@@ -4,36 +4,31 @@ Web-based lifecycle manager and OpenAI-compatible gateway for llama.cpp.
 
 ## Repository structure
 
-- `frontend/` — Nuxt application
+- `frontend/` — Nuxt 4 application
 - `backend/` — Go manager service
 - `specs/` — product and architecture specifications
 
-The frontend and backend are independent application roots. Run dependency-management and build commands from the corresponding directory.
+## Local testing
 
-## Local testing with Docker Compose
-
-Start both applications from the repository root:
+Create the local model/config directories and start both applications:
 
 ```bash
-docker compose up
+mkdir -p data/config data/models
+docker compose up --build
 ```
 
-Then open:
+Open:
 
 - Frontend: http://localhost:3000
-- Backend: http://localhost:8080
-- Backend health check: http://localhost:8080/health
+- Backend: http://localhost:8888
+- Health: http://localhost:8888/health
 
-The Compose setup bind-mounts both source directories. Nuxt runs in development mode, so frontend edits are picked up without rebuilding the container. Go build/module caches and frontend `node_modules` are stored in named Docker volumes instead of the working tree.
+On first load, create the bootstrap administrator account. GGUF files placed under `data/models/` are visible inside the backend as `/models/<file>.gguf` and can then be registered from the Models page.
 
-To stop the stack:
-
-```bash
-docker compose down
-```
-
-To also discard the development dependency/cache volumes:
+The default backend image uses the standard llama.cpp server image. To test a different llama.cpp image variant, set `LLAMA_IMAGE` while building, for example:
 
 ```bash
-docker compose down -v
+LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda docker compose up --build
 ```
+
+The exact upstream image tag can be overridden without changing the manager code.

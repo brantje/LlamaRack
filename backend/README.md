@@ -1,5 +1,13 @@
 # Backend
 
-Go application root for the llamacpp-manager control plane.
+Go control plane for llamacpp-manager.
 
-The previous implementation has intentionally been removed. Backend features will be rebuilt from the specifications in `../specs/`.
+The backend owns persistence, authentication, model configuration, `llama-server` worker processes, lifecycle/autoload, and the unified OpenAI-compatible `/v1` gateway.
+
+Default container paths:
+
+- `/config/manager.db` — SQLite state
+- `/models` — GGUF model files
+- `llama-server` — managed worker binary
+
+The HTTP API listens on port `8000` inside the container and is mapped to host port `8888` by the root Compose file.

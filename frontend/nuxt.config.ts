@@ -13,5 +13,7 @@ export default defineNuxtConfig({
         { name: 'color-scheme', content: 'dark' }
       ]
     }
-  }
+  },
+  css: ['~/assets/css/main.css'],
+  typescript: { strict: true }
 })

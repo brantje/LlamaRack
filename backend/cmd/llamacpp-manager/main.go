@@ -1,50 +1,113 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/api"
+	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamacpp-manager/backend/internal/config"
+	"github.com/brantje/llamacpp-manager/backend/internal/database"
+	"github.com/brantje/llamacpp-manager/backend/internal/gateway"
+	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
 func main() {
-	addr := os.Getenv("LCM_LISTEN_ADDR")
-	if addr == "" {
-		addr = ":8000"
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	cfg := config.Load()
+	if err := os.MkdirAll(cfg.ModelsDir, 0o755); err != nil {
+		slog.Error("create models dir", "error", err)
+		os.Exit(1)
+	}
+	db, err := database.Open(ctx, cfg.DatabasePath)
+	if err != nil {
+		slog.Error("open database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	authService := auth.New(db, cfg.SessionLifetime)
+	modelService := models.New(db, cfg.ModelsDir)
+	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
+	lifecycleService := lifecycle.New(modelService, sup)
+
+	var profileMu sync.RWMutex
+	var profile llamacpp.Profile
+	var profileErr error
+	refreshProfile := func() {
+		p, err := llamacpp.Discover(context.Background(), cfg.LlamaServerPath)
+		profileMu.Lock()
+		profile, profileErr = p, err
+		profileMu.Unlock()
+		if err != nil {
+			slog.Warn("llama-server discovery unavailable", "error", err)
+		} else {
+			slog.Info("llama-server discovered", "version", p.Version, "options", len(p.Options))
+		}
+	}
+	refreshProfile()
+	profileGetter := func() (llamacpp.Profile, error) {
+		profileMu.RLock()
+		defer profileMu.RUnlock()
+		return profile, profileErr
 	}
 
-	corsOrigin := os.Getenv("LCM_CORS_ORIGIN")
-	if corsOrigin == "" {
-		corsOrigin = "http://localhost:3000"
-	}
-
+	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
+	openAI := gateway.New(authService, modelService, lifecycleService)
 	mux := http.NewServeMux()
+	mux.Handle("/api/v1/", apiServer)
+	mux.Handle("/v1/", openAI)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"name":   "llamacpp-manager-backend",
-			"status": "scaffold",
-		})
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "llamacpp-manager", "status": "running"})
 	})
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", corsOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Vary", "Origin")
+	server := &http.Server{Addr: cfg.ListenAddr, Handler: cors(cfg.AllowedOrigin, mux), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	go lifecycleService.RunReconciler(ctx)
+	go func() {
+		slog.Info("backend listening", "addr", cfg.ListenAddr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server failed", "error", err)
+			stop()
+		}
+	}()
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_ = server.Shutdown(shutdownCtx)
+	sup.Shutdown(shutdownCtx)
+}
+
+func cors(allowedOrigin string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && origin == allowedOrigin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
-
-	log.Printf("llamacpp-manager backend listening on %s", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		log.Fatal(err)
-	}
 }

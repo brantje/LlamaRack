@@ -1,4 +1,28 @@
 services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    environment:
+      LCM_LISTEN_ADDR: :8000
+      LCM_DATA_DIR: /config
+      LCM_MODELS_DIR: /models
+      LCM_LLAMA_SERVER: /app/llama-server
+      LCM_ALLOWED_ORIGIN: http://localhost:3000
+    volumes:
+      - ./data/config:/config
+      - ./data/models:/models
+    ports:
+      - "8888:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null || wget -qO- http://127.0.0.1:8000/health >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
   frontend:
     image: node:24-bookworm-slim
     working_dir: /app
@@ -16,32 +40,5 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  backend:
-    image: golang:1.27-bookworm
-    working_dir: /app
-    command: go run ./cmd/llamacpp-manager
-    environment:
-      LCM_LISTEN_ADDR: :8000
-    volumes:
-      - ./backend:/app
-      - backend_go_build_cache:/root/.cache/go-build
-      - backend_go_mod_cache:/go/pkg/mod
-    ports:
-      - "8888:8000"
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000 &&
-          printf "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 &&
-          grep -q "200 OK" <&3'
-      interval: 2s
-      timeout: 2s
-      retries: 15
-      start_period: 5s
-    restart: unless-stopped
-
 volumes:
   frontend_node_modules:
-  backend_go_build_cache:
-  backend_go_mod_cache:
