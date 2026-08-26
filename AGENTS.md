@@ -18,7 +18,7 @@ The target styling model is Tailwind + Nuxt UI. Legacy selector-driven component
 
 Preserve the existing llamacpp-manager theme unless a task explicitly requests a redesign. Prefer semantic Nuxt UI/Tailwind theme configuration over repeated raw color literals.
 
-**Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface.
+**Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered/elevated containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface. Components with surfaced defaults must also stay flat when nested: for example, `UEmpty` defaults to an outlined surface, so use `variant="naked"` whenever `UEmpty` is rendered inside a card.
 
 ### Nuxt UI component inventory
 
