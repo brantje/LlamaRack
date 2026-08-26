@@ -152,7 +152,7 @@ describe('useManager', () => {
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
-  it('applies websocket runtime events and reconnects after disconnect', async () => {
+  it('applies websocket snapshots/events and reconnects after disconnect', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return { required: false }
       if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true }
@@ -166,6 +166,15 @@ describe('useManager', () => {
     const socket = FakeWebSocket.instances[0]!
     socket.open()
     expect(manager.runtimeEventsConnected.value).toBe(true)
+
+    manager.runtimes.value.m1!.push({ instance_id: 'stale', model_id: 'm1', state: 'READY' })
+    socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: 'i1', model_id: 'm1', state: 'UNLOADED' }] })
+    expect(manager.runtimes.value.m1).toEqual([{ instance_id: 'i1', model_id: 'm1', state: 'UNLOADED' }])
+
+    mocks.request.mockClear()
+    await manager.refresh()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('/runtime'))).toBe(false)
+    expect(manager.runtimes.value.m1?.[0]?.state).toBe('UNLOADED')
 
     socket.emit({ type: 'runtime', runtime: { instance_id: 'i1', model_id: 'm1', state: 'STARTING', pid: 41 } })
     expect(manager.runtimes.value.m1?.[0]).toMatchObject({ state: 'STARTING', pid: 41 })
@@ -194,6 +203,7 @@ describe('useManager', () => {
     manager.connectRuntimeEvents()
     const socket = FakeWebSocket.instances[0]!
     socket.open()
+    socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: '', model_id: 'm1', state: 'READY' }, { instance_id: 'i1', model_id: '', state: 'READY' }] })
     socket.emit({ type: 'runtime', runtime: { instance_id: '', model_id: 'm1', state: 'READY' } })
     socket.emit({ type: 'runtime', runtime: { instance_id: 'i1', model_id: '', state: 'READY' } })
     expect(manager.runtimes.value).toEqual({})
