@@ -98,7 +98,6 @@ async function submitAuth() {
           <UUser :name="user.username" :description="user.role" size="sm" />
           <UButton
             data-testid="sign-out"
-            class="text-button"
             color="neutral"
             variant="link"
             size="xs"

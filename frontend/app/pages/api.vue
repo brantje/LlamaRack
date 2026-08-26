@@ -101,7 +101,7 @@ onMounted(load)
             <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">CREDENTIALS</p>
             <h2 class="text-xl font-bold">Inference API keys</h2>
           </div>
-          <div class="inline-create flex w-full gap-2 md:w-auto">
+          <div class="flex w-full gap-2 md:w-auto">
             <UInput v-model="name" data-testid="key-name" class="min-w-0 flex-1 md:w-48" placeholder="Key name" />
             <UButton data-testid="create-key" size="sm" @click="createKey">Create key</UButton>
           </div>
@@ -111,7 +111,7 @@ onMounted(load)
       <p class="mb-4 text-sm text-muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
       <UAlert v-if="error" class="mb-4" color="error" variant="subtle" :description="error" />
 
-      <UCard v-if="secret" class="secret-box mb-4 bg-default/60" variant="subtle">
+      <UCard v-if="secret" class="mb-4 bg-default/60" variant="subtle">
         <div class="space-y-3">
           <strong class="text-sm">Copy this key now. It will not be shown again.</strong>
           <code class="block break-all font-mono text-sm text-primary">{{ secret }}</code>
