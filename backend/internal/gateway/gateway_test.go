@@ -77,9 +77,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	m := models.New(db, modelsDir)
 	path := filepath.Join(modelsDir, "gateway-Q4_K_M.gguf")
 	if err := os.WriteFile(path, []byte("gguf"), 0o644); err != nil { t.Fatal(err) }
-	artifact, err := m.RegisterArtifact(ctx, path, "gateway")
-	if err != nil { t.Fatal(err) }
-	if _, err := m.Create(ctx, models.CreateModelInput{PublicID:"gateway-model", ArtifactID:artifact.ID, Autoload:&autoload}); err != nil { t.Fatal(err) }
+	if _, err := m.Create(ctx, models.CreateModelInput{PublicID:"gateway-model", Name:"Gateway model", GGUFPath:path, Autoload:&autoload}); err != nil { t.Fatal(err) }
 	sup := supervisor.New(gatewayFakeBinary(t), "127.0.0.1", 33000, 5*time.Second)
 	t.Cleanup(func(){ ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel(); sup.Shutdown(ctx) })
 	l := lifecycle.New(m, sup)
