@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { parseLlamaCppOptions } from '~/utils/llamacppOptions'
+
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
@@ -7,18 +9,6 @@ const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
 const form = reactive({ name: '', context_length: 0, options: '' })
-
-function parseOptions(value: string) {
-  const out: Record<string, string> = {}
-  for (const line of value.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const at = trimmed.indexOf('=')
-    if (at <= 0) throw new Error(`Invalid option “${trimmed}”; use key=value`)
-    out[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim()
-  }
-  return out
-}
 
 onMounted(async () => {
   try {
@@ -41,7 +31,7 @@ async function submit() {
   error.value = ''
   try {
     await manager.request(`/api/v1/models/${encodeURIComponent(id.value)}`, {
-      method: 'PUT', body: { name: form.name, context_length: form.context_length, options: parseOptions(form.options) }
+      method: 'PUT', body: { name: form.name, context_length: form.context_length, options: parseLlamaCppOptions(form.options, manager.profile.value) }
     })
     await manager.refresh()
     await router.push('/models')
@@ -65,7 +55,7 @@ async function submit() {
       <UForm v-else :state="form" class="space-y-5" @submit="submit">
         <UFormField label="Model name" name="name" required><UInput v-model="form.name" class="w-full" required /></UFormField>
         <UFormField label="Context capability" name="context_length" description="Maximum context supported by this registered artifact/configuration. Use 0 when unknown."><UInputNumber v-model="form.context_length" class="w-full" :min="0" /></UFormField>
-        <UFormField label="llama.cpp defaults" name="options" description="One key=value pair per line. Instance options override these values."><UTextarea v-model="form.options" class="w-full font-mono" :rows="8" /></UFormField>
+        <UFormField label="llama.cpp defaults" name="options" description="One key=value pair per line. Validated against the detected llama-server; Instance options override these values."><UTextarea v-model="form.options" class="w-full font-mono" :rows="8" /></UFormField>
         <div class="flex justify-end gap-2"><UButton to="/models" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy">Save Model</UButton></div>
       </UForm>
     </UCard>
