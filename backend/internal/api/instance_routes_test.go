@@ -84,7 +84,10 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 		"tensor_split": "",
 		"options": map[string]string{"ctx-size": "4096"},
 	}
-	updated := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", baseUpdate, cookie)
+	slugAwareUpdate := map[string]any{}
+	for k, v := range baseUpdate { slugAwareUpdate[k] = v }
+	slugAwareUpdate["slug"] = "Primary Coder"
+	updated := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", slugAwareUpdate, cookie)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"always_on":true`) {
 		t.Fatalf("update unloaded=%d body=%s", updated.Code, updated.Body.String())
 	}
@@ -183,13 +186,14 @@ func TestModelCreationFirstInstanceBranches(t *testing.T) {
 		"gguf_path": writeGGUF("bootstrap-Q4_K_M.gguf"),
 		"first_instance": map[string]any{
 			"name": "Bootstrap Instance",
+			"slug": "Bootstrap API",
 			"always_on": false,
 			"autoload_enabled": true,
 			"eviction_enabled": true,
 			"start": true,
 		},
 	}, cookie)
-	if started.Code != http.StatusCreated || !strings.Contains(started.Body.String(), `"instance"`) || !strings.Contains(started.Body.String(), `"start_error"`) {
+	if started.Code != http.StatusCreated || !strings.Contains(started.Body.String(), `"id":"bootstrap-api"`) || !strings.Contains(started.Body.String(), `"start_error"`) {
 		t.Fatalf("bootstrap start failure=%d body=%s", started.Code, started.Body.String())
 	}
 
