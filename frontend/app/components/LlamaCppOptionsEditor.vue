@@ -138,7 +138,7 @@ function removeOverride(key: string) {
   delete next[key]
   emit('update:modelValue', next)
 }
-function badgeColor(source: string) {
+function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutral' {
   if (source === 'instance') return 'primary'
   if (source === 'model') return 'success'
   if (source === 'global') return 'warning'
@@ -169,7 +169,7 @@ function badgeColor(source: string) {
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
               <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
-              <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option.key)) as any">{{ effectiveSource(option.key) }}</UBadge>
+              <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option.key))">{{ effectiveSource(option.key) }}</UBadge>
               <UBadge v-if="protectedKeys.has(option.key)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
               <UBadge v-if="option.unsupported" size="sm" color="warning" variant="outline">Unsupported · retained</UBadge>
             </div>
