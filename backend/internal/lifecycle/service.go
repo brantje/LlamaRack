@@ -47,11 +47,12 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
 		return endpoint, nil
 	}
-	if s.isManuallyStopped(m.ID) {
-		return "", errors.New("model manually stopped until manager restart")
-	}
 	if !m.Autoload {
 		return "", errors.New("model unloaded and autoload disabled")
+	}
+	if s.isManuallyStopped(m.ID) {
+		s.clearManualStop(m.ID)
+		slog.Info("manual stop overridden by inference request", "model_id", m.ID, "public_id", m.PublicID)
 	}
 	slog.Info("autoload requested", "model_id", m.ID, "public_id", m.PublicID)
 	return s.startSingleFlight(ctx, m)
