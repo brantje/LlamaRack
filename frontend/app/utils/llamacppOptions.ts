@@ -59,12 +59,11 @@ export function parseLlamaCppOptions(text: string, profile: Profile | null) {
     if (!key) throw new Error(`Invalid option “${trimmed}”; option key is required`)
     if (key in parsed) throw new Error(`Duplicate llama.cpp option “${key}”`)
     if (managerOwnedOptions.has(key)) throw new Error(`llama.cpp option “${key}” is managed by LlamaCPP Manager and cannot be overridden here`)
+    if (!profile) throw new Error('Cannot validate llama.cpp overrides because the llama-server option schema is unavailable')
 
-    if (profile) {
-      const option = available.get(key)
-      if (!option) throw new Error(`Unsupported llama.cpp option “${key}” for ${profile.version || profile.path}`)
-      validateValue(option, value)
-    }
+    const option = available.get(key)
+    if (!option) throw new Error(`Unsupported llama.cpp option “${key}” for ${profile.version || profile.path}`)
+    validateValue(option, value)
     parsed[key] = value
   }
 
