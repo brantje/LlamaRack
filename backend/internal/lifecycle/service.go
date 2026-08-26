@@ -29,6 +29,7 @@ type Service struct {
 	manuallyStopped map[string]bool
 	activities      map[string]Activity
 	idleLocks       map[string]*sync.Mutex
+	operationGates  map[string]chan struct{}
 	now             func() time.Time
 }
 
@@ -42,7 +43,8 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	return &Service{
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup,
 		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{},
-		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{}, now: time.Now,
+		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
+		operationGates: map[string]chan struct{}{}, now: time.Now,
 	}
 }
 
@@ -117,6 +119,12 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 }
 
 func (s *Service) StopInstance(ctx context.Context, id string) error {
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
 		return err
@@ -134,14 +142,33 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 }
 
 func (s *Service) RestartInstance(ctx context.Context, id string) (string, error) {
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	s.clearManualStop(id)
+	i, err := s.instances.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if !i.Enabled {
+		return "", errors.New("instance disabled")
+	}
 	if err := s.sup.Stop(ctx, id); err != nil {
 		return "", err
 	}
-	return s.startInstance(ctx, id, true)
+	return s.startOne(ctx, i)
 }
 
 func (s *Service) KillInstance(ctx context.Context, id string) error {
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if _, err := s.instances.Get(ctx, id); err != nil {
 		return err
 	}
@@ -388,6 +415,26 @@ func (s *Service) idleLock(id string) *sync.Mutex {
 	}
 	return lock
 }
+func (s *Service) operationGate(id string) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	gate := s.operationGates[id]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		s.operationGates[id] = gate
+	}
+	return gate
+}
+func (s *Service) acquireOperation(ctx context.Context, id string) (func(), error) {
+	gate := s.operationGate(id)
+	select {
+	case gate <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-gate }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 func (s *Service) markManualStop(id string) {
 	s.mu.Lock()
 	s.manuallyStopped[id] = true
@@ -405,26 +452,64 @@ func (s *Service) isManuallyStopped(id string) bool {
 }
 
 func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	s.mu.Lock()
-	if c := s.loads[i.ID]; c != nil {
-		s.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-c.done:
-			return c.endpoint, c.err
+	c := s.loads[i.ID]
+	if c == nil {
+		c = &loadCall{done: make(chan struct{})}
+		s.loads[i.ID] = c
+		go s.runLoad(i.ID, c)
+	}
+	s.mu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-c.done:
+		return c.endpoint, c.err
+	}
+}
+
+func (s *Service) runLoad(id string, c *loadCall) {
+	release, err := s.acquireOperation(context.Background(), id)
+	if err != nil {
+		s.completeLoad(id, c, "", err)
+		return
+	}
+	defer release()
+
+	var endpoint string
+	if s.isManuallyStopped(id) {
+		err = errors.New("instance manually stopped until manager restart")
+	} else {
+		var i instances.Instance
+		i, err = s.instances.Get(context.Background(), id)
+		if err == nil && !i.Enabled {
+			err = errors.New("instance disabled")
+		}
+		if err == nil {
+			if readyEndpoint, ok := s.sup.Endpoint(id); ok {
+				endpoint = readyEndpoint
+			} else {
+				endpoint, err = s.startOne(context.Background(), i)
+			}
 		}
 	}
-	c := &loadCall{done: make(chan struct{})}
-	s.loads[i.ID] = c
-	s.mu.Unlock()
-	endpoint, err := s.startOne(ctx, i)
-	c.endpoint, c.err = endpoint, err
-	close(c.done)
+	s.completeLoad(id, c, endpoint, err)
+}
+
+func (s *Service) completeLoad(id string, c *loadCall, endpoint string, err error) {
 	s.mu.Lock()
-	delete(s.loads, i.ID)
+	c.endpoint = endpoint
+	c.err = err
+	if s.loads[id] == c {
+		delete(s.loads, id)
+	}
+	close(c.done)
 	s.mu.Unlock()
-	return endpoint, err
 }
 
 func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, error) {
