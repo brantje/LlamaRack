@@ -20,10 +20,26 @@ const emit = defineEmits<{
 }>()
 
 const copied = ref(false)
+let copiedResetTimer: ReturnType<typeof setTimeout> | undefined
 
-watch(() => props.text, () => {
+function resetCopiedState() {
+  clearTimeout(copiedResetTimer)
+  copiedResetTimer = undefined
   copied.value = false
-})
+}
+
+function markCopied() {
+  clearTimeout(copiedResetTimer)
+  copied.value = true
+  emit('copied', props.text)
+  copiedResetTimer = setTimeout(() => {
+    copied.value = false
+    copiedResetTimer = undefined
+  }, 5000)
+}
+
+watch(() => props.text, resetCopiedState)
+onBeforeUnmount(() => clearTimeout(copiedResetTimer))
 
 function legacyCopy(text: string) {
   if (typeof document === 'undefined') return false
@@ -50,7 +66,7 @@ function legacyCopy(text: string) {
 }
 
 async function copy() {
-  copied.value = false
+  resetCopiedState()
   if (!props.text) return
 
   let clipboardError = ''
@@ -60,8 +76,7 @@ async function copy() {
       if (navigator.clipboard?.writeText) {
         try {
           await navigator.clipboard.writeText(props.text)
-          copied.value = true
-          emit('copied', props.text)
+          markCopied()
           return
         } catch (value: any) {
           clipboardError = value?.message || ''
@@ -76,8 +91,7 @@ async function copy() {
   }
 
   if (legacyCopy(props.text)) {
-    copied.value = true
-    emit('copied', props.text)
+    markCopied()
     return
   }
 
