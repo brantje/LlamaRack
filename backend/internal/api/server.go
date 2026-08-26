@@ -153,11 +153,71 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		w.WriteHeader(204)
 	case strings.HasPrefix(path, "/api/v1/models/"):
 		s.modelRoute(w, r, path, user)
+	case strings.HasPrefix(path, "/api/v1/instances/") && strings.HasSuffix(path, "/logs/stream") && r.Method == http.MethodGet:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/instances/"), "/logs/stream")
+		s.streamLogs(w, r, id)
 	case strings.HasPrefix(path, "/api/v1/instances/") && strings.HasSuffix(path, "/logs") && r.Method == http.MethodGet:
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/instances/"), "/logs")
 		writeJSON(w, 200, map[string]any{"lines": s.lifecycle.Logs(id)})
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
+	}
+}
+
+func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, id string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, 500, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	snapshot, events, cancel := s.lifecycle.SubscribeLogs(id)
+	defer cancel()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	writeLine := func(line string) bool {
+		payload, err := json.Marshal(line)
+		if err != nil {
+			return false
+		}
+		if _, err := w.Write([]byte("data: ")); err != nil {
+			return false
+		}
+		if _, err := w.Write(payload); err != nil {
+			return false
+		}
+		_, err = w.Write([]byte("\n\n"))
+		return err == nil
+	}
+	for _, line := range snapshot {
+		if !writeLine(line) {
+			return
+		}
+	}
+	_, _ = w.Write([]byte(": connected\n\n"))
+	flusher.Flush()
+
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case line, open := <-events:
+			if !open || !writeLine(line) {
+				return
+			}
+			flusher.Flush()
+		case <-keepAlive.C:
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
 	}
 }
 
