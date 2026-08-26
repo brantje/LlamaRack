@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -91,6 +92,12 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		if !decode(w, r, &in) {
 			return
 		}
+		validated, err := s.validateLlamaOptions(in.Options)
+		if err != nil {
+			writeErr(w, 400, err)
+			return
+		}
+		in.Options = validated
 		item, err := s.lifecycle.Instances().Create(r.Context(), in)
 		if err != nil {
 			writeErr(w, 400, err)
@@ -133,6 +140,20 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 	}
 }
 
+func (s *Server) validateLlamaOptions(options map[string]string) (map[string]string, error) {
+	if options == nil {
+		return nil, nil
+	}
+	if len(options) == 0 {
+		return map[string]string{}, nil
+	}
+	profile, err := s.profile()
+	if err != nil {
+		return nil, fmt.Errorf("cannot validate llama.cpp options: %w", err)
+	}
+	return llamacpp.ValidateOptions(profile, options)
+}
+
 func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		models.CreateModelInput
@@ -148,6 +169,12 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	validated, err := s.validateLlamaOptions(in.Options)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	in.Options = validated
 	model, err := s.models.Create(r.Context(), in.CreateModelInput)
 	if err != nil {
 		writeErr(w, 400, err)
@@ -304,6 +331,12 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 			if !decode(w, r, &in) {
 				return
 			}
+			validated, err := s.validateLlamaOptions(in.Options)
+			if err != nil {
+				writeErr(w, 400, err)
+				return
+			}
+			in.Options = validated
 			item, err := s.models.Update(r.Context(), id, in)
 			if err != nil {
 				writeErr(w, 400, err)
@@ -518,6 +551,12 @@ func (s *Server) updateInstance(w http.ResponseWriter, r *http.Request, id strin
 	if !decode(w, r, &in) {
 		return
 	}
+	validated, err := s.validateLlamaOptions(in.Options)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	in.Options = validated
 	current, err := s.lifecycle.Instances().Get(r.Context(), id)
 	if err != nil {
 		writeErr(w, 404, err)
