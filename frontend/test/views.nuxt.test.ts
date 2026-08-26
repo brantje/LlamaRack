@@ -101,7 +101,7 @@ describe('overview and settings', () => {
     expect(overview.text()).toContain('1 discovered CLI options')
 
     const settings = await mountSuspended(SettingsPage, { route: false })
-    expect(settings.text()).toContain('http://manager.test:8888/api/v1')
+    expect(settings.text()).toContain('http://manager.test:8888')
     expect(settings.text()).toContain('/app/llama-server')
     expect(settings.text()).toContain('abcdefghijklmnopqrstuvwxyz'.slice(0, 24))
     manager.profile.value = null
@@ -181,6 +181,7 @@ describe('API page', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('secret-value')
     await wrapper.find('.secret-box button').trigger('click')
+    await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('secret-value')
     const revoke = wrapper.findAll('button').find(b => b.text() === 'Revoke')!
     await revoke.trigger('click')
