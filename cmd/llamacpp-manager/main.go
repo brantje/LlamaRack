@@ -59,7 +59,7 @@ func main() {
 	refreshProfile()
 	profileGetter := func() (llamacpp.Profile,error) { profileMu.RLock(); defer profileMu.RUnlock(); return profile, profileErr }
 
-	apiServer := api.New(authService, modelService, lifecycleService, hfProvider, downloadManager, profileGetter)
+	apiServer := api.New(authService, modelService, lifecycleService, hfProvider, downloadManager, hardwareService, profileGetter)
 	openAIGateway := gateway.New(authService, modelService, lifecycleService, requestRouter)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", apiServer)
