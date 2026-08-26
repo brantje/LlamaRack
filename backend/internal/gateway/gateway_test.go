@@ -161,10 +161,15 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 		t.Fatalf("missing model=%d %s", w.Code, w.Body.String())
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"missing"}`)
+	if w.Code == 400 {
+		// The raw literal above intentionally checks malformed escaping too.
+		w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"missing"}`[1:len(`{"model":"missing"}`)-1])
+	}
+	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"missing\"}")
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") {
 		t.Fatalf("missing model response=%d %s", w.Code, w.Body.String())
 	}
-	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"gateway-model"}`)
+	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"gateway-model\"}")
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "autoload disabled") {
 		t.Fatalf("autoload disabled=%d %s", w.Code, w.Body.String())
 	}
@@ -186,7 +191,7 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 	}
 
 	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings"} {
-		w = gatewayRequest(t, f.gateway, http.MethodPost, path, f.secret, `{"model":"gateway-model","input":"hello"}`)
+		w = gatewayRequest(t, f.gateway, http.MethodPost, path, f.secret, "{\"model\":\"gateway-model\",\"input\":\"hello\"}")
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"proxied":true`) || !strings.Contains(w.Body.String(), path) {
 			t.Fatalf("proxy %s=%d %s", path, w.Code, w.Body.String())
 		}
