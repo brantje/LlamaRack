@@ -176,6 +176,18 @@ func TestAdminModelProfileAndAPIKeyRoutes(t *testing.T) {
 	cookie := bootstrapAndLogin(t, f, "admin")
 	m := createModel(t, f, cookie)
 
+	nested := filepath.Join(f.dir, "Qwen", "coder")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "spare-Q8_0.gguf"), []byte("gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := doRequest(t, f.server, http.MethodGet, "/api/v1/models/available", nil, cookie)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"path":"Qwen/coder/spare-Q8_0.gguf"`) || strings.Contains(w.Body.String(), "/models/") {
+		t.Fatalf("available models=%d %s", w.Code, w.Body.String())
+	}
+
 	for _, tc := range []struct{ path string; want int }{
 		{"/api/v1/models", 200},
 		{"/api/v1/models/" + m.ID, 200},
@@ -191,7 +203,7 @@ func TestAdminModelProfileAndAPIKeyRoutes(t *testing.T) {
 		}
 	}
 
-	w := doRequest(t, f.server, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "sdk"}, cookie)
+	w = doRequest(t, f.server, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "sdk"}, cookie)
 	if w.Code != 201 || !strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("create key=%d %s", w.Code, w.Body.String())
 	}
@@ -235,6 +247,10 @@ func TestAuthorizationMethodsNotFoundAndProfileUnavailable(t *testing.T) {
 	w := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]string{}, cookie)
 	if w.Code != 403 {
 		t.Fatalf("readonly model=%d", w.Code)
+	}
+	w = doRequest(t, f.server, http.MethodGet, "/api/v1/models/available", nil, cookie)
+	if w.Code != 403 {
+		t.Fatalf("readonly available models=%d", w.Code)
 	}
 	w = doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": "x"}, cookie)
 	if w.Code != 404 {
