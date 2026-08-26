@@ -1,5 +1,43 @@
 # AGENTS.md
 
+## Frontend UI: component-first is mandatory
+
+For frontend work, **Nuxt UI components are the first choice**. Before creating markup, a local component, or custom styling, check the Nuxt UI component catalog: https://ui.nuxt.com/docs/components
+
+Use this implementation priority, in order:
+
+1. **Nuxt UI component** when a suitable component exists.
+2. **Nuxt UI props, variants, slots and theme configuration** to adapt the component.
+3. **Tailwind utility classes** for page-specific layout and composition that Nuxt UI does not provide.
+4. **Shared Tailwind/Nuxt UI theme tokens** for reusable visual values.
+5. **Custom CSS only as a last resort** when Nuxt UI and Tailwind cannot express the requirement. Keep exceptions narrow and document why they are necessary.
+
+Do not rebuild a Nuxt UI primitive with custom HTML/CSS. Do not prefer an existing repository-specific CSS class over a Nuxt UI component merely because the class already exists. When touching legacy frontend UI, migrate the touched surface toward Nuxt UI + Tailwind rather than extending the legacy CSS system.
+
+The target styling model is Tailwind + Nuxt UI. Legacy selector-driven component CSS must be removed as surfaces are migrated. A CSS entry point may exist for required Tailwind/Nuxt UI imports and narrowly scoped theme/token declarations, but it must not become a bespoke component library or a collection of `@apply`-based replacements for Nuxt UI components.
+
+Preserve the existing llamacpp-manager theme unless a task explicitly requests a redesign. Prefer semantic Nuxt UI/Tailwind theme configuration over repeated raw color literals.
+
+### Nuxt UI component inventory
+
+This inventory mirrors the official Nuxt UI component catalog (v4.11.0 at the time this rule was added). **Check this list before writing a custom UI primitive.** If the installed Nuxt UI version changes, consult the current catalog and update this inventory.
+
+- **Layout:** `UApp`, `UContainer`, `UError`, `UFooter`, `UHeader`, `UMain`, `USidebar`, `USplitter`, `UTheme`
+- **Element:** `UAlert`, `UAvatar`, `UAvatarGroup`, `UBadge`, `UBanner`, `UButton`, `UCalendar`, `UCard`, `UChip`, `UCollapsible`, `UFieldGroup`, `UIcon`, `UKbd`, `UProgress`, `UProgressGroup`, `USeparator`, `USkeleton`
+- **Form:** `UCheckbox`, `UCheckboxGroup`, `UColorPicker`, `UFileUpload`, `UForm`, `UFormField`, `UInput`, `UInputDate`, `UInputMenu`, `UInputNumber`, `UInputRating`, `UInputTags`, `UInputTime`, `UListbox`, `UPinInput`, `URadioGroup`, `USelect`, `USelectMenu`, `USlider`, `USwitch`, `UTextarea`
+- **Data:** `UAccordion`, `UCarousel`, `UEmpty`, `UMarquee`, `UScrollArea`, `UTable`, `UTimeline`, `UTree`, `UUser`
+- **Navigation:** `UBreadcrumb`, `UCommandPalette`, `UFooterColumns`, `ULink`, `UNavigationMenu`, `UPagination`, `UStepper`, `UTabs`
+- **Overlay:** `UContextMenu`, `UDrawer`, `UDropdownMenu`, `UModal`, `UPopover`, `USlideover`, `UToast`, `UTooltip`
+- **Page:** `UAuthForm`, `UBlogPost`, `UBlogPosts`, `UChangelogVersion`, `UChangelogVersions`, `UPage`, `UPageAnchors`, `UPageAside`, `UPageBody`, `UPageCard`, `UPageColumns`, `UPageCTA`, `UPageFeature`, `UPageGrid`, `UPageHeader`, `UPageHero`, `UPageLinks`, `UPageList`, `UPageLogos`, `UPageSection`, `UPricingPlan`, `UPricingPlans`, `UPricingTable`
+- **Dashboard:** `UDashboardGroup`, `UDashboardNavbar`, `UDashboardPanel`, `UDashboardResizeHandle`, `UDashboardSearch`, `UDashboardSearchButton`, `UDashboardSidebar`, `UDashboardSidebarCollapse`, `UDashboardSidebarToggle`, `UDashboardToolbar`
+- **AI Chat:** `UChat`, `UChatMessage`, `UChatMessages`, `UChatPalette`, `UChatPrompt`, `UChatPromptSubmit`, `UChatReasoning`, `UChatShimmer`, `UChatTool`
+- **Editor:** `UEditor`, `UEditorDragHandle`, `UEditorEmojiMenu`, `UEditorMentionMenu`, `UEditorSuggestionMenu`, `UEditorToolbar`
+- **Content:** `UContentNavigation`, `UContentSearch`, `UContentSearchButton`, `UContentSurround`, `UContentToc`
+- **Color Mode:** `UColorModeAvatar`, `UColorModeButton`, `UColorModeImage`, `UColorModeSelect`, `UColorModeSwitch`
+- **i18n:** `ULocaleSelect`
+
+Some components require optional Nuxt ecosystem integrations or additional dependencies. That is not a reason to recreate the component locally; first check the component documentation and use the official integration when it fits the product requirement.
+
 ## Quality gates
 
 Test coverage is a hard repository rule.
