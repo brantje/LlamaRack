@@ -29,8 +29,9 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 	}
 
 	cookie := bootstrapAndLogin(t, f)
+	cookieHeader := cookie.Name + "=" + cookie.Value
 	badOriginHeaders := http.Header{}
-	badOriginHeaders.Set("Cookie", cookie.String())
+	badOriginHeaders.Set("Cookie", cookieHeader)
 	badOriginHeaders.Set("Origin", "https://evil.example")
 	if conn, response, err := websocket.DefaultDialer.Dial(wsURL, badOriginHeaders); err == nil {
 		_ = conn.Close()
@@ -39,23 +40,30 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 		t.Fatalf("cross-host response=%v err=%v", response, err)
 	}
 
+	model := createModel(t, f, cookie)
 	headers := http.Header{}
-	headers.Set("Cookie", cookie.String())
+	headers.Set("Cookie", cookieHeader)
 	headers.Set("Origin", server.URL)
 	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
 	if err != nil {
 		t.Fatalf("websocket dial failed: response=%v err=%v", response, err)
 	}
 	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
-	model := createModel(t, f, cookie)
+	var snapshot runtimeSnapshotEvent
+	if err := conn.ReadJSON(&snapshot); err != nil {
+		t.Fatalf("read runtime snapshot: %v", err)
+	}
+	if snapshot.Type != "runtime_snapshot" || len(snapshot.Runtimes) != 1 || snapshot.Runtimes[0].ModelID != model.ID || snapshot.Runtimes[0].State != supervisor.Unloaded {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+
 	start := doRequest(t, f.server, http.MethodPost, "/api/v1/models/"+model.ID+"/start", nil, cookie)
 	if start.Code != http.StatusServiceUnavailable {
 		t.Fatalf("start status=%d body=%s", start.Code, start.Body.String())
-	}
-
-	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatal(err)
 	}
 	for _, want := range []supervisor.State{supervisor.Starting, supervisor.Failed} {
 		var event runtimeEvent
