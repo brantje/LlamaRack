@@ -9,6 +9,7 @@ import (
 
 	"github.com/brantje/llamacpp-manager/internal/auth"
 	"github.com/brantje/llamacpp-manager/internal/downloads"
+	"github.com/brantje/llamacpp-manager/internal/hardware"
 	"github.com/brantje/llamacpp-manager/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/internal/models"
@@ -23,11 +24,12 @@ type Server struct {
 	lifecycle *lifecycle.Service
 	hf        *providers.HuggingFace
 	downloads *downloads.Manager
+	hardware  *hardware.Service
 	profile   func() (llamacpp.Profile, error)
 }
 
-func New(authService *auth.Service, modelService *models.Service, lifecycleService *lifecycle.Service, hf *providers.HuggingFace, downloadManager *downloads.Manager, profile func() (llamacpp.Profile, error)) *Server {
-	return &Server{auth: authService, models: modelService, lifecycle: lifecycleService, hf: hf, downloads: downloadManager, profile: profile}
+func New(authService *auth.Service, modelService *models.Service, lifecycleService *lifecycle.Service, hf *providers.HuggingFace, downloadManager *downloads.Manager, hardwareService *hardware.Service, profile func() (llamacpp.Profile, error)) *Server {
+	return &Server{auth:authService,models:modelService,lifecycle:lifecycleService,hf:hf,downloads:downloadManager,hardware:hardwareService,profile:profile}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -35,11 +37,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if path == "" { path = "/" }
 	switch {
 	case path == "/api/v1/health" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"status":"ok"})
+		writeJSON(w,http.StatusOK,map[string]any{"status":"ok"})
 	case path == "/api/v1/auth/bootstrap" && r.Method == http.MethodGet:
-		required, err := s.auth.BootstrapRequired(r.Context())
-		if err != nil { writeErr(w,500,err); return }
-		writeJSON(w,200,map[string]bool{"required":required})
+		required,err:=s.auth.BootstrapRequired(r.Context());if err!=nil{writeErr(w,500,err);return};writeJSON(w,200,map[string]bool{"required":required})
 	case path == "/api/v1/auth/bootstrap" && r.Method == http.MethodPost:
 		s.bootstrap(w,r)
 	case path == "/api/v1/auth/login" && r.Method == http.MethodPost:
@@ -47,9 +47,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/api/v1/auth/logout" && r.Method == http.MethodPost:
 		s.logout(w,r)
 	default:
-		user, ok := s.requireUser(w,r)
-		if !ok { return }
-		s.serveAuthenticated(w,r,path,user)
+		user,ok:=s.requireUser(w,r);if !ok{return};s.serveAuthenticated(w,r,path,user)
 	}
 }
 
@@ -57,6 +55,8 @@ func (s *Server) serveAuthenticated(w http.ResponseWriter, r *http.Request, path
 	switch {
 	case path == "/api/v1/me" && r.Method == http.MethodGet:
 		writeJSON(w,200,user)
+	case path == "/api/v1/hardware" && r.Method == http.MethodGet:
+		writeJSON(w,200,s.hardware.Snapshot(r.Context()))
 	case path == "/api/v1/models" && r.Method == http.MethodGet:
 		items,err:=s.models.List(r.Context());if err!=nil{writeErr(w,500,err);return};writeJSON(w,200,items)
 	case path == "/api/v1/models" && r.Method == http.MethodPost:
