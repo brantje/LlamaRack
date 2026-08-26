@@ -81,8 +81,11 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
+	managementAPI := http.NewServeMux()
+	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService))
+	managementAPI.Handle("/", apiServer)
 	openAI := gateway.New(authService, modelService, lifecycleService)
-	mux := newMux(apiServer, openAI)
+	mux := newMux(managementAPI, openAI)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
