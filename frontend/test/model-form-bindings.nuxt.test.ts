@@ -42,7 +42,8 @@ describe('model creation form', () => {
     expect(wrapper.text()).toContain('Allow resource-pressure eviction')
     expect(wrapper.text()).toContain('Launch this Instance after creation')
     expect(wrapper.text()).not.toContain('Priority')
-    expect(wrapper.text()).not.toContain('GPU placement')
+    expect(wrapper.find('[name="priority"]').exists()).toBe(false)
+    expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
 
     const select = selectComponents(wrapper)[0]!
     expect(select.props('items')).toEqual(expect.arrayContaining([
@@ -98,9 +99,9 @@ describe('model creation form', () => {
     expect(wrapper.text()).toContain('Model and Instance were created')
     expect(wrapper.text()).toContain('worker exploded')
 
-    const toggle = wrapper.getComponent('[data-testid="create-first-instance"]')
-    toggle.vm.$emit('update:modelValue', false)
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
     await flushPromises()
+    expect(wrapper.find('[data-testid="instance-name"]').exists()).toBe(false)
     mocks.request.mockClear()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
