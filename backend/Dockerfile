@@ -6,7 +6,9 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/llamacpp-manager ./cmd/llamacpp-manager
+RUN go mod tidy && \
+    go mod verify && \
+    CGO_ENABLED=0 go build -trimpath -o /out/llamacpp-manager ./cmd/llamacpp-manager
 
 FROM ${LLAMA_IMAGE}
 COPY --from=build /out/llamacpp-manager /usr/local/bin/llamacpp-manager
