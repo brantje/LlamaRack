@@ -95,6 +95,6 @@ const accessibleLabel = computed(() => {
     :title="copied ? copiedLabel : label"
     @click="copy"
   >
-    <template v-if="!iconOnly">{{ copied ? copiedLabel : label }}</template>
+    <template v-if="!iconOnly">{{ label }}</template>
   </UButton>
 </template>
