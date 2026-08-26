@@ -3,6 +3,7 @@ const manager = useManager()
 const { models } = manager
 const message = ref('')
 const pending = ref<string | null>(null)
+const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 
 function formatBytes(value: number) {
   if (!value) return '—'
@@ -21,7 +22,14 @@ function contextLabel(value: number) {
 }
 
 async function remove(id: string) {
-  if (!confirm('Delete this registered model? Its Instance definitions will also be deleted. The GGUF file will not be removed.')) return
+  const model = models.value.find(item => item.id === id)
+  const confirmed = await confirmation.value?.request({
+    title: 'Delete Model',
+    description: `Delete registered Model “${model?.name || id}”? Its Instance definitions will also be deleted. The GGUF file will not be removed.`,
+    confirmLabel: 'Delete Model',
+    color: 'error'
+  })
+  if (!confirmed) return
   pending.value = id
   message.value = ''
   try {
@@ -38,12 +46,7 @@ async function remove(id: string) {
 <template>
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
-      <UPageHeader
-        class="min-w-0 flex-1"
-        headline="MODEL REGISTRY"
-        title="Models"
-        description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances."
-      />
+      <UPageHeader class="min-w-0 flex-1" headline="MODEL REGISTRY" title="Models" description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances." />
       <div class="flex flex-wrap justify-end gap-2">
         <UButton color="neutral" variant="soft" @click="manager.refresh">Refresh</UButton>
         <UButton to="/models/new">Add model</UButton>
@@ -51,7 +54,6 @@ async function remove(id: string) {
     </div>
 
     <UAlert v-if="message" color="error" variant="subtle" :description="message" />
-
     <UEmpty v-if="!models.length" title="No models registered" description="Register a local GGUF file to get started.">
       <template #actions><UButton to="/models/new" size="sm">Add model</UButton></template>
     </UEmpty>
@@ -61,12 +63,7 @@ async function remove(id: string) {
         <table class="w-full text-left text-sm" data-testid="models-table">
           <thead class="border-b border-default bg-elevated/40 text-xs uppercase tracking-wide text-dimmed">
             <tr>
-              <th class="px-4 py-3 font-semibold">Name</th>
-              <th class="px-4 py-3 font-semibold">Path</th>
-              <th class="px-4 py-3 font-semibold">Size</th>
-              <th class="px-4 py-3 font-semibold">Quantization</th>
-              <th class="px-4 py-3 font-semibold">Context capability</th>
-              <th class="px-4 py-3 text-right font-semibold">Actions</th>
+              <th class="px-4 py-3 font-semibold">Name</th><th class="px-4 py-3 font-semibold">Path</th><th class="px-4 py-3 font-semibold">Size</th><th class="px-4 py-3 font-semibold">Quantization</th><th class="px-4 py-3 font-semibold">Context capability</th><th class="px-4 py-3 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-default">
@@ -76,16 +73,12 @@ async function remove(id: string) {
               <td class="whitespace-nowrap px-4 py-3">{{ formatBytes(model.total_bytes) }}</td>
               <td class="whitespace-nowrap px-4 py-3">{{ model.quantization || '—' }}</td>
               <td class="whitespace-nowrap px-4 py-3">{{ contextLabel(model.context_length) }}</td>
-              <td class="px-4 py-3">
-                <div class="flex justify-end gap-2">
-                  <UButton :to="`/models/${model.id}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton>
-                  <UButton color="error" variant="soft" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</UButton>
-                </div>
-              </td>
+              <td class="px-4 py-3"><div class="flex justify-end gap-2"><UButton :to="`/models/${model.id}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton><UButton color="error" variant="soft" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</UButton></div></td>
             </tr>
           </tbody>
         </table>
       </div>
     </UCard>
+    <AppConfirmationModal ref="confirmation" />
   </div>
 </template>
