@@ -53,7 +53,7 @@ describe('model creation form', () => {
     expect(JSON.stringify(select.props('items'))).not.toContain('/models/')
   })
 
-  it('creates a registry model with an editable generated first-instance slug', async () => {
+  it('prefills first-instance name from the model name and keeps the generated slug in sync', async () => {
     const manager = useManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return discovered
@@ -65,10 +65,21 @@ describe('model creation form', () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
+
     await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder')
     await flushPromises()
     expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Qwen Coder')
     expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coder')
+
+    await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder 32B')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Qwen Coder 32B')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coder-32b')
+
+    await wrapper.get('[data-testid="instance-name"]').setValue('Qwen Coding')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coding')
+
     await wrapper.get('[data-testid="instance-slug"]').setValue('coding-api')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -76,14 +87,28 @@ describe('model creation form', () => {
       method: 'POST',
       body: {
         gguf_path: 'Qwen/coder/qwen-Q4_K_M.gguf',
-        name: 'Qwen Coder',
+        name: 'Qwen Coder 32B',
         context_length: 0,
         first_instance: {
-          name: 'Qwen Coder', slug: 'coding-api', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
+          name: 'Qwen Coding', slug: 'coding-api', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
         }
       }
     })
     expect(manager.models.value).toEqual([])
+  })
+
+  it('prefills from the current model name when first-instance creation is enabled again', async () => {
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
+    await wrapper.get('[data-testid="model-name"]').setValue('Model While Disabled')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="instance-name"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Model While Disabled')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('model-while-disabled')
   })
 
   it('preserves durable records when launch fails and supports registry-only creation', async () => {
