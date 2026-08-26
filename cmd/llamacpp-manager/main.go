@@ -22,6 +22,7 @@ import (
 	"github.com/brantje/llamacpp-manager/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/internal/models"
 	"github.com/brantje/llamacpp-manager/internal/providers"
+	"github.com/brantje/llamacpp-manager/internal/router"
 	"github.com/brantje/llamacpp-manager/internal/supervisor"
 )
 
@@ -39,6 +40,7 @@ func main() {
 	modelService := models.New(db.DB, cfg.ModelsDir)
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
 	lifecycleService := lifecycle.New(modelService, sup)
+	requestRouter := router.New(modelService, sup)
 	hfProvider := providers.NewHuggingFace(os.Getenv("HF_TOKEN"))
 	downloadManager := downloads.New(cfg.ModelsDir, modelService, hfProvider)
 
@@ -54,7 +56,7 @@ func main() {
 	profileGetter := func() (llamacpp.Profile,error) { profileMu.RLock(); defer profileMu.RUnlock(); return profile, profileErr }
 
 	apiServer := api.New(authService, modelService, lifecycleService, hfProvider, downloadManager, profileGetter)
-	openAIGateway := gateway.New(authService, modelService, lifecycleService)
+	openAIGateway := gateway.New(authService, modelService, lifecycleService, requestRouter)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", apiServer)
 	mux.Handle("/v1/", openAIGateway)
