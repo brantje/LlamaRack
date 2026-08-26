@@ -195,6 +195,9 @@ func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (schedu
 	}
 	candidates := make([]scheduler.Candidate, 0)
 	for _, m := range items {
+		if !m.EvictionEnabled {
+			continue
+		}
 		instances, err := s.models.Instances(ctx, m.ID)
 		if err != nil {
 			return scheduler.Plan{}, err
@@ -239,10 +242,7 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	}
 }
 
-func (s *Service) ReconcileIdle(ctx context.Context, idleTimeout time.Duration) {
-	if idleTimeout <= 0 {
-		return
-	}
+func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Duration) {
 	items, err := s.models.List(ctx)
 	if err != nil {
 		return
@@ -250,6 +250,13 @@ func (s *Service) ReconcileIdle(ctx context.Context, idleTimeout time.Duration) 
 	now := s.now().UTC()
 	for _, m := range items {
 		if !m.Enabled || m.AlwaysOn {
+			continue
+		}
+		idleTimeout := globalIdleTimeout
+		if m.IdleUnloadSeconds > 0 {
+			idleTimeout = time.Duration(m.IdleUnloadSeconds) * time.Second
+		}
+		if idleTimeout <= 0 {
 			continue
 		}
 
@@ -267,7 +274,7 @@ func (s *Service) ReconcileIdle(ctx context.Context, idleTimeout time.Duration) 
 			idleLock.Unlock()
 			continue
 		}
-		slog.Info("idle timeout reached; unloading model", "model_id", m.ID, "public_id", m.PublicID, "idle_for", now.Sub(activity.LastUsed))
+		slog.Info("idle timeout reached; unloading model", "model_id", m.ID, "public_id", m.PublicID, "idle_for", now.Sub(activity.LastUsed), "idle_timeout", idleTimeout)
 		err := s.StopModel(ctx, m.ID)
 		idleLock.Unlock()
 		if err != nil {
@@ -294,17 +301,16 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (s *Service) RunIdleReconciler(ctx context.Context, idleTimeout time.Duration) {
-	if idleTimeout <= 0 {
-		<-ctx.Done()
-		return
-	}
-	interval := idleTimeout / 2
-	if interval > 15*time.Second {
-		interval = 15 * time.Second
-	}
-	if interval < time.Second {
-		interval = time.Second
+func (s *Service) RunIdleReconciler(ctx context.Context, globalIdleTimeout time.Duration) {
+	interval := 15 * time.Second
+	if globalIdleTimeout > 0 {
+		interval = globalIdleTimeout / 2
+		if interval > 15*time.Second {
+			interval = 15 * time.Second
+		}
+		if interval < time.Second {
+			interval = time.Second
+		}
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -313,7 +319,7 @@ func (s *Service) RunIdleReconciler(ctx context.Context, idleTimeout time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.ReconcileIdle(ctx, idleTimeout)
+			s.ReconcileIdle(ctx, globalIdleTimeout)
 		}
 	}
 }
