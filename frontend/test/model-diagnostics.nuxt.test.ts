@@ -101,4 +101,70 @@ describe('model diagnostics', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/instance-12345678/logs')
   })
+
+  it('runs direct start and stop actions and handles a model with no runtime logs', async () => {
+    const manager = seedModel()
+    let state = 'UNLOADED'
+    let returnRuntime = true
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') {
+        state = 'READY'
+        return []
+      }
+      if (path === '/api/v1/models/m1/stop' && options?.method === 'POST') {
+        state = 'UNLOADED'
+        return undefined
+      }
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/artifacts') return []
+      if (path === '/api/v1/models/m1/runtime') {
+        return returnRuntime ? [{ instance_id: 'instance-12345678', model_id: 'm1', state, pid: state === 'READY' ? 99 : undefined, port: state === 'READY' ? 32000 : undefined }] : []
+      }
+      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      return []
+    })
+
+    const wrapper = await mountSuspended(ModelsPage, { route: false })
+    await wrapper.findAll('button').find(button => button.text() === 'Start')!.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/start', { method: 'POST' })
+    expect(wrapper.text()).toContain('READY')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Stop')!.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/stop', { method: 'POST' })
+    expect(wrapper.text()).toContain('UNLOADED')
+
+    returnRuntime = false
+    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No worker output captured yet.')
+  })
+
+  it('reports a successful start that never reaches READY and log loading failures', async () => {
+    const manager = seedModel()
+    let failLogs = false
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') return []
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/artifacts') return []
+      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'FAILED' }]
+      if (path === '/api/v1/instances/instance-12345678/logs') {
+        if (failLogs) throw {}
+        return { lines: [] }
+      }
+      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      return []
+    })
+
+    const wrapper = await mountSuspended(ModelsPage, { route: false })
+    await wrapper.findAll('button').find(button => button.text() === 'Test')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('FAIL · Worker did not reach READY state')
+
+    failLogs = true
+    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to load worker logs')
+  })
 })
