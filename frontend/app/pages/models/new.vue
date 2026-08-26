@@ -10,12 +10,15 @@ const scanning = ref(false)
 const error = ref('')
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
+const firstInstanceNameEdited = ref(false)
+const firstInstanceSlugEdited = ref(false)
 const form = reactive({
   gguf_path: '',
   name: '',
   context_length: 0,
   first_instance: {
     name: '',
+    slug: '',
     always_on: false,
     autoload_enabled: true,
     eviction_enabled: true,
@@ -31,8 +34,16 @@ const ggufPlaceholder = computed(() => scanning.value
   ? 'Scanning model folder…'
   : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
 
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
+}
+
 watch(() => form.name, (name) => {
-  if (!form.first_instance.name) form.first_instance.name = name
+  if (!firstInstanceNameEdited.value) form.first_instance.name = name
+})
+
+watch(() => form.first_instance.name, (name) => {
+  if (!firstInstanceSlugEdited.value) form.first_instance.slug = slugify(name)
 })
 
 function messageFor(value: any, fallback: string) {
@@ -112,8 +123,11 @@ async function createModel() {
         <UCheckbox v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
 
         <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
-          <UFormField label="Instance name" name="first_instance.name" description="The name is slugified into the OpenAI model ID." required>
-            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
+          <UFormField label="Instance name" name="first_instance.name" required>
+            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required @update:model-value="firstInstanceNameEdited = true" />
+          </UFormField>
+          <UFormField label="Instance slug" name="first_instance.slug" description="Exact OpenAI model ID. Defaults from the Instance name but can be customized." required>
+            <UInput v-model="form.first_instance.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="firstInstanceSlugEdited = true" />
           </UFormField>
           <div class="space-y-3">
             <UCheckbox v-model="form.first_instance.always_on" data-testid="always-on" label="Always on" />
@@ -127,7 +141,7 @@ async function createModel() {
         <div class="flex flex-wrap justify-end gap-2 pt-2">
           <UButton type="button" color="neutral" variant="soft" :loading="scanning" @click="scanGGUFs">Rescan</UButton>
           <UButton to="/models" color="neutral" variant="soft">Cancel</UButton>
-          <UButton type="submit" :loading="busy" :disabled="scanning || !form.gguf_path || (createFirstInstance && !form.first_instance.name)">Create model</UButton>
+          <UButton type="submit" :loading="busy" :disabled="scanning || !form.gguf_path || (createFirstInstance && (!form.first_instance.name || !form.first_instance.slug))">Create model</UButton>
         </div>
       </UForm>
     </UCard>
