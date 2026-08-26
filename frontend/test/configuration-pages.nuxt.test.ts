@@ -70,6 +70,8 @@ describe('Instance configuration pages', () => {
     select[2]!.vm.$emit('update:modelValue', 'manual')
     await flushPromises()
 
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Coder Model')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('coder-model')
     await wrapper.get('[data-testid="instance-name"]').setValue('Primary Coder')
     await flushPromises()
     expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('primary-coder')
