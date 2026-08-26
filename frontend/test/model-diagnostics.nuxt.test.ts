@@ -196,6 +196,6 @@ describe('model diagnostics', () => {
     FakeEventSource.throwOnCreate = true
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Unable to open live worker logs')
+    expect(wrapper.text()).toContain('stream unavailable')
   })
 })
