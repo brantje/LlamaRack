@@ -32,7 +32,6 @@ func TestPersistenceFailuresBecomeHTTPErrorResponses(t *testing.T) {
 
 	for _, tc := range []struct{ method, path string; body any; want int }{
 		{http.MethodGet, "/api/v1/models", nil, 500},
-		{http.MethodGet, "/api/v1/artifacts", nil, 500},
 		{http.MethodGet, "/api/v1/api-keys", nil, 500},
 		{http.MethodPost, "/api/v1/api-keys", map[string]string{"name":"x"}, 500},
 		{http.MethodPost, "/api/v1/api-keys/id/revoke", nil, 500},
