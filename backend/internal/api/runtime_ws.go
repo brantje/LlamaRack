@@ -22,6 +22,11 @@ type runtimeEvent struct {
 	Runtime supervisor.Runtime `json:"runtime"`
 }
 
+type runtimeSnapshotEvent struct {
+	Type     string               `json:"type"`
+	Runtimes []supervisor.Runtime `json:"runtimes"`
+}
+
 var runtimeUpgrader = websocket.Upgrader{CheckOrigin: websocketOriginAllowed}
 
 func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service) http.Handler {
@@ -49,12 +54,13 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	defer conn.Close()
 
-	snapshot, events, cancel := h.lifecycle.SubscribeRuntimes()
+	snapshot, events, cancel, err := h.lifecycle.SubscribeRuntimes(r.Context())
+	if err != nil {
+		return
+	}
 	defer cancel()
-	for _, runtime := range snapshot {
-		if err := conn.WriteJSON(runtimeEvent{Type: "runtime", Runtime: runtime}); err != nil {
-			return
-		}
+	if err := conn.WriteJSON(runtimeSnapshotEvent{Type: "runtime_snapshot", Runtimes: snapshot}); err != nil {
+		return
 	}
 
 	disconnected := make(chan struct{})
