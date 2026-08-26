@@ -7,12 +7,12 @@ import { useManager } from '~/composables/useManager'
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
-function resetAdmin() {
+function resetAuthenticated() {
   const manager = useManager()
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
-  manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+  manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
@@ -23,7 +23,7 @@ beforeEach(() => {
   mocks.request.mockReset()
   vi.stubGlobal('confirm', vi.fn(() => true))
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn() } })
-  resetAdmin()
+  resetAuthenticated()
 })
 
 describe('API key controls', () => {
