@@ -39,7 +39,7 @@ function components(wrapper: any, name: string, fallback: string) {
   const found = wrapper.findAllComponents({ name })
   return found.length ? found : wrapper.findAllComponents({ name: fallback })
 }
-function selects(wrapper: any) { return components(wrapper, 'Select', 'USelect') }
+function selects(wrapper: any) { return components(wrapper, 'SelectMenu', 'USelectMenu') }
 function inputs(wrapper: any) { return components(wrapper, 'Input', 'UInput') }
 function numbers(wrapper: any) { return components(wrapper, 'InputNumber', 'UInputNumber') }
 function textareas(wrapper: any) { return components(wrapper, 'Textarea', 'UTextarea') }
