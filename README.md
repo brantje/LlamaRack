@@ -25,7 +25,7 @@ Open:
 
 On first load, create the bootstrap administrator account. GGUF files placed anywhere under `data/models/` are visible inside the backend models directory. **Models → Add model** (or `/models/new`) scans that directory recursively and lists only GGUF files that have not already been added. Paths in the UI are relative to the models directory, so the `/models` container prefix is hidden. Model registration and GGUF registration are a single step; there is no separate artifact registry.
 
-Always-On models are reconciled once when the backend starts. Periodic reconciliation defaults to every 15 seconds and can be changed with `LCM_ALWAYS_ON_RECONCILE_SECONDS`. Set it to `0` to keep the startup reconciliation but disable periodic restarts, which allows an Always-On model to remain manually stopped until the manager restarts or it is started explicitly.
+Always-On models are reconciled once when the backend starts. Periodic reconciliation defaults to every 15 seconds and can be changed with `LCM_ALWAYS_ON_RECONCILE_SECONDS`; set it to `0` to disable periodic reconciliation after the startup pass. When a user manually stops an Always-On model, that model is suppressed from both periodic reconciliation and autoload for the rest of the current backend runtime. An explicit Start clears the suppression, and restarting the backend clears all manual-stop suppressions so Always-On models are started again.
 
 The default backend image uses the standard llama.cpp server image. To test a different llama.cpp image variant, set `LLAMA_IMAGE` while building, for example:
 
