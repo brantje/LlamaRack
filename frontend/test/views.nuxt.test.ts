@@ -201,13 +201,13 @@ describe('models page', () => {
       { id: 'a2', display_name: 'Plain', local_path: 'plain.gguf', total_bytes: 4 }
     ]
     await nextTick()
+    expect(wrapper.text()).toContain('Plain')
     const currentForms = wrapper.findAll('form')
     await currentForms[1]!.find('input').setValue('coder')
     await currentForms[1]!.find('select').setValue('a1')
     await currentForms[1]!.trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', expect.objectContaining({ method: 'POST' }))
-    expect(wrapper.text()).toContain('Plain')
   })
 
   it('starts, stops, deletes, and reports action errors', async () => {
