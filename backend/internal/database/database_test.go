@@ -30,7 +30,7 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	if artifacts != 0 {
 		t.Fatal("artifacts table should not exist")
 	}
-	for _, column := range []string{"name", "gguf_path", "total_bytes", "quantization", "autoload_enabled"} {
+	for _, column := range []string{"name", "gguf_path", "total_bytes", "quantization", "autoload_enabled", "eviction_enabled", "idle_unload_seconds"} {
 		var count int
 		rows, err := db.QueryContext(ctx, "PRAGMA table_info(models)")
 		if err != nil {
@@ -55,6 +55,16 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO models(id,public_id,name,gguf_path,total_bytes) VALUES('m1','one','One','same.gguf',1)"); err != nil {
 		t.Fatal(err)
+	}
+	var evictionEnabled, idleUnloadSeconds int
+	if err := db.QueryRowContext(ctx, "SELECT eviction_enabled,idle_unload_seconds FROM models WHERE id='m1'").Scan(&evictionEnabled, &idleUnloadSeconds); err != nil {
+		t.Fatal(err)
+	}
+	if evictionEnabled != 1 || idleUnloadSeconds != 0 {
+		t.Fatalf("unexpected eviction defaults enabled=%d idle=%d", evictionEnabled, idleUnloadSeconds)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE models SET idle_unload_seconds=-1 WHERE id='m1'"); err == nil {
+		t.Fatal("expected non-negative idle timeout constraint")
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO models(id,public_id,name,gguf_path,total_bytes) VALUES('m2','two','Two','same.gguf',1)"); err == nil {
 		t.Fatal("expected unique GGUF path constraint")
