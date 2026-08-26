@@ -98,6 +98,64 @@ describe('instance control plane', () => {
     expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
   })
 
+  it('covers policy variants, state badges, model fallback and empty/error log branches', async () => {
+    const manager = seed()
+    manager.instances.value = [
+      { id: 'protected', model_id: 'missing-model', name: 'Protected', enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: false, idle_unload_seconds: 60, gpu_mode: 'manual', gpu_devices: ['0'] },
+      { id: 'ready', model_id: 'm1', name: 'Ready Instance', enabled: true, autoload_enabled: true, always_on: false, priority: 'low', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }
+    ]
+    manager.runtimes.value = {
+      'missing-model': [{ instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }],
+      m1: [{ instance_id: 'ready', model_id: 'm1', state: 'READY' }]
+    }
+    let logMode: 'empty' | 'error' = 'empty'
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/instances/protected/logs') {
+        if (logMode === 'error') throw new Error('log retrieval failed')
+        return {}
+      }
+      if (path === '/api/v1/instances/protected/start' && options?.method === 'POST') throw {}
+      if (path === '/api/v1/instances/protected/restart' && options?.method === 'POST') throw new Error('restart failed')
+      if (path === '/api/v1/instances') return manager.instances.value
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances/protected/runtime') return { instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }
+      if (path === '/api/v1/instances/ready/runtime') return { instance_id: 'ready', model_id: 'm1', state: 'READY' }
+      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      return {}
+    })
+
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    expect(wrapper.text()).toContain('missing-model')
+    expect(wrapper.text()).toContain('FAILED')
+    expect(wrapper.text()).toContain('READY')
+    expect(wrapper.text()).toContain('Always On')
+    expect(wrapper.text()).toContain('Manual load')
+    expect(wrapper.text()).toContain('Protected from resource-pressure eviction')
+
+    const protectedCard = wrapper.findAll('[data-testid="instance-card"]')[0]!
+    await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('No logs captured.')
+
+    await protectedCard.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to start Instance')
+
+    await protectedCard.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('restart failed')
+
+    logMode = 'error'
+    await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('log retrieval failed')
+
+    vi.mocked(globalThis.confirm).mockReturnValueOnce(false)
+    mocks.request.mockClear()
+    await protectedCard.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalled()
+  })
+
   it('renders the empty state', async () => {
     const manager = seed()
     manager.instances.value = []
