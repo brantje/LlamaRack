@@ -217,17 +217,21 @@ func TestNoEnabledInstanceAndAlwaysOnReconciliation(t *testing.T) {
 }
 
 func TestRunReconcilerStopsWithContext(t *testing.T) {
-	s, _, _, _, _ := setupLifecycle(t, false, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		s.RunReconciler(ctx)
-		close(done)
-	}()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("reconciler did not stop")
+	for _, interval := range []time.Duration{0, 15 * time.Second} {
+		t.Run(interval.String(), func(t *testing.T) {
+			s, _, _, _, _ := setupLifecycle(t, false, false)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				s.RunReconciler(ctx, interval)
+				close(done)
+			}()
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("reconciler did not stop")
+			}
+		})
 	}
 }
