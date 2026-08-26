@@ -56,7 +56,7 @@ func New(binary, host string, portStart int, startupTimeout time.Duration) *Supe
 	return &Supervisor{binary: binary, host: host, portStart: portStart, startupTimeout: startupTimeout, workers: map[string]*worker{}}
 }
 
-func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, args []string) (Runtime, error) {
+func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, extraArgs []string) (Runtime, error) {
 	s.mu.Lock()
 	if existing := s.workers[instanceID]; existing != nil && existing.runtime.State != Failed && existing.runtime.State != Unloaded {
 		rt := existing.runtime
@@ -68,7 +68,8 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 		s.mu.Unlock()
 		return Runtime{}, err
 	}
-	workerArgs := append([]string{}, args...)
+	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
+	workerArgs = append(workerArgs, extraArgs...)
 	cmd := exec.Command(s.binary, workerArgs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil { s.mu.Unlock(); return Runtime{}, err }
@@ -91,16 +92,21 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	waitCtx, cancel := context.WithTimeout(ctx, s.startupTimeout)
 	defer cancel()
 	if err := s.waitReady(waitCtx, port); err != nil {
-		_ = s.Stop(context.Background(), instanceID)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		_ = s.Stop(stopCtx, instanceID)
+		stopCancel()
 		s.setState(instanceID, Failed, err.Error())
 		return s.Status(instanceID), err
 	}
 	s.mu.Lock()
-	if current := s.workers[instanceID]; current != nil {
-		current.runtime.State = Ready
-		current.runtime.ReadyAt = time.Now().UTC()
+	current := s.workers[instanceID]
+	if current == nil {
+		s.mu.Unlock()
+		return Runtime{InstanceID: instanceID, State: Failed}, errors.New("worker disappeared during startup")
 	}
-	rt := s.workers[instanceID].runtime
+	current.runtime.State = Ready
+	current.runtime.ReadyAt = time.Now().UTC()
+	rt := current.runtime
 	s.mu.Unlock()
 	return rt, nil
 }
@@ -108,7 +114,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 func (s *Supervisor) Stop(ctx context.Context, instanceID string) error {
 	s.mu.Lock()
 	w := s.workers[instanceID]
-	if w == nil || w.cmd == nil || w.cmd.Process == nil {
+	if w == nil || w.cmd == nil || w.cmd.Process == nil || w.runtime.State == Unloaded {
 		s.mu.Unlock()
 		return nil
 	}
@@ -126,7 +132,7 @@ func (s *Supervisor) Stop(ctx context.Context, instanceID string) error {
 		return ctx.Err()
 	case <-time.After(15 * time.Second):
 		_ = process.Kill()
-		<-done
+		select { case <-done: case <-time.After(5*time.Second): }
 		return nil
 	}
 }
