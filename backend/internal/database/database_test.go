@@ -53,6 +53,12 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 			t.Fatalf("models.%s missing", column)
 		}
 	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO models(id,public_id,name,gguf_path,total_bytes) VALUES('m1','one','One','same.gguf',1)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO models(id,public_id,name,gguf_path,total_bytes) VALUES('m2','two','Two','same.gguf',1)"); err == nil {
+		t.Fatal("expected unique GGUF path constraint")
+	}
 	var enabled int
 	if err := db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled); err != nil {
 		t.Fatal(err)
