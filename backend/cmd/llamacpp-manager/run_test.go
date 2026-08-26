@@ -41,35 +41,44 @@ exit 2
 	return path
 }
 
-func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
+func testConfig(t *testing.T, llamaPath string) config.Config {
+	t.Helper()
 	root := t.TempDir()
-	port := freePort(t)
-	cfg := config.Config{
-		ListenAddr: "127.0.0.1:" + strconv.Itoa(port),
+	return config.Config{
+		ListenAddr: "127.0.0.1:" + strconv.Itoa(freePort(t)),
 		DataDir: filepath.Join(root, "config"),
 		ModelsDir: filepath.Join(root, "models"),
 		DatabasePath: filepath.Join(root, "config", "manager.db"),
-		LlamaServerPath: fakeDiscoveryBinary(t),
+		LlamaServerPath: llamaPath,
 		WorkerHost: "127.0.0.1",
 		WorkerPortStart: 35000,
 		StartupTimeout: time.Second,
 		SessionLifetime: time.Hour,
 		AllowedOrigin: "http://localhost:3000",
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func(){ done <- run(ctx, cfg) }()
-	base := "http://" + cfg.ListenAddr
+}
+
+func waitHealthy(t *testing.T, base string) {
+	t.Helper()
 	deadline := time.Now().Add(5*time.Second)
 	for {
 		resp, err := http.Get(base + "/health")
 		if err == nil {
 			_ = resp.Body.Close()
-			if resp.StatusCode == 200 { break }
+			if resp.StatusCode == 200 { return }
 		}
 		if time.Now().After(deadline) { t.Fatal("server did not become healthy") }
 		time.Sleep(20*time.Millisecond)
 	}
+}
+
+func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
+	cfg := testConfig(t, fakeDiscoveryBinary(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func(){ done <- run(ctx, cfg) }()
+	base := "http://" + cfg.ListenAddr
+	waitHealthy(t, base)
 	for _, path := range []string{"/health", "/", "/api/v1/health"} {
 		resp, err := http.Get(base + path)
 		if err != nil { t.Fatal(err) }
@@ -82,6 +91,22 @@ func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
 		if err != nil { t.Fatalf("run: %v", err) }
 	case <-time.After(3*time.Second):
 		t.Fatal("run did not shut down")
+	}
+}
+
+func TestRunStartsWhenLlamaDiscoveryUnavailable(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig(t, filepath.Join(root, "missing-llama-server"))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func(){ done <- run(ctx, cfg) }()
+	waitHealthy(t, "http://"+cfg.ListenAddr)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil { t.Fatalf("run without discovery: %v", err) }
+	case <-time.After(3*time.Second):
+		t.Fatal("run without discovery did not shut down")
 	}
 }
 
