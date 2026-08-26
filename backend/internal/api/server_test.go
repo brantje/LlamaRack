@@ -85,14 +85,11 @@ func doRequest(t *testing.T, h http.Handler, method, path string, body any, cook
 	return w
 }
 
-func bootstrapAndLogin(t *testing.T, f *apiFixture, role string) *http.Cookie {
+func bootstrapAndLogin(t *testing.T, f *apiFixture) *http.Cookie {
 	t.Helper()
 	w := doRequest(t, f.server, http.MethodPost, "/api/v1/auth/bootstrap", map[string]string{"username": "admin", "password": "correct-horse-battery"}, nil)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("bootstrap status=%d body=%s", w.Code, w.Body.String())
-	}
-	if role != "admin" {
-		f.dbExec("UPDATE users SET role=? WHERE username='admin'", role)
 	}
 	w = doRequest(t, f.server, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "admin", "password": "correct-horse-battery"}, nil)
 	if w.Code != http.StatusOK {
@@ -148,13 +145,13 @@ func TestPublicAuthAndSessionRoutes(t *testing.T) {
 		t.Fatalf("unknown field=%d %s", w.Code, w.Body.String())
 	}
 
-	cookie := bootstrapAndLogin(t, f, "admin")
+	cookie := bootstrapAndLogin(t, f)
 	w = doRequest(t, f.server, http.MethodGet, "/api/v1/me", nil, nil)
 	if w.Code != 401 {
 		t.Fatalf("missing auth=%d", w.Code)
 	}
 	w = doRequest(t, f.server, http.MethodGet, "/api/v1/me", nil, cookie)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "admin") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "admin") || strings.Contains(w.Body.String(), "role") {
 		t.Fatalf("me=%d %s", w.Code, w.Body.String())
 	}
 	w = doRequest(t, f.server, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "admin", "password": "wrong"}, nil)
@@ -171,9 +168,9 @@ func TestPublicAuthAndSessionRoutes(t *testing.T) {
 	}
 }
 
-func TestAdminModelProfileAndAPIKeyRoutes(t *testing.T) {
+func TestAuthenticatedModelProfileAndAPIKeyRoutes(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	cookie := bootstrapAndLogin(t, f, "admin")
+	cookie := bootstrapAndLogin(t, f)
 	m := createModel(t, f, cookie)
 
 	nested := filepath.Join(f.dir, "Qwen", "coder")
@@ -240,29 +237,13 @@ func TestAdminModelProfileAndAPIKeyRoutes(t *testing.T) {
 	}
 }
 
-func TestAuthorizationMethodsNotFoundAndProfileUnavailable(t *testing.T) {
+func TestAuthenticatedMethodsNotFoundAndProfileUnavailable(t *testing.T) {
 	f := newAPIFixture(t, func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("no llama") })
-	cookie := bootstrapAndLogin(t, f, "readonly")
+	cookie := bootstrapAndLogin(t, f)
 
-	w := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]string{}, cookie)
-	if w.Code != 403 {
-		t.Fatalf("readonly model=%d", w.Code)
-	}
-	w = doRequest(t, f.server, http.MethodGet, "/api/v1/models/available", nil, cookie)
-	if w.Code != 403 {
-		t.Fatalf("readonly available models=%d", w.Code)
-	}
-	w = doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": "x"}, cookie)
+	w := doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": "x"}, cookie)
 	if w.Code != 404 {
 		t.Fatalf("removed artifact route=%d", w.Code)
-	}
-	w = doRequest(t, f.server, http.MethodGet, "/api/v1/api-keys", nil, cookie)
-	if w.Code != 403 {
-		t.Fatalf("readonly keys=%d", w.Code)
-	}
-	w = doRequest(t, f.server, http.MethodPost, "/api/v1/api-keys", map[string]string{}, cookie)
-	if w.Code != 403 {
-		t.Fatalf("readonly create key=%d", w.Code)
 	}
 	w = doRequest(t, f.server, http.MethodGet, "/api/v1/llamacpp/profile", nil, cookie)
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "no llama") {
@@ -290,10 +271,5 @@ func TestWriteHelpers(t *testing.T) {
 	writeErr(w, 418, nil)
 	if w.Code != 418 || !strings.Contains(w.Body.String(), "unknown error") {
 		t.Fatalf("writeErr=%d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	writeForbidden(w)
-	if w.Code != 403 {
-		t.Fatalf("forbidden=%d", w.Code)
 	}
 }
