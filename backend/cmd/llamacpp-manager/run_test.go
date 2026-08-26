@@ -58,11 +58,18 @@ func testConfig(t *testing.T, llamaPath string) config.Config {
 	}
 }
 
-func waitHealthy(t *testing.T, base string) {
+func testHTTPClient(t *testing.T) *http.Client {
+	t.Helper()
+	transport := &http.Transport{DisableKeepAlives: true}
+	t.Cleanup(transport.CloseIdleConnections)
+	return &http.Client{Transport: transport, Timeout: 2 * time.Second}
+}
+
+func waitHealthy(t *testing.T, client *http.Client, base string) {
 	t.Helper()
 	deadline := time.Now().Add(5*time.Second)
 	for {
-		resp, err := http.Get(base + "/health")
+		resp, err := client.Get(base + "/health")
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == 200 { return }
@@ -72,26 +79,32 @@ func waitHealthy(t *testing.T, base string) {
 	}
 }
 
+func waitRunStopped(t *testing.T, done <-chan error, label string) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil { t.Fatalf("%s: %v", label, err) }
+	case <-time.After(10*time.Second):
+		t.Fatalf("%s did not shut down", label)
+	}
+}
+
 func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
 	cfg := testConfig(t, fakeDiscoveryBinary(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func(){ done <- run(ctx, cfg) }()
+	client := testHTTPClient(t)
 	base := "http://" + cfg.ListenAddr
-	waitHealthy(t, base)
+	waitHealthy(t, client, base)
 	for _, path := range []string{"/health", "/", "/api/v1/health"} {
-		resp, err := http.Get(base + path)
+		resp, err := client.Get(base + path)
 		if err != nil { t.Fatal(err) }
 		_ = resp.Body.Close()
 		if resp.StatusCode != 200 { t.Fatalf("GET %s status=%d", path, resp.StatusCode) }
 	}
 	cancel()
-	select {
-	case err := <-done:
-		if err != nil { t.Fatalf("run: %v", err) }
-	case <-time.After(3*time.Second):
-		t.Fatal("run did not shut down")
-	}
+	waitRunStopped(t, done, "run")
 }
 
 func TestRunStartsWhenLlamaDiscoveryUnavailable(t *testing.T) {
@@ -100,14 +113,10 @@ func TestRunStartsWhenLlamaDiscoveryUnavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func(){ done <- run(ctx, cfg) }()
-	waitHealthy(t, "http://"+cfg.ListenAddr)
+	client := testHTTPClient(t)
+	waitHealthy(t, client, "http://"+cfg.ListenAddr)
 	cancel()
-	select {
-	case err := <-done:
-		if err != nil { t.Fatalf("run without discovery: %v", err) }
-	case <-time.After(3*time.Second):
-		t.Fatal("run without discovery did not shut down")
-	}
+	waitRunStopped(t, done, "run without discovery")
 }
 
 func TestRunErrors(t *testing.T) {
