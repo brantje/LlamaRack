@@ -1,20 +1,20 @@
-# Go
-/bin/
-*.test
-coverage.out
+# Frontend
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/.data/
 
-# Nuxt
-web/node_modules/
-web/.nuxt/
-web/.output/
-web/dist/
+# Backend
+backend/bin/
+backend/data/
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
 
-# Runtime data
-/config/
-/models/
-*.db
-*.db-shm
-*.db-wal
+# Environment
+.env
+.env.*
+!.env.example
 
 # IDE / OS
 .idea/
