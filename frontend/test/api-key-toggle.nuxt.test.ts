@@ -19,9 +19,17 @@ function seedAuthenticated() {
   return manager
 }
 
+async function clickConfirmation(kind: 'confirm' | 'cancel') {
+  await flushPromises()
+  const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
+  const button = buttons.at(-1)
+  if (!button) throw new Error(`Missing confirmation ${kind} button`)
+  button.click()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
-  vi.stubGlobal('confirm', vi.fn(() => true))
   seedAuthenticated()
 })
 
@@ -75,7 +83,9 @@ describe('API key state controls', () => {
 
     await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
     await flushPromises()
-    expect(confirm).toHaveBeenCalledWith('Revoke API key "sdk"? It will be permanently removed.')
+    expect(document.body.textContent).toContain('Revoke API key “sdk”? It will be permanently removed.')
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', expect.anything())
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
     expect(wrapper.text()).toContain('No API keys created yet.')
   })
@@ -93,9 +103,8 @@ describe('API key state controls', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('toggle failed')
 
-    vi.mocked(confirm).mockReturnValueOnce(false)
     await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
   })
 })
