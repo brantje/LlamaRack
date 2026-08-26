@@ -52,11 +52,11 @@ beforeEach(() => {
 })
 
 describe('Instance configuration pages', () => {
-  it('creates a fully configured Instance and launches the exact created ID', async () => {
+  it('creates a fully configured Instance with an editable generated slug and launches the exact created ID', async () => {
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'primary-coder' }
-      if (path === '/api/v1/instances/primary-coder/start') return { state: 'READY' }
+      if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'custom-coder' }
+      if (path === '/api/v1/instances/custom-coder/start') return { state: 'READY' }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return []
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
@@ -70,10 +70,14 @@ describe('Instance configuration pages', () => {
     select[2]!.vm.$emit('update:modelValue', 'manual')
     await flushPromises()
 
+    await wrapper.get('[data-testid="instance-name"]').setValue('Primary Coder')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('primary-coder')
+    await wrapper.get('[data-testid="instance-slug"]').setValue('custom-coder')
+
     const input = inputs(wrapper)
-    input[0]!.vm.$emit('update:modelValue', 'Primary Coder')
-    input[1]!.vm.$emit('update:modelValue', '0, 1')
-    input[2]!.vm.$emit('update:modelValue', '1,1')
+    input[2]!.vm.$emit('update:modelValue', '0, 1')
+    input[3]!.vm.$emit('update:modelValue', '1,1')
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 90)
     textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=8192\nthreads=4')
     const checks = checkboxes(wrapper)
@@ -88,12 +92,12 @@ describe('Instance configuration pages', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances', {
       method: 'POST',
       body: expect.objectContaining({
-        model_id: 'm1', name: 'Primary Coder', priority: 'high', always_on: true,
+        model_id: 'm1', name: 'Primary Coder', slug: 'custom-coder', priority: 'high', always_on: true,
         idle_unload_seconds: 90, gpu_mode: 'manual', gpu_devices: ['0', '1'], tensor_split: '1,1',
         options: { 'ctx-size': '8192', threads: '4' }
       })
     })
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/primary-coder/start', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/custom-coder/start', { method: 'POST' })
   })
 
   it('reports invalid overrides and preserves a created Instance when launch confirmation is cancelled', async () => {
@@ -107,7 +111,7 @@ describe('Instance configuration pages', () => {
     })
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     selects(wrapper)[0]!.vm.$emit('update:modelValue', 'm1')
-    inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Cancelled Launch')
+    await wrapper.get('[data-testid="instance-name"]').setValue('Cancelled Launch')
     textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'invalid-option')
     await flushPromises()
     await wrapper.find('form').trigger('submit')
