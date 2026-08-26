@@ -137,11 +137,21 @@ func (s *Service) readyEndpoint(ctx context.Context, model models.Model) (string
 }
 
 func optionArgs(options map[string]string) []string {
-	keys:=make([]string,0,len(options));for key:=range options{keys=append(keys,key)};sort.Strings(keys)
-	args:=make([]string,0,len(keys)*2)
-	for _,key:=range keys{
-		value:=strings.TrimSpace(options[key]);flag:="--"+strings.TrimLeft(key,"-")
-		switch strings.ToLower(value){case "true":args=append(args,flag);case "false","":[0]default:args=append(args,flag,value)}
+	keys := make([]string, 0, len(options))
+	for key := range options { keys = append(keys, key) }
+	sort.Strings(keys)
+	args := make([]string, 0, len(keys)*2)
+	for _, key := range keys {
+		value := strings.TrimSpace(options[key])
+		flag := "--" + strings.TrimLeft(key, "-")
+		switch strings.ToLower(value) {
+		case "true":
+			args = append(args, flag)
+		case "false", "":
+			continue
+		default:
+			args = append(args, flag, value)
+		}
 	}
 	return args
 }
