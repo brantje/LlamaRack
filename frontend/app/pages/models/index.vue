@@ -158,6 +158,7 @@ async function remove(id: string) {
 
       <UEmpty
         v-if="!models.length"
+        variant="naked"
         title="No models configured"
         description="Add a GGUF model to get started."
       >
