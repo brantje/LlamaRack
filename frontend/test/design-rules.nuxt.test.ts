@@ -2,12 +2,16 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-function vueFiles(directory: string): string[] {
+function sourceFiles(directory: string, extensions: string[] = ['.vue']): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) return vueFiles(path)
-    return entry.isFile() && entry.name.endsWith('.vue') ? [path] : []
+    if (entry.isDirectory()) return sourceFiles(path, extensions)
+    return entry.isFile() && extensions.some(extension => entry.name.endsWith(extension)) ? [path] : []
   })
+}
+
+function vueFiles(directory: string) {
+  return sourceFiles(directory, ['.vue'])
 }
 
 function flatCardViolations(source: string): string[] {
@@ -62,6 +66,17 @@ describe('frontend design rules', () => {
     const appRoot = resolve(process.cwd(), 'app')
     const violations = vueFiles(appRoot).flatMap(file => flatCardViolations(readFileSync(file, 'utf8')).map(message => `${relative(appRoot, file)}: ${message}`))
     expect(violations).toEqual([])
+  })
+
+  it('uses Nuxt UI modals instead of native confirmation dialogs', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const nativeConfirmation = /\b(?:(?:window|globalThis)\.)?confirm\s*\(/g
+    const violations = sourceFiles(appRoot, ['.vue', '.ts']).flatMap(file => {
+      const matches = readFileSync(file, 'utf8').match(nativeConfirmation) || []
+      return matches.map(() => relative(appRoot, file))
+    })
+    expect(violations).toEqual([])
+    expect(readFileSync(resolve(appRoot, 'components/AppConfirmationModal.vue'), 'utf8')).toContain('<UModal')
   })
 
   it('keeps Models as registry rows and Instances as sibling runtime cards', () => {

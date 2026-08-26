@@ -9,7 +9,6 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockResolvedValue([])
-  vi.stubGlobal('confirm', vi.fn(() => true))
   const manager = useManager()
   manager.disconnectRuntimeEvents()
   manager.initialized.value = true
