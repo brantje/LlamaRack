@@ -31,7 +31,12 @@ function resetManager() {
   manager.models.value = [model()]
   manager.instances.value = []
   manager.runtimes.value = {}
-  manager.profile.value = null
+  manager.profile.value = {
+    path: '/app/llama-server', version: 'test', fingerprint: 'abc', options: [
+      { key: 'ctx-size', value_hint: 'N', kind: 'integer' },
+      { key: 'threads', value_hint: 'N', kind: 'integer' }
+    ]
+  }
   return manager
 }
 
