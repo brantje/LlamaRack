@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,44 +14,63 @@ import (
 )
 
 type Model struct {
-	ID                string `json:"id"`
-	PublicID          string `json:"model_id"`
-	Name              string `json:"name"`
-	GGUFPath          string `json:"gguf_path"`
-	TotalBytes        int64  `json:"total_bytes"`
-	Quantization      string `json:"quantization,omitempty"`
-	Enabled           bool   `json:"enabled"`
-	Autoload          bool   `json:"autoload_enabled"`
-	AlwaysOn          bool   `json:"always_on"`
-	Priority          string `json:"priority"`
-	EvictionEnabled   bool   `json:"eviction_enabled"`
-	IdleUnloadSeconds int    `json:"idle_unload_seconds"`
-	RoutingPolicy     string `json:"routing_policy"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	GGUFPath      string `json:"gguf_path"`
+	TotalBytes    int64  `json:"total_bytes"`
+	Quantization  string `json:"quantization,omitempty"`
+	ContextLength int    `json:"context_length"`
+
+	// Deprecated compatibility fields are intentionally not part of the public
+	// management API. Runtime policy is owned by Instance in Phase 5.5.
+	PublicID          string `json:"-"`
+	Enabled           bool   `json:"-"`
+	Autoload          bool   `json:"-"`
+	AlwaysOn          bool   `json:"-"`
+	Priority          string `json:"-"`
+	EvictionEnabled   bool   `json:"-"`
+	IdleUnloadSeconds int    `json:"-"`
+	RoutingPolicy     string `json:"-"`
 }
 
 type Instance struct {
-	ID          string   `json:"id"`
-	ModelID     string   `json:"model_id"`
-	Name        string   `json:"name"`
-	Enabled     bool     `json:"enabled"`
-	Preferred   bool     `json:"preferred"`
-	GPUMode     string   `json:"gpu_mode"`
-	GPUDevices  []string `json:"gpu_devices,omitempty"`
-	TensorSplit string   `json:"tensor_split,omitempty"`
+	ID                string   `json:"id"`
+	ModelID           string   `json:"model_id"`
+	Name              string   `json:"name"`
+	Enabled           bool     `json:"enabled"`
+	Autoload          bool     `json:"autoload_enabled"`
+	AlwaysOn          bool     `json:"always_on"`
+	Priority          string   `json:"priority"`
+	EvictionEnabled   bool     `json:"eviction_enabled"`
+	IdleUnloadSeconds int      `json:"idle_unload_seconds"`
+	GPUMode           string   `json:"gpu_mode"`
+	GPUDevices        []string `json:"gpu_devices,omitempty"`
+	TensorSplit       string   `json:"tensor_split,omitempty"`
+	Preferred         bool     `json:"-"`
 }
 
 type CreateModelInput struct {
-	PublicID          string            `json:"model_id"`
-	Name              string            `json:"name"`
-	GGUFPath          string            `json:"gguf_path"`
-	Enabled           *bool             `json:"enabled,omitempty"`
-	Autoload          *bool             `json:"autoload_enabled,omitempty"`
-	AlwaysOn          bool              `json:"always_on"`
-	Priority          string            `json:"priority"`
-	EvictionEnabled   *bool             `json:"eviction_enabled,omitempty"`
-	IdleUnloadSeconds int               `json:"idle_unload_seconds,omitempty"`
-	RoutingPolicy     string            `json:"routing_policy"`
-	Options           map[string]string `json:"options,omitempty"`
+	Name          string            `json:"name"`
+	GGUFPath      string            `json:"gguf_path"`
+	ContextLength int               `json:"context_length,omitempty"`
+	Options       map[string]string `json:"options,omitempty"`
+
+	// Deprecated request fields retained only so older direct callers/tests keep
+	// compiling. The management UI/API no longer uses them as Model policy.
+	PublicID          string `json:"model_id,omitempty"`
+	Enabled           *bool  `json:"enabled,omitempty"`
+	Autoload          *bool  `json:"autoload_enabled,omitempty"`
+	AlwaysOn          bool   `json:"always_on,omitempty"`
+	Priority          string `json:"priority,omitempty"`
+	EvictionEnabled   *bool  `json:"eviction_enabled,omitempty"`
+	IdleUnloadSeconds int    `json:"idle_unload_seconds,omitempty"`
+	RoutingPolicy     string `json:"routing_policy,omitempty"`
+}
+
+type UpdateModelInput struct {
+	Name          string            `json:"name"`
+	ContextLength int               `json:"context_length,omitempty"`
+	Options       map[string]string `json:"options,omitempty"`
 }
 
 type Service struct {
@@ -61,18 +79,15 @@ type Service struct {
 }
 
 func New(db *sql.DB, modelsDir string) *Service { return &Service{db: db, modelsDir: modelsDir} }
+func (s *Service) DB() *sql.DB                  { return s.db }
 
 func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error) {
-	in.PublicID = strings.TrimSpace(in.PublicID)
-	if in.PublicID == "" || strings.ContainsAny(in.PublicID, " /\\\t\r\n") {
-		return Model{}, errors.New("invalid model_id")
-	}
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
 		return Model{}, errors.New("name is required")
 	}
-	if in.IdleUnloadSeconds < 0 {
-		return Model{}, errors.New("idle_unload_seconds must be zero or greater")
+	if in.ContextLength < 0 {
+		return Model{}, errors.New("context_length must be zero or greater")
 	}
 	ggufPath, info, err := s.resolveGGUF(in.GGUFPath)
 	if err != nil {
@@ -86,84 +101,96 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Model{}, err
 	}
-	enabled := true
-	if in.Enabled != nil {
-		enabled = *in.Enabled
-	}
-	autoload := true
-	if in.Autoload != nil {
-		autoload = *in.Autoload
-	}
-	evictionEnabled := true
-	if in.EvictionEnabled != nil {
-		evictionEnabled = *in.EvictionEnabled
-	}
-	priority := strings.ToLower(strings.TrimSpace(in.Priority))
-	if priority == "" {
-		priority = "normal"
-	}
-	if priority != "low" && priority != "normal" && priority != "high" {
-		return Model{}, errors.New("priority must be low, normal, or high")
-	}
-	routing := strings.ToLower(strings.TrimSpace(in.RoutingPolicy))
-	if routing == "" {
-		routing = "least_active"
-	}
-	allowedRouting := map[string]bool{"least_active": true, "round_robin": true, "preferred": true, "fixed": true, "lowest_load": true}
-	if !allowedRouting[routing] {
-		return Model{}, fmt.Errorf("unsupported routing policy %q", routing)
-	}
 	m := Model{
-		ID:                newID(),
-		PublicID:          in.PublicID,
-		Name:              in.Name,
-		GGUFPath:          ggufPath,
-		TotalBytes:        info.Size(),
-		Quantization:      quantFromName(filepath.Base(ggufPath)),
-		Enabled:           enabled,
-		Autoload:          autoload,
-		AlwaysOn:          in.AlwaysOn,
-		Priority:          priority,
-		EvictionEnabled:   evictionEnabled,
-		IdleUnloadSeconds: in.IdleUnloadSeconds,
-		RoutingPolicy:     routing,
+		ID:            newID(),
+		Name:          in.Name,
+		GGUFPath:      ggufPath,
+		TotalBytes:    info.Size(),
+		Quantization:  quantFromName(filepath.Base(ggufPath)),
+		ContextLength: in.ContextLength,
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Model{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO models(id,public_id,name,gguf_path,total_bytes,quantization,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,routing_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		m.ID, m.PublicID, m.Name, m.GGUFPath, m.TotalBytes, m.Quantization, boolInt(m.Enabled), boolInt(m.Autoload), boolInt(m.AlwaysOn), m.Priority, boolInt(m.EvictionEnabled), m.IdleUnloadSeconds, m.RoutingPolicy); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`,
+		m.ID, m.Name, m.GGUFPath, m.TotalBytes, m.Quantization, m.ContextLength); err != nil {
 		return Model{}, err
 	}
-	keys := make([]string, 0, len(in.Options))
-	for key := range in.Options {
-		keys = append(keys, key)
+	if err := replaceOptions(ctx, tx, "model_options", "model_id", m.ID, in.Options); err != nil {
+		return Model{}, err
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
+
+	// Compatibility only: pre-Phase-5.5 callers supplied model_id and expected a
+	// default worker. New management requests omit model_id, so Models can exist
+	// with zero Instances as required by Phase 5.5.
+	if legacy := strings.TrimSpace(in.PublicID); legacy != "" {
+		if strings.ContainsAny(legacy, " /\\\t\r\n") {
+			return Model{}, errors.New("invalid model_id")
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO model_options(model_id,option_key,option_value) VALUES(?,?,?)", m.ID, key, in.Options[key]); err != nil {
+		enabled := true
+		if in.Enabled != nil {
+			enabled = *in.Enabled
+		}
+		autoload := true
+		if in.Autoload != nil {
+			autoload = *in.Autoload
+		}
+		eviction := true
+		if in.EvictionEnabled != nil {
+			eviction = *in.EvictionEnabled
+		}
+		priority := normalizePriority(in.Priority)
+		if in.IdleUnloadSeconds < 0 {
+			return Model{}, errors.New("idle_unload_seconds must be zero or greater")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`,
+			strings.ToLower(legacy), m.ID, legacy, boolInt(enabled), boolInt(autoload), boolInt(in.AlwaysOn), priority, boolInt(eviction), in.IdleUnloadSeconds); err != nil {
 			return Model{}, err
 		}
-	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO instances(id,model_id,name) VALUES(?,?,?)", newID(), m.ID, "default"); err != nil {
-		return Model{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Model{}, err
 	}
-	return m, nil
+	return s.withLegacyPolicy(ctx, m), nil
 }
 
-const modelColumns = `id,public_id,name,gguf_path,total_bytes,quantization,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,routing_policy`
+func (s *Service) Update(ctx context.Context, id string, in UpdateModelInput) (Model, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return Model{}, errors.New("name is required")
+	}
+	if in.ContextLength < 0 {
+		return Model{}, errors.New("context_length must be zero or greater")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Model{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE models SET name=?, context_length=?, updated_at=unixepoch() WHERE id=?`, name, in.ContextLength, id)
+	if err != nil {
+		return Model{}, err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return Model{}, sql.ErrNoRows
+	}
+	if in.Options != nil {
+		if err := replaceOptions(ctx, tx, "model_options", "model_id", id, in.Options); err != nil {
+			return Model{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Model{}, err
+	}
+	return s.GetByID(ctx, id)
+}
+
+const modelColumns = `id,name,gguf_path,total_bytes,quantization,context_length`
 
 func (s *Service) List(ctx context.Context) ([]Model, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+modelColumns+` FROM models ORDER BY public_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+modelColumns+` FROM models ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -176,15 +203,35 @@ func (s *Service) List(ctx context.Context) ([]Model, error) {
 		}
 		out = append(out, m)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i] = s.withLegacyPolicy(ctx, out[i])
+	}
+	return out, nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (Model, error) {
-	return scanModel(s.db.QueryRowContext(ctx, `SELECT `+modelColumns+` FROM models WHERE id=?`, id))
+	m, err := scanModel(s.db.QueryRowContext(ctx, `SELECT `+modelColumns+` FROM models WHERE id=?`, id))
+	if err != nil {
+		return Model{}, err
+	}
+	return s.withLegacyPolicy(ctx, m), nil
 }
 
+// GetByPublicID is retained for source compatibility. Public inference identity
+// is now the exact Instance ID, so this resolves through instances.id.
 func (s *Service) GetByPublicID(ctx context.Context, id string) (Model, error) {
-	return scanModel(s.db.QueryRowContext(ctx, `SELECT `+modelColumns+` FROM models WHERE public_id=?`, id))
+	var modelID string
+	if err := s.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, id).Scan(&modelID); err != nil {
+		return Model{}, err
+	}
+	m, err := s.GetByID(ctx, modelID)
+	if err == nil {
+		m.PublicID = id
+	}
+	return m, err
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
@@ -193,24 +240,13 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 func (s *Service) Options(ctx context.Context, modelID string) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT option_key,option_value FROM model_options WHERE model_id=? ORDER BY option_key", modelID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, err
-		}
-		out[k] = v
-	}
-	return out, rows.Err()
+	return readOptions(ctx, s.db, "model_options", "model_id", modelID)
 }
 
+// Instances is a compatibility read helper. Instance CRUD/policy ownership lives
+// in internal/instances; callers should prefer that service for new code.
 func (s *Service) Instances(ctx context.Context, modelID string) ([]Instance, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,model_id,name,enabled,preferred,gpu_mode,gpu_devices,tensor_split FROM instances WHERE model_id=? ORDER BY name", modelID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split FROM instances WHERE model_id=? ORDER BY name`, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,12 +254,12 @@ func (s *Service) Instances(ctx context.Context, modelID string) ([]Instance, er
 	var out []Instance
 	for rows.Next() {
 		var i Instance
-		var enabled, preferred int
+		var enabled, autoload, alwaysOn, eviction int
 		var devices, tensorSplit sql.NullString
-		if err := rows.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &preferred, &i.GPUMode, &devices, &tensorSplit); err != nil {
+		if err := rows.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.GPUMode, &devices, &tensorSplit); err != nil {
 			return nil, err
 		}
-		i.Enabled, i.Preferred = enabled != 0, preferred != 0
+		i.Enabled, i.Autoload, i.AlwaysOn, i.EvictionEnabled = enabled != 0, autoload != 0, alwaysOn != 0, eviction != 0
 		if devices.Valid && strings.TrimSpace(devices.String) != "" {
 			for _, d := range strings.Split(devices.String, ",") {
 				if d = strings.TrimSpace(d); d != "" {
@@ -290,19 +326,86 @@ func (s *Service) resolveGGUF(path string) (string, os.FileInfo, error) {
 }
 
 type scanner interface{ Scan(...any) error }
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+type queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
 
 func scanModel(row scanner) (Model, error) {
 	var m Model
 	var quantization sql.NullString
-	var en, au, ao, evictionEnabled int
-	if err := row.Scan(&m.ID, &m.PublicID, &m.Name, &m.GGUFPath, &m.TotalBytes, &quantization, &en, &au, &ao, &m.Priority, &evictionEnabled, &m.IdleUnloadSeconds, &m.RoutingPolicy); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &m.GGUFPath, &m.TotalBytes, &quantization, &m.ContextLength); err != nil {
 		return Model{}, err
 	}
 	if quantization.Valid {
 		m.Quantization = quantization.String
 	}
-	m.Enabled, m.Autoload, m.AlwaysOn, m.EvictionEnabled = en != 0, au != 0, ao != 0, evictionEnabled != 0
 	return m, nil
+}
+
+func replaceOptions(ctx context.Context, tx *sql.Tx, table, idColumn, id string, options map[string]string) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+idColumn+"=?", id); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO "+table+"("+idColumn+",option_key,option_value) VALUES(?,?,?)", id, trimmed, options[key]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readOptions(ctx context.Context, q queryer, table, idColumn, id string) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT option_key,option_value FROM "+table+" WHERE "+idColumn+"=? ORDER BY option_key", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) withLegacyPolicy(ctx context.Context, m Model) Model {
+	var enabled, autoload, alwaysOn, eviction int
+	err := s.db.QueryRowContext(ctx, `SELECT id,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances WHERE model_id=? ORDER BY created_at,id LIMIT 1`, m.ID).
+		Scan(&m.PublicID, &enabled, &autoload, &alwaysOn, &m.Priority, &eviction, &m.IdleUnloadSeconds)
+	if err == nil {
+		m.Enabled = enabled != 0
+		m.Autoload = autoload != 0
+		m.AlwaysOn = alwaysOn != 0
+		m.EvictionEnabled = eviction != 0
+		m.RoutingPolicy = "least_active"
+	}
+	return m
+}
+
+func normalizePriority(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low":
+		return "low"
+	case "high":
+		return "high"
+	default:
+		return "normal"
+	}
 }
 
 func newID() string {
