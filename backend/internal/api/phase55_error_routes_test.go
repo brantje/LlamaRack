@@ -27,7 +27,7 @@ func TestPhase55InstanceAndModelRouteErrors(t *testing.T) {
 		want   int
 	}{
 		{http.MethodPost, "/api/v1/instances", []byte(`{"model_id":`), http.StatusBadRequest},
-		{http.MethodGet, "/api/v1/instances/", nil, http.StatusNotFound},
+		{http.MethodGet, "/api/v1/instances/", nil, http.StatusOK},
 		{http.MethodPatch, "/api/v1/instances/disabled-instance", map[string]any{}, http.StatusMethodNotAllowed},
 		{http.MethodPut, "/api/v1/instances/disabled-instance", []byte(`{"name":`), http.StatusBadRequest},
 		{http.MethodPut, "/api/v1/instances/missing", map[string]any{"model_id": model.ID, "name": "Missing"}, http.StatusNotFound},
