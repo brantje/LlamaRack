@@ -36,7 +36,7 @@ func TestPhase55InstanceAndModelRouteErrors(t *testing.T) {
 		{http.MethodPost, "/api/v1/instances/missing/restart", nil, http.StatusServiceUnavailable},
 		{http.MethodPost, "/api/v1/instances/missing/kill", nil, http.StatusInternalServerError},
 		{http.MethodPost, "/api/v1/instances/missing/duplicate", nil, http.StatusBadRequest},
-		{http.MethodGet, "/api/v1/instances/missing/options", nil, http.StatusInternalServerError},
+		{http.MethodGet, "/api/v1/instances/missing/options", nil, http.StatusOK},
 		{http.MethodGet, "/api/v1/instances/disabled-instance/extra/path", nil, http.StatusNotFound},
 		{http.MethodPatch, "/api/v1/models/" + model.ID, map[string]any{}, http.StatusMethodNotAllowed},
 		{http.MethodPost, "/api/v1/models/" + model.ID + "/options", nil, http.StatusMethodNotAllowed},
