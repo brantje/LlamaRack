@@ -10,7 +10,7 @@ import (
 func main() {
 	addr := os.Getenv("LCM_LISTEN_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":8000"
 	}
 
 	mux := http.NewServeMux()
