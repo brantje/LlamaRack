@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -99,10 +101,10 @@ func main() {
 	sup.Shutdown(shutdownCtx)
 }
 
-func cors(allowedOrigin string, next http.Handler) http.Handler {
+func cors(allowedOrigins string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin == allowedOrigin {
+		if origin != "" && originAllowed(origin, r.Host, allowedOrigins) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -115,6 +117,24 @@ func cors(allowedOrigin string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func originAllowed(origin, requestHost, configured string) bool {
+	for _, allowed := range strings.Split(configured, ",") {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
+		return false
+	}
+	requestURL, err := url.Parse("http://" + requestHost)
+	if err != nil || requestURL.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(originURL.Hostname(), requestURL.Hostname())
 }
 
 func healthcheck() {
