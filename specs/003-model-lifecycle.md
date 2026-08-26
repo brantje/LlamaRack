@@ -1,4 +1,4 @@
-# 003 — Model Lifecycle
+# 003 — Instance Lifecycle
 
 Status: Draft
 
@@ -6,23 +6,38 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how configured models and their runtime instances move between lifecycle states, how autoloading and Always-On policy work, and how the manager recovers from crashes and restarts.
+This specification defines lifecycle behavior for durable configured **Instances**.
 
-The lifecycle layer owns desired state and coordinates with the scheduler and process supervisor. It does not directly spawn processes and it does not choose request-routing targets.
+A Model is configuration and artifact metadata. An Instance is the unit that starts, stops, autoloads, reconciles, drains and fails.
 
 ## 2. Terminology
 
-- **Model** — user-facing configured model with a public model ID.
-- **Instance definition** — durable configured runtime slot for a model.
-- **Runtime instance** — the currently observed `llama-server` process associated with an instance definition.
-- **Desired state** — what policy/configuration says should exist.
-- **Observed state** — what the manager currently sees from the operating system and worker health checks.
-- **Autoload** — permission to load an unloaded model in response to an inference request.
-- **Always On** — policy requiring at least one READY/starting instance to be maintained for the model.
+- **Model** — registered management-plane model and reusable llama.cpp defaults.
+- **Instance** — durable configured `llama-server` process definition.
+- **Runtime Instance** — currently observed child process for an Instance.
+- **Desired state** — what Instance policy says should exist.
+- **Observed state** — what the manager currently observes.
+- **Autoload on request** — permission for an inference request targeting a stopped Instance to start that exact Instance.
+- **Always On** — policy requiring that exact Instance to be continuously reconciled toward running/ready state, except during explicit temporary manual-stop suppression.
 
-## 3. Instance lifecycle states
+## 3. Instance identity
 
-The canonical runtime states are:
+Lifecycle operations always use `instance.id`.
+
+`instance.id` is the slug derived from Instance name and is also the OpenAI `model` value.
+
+Example:
+
+```text
+Instance name: Qwen Coding 32B
+instance.id:   qwen-coding-32b
+```
+
+An inference request for `qwen-coding-32b` may only start/use that exact Instance. It must not silently switch to another Instance referencing the same Model.
+
+## 4. Lifecycle states
+
+Canonical states:
 
 - `UNLOADED`
 - `QUEUED`
@@ -32,52 +47,6 @@ The canonical runtime states are:
 - `DRAINING`
 - `STOPPING`
 - `FAILED`
-
-### 3.1 UNLOADED
-
-No managed worker process is active for the instance definition.
-
-The instance may still be enabled and eligible for autoload.
-
-### 3.2 QUEUED
-
-A start has been requested but the scheduler has not yet committed resources or a start slot is waiting behind another lifecycle action.
-
-QUEUED is useful to distinguish waiting for placement from a process that has actually begun startup.
-
-### 3.3 STARTING
-
-The supervisor has accepted a launch plan and is starting the child process. The process may exist but is not yet confirmed to be loading/serving.
-
-### 3.4 LOADING
-
-The child process is alive and model initialization is in progress, but readiness has not been confirmed.
-
-If upstream llama.cpp does not expose a perfect distinction between STARTING and LOADING, the manager may infer the boundary from process/log/health behavior. The external state machine must still preserve the distinction when practical.
-
-### 3.5 READY
-
-The worker passed readiness checks and may receive inference traffic.
-
-Only READY instances are eligible for normal routing.
-
-### 3.6 DRAINING
-
-The instance is no longer selected for new requests but one or more existing requests/streams may still be active.
-
-DRAINING is used for graceful idle shutdown, user stop, controlled restart and some eviction flows.
-
-### 3.7 STOPPING
-
-No new requests are accepted and the supervisor is terminating the worker.
-
-### 3.8 FAILED
-
-The last requested lifecycle action failed or the process exited unexpectedly and policy has not yet successfully restored it.
-
-FAILED must include a concise machine-readable reason plus human-readable summary, while full details remain available in instance logs.
-
-## 4. Valid transition model
 
 Primary transitions:
 
@@ -89,277 +58,297 @@ READY -> DRAINING -> STOPPING -> UNLOADED
 QUEUED   -> FAILED
 STARTING -> FAILED
 LOADING  -> FAILED
-READY    -> FAILED     (unexpected worker exit)
-DRAINING -> FAILED     (unexpected exit may still be recorded)
-STOPPING -> UNLOADED
-STOPPING -> FAILED     (unable to terminate cleanly / unknown process state)
+READY    -> FAILED
+DRAINING -> FAILED
+STOPPING -> UNLOADED | FAILED
 
-FAILED -> QUEUED       (manual or policy retry)
-FAILED -> UNLOADED     (clear/reset after confirming no process exists)
+FAILED -> QUEUED | UNLOADED
 ```
 
-Implementation may contain internal substates, but the management API and UI should use this stable vocabulary.
+Only READY Instances receive new inference requests.
 
-## 5. Aggregate model status
+## 5. Start triggers
 
-A Model may have multiple instance definitions. Its displayed aggregate status is derived, not independently stored as truth.
+An Instance start can be triggered by:
 
-Suggested precedence:
-
-1. `READY` if at least one instance is READY;
-2. `LOADING` if none is READY and any instance is STARTING/LOADING;
-3. `QUEUED` if none above and any is QUEUED;
-4. `DRAINING` if only draining/stopping activity remains;
-5. `FAILED` if no usable/starting instance exists and one or more instances failed;
-6. `UNLOADED` otherwise.
-
-The UI should also show counts so aggregate state does not hide partial failures such as `1 ready / 1 failed`.
-
-## 6. Start triggers
-
-A start can be triggered by:
-
-- user/operator action;
-- an inference request to an unloaded model with autoload enabled;
+- user Launch;
+- inference request targeting a stopped autoload-enabled Instance;
 - Always-On reconciliation;
-- restart after configuration change;
-- recovery policy after an unexpected worker exit.
+- controlled restart after configuration change;
+- crash-recovery policy when Always On or waiting inference requires it.
 
-All triggers enter the same lifecycle coordinator. There must not be separate ad-hoc spawn paths.
+Every trigger enters the same lifecycle coordinator.
 
-## 7. Autoload behavior
+## 6. Per-Instance single-flight startup
 
-When an inference request resolves to a model with no READY instance:
+Concurrent requests targeting the same stopped Instance must share one startup operation.
 
-1. If the model is disabled, fail without starting it.
-2. If an instance is already STARTING/LOADING/QUEUED, attach the request as a waiter to that shared load operation.
-3. If no load is in progress and autoload is disabled, return a model-unavailable error.
-4. If autoload is enabled, request a start through the lifecycle coordinator.
-5. Wait until a READY instance exists or the configured startup timeout expires.
-6. Route the request once READY.
+Example:
 
-Multiple simultaneous requests must never independently launch duplicate workers merely because they all observed the model as unloaded.
+```text
+20 requests -> model="qwen-coding"
+              |
+              v
+        one Instance start
+              |
+              v
+       all waiters continue
+```
 
-The implementation therefore requires a per-model single-flight load operation.
+A request targeting a sibling Instance uses a separate lifecycle operation.
+
+## 7. Autoload on request
+
+When inference resolves `model` to an Instance:
+
+1. If the Instance does not exist, return model-not-found.
+2. If READY, route immediately.
+3. If QUEUED/STARTING/LOADING, join the existing startup wait.
+4. If stopped and Autoload is disabled, return model-unavailable.
+5. If stopped and Autoload is enabled, request startup for that exact Instance.
+6. Wait until READY or the effective request/startup deadline expires.
+7. Proxy only to that Instance.
+
+Do not search sibling Instances as substitutes.
 
 ## 8. Waiting request behavior
 
-Each waiting request has its own client cancellation and deadline.
+Each waiter retains its own cancellation/deadline.
 
-If one client disconnects:
+If one caller disconnects:
 
-- remove that waiter;
-- do not cancel the shared model startup if another waiter exists;
-- do not cancel startup if Always-On policy requires the model;
-- optionally cancel startup if no waiter remains, Always-On is false, and policy explicitly permits startup cancellation. V1 may choose the simpler behavior of allowing the already-started load to finish.
-
-The configured model startup timeout is the maximum normal wait for the model to become READY. Individual client deadlines may be shorter.
+- remove only that waiter;
+- keep startup alive for other waiters;
+- keep startup alive if Always On requires the Instance;
+- cancellation of all waiters may allow startup cancellation only if product policy explicitly permits it.
 
 ## 9. Always-On policy
 
-`always_on = true` means the manager must maintain **at least one** usable instance for the enabled model.
+`instance.always_on = true` means the manager reconciles that exact Instance toward a usable state.
 
-A reconciliation loop periodically evaluates each Always-On model.
-
-Desired invariant:
+Desired invariant when not manually suppressed:
 
 ```text
 enabled && always_on
-=> at least one instance is READY, STARTING, LOADING or QUEUED
+=> state in READY/LOADING/STARTING/QUEUED
 ```
 
-If no such instance exists, the lifecycle coordinator requests one.
-
-Always-On does not require all manually defined instances to remain loaded. It guarantees a minimum of one in v1.
+Always On no longer means “at least one Instance for this Model.” Every Instance carries its own policy.
 
 ### 9.1 Manager startup
 
-After initialization and hardware discovery, all enabled Always-On models are reconciled. They may start concurrently subject to scheduler/resource limits.
+After startup recovery and hardware initialization, reconcile every enabled Always-On Instance.
 
 ### 9.2 Worker crash
 
-If the only READY instance for an Always-On model exits unexpectedly, the model immediately becomes unsatisfied and should be queued for restart according to retry/backoff policy.
+If an Always-On Instance crashes, retry with bounded backoff unless manually suppressed or a permanent configuration/hardware failure blocks it.
 
 ### 9.3 Resource contention
 
-Always-On instances are protected from normal eviction. If the system cannot satisfy all Always-On models simultaneously, the UI must expose the unsatisfied desired state and reason. The scheduler must not silently oscillate between mutually impossible Always-On models.
+Always-On Instances are not normal resource-pressure eviction victims. If all desired Always-On Instances cannot fit, expose unsatisfied desired state without endless eviction/restart oscillation.
 
-## 10. Idle unloading
+## 10. Manual stop of Always-On Instances
 
-Idle unloading applies only to models that are not required to remain loaded by Always-On policy.
+Users must be able to intentionally stop an Always-On Instance without watching it immediately restart.
 
-A model is considered idle when:
+When the user manually presses Stop:
 
-- it has no active requests;
-- it has no queued/waiting inference requests;
-- no lifecycle operation requires it to stay loaded;
-- `now - last_request_completed_or_activity_at >= effective_idle_timeout`.
+```text
+Always-On Instance
+-> graceful stop
+-> UNLOADED
+-> session-local manual-stop suppression = true
+```
 
-When idle timeout is reached:
+While suppressed, normal Always-On reconciliation does not restart it.
 
-1. mark selected READY instance DRAINING;
-2. stop routing new requests to it;
-3. if an in-flight request appeared before the drain boundary, wait for it to finish subject to drain timeout;
-4. transition to STOPPING;
-5. terminate the worker;
-6. transition to UNLOADED.
+Suppression clears when:
 
-If a new request arrives while a model is DRAINING but before process termination, v1 should use deterministic behavior. Preferred behavior:
+- the user explicitly presses Launch;
+- an inference request targets that Instance and needs it;
+- the manager restarts.
 
-- cancel the idle shutdown if safe and return the instance to READY before STOPPING begins;
-- once STOPPING begins, let shutdown complete and use normal autoload to start again.
+Suppression is session-local and is not durable desired configuration.
 
-This avoids routing to a process already being terminated.
+## 11. Idle unloading
 
-## 11. Manual stop behavior
+Idle unloading, when enabled, is Instance-specific and only applies when the Instance is not actively required by Always On or another lifecycle operation.
 
-An authorized user may stop a model or instance.
+An Instance is idle when:
 
-For a non-Always-On model, stop means graceful drain then unload.
+- no active requests;
+- no queued/waiting inference requests;
+- no lifecycle operation pins it;
+- idle timeout elapsed.
 
-For an Always-On model, the UI must make the policy conflict explicit. Recommended behavior:
-
-- `Stop instance` may stop one instance if another satisfies Always-On;
-- attempting to stop the final instance requires either disabling Always-On first or using an explicit temporary-stop operation if such a feature is later added.
-
-V1 should prefer clear policy enforcement over hidden immediate restarts that make the Stop button appear broken.
-
-## 12. Configuration changes
-
-Each running instance records the effective launch configuration fingerprint.
-
-When model configuration or relevant binary/instance placement configuration changes:
-
-- compute a new desired fingerprint;
-- if it differs from a running instance fingerprint, mark `restart_required`;
-- do not pretend the running process has adopted settings it cannot change dynamically.
-
-The user may choose a controlled restart, and some changes may support an explicit `save and restart` action.
-
-For an Always-On model with only one instance, a restart temporarily violates READY availability while the model reloads. V1 does not promise zero-downtime restarts.
-
-## 13. Controlled restart
-
-A controlled restart is:
+Then:
 
 ```text
 READY
- -> DRAINING
- -> STOPPING
- -> UNLOADED
- -> QUEUED
- -> STARTING
- -> LOADING
- -> READY
+-> DRAINING
+-> STOPPING
+-> UNLOADED
 ```
 
-The lifecycle coordinator must serialize restart with simultaneous manual/autoload/Always-On actions.
+A new request during early drain may cancel the idle stop if safe. Once STOPPING starts, finish shutdown and use normal autoload if required.
 
-## 14. Unexpected process exit
+## 12. Stop, Kill and Restart
 
-When the supervisor observes a child exit:
+### Stop
 
-1. remove it from routing immediately;
-2. capture exit code/signal and final log context;
-3. update observed state to FAILED unless the exit was expected as part of STOPPING;
-4. clear ephemeral PID/port state;
-5. inform lifecycle reconciliation.
+Graceful:
 
-Restart policy:
+```text
+READY -> DRAINING -> STOPPING -> UNLOADED
+```
 
-- Always-On model: retry automatically with bounded exponential backoff;
-- model with waiting autoload requests: retry only within a bounded startup attempt policy;
-- ordinary non-Always-On idle model: remain FAILED/UNLOADED until manual start or later autoload, depending on failure classification.
+### Kill
 
-Do not create infinite tight crash loops.
+Immediate explicit process termination for operational recovery. It does not promise graceful request completion.
 
-## 15. Startup readiness
+### Restart
 
-A process being alive is not sufficient for READY.
+Controlled:
 
-Readiness requires a successful llama-server readiness/health condition appropriate to the installed version.
+```text
+READY
+-> DRAINING
+-> STOPPING
+-> UNLOADED
+-> QUEUED
+-> STARTING
+-> LOADING
+-> READY
+```
 
-Startup timeout begins when the start operation is accepted or process launch begins; choose one definition consistently and expose it in API documentation.
+Lifecycle operations for one Instance must serialize safely.
 
-On timeout:
+## 13. Editing a running Instance
 
-- stop/kill the incomplete worker if still running;
-- transition to FAILED;
+Runtime-affecting Instance edits do not use the normal long-lived “save and restart later” path.
+
+Before saving, show confirmation that the Instance will restart and may temporarily interrupt availability/active work.
+
+On confirmation:
+
+1. persist desired configuration;
+2. drain;
+3. stop;
+4. start with new effective configuration;
+5. become READY or FAILED.
+
+### 13.1 Instance rename
+
+Renaming changes the slug-derived `instance.id` and therefore changes the OpenAI `model` identifier.
+
+The UI must show a separate API-breaking-change warning before applying the rename.
+
+If the Instance is running, the rename/update workflow must keep durable references consistent and restart if required by implementation identity binding.
+
+No hidden old-ID alias is retained in v1.
+
+## 14. Model/global configuration changes
+
+Model/global llama.cpp defaults may affect multiple Instances through inheritance.
+
+For affected running Instances:
+
+- compute new desired fingerprints;
+- never claim the running worker already adopted immutable changed values;
+- expose restart-required state until a controlled restart is performed.
+
+The automatic restart-on-save rule applies specifically to direct Instance edits. Broad global/Model changes may use explicit impact/restart workflows.
+
+## 15. Unexpected process exit
+
+On child exit:
+
+1. immediately remove the Instance from READY routing;
+2. capture exit code/signal/log context;
+3. mark FAILED unless exit was expected during STOPPING;
+4. clear PID/private port;
+5. evaluate Instance policy.
+
+Restart behavior:
+
+- Always-On Instance: bounded automatic retry;
+- Instance with active autoload waiters: bounded retry within request/startup policy;
+- ordinary non-Always-On Instance: remain FAILED/UNLOADED until manual Launch or a later autoload request.
+
+Never create tight crash loops.
+
+## 16. Startup readiness and timeout
+
+A live process is not enough for READY.
+
+READY requires successful worker readiness/health criteria appropriate to the installed llama.cpp build.
+
+On startup timeout:
+
+- terminate incomplete worker;
+- transition FAILED;
 - record `startup_timeout`;
 - fail waiting inference requests.
 
-## 16. Health after readiness
+## 17. Health after readiness
 
-READY workers require ongoing health observation.
+READY workers require ongoing health checks.
 
-A transient failed health probe should not immediately kill a healthy long-running generation. Use a configurable or hard-coded bounded failure threshold.
+Transient probe failure should not immediately kill a long generation. Use bounded failure thresholds.
 
-If the worker is unhealthy beyond threshold:
+Persistent unhealthy state removes the Instance from routing and allows lifecycle policy to decide restart.
 
-- remove from routing;
-- transition through an unhealthy/FAILED internal path;
-- allow lifecycle policy to restart if required.
+## 18. Drain behavior
 
-Public state may remain FAILED rather than introduce another top-level `UNHEALTHY` state in v1.
+DRAINING:
 
-## 17. Drain behavior
+- immediately rejects new routing to that Instance;
+- allows existing requests to finish up to drain timeout;
+- after timeout, terminates outstanding work as needed and proceeds to STOPPING.
 
-DRAINING must stop new routing immediately.
-
-Existing streaming and non-streaming requests are allowed to finish up to a drain timeout.
-
-If drain timeout expires:
-
-- cancel/terminate outstanding proxied requests where possible;
-- proceed with worker shutdown;
-- clients receive connection/error behavior appropriate to whether response streaming had already started.
-
-No new request may be intentionally sent to a DRAINING worker.
-
-## 18. Shutdown behavior
-
-On manager shutdown:
-
-1. stop accepting new management mutations and new inference requests where practical;
-2. mark managed READY workers DRAINING;
-3. allow bounded request completion;
-4. ask supervisor to terminate all managed workers;
-5. persist durable state;
-6. exit only after workers are gone or hard shutdown deadline is reached.
-
-The manager should not intentionally leave orphaned `llama-server` processes.
+No new request is intentionally sent to a DRAINING Instance.
 
 ## 19. Manager restart recovery
 
-Persisted runtime fields such as PID and READY state are never trusted as live state after restart.
+Persisted PID/port/READY values are stale after restart unless re-observed.
 
 On startup:
 
-- treat previous runtime records as stale diagnostics;
-- verify/clean up manager-owned orphan processes if a safe ownership mechanism is available;
-- reconstruct observed state from actual processes started by the new manager session;
-- mark normal models UNLOADED;
-- reconcile Always-On models back toward desired state.
-
-The design should include a manager/worker ownership token or equivalent launch marker so unrelated user-run llama-server processes are never killed.
+- discard stale liveness assumptions;
+- safely clean manager-owned orphan workers where ownership can be proven;
+- reconstruct observed state;
+- mark ordinary Instances UNLOADED;
+- reconcile Always-On Instances;
+- manual-stop suppression is cleared because it is session-local.
 
 ## 20. Resource eviction lifecycle
 
-When the scheduler selects an instance for eviction:
+When Phase 7 scheduler execution chooses an Instance as an eviction victim:
 
-- lifecycle confirms the instance is still eligible;
-- mark it DRAINING;
-- remove it from routing;
-- wait for active requests to finish within policy;
-- stop it;
-- release the scheduler reservation;
-- continue starting the requesting model.
+1. revalidate that exact Instance is still eligible;
+2. mark DRAINING;
+3. remove it from routing;
+4. allow active work to finish within policy;
+5. stop it;
+6. release/refresh resources;
+7. continue the requested Instance start.
 
-Scheduling decisions must be revalidated because resource state may change between planning and execution.
+An Instance with `eviction_enabled = false` is protected from normal resource-pressure eviction.
 
-## 21. Failure classifications
+## 21. Lifecycle API semantics
 
-At minimum distinguish:
+Examples:
+
+- Launch may return `QUEUED`/`STARTING` immediately.
+- Stop may return `DRAINING`/`STOPPING`.
+- repeated Launch while already starting is idempotent for that Instance;
+- repeated Stop on UNLOADED is idempotently successful;
+- Kill explicitly means immediate termination behavior;
+- inference autoload waits internally because the client request must ultimately execute or fail.
+
+## 22. Failure classifications
+
+At minimum:
 
 - `invalid_configuration`;
 - `artifact_missing`;
@@ -374,62 +363,39 @@ At minimum distinguish:
 - `permission_error`;
 - `unknown`.
 
-The UI should display the concise classification and link/show relevant instance logs.
+## 23. Invariants
 
-## 22. API operation semantics
+1. Lifecycle belongs to Instances.
+2. Only READY Instances receive new inference requests.
+3. One startup operation per Instance is active at a time.
+4. A request for one `instance.id` never silently uses a sibling Instance.
+5. Always On reconciles the exact Instance.
+6. Manual Stop can temporarily suppress Always-On reconciliation.
+7. Idle unload never stops an active request.
+8. PID/private port are cleared on process exit.
+9. Unexpected exits never remain displayed as READY.
+10. Direct Instance edits confirm and then automatically restart when needed.
+11. Instance rename warns that the OpenAI model ID changes.
+12. Manager restart never trusts stale READY state.
 
-Lifecycle mutations should return operation/state information rather than imply immediate readiness.
+## 24. Acceptance criteria
 
-Examples:
+Tests demonstrate:
 
-- Start request may return current state `QUEUED`/`STARTING`.
-- Stop request may return `DRAINING`/`STOPPING`.
-- Repeated Start on an already starting model is idempotent and attaches to the same desired operation.
-- Repeated Stop on an unloaded model is idempotently successful.
-
-Inference autoload waits internally because compatibility clients expect the inference request itself to either execute or fail; management API calls need not block through full model load unless an explicit wait option is added.
-
-## 23. Timing defaults
-
-Exact defaults remain implementation/product settings, but the following must be configurable at least globally and overridable where specified:
-
-- model startup timeout;
-- idle unload timeout;
-- drain timeout;
-- health failure threshold/interval if exposed;
-- crash restart backoff policy.
-
-Avoid per-model knobs for every internal timer unless there is user value.
-
-## 24. Lifecycle invariants
-
-1. Only READY instances receive new inference requests.
-2. At most one start/load operation per model is active unless deliberately starting a second manual instance.
-3. An Always-On model is continuously reconciled toward at least one usable instance.
-4. Idle unload never stops an instance with active requests.
-5. A worker PID/port is cleared when its process exits.
-6. Unexpected exits never remain displayed as READY.
-7. Configuration changes never silently claim to affect already-running immutable worker options.
-8. Manual stop cannot silently fight Always-On policy.
-9. Eviction goes through DRAINING before normal termination unless emergency process failure makes that impossible.
-10. A manager restart never assumes old READY state is still valid.
-
-## 25. Acceptance criteria
-
-Lifecycle implementation is complete when tests demonstrate:
-
-- manual start from UNLOADED to READY;
-- manual graceful stop from READY to UNLOADED;
-- autoload from an inference request;
-- 20 simultaneous requests to one unloaded model cause one startup, not 20;
-- one waiting client disconnect does not abort startup required by other clients;
-- startup timeout produces FAILED and cleans up the child process;
-- an Always-On model starts after manager boot;
-- an Always-On worker crash causes bounded automatic restart;
-- an idle non-Always-On model unloads after timeout;
-- an active generation prevents idle unload;
-- a new request during early drain either safely cancels the idle stop or waits through a deterministic reload path;
-- configuration fingerprint change is reported as restart-required;
-- controlled restart does not route new requests to the draining worker;
-- manager restart does not trust stale PID/READY state;
-- resource eviction drains an eligible model before starting the requesting model.
+- manual Launch from UNLOADED to READY;
+- graceful Stop to UNLOADED;
+- Kill terminates immediately;
+- controlled Restart lifecycle;
+- autoload for a stopped Instance;
+- 20 simultaneous requests for one Instance produce one startup;
+- requests for sibling Instances remain independent;
+- Always-On Instance starts after manager boot;
+- Always-On crash causes bounded retry;
+- manual Stop keeps an Always-On Instance stopped during the current manager session;
+- targeted inference can clear that suppression and start it;
+- manager restart clears suppression and restores Always-On behavior;
+- idle unload does not interrupt active work;
+- direct running-Instance edit confirms and restarts automatically;
+- Instance rename requires API-breaking warning;
+- resource eviction drains the selected Instance;
+- manager restart discards stale PID/READY state.
