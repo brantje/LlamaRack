@@ -104,6 +104,10 @@ func (s *Service) Runtime(ctx context.Context, id string) ([]supervisor.Runtime,
 
 func (s *Service) Logs(id string) []string { return s.sup.Logs(id) }
 
+func (s *Service) SubscribeLogs(id string) ([]string, <-chan string, func()) {
+	return s.sup.SubscribeLogs(id)
+}
+
 func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	items, err := s.models.List(ctx)
 	if err != nil {
