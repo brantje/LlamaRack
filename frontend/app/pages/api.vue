@@ -7,7 +7,7 @@ const keys = ref<APIKey[]>([])
 const name = ref('default')
 const secret = ref('')
 const error = ref('')
-const pending = reactive<Record<string, 'toggle' | 'delete' | undefined>>({})
+const pending = reactive<Record<string, 'toggle' | 'revoke' | undefined>>({})
 
 async function load() {
   if (!isAdmin.value) return
@@ -42,15 +42,15 @@ async function setEnabled(key: APIKey) {
   }
 }
 
-async function deleteKey(key: APIKey) {
-  if (!confirm(`Delete API key "${key.name}"? This cannot be undone.`)) return
-  pending[key.id] = 'delete'
+async function revoke(key: APIKey) {
+  if (!confirm(`Revoke API key "${key.name}"? It will be permanently removed.`)) return
+  pending[key.id] = 'revoke'
   error.value = ''
   try {
-    await manager.request(`/api/v1/api-keys/${key.id}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/api-keys/${key.id}/revoke`, { method: 'POST' })
     await load()
   } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to delete API key'
+    error.value = e?.data?.error || e?.message || 'Unable to revoke API key'
   } finally {
     pending[key.id] = undefined
   }
@@ -92,6 +92,7 @@ onMounted(load)
         </div>
       </div>
 
+      <p class="muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
       <p v-if="error" class="alert error">{{ error }}</p>
       <div v-if="secret" class="secret-box">
         <strong>Copy this key now. It will not be shown again.</strong>
@@ -114,8 +115,8 @@ onMounted(load)
                   <button class="ghost small" :disabled="!!pending[key.id]" @click="setEnabled(key)">
                     {{ pending[key.id] === 'toggle' ? 'Saving…' : key.enabled ? 'Disable' : 'Enable' }}
                   </button>
-                  <button class="danger small" :disabled="!!pending[key.id]" @click="deleteKey(key)">
-                    {{ pending[key.id] === 'delete' ? 'Deleting…' : 'Delete' }}
+                  <button class="danger small" :disabled="!!pending[key.id]" @click="revoke(key)">
+                    {{ pending[key.id] === 'revoke' ? 'Revoking…' : 'Revoke' }}
                   </button>
                 </div>
               </td>
