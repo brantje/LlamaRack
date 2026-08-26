@@ -45,9 +45,17 @@ function numbers(wrapper: any) { return components(wrapper, 'InputNumber', 'UInp
 function textareas(wrapper: any) { return components(wrapper, 'Textarea', 'UTextarea') }
 function checkboxes(wrapper: any) { return components(wrapper, 'Checkbox', 'UCheckbox') }
 
+async function clickConfirmation(kind: 'confirm' | 'cancel') {
+  await flushPromises()
+  const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
+  const button = buttons.at(-1)
+  if (!button) throw new Error(`Missing confirmation ${kind} button`)
+  button.click()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
-  vi.stubGlobal('confirm', vi.fn(() => true))
   resetManager()
 })
 
@@ -90,7 +98,7 @@ describe('Instance configuration pages', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(globalThis.confirm).toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Launching this Instance may stop other idle Instances')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances', {
       method: 'POST',
       body: expect.objectContaining({
@@ -99,6 +107,8 @@ describe('Instance configuration pages', () => {
         options: { 'ctx-size': '8192', threads: '4' }
       })
     })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/custom-coder/start', expect.anything())
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/custom-coder/start', { method: 'POST' })
   })
 
@@ -123,11 +133,12 @@ describe('Instance configuration pages', () => {
 
     textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=4096')
     checkboxes(wrapper)[4]!.vm.$emit('update:modelValue', true)
-    vi.mocked(globalThis.confirm).mockReturnValue(false)
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances', expect.objectContaining({ method: 'POST' }))
+    expect(document.body.textContent).toContain('Keep stopped')
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/cancelled-launch/start', expect.anything())
   })
 
@@ -159,7 +170,10 @@ describe('Instance configuration pages', () => {
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(globalThis.confirm).toHaveBeenCalledTimes(2)
+    expect(document.body.textContent).toContain('Existing clients using the old model ID will break')
+    await clickConfirmation('confirm')
+    expect(document.body.textContent).toContain('temporary unavailability')
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/primary-coder', {
       method: 'PUT',
       body: expect.objectContaining({
@@ -189,14 +203,13 @@ describe('Instance configuration pages', () => {
     wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Breaking Rename')
-    vi.mocked(globalThis.confirm).mockReturnValue(false)
     await wrapper.find('form').trigger('submit')
     await flushPromises()
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))
 
     inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Primary Coder')
     textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'not-valid')
-    vi.mocked(globalThis.confirm).mockReturnValue(true)
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
