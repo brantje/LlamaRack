@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import type { Model, Runtime } from '~/composables/useManager'
 
+type WorkerLogLine = {
+  timestamp: string
+  text: string
+}
+
 const manager = useManager()
 const { models, canOperate } = manager
 const message = ref('')
 const pending = reactive<Record<string, 'start' | 'stop' | 'test' | 'logs' | 'delete' | undefined>>({})
 const testResults = reactive<Record<string, string>>({})
-const workerLogs = reactive<Record<string, string[] | undefined>>({})
+const workerLogs = reactive<Record<string, WorkerLogLine[] | undefined>>({})
 const liveLogModels = reactive<Record<string, boolean>>({})
 const liveSources = new Map<string, EventSource>()
 const logsOpen = ref(false)
@@ -31,9 +36,15 @@ function statusColor(state: string): 'primary' | 'error' | 'warning' | 'secondar
   return 'neutral'
 }
 
+function logTimestamp(date = new Date()) {
+  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+}
+
 function appendWorkerLog(modelId: string, instanceId: string, line: string) {
   const lines = workerLogs[modelId] || (workerLogs[modelId] = [])
-  lines.push(`[${instanceId.slice(0, 8)}] ${line}`)
+  lines.push({ timestamp: logTimestamp(), text: `[${instanceId.slice(0, 8)}] ${line}` })
   if (lines.length > 2000) lines.splice(0, lines.length - 2000)
 }
 
@@ -294,57 +305,44 @@ async function remove(id: string) {
 
     <UModal
       v-model:open="logsOpen"
-      :title="logModel ? `${logModel.model_id} logs` : 'Worker logs'"
-      description="Live output from active worker instances."
-      :ui="{ content: 'sm:max-w-5xl' }"
+      :title="logModel ? `worker://${logModel.model_id}` : 'Worker logs'"
+      :ui="{
+        content: 'sm:max-w-5xl overflow-hidden bg-[#05080a]',
+        header: 'border-b border-slate-800 bg-slate-950/90',
+        title: 'font-mono text-xs font-normal text-slate-400',
+        body: 'p-0'
+      }"
     >
+      <template #actions>
+        <span class="font-mono text-[11px] text-slate-500">
+          {{ logModelId && liveLogModels[logModelId] ? 'LIVE' : 'WAITING' }} · {{ activeLogLines.length }} lines
+        </span>
+      </template>
+
       <template #body>
-        <div
-          data-testid="log-terminal"
-          class="overflow-hidden rounded-lg border border-slate-800 bg-[#05080a] shadow-inner shadow-black/40"
-        >
-          <div class="flex min-w-0 items-center gap-3 border-b border-slate-800 bg-slate-950/90 px-4 py-2 font-mono text-[11px]">
-            <div class="flex shrink-0 items-center gap-1.5" aria-hidden="true">
-              <span class="size-2.5 rounded-full bg-error" />
-              <span class="size-2.5 rounded-full bg-warning" />
-              <span class="size-2.5 rounded-full bg-primary" />
+        <UScrollArea data-testid="log-terminal" class="h-[min(65vh,38rem)] bg-[#05080a]">
+          <div class="min-h-full p-4 font-mono text-xs leading-[1.65]">
+            <div v-if="activeLogLines.length" class="space-y-0.5">
+              <div
+                v-for="(line, index) in activeLogLines"
+                :key="`${index}-${line.timestamp}-${line.text}`"
+                :data-stream="logStream(line.text)"
+                class="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-3 break-words"
+              >
+                <time class="select-none text-slate-600" :datetime="line.timestamp" data-log-time>{{ line.timestamp }}</time>
+                <span
+                  :class="logStream(line.text) === 'stderr'
+                    ? 'text-error-300'
+                    : logStream(line.text) === 'stdout'
+                      ? 'text-slate-200'
+                      : 'text-slate-400'"
+                >{{ line.text }}</span>
+              </div>
             </div>
-            <span class="min-w-0 flex-1 truncate text-slate-400">
-              worker://{{ logModel?.model_id || 'unknown' }}
-            </span>
-            <span class="shrink-0 text-slate-500">
-              {{ logModelId && liveLogModels[logModelId] ? 'LIVE' : 'WAITING' }} · {{ activeLogLines.length }} lines
-            </span>
+
+            <p v-else class="text-slate-500">Waiting for worker output…</p>
           </div>
-
-          <UScrollArea class="h-[min(65vh,38rem)]">
-            <div class="min-h-full p-4 font-mono text-xs leading-[1.65]">
-              <div v-if="activeLogLines.length" class="space-y-0.5">
-                <div
-                  v-for="(line, index) in activeLogLines"
-                  :key="`${index}-${line}`"
-                  :data-stream="logStream(line)"
-                  class="grid grid-cols-[auto_1fr] gap-2 break-words"
-                >
-                  <span class="select-none text-primary">$</span>
-                  <span
-                    :class="logStream(line) === 'stderr'
-                      ? 'text-error-300'
-                      : logStream(line) === 'stdout'
-                        ? 'text-slate-200'
-                        : 'text-slate-400'"
-                  >{{ line }}</span>
-                </div>
-              </div>
-
-              <div v-else class="flex items-center gap-2 text-slate-500">
-                <span class="select-none text-primary">$</span>
-                <span>waiting for worker output</span>
-                <span class="animate-pulse text-primary">▋</span>
-              </div>
-            </div>
-          </UScrollArea>
-        </div>
+        </UScrollArea>
       </template>
     </UModal>
   </div>
