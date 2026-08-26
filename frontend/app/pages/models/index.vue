@@ -4,11 +4,16 @@ import type { Model, Runtime } from '~/composables/useManager'
 const manager = useManager()
 const { models, canOperate } = manager
 const message = ref('')
-const pending = reactive<Record<string, 'start' | 'stop' | 'test' | 'logs' | undefined>>({})
+const pending = reactive<Record<string, 'start' | 'stop' | 'test' | 'logs' | 'delete' | undefined>>({})
 const testResults = reactive<Record<string, string>>({})
 const workerLogs = reactive<Record<string, string[] | undefined>>({})
 const liveLogModels = reactive<Record<string, boolean>>({})
 const liveSources = new Map<string, EventSource>()
+const logsOpen = ref(false)
+const logModelId = ref<string | null>(null)
+
+const logModel = computed(() => models.value.find(model => model.id === logModelId.value) || null)
+const activeLogLines = computed(() => logModelId.value ? workerLogs[logModelId.value] || [] : [])
 
 function errorMessage(error: any, fallback: string) {
   return error?.data?.error || error?.message || fallback
@@ -93,6 +98,12 @@ async function loadLogs(id: string) {
   }
 }
 
+async function openLogs(model: Model) {
+  logModelId.value = model.id
+  logsOpen.value = true
+  await loadLogs(model.id)
+}
+
 async function testModel(model: Model) {
   pending[model.id] = 'test'
   message.value = ''
@@ -118,7 +129,7 @@ async function testModel(model: Model) {
 
 async function remove(id: string) {
   if (!confirm('Delete this model configuration? The GGUF file will not be deleted.')) return
-  pending[id] = 'stop'
+  pending[id] = 'delete'
   message.value = ''
   try {
     await manager.request(`/api/v1/models/${id}`, { method: 'DELETE' })
@@ -137,7 +148,7 @@ async function remove(id: string) {
       <UPageHeader
         class="min-w-0 flex-1"
         headline="MODEL REGISTRY"
-        title="Models"
+        title="Model fleet"
         description="Configure local GGUF models and control model workers."
       />
       <div class="flex flex-wrap justify-end gap-2">
@@ -148,115 +159,159 @@ async function remove(id: string) {
 
     <UAlert v-if="message" color="error" variant="subtle" :description="message" />
 
-    <UCard>
-      <template #header>
-        <div>
-          <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">CONFIGURED</p>
-          <h2 class="text-xl font-bold">Model fleet</h2>
-        </div>
+    <UEmpty
+      v-if="!models.length"
+      title="No models configured"
+      description="Add a GGUF model to get started."
+    >
+      <template v-if="canOperate" #actions>
+        <UButton to="/models/new" size="sm">Add model</UButton>
       </template>
+    </UEmpty>
 
-      <UEmpty
-        v-if="!models.length"
-        variant="naked"
-        title="No models configured"
-        description="Add a GGUF model to get started."
+    <div v-else class="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+      <UCard
+        v-for="model in models"
+        :key="model.id"
+        data-testid="model-card"
+        class="min-w-0"
       >
-        <template v-if="canOperate" #actions>
-          <UButton to="/models/new" size="sm">Add model</UButton>
-        </template>
-      </UEmpty>
-
-      <div v-else class="divide-y divide-default">
-        <article v-for="model in models" :key="model.id" class="py-5 first:pt-0 last:pb-0">
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <template #header>
+          <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <strong>{{ model.model_id }}</strong>
+                <h2 class="truncate text-lg font-bold">{{ model.model_id }}</h2>
                 <UBadge :color="statusColor(manager.modelState(model))" variant="subtle" size="sm">
                   {{ manager.modelState(model) }}
                 </UBadge>
               </div>
-              <p class="mt-1.5 text-sm text-muted">{{ model.name }}</p>
-              <p class="mt-1 break-all font-mono text-xs text-dimmed">
-                {{ model.gguf_path }}{{ model.quantization ? ` · ${model.quantization}` : '' }}
-              </p>
-              <p class="mt-1 text-xs text-dimmed">
-                {{ model.priority }} · {{ model.routing_policy }} · {{ model.always_on ? 'always on' : model.autoload_enabled ? 'autoload' : 'manual' }}
-              </p>
+              <p class="mt-1 truncate text-sm text-muted">{{ model.name }}</p>
             </div>
 
-            <UFieldGroup v-if="canOperate" class="flex-wrap justify-start xl:justify-end">
-              <UButton
-                color="neutral"
-                variant="soft"
-                size="sm"
-                :loading="pending[model.id] === 'start'"
-                :disabled="!!pending[model.id] || ['READY', 'STARTING', 'LOADING'].includes(manager.modelState(model))"
-                @click="action(model.id, 'start')"
-              >
-                Start
-              </UButton>
-              <UButton
-                color="neutral"
-                variant="soft"
-                size="sm"
-                :loading="pending[model.id] === 'stop'"
-                :disabled="!!pending[model.id] || manager.modelState(model) === 'UNLOADED'"
-                @click="action(model.id, 'stop')"
-              >
-                Stop
-              </UButton>
-              <UButton
-                size="sm"
-                :loading="pending[model.id] === 'test'"
-                :disabled="!!pending[model.id]"
-                @click="testModel(model)"
-              >
-                Test
-              </UButton>
-              <UButton
-                color="neutral"
-                variant="soft"
-                size="sm"
-                :loading="pending[model.id] === 'logs'"
-                :disabled="!!pending[model.id]"
-                @click="loadLogs(model.id)"
-              >
-                {{ liveLogModels[model.id] ? 'Logs · Live' : 'Logs' }}
-              </UButton>
-              <UButton
-                color="error"
-                variant="soft"
-                size="sm"
-                :disabled="!!pending[model.id]"
-                @click="remove(model.id)"
-              >
-                Delete
-              </UButton>
-            </UFieldGroup>
+            <UButton
+              v-if="canOperate"
+              icon="i-lucide-pencil"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              disabled
+              aria-label="Edit model (coming soon)"
+              title="Edit model (coming soon)"
+            />
           </div>
+        </template>
 
-          <UAlert
-            v-if="testResults[model.id]"
-            class="mt-4"
-            :color="testResults[model.id].startsWith('PASS') ? 'primary' : 'error'"
-            variant="subtle"
-            :description="testResults[model.id]"
-          />
-
-          <section v-if="workerLogs[model.id] !== undefined" class="mt-4 border-t border-default pt-4">
-            <div class="flex items-center justify-between gap-3 text-xs">
-              <strong>Worker logs</strong>
-              <span class="text-dimmed">{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</span>
+        <dl class="space-y-3 text-sm">
+          <div>
+            <dt class="text-xs font-semibold uppercase tracking-wide text-dimmed">GGUF</dt>
+            <dd class="mt-1 break-all font-mono text-xs text-muted">
+              {{ model.gguf_path }}{{ model.quantization ? ` · ${model.quantization}` : '' }}
+            </dd>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <dt class="text-xs font-semibold uppercase tracking-wide text-dimmed">Priority</dt>
+              <dd class="mt-1 capitalize">{{ model.priority }}</dd>
             </div>
-            <UScrollArea v-if="workerLogs[model.id]?.length" class="mt-3 max-h-80">
-              <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-muted">{{ workerLogs[model.id]?.join('\n') }}</pre>
-            </UScrollArea>
-            <p v-else class="mt-3 text-sm text-muted">Waiting for worker output…</p>
-          </section>
-        </article>
-      </div>
-    </UCard>
+            <div>
+              <dt class="text-xs font-semibold uppercase tracking-wide text-dimmed">Routing</dt>
+              <dd class="mt-1">{{ model.routing_policy === 'round_robin' ? 'Round robin' : 'Least active' }}</dd>
+            </div>
+          </div>
+          <div>
+            <dt class="text-xs font-semibold uppercase tracking-wide text-dimmed">Lifecycle</dt>
+            <dd class="mt-1">{{ model.always_on ? 'Always on' : model.autoload_enabled ? 'Autoload on request' : 'Manual' }}</dd>
+          </div>
+        </dl>
+
+        <UAlert
+          v-if="testResults[model.id]"
+          class="mt-4"
+          :color="testResults[model.id].startsWith('PASS') ? 'primary' : 'error'"
+          variant="subtle"
+          :description="testResults[model.id]"
+        />
+
+        <template v-if="canOperate" #footer>
+          <div class="flex flex-wrap gap-2">
+            <UButton
+              color="neutral"
+              variant="soft"
+              size="sm"
+              :loading="pending[model.id] === 'start'"
+              :disabled="!!pending[model.id] || ['READY', 'STARTING', 'LOADING'].includes(manager.modelState(model))"
+              @click="action(model.id, 'start')"
+            >
+              Start
+            </UButton>
+            <UButton
+              color="neutral"
+              variant="soft"
+              size="sm"
+              :loading="pending[model.id] === 'stop'"
+              :disabled="!!pending[model.id] || manager.modelState(model) === 'UNLOADED'"
+              @click="action(model.id, 'stop')"
+            >
+              Stop
+            </UButton>
+            <UButton
+              size="sm"
+              :loading="pending[model.id] === 'test'"
+              :disabled="!!pending[model.id]"
+              @click="testModel(model)"
+            >
+              Test
+            </UButton>
+            <UButton
+              color="neutral"
+              variant="soft"
+              size="sm"
+              :loading="pending[model.id] === 'logs'"
+              :disabled="!!pending[model.id]"
+              @click="openLogs(model)"
+            >
+              Logs
+            </UButton>
+            <UButton
+              color="error"
+              variant="soft"
+              size="sm"
+              :loading="pending[model.id] === 'delete'"
+              :disabled="!!pending[model.id]"
+              @click="remove(model.id)"
+            >
+              Delete
+            </UButton>
+          </div>
+        </template>
+      </UCard>
+    </div>
+
+    <UModal
+      v-model:open="logsOpen"
+      :title="logModel ? `${logModel.model_id} logs` : 'Worker logs'"
+      description="Live output from active worker instances."
+      :ui="{ content: 'sm:max-w-4xl' }"
+    >
+      <template #body>
+        <div class="flex items-center justify-between gap-3 text-xs">
+          <UBadge :color="logModelId && liveLogModels[logModelId] ? 'primary' : 'neutral'" variant="subtle" size="sm">
+            {{ logModelId && liveLogModels[logModelId] ? 'LIVE' : 'WAITING' }}
+          </UBadge>
+          <span class="text-dimmed">{{ activeLogLines.length }} lines</span>
+        </div>
+
+        <UScrollArea v-if="activeLogLines.length" class="mt-4 h-[min(65vh,36rem)]">
+          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-muted">{{ activeLogLines.join('\n') }}</pre>
+        </UScrollArea>
+        <UEmpty
+          v-else
+          variant="naked"
+          class="min-h-48"
+          title="Waiting for worker output…"
+          description="Logs will appear here when a worker emits output."
+        />
+      </template>
+    </UModal>
   </div>
 </template>
