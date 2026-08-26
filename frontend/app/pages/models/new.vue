@@ -1,10 +1,7 @@
 <script setup lang="ts">
-type AvailableGGUF = {
-  path: string
-  name: string
-  total_bytes: number
-  quantization?: string
-}
+type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string }
+
+type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
 
 const manager = useManager()
 const router = useRouter()
@@ -12,59 +9,34 @@ const busy = ref(false)
 const scanning = ref(false)
 const error = ref('')
 const availableGGUFs = ref<AvailableGGUF[]>([])
-const publicIdEdited = ref(false)
+const createFirstInstance = ref(true)
 const form = reactive({
   gguf_path: '',
   name: '',
-  model_id: '',
-  priority: 'normal',
-  eviction_enabled: true,
-  idle_unload_seconds: 0,
-  routing_policy: 'least_active',
-  autoload_enabled: true,
-  always_on: false
+  context_length: 0,
+  first_instance: {
+    name: '',
+    always_on: false,
+    autoload_enabled: true,
+    eviction_enabled: true,
+    start: false
+  }
 })
 
 const ggufItems = computed(() => availableGGUFs.value.map(file => ({
   label: `${file.path}${file.quantization ? ` · ${file.quantization}` : ''}`,
   value: file.path
 })))
-const routingItems = [
-  { label: 'Least active', value: 'least_active' },
-  { label: 'Round robin', value: 'round_robin' }
-]
 const ggufPlaceholder = computed(() => scanning.value
   ? 'Scanning model folder…'
-  : availableGGUFs.value.length
-    ? 'Select GGUF'
-    : 'No unregistered GGUF files found')
-
-const priorityItems = [
-  { label: 'Low', value: 'low' },
-  { label: 'Normal', value: 'normal' },
-  { label: 'High', value: 'high' }
-]
-
-function slugifyModelID(value: string) {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
-
-function messageFor(errorValue: any, fallback: string) {
-  return errorValue?.data?.error || errorValue?.message || fallback
-}
+  : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
 
 watch(() => form.name, (name) => {
-  if (!publicIdEdited.value) form.model_id = slugifyModelID(name)
+  if (!form.first_instance.name) form.first_instance.name = name
 })
 
-function markPublicIdEdited() {
-  publicIdEdited.value = true
+function messageFor(value: any, fallback: string) {
+  return value?.data?.error || value?.message || fallback
 }
 
 async function scanGGUFs() {
@@ -88,9 +60,19 @@ async function createModel() {
   busy.value = true
   error.value = ''
   try {
-    await manager.request('/api/v1/models', { method: 'POST', body: form })
+    const body = {
+      gguf_path: form.gguf_path,
+      name: form.name,
+      context_length: form.context_length,
+      first_instance: createFirstInstance.value ? form.first_instance : undefined
+    }
+    const result = await manager.request<CreateResponse>('/api/v1/models', { method: 'POST', body })
     await manager.refresh()
-    await router.push('/models')
+    if (result.start_error) {
+      error.value = `Model and Instance were created, but llama-server failed to start: ${result.start_error}`
+      return
+    }
+    await router.push(createFirstInstance.value ? '/instances' : '/models')
   } catch (e: any) {
     error.value = messageFor(e, 'Unable to create model')
   } finally {
@@ -106,81 +88,46 @@ async function createModel() {
         class="min-w-0 flex-1"
         headline="MODEL REGISTRY"
         title="Add model"
-        description="Select an unregistered GGUF file and configure its model in one step."
+        description="Register a GGUF model and optionally bootstrap its first addressable Instance."
       />
       <UButton to="/models" color="neutral" variant="soft">Back to models</UButton>
     </div>
 
     <UCard class="max-w-3xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
-
       <UForm :state="form" class="space-y-6" @submit="createModel">
-        <UFormField label="GGUF file" name="gguf_path" description="The model folder is scanned recursively. Already-added GGUF files are hidden." required>
-          <USelect
-            v-model="form.gguf_path"
-            data-testid="gguf-select"
-            class="w-full"
-            :items="ggufItems"
-            label-key="label"
-            value-key="value"
-            :placeholder="ggufPlaceholder"
-            :disabled="scanning || !availableGGUFs.length"
-            required
-          />
+        <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files are hidden." required>
+          <USelect v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
 
         <UFormField label="Model name" name="name" required>
-          <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder" required />
+          <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
         </UFormField>
 
-        <UFormField label="Public model ID" name="model_id" description="Auto-filled from the model name. You can override it." required>
-          <UInput
-            v-model="form.model_id"
-            data-testid="model-id"
-            class="w-full"
-            placeholder="qwen-coder"
-            required
-            @input="markPublicIdEdited"
-          />
+        <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact/configuration. Use 0 when unknown.">
+          <UInputNumber v-model="form.context_length" class="w-full" :min="0" :step="1" />
         </UFormField>
 
-        <UFormField label="Routing" name="routing_policy">
-          <USelect v-model="form.routing_policy" data-testid="routing-select" class="w-full" :items="routingItems" label-key="label" value-key="value" />
-        </UFormField>
+        <USeparator label="First Instance" />
+        <UCheckbox v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
 
-        <USeparator label="Eviction" />
-        <p class="-mt-3 text-sm leading-6 text-muted">Controls idle unloading now and resource-pressure eviction when Phase 7 hardware scheduling is enabled.</p>
-
-        <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="Priority" name="priority" description="Lower-priority models are preferred eviction candidates.">
-            <USelect v-model="form.priority" data-testid="priority-select" class="w-full" :items="priorityItems" label-key="label" value-key="value" />
+        <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
+          <UFormField label="Instance name" name="first_instance.name" description="The name is slugified into the OpenAI model ID." required>
+            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
           </UFormField>
-          <UFormField label="Idle unload timeout (seconds)" name="idle_unload_seconds" description="0 inherits the global LCM_IDLE_UNLOAD_SECONDS setting.">
-            <UInputNumber
-              v-model="form.idle_unload_seconds"
-              data-testid="idle-timeout"
-              class="w-full"
-              :min="0"
-              :step="1"
-            />
-          </UFormField>
-        </div>
-
-        <div class="space-y-3">
-          <UCheckbox v-model="form.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" />
-          <p class="pl-6 text-xs text-muted">Always-On models remain protected from normal eviction even when this is enabled.</p>
-        </div>
-
-        <USeparator label="Lifecycle" />
-        <div class="space-y-3">
-          <UCheckbox v-model="form.autoload_enabled" data-testid="autoload-enabled" label="Autoload on request" />
-          <UCheckbox v-model="form.always_on" data-testid="always-on" label="Always on" />
+          <div class="space-y-3">
+            <UCheckbox v-model="form.first_instance.always_on" data-testid="always-on" label="Always on" />
+            <UCheckbox v-model="form.first_instance.autoload_enabled" data-testid="autoload-enabled" label="Autoload on request" />
+            <UCheckbox v-model="form.first_instance.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" />
+          </div>
+          <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" label="Launch this Instance after creation" />
+          <p class="text-xs text-muted">Advanced Instance settings such as priority, GPU placement, tensor split, idle timeout and instance-level llama.cpp overrides are configured from Instances.</p>
         </div>
 
         <div class="flex flex-wrap justify-end gap-2 pt-2">
           <UButton type="button" color="neutral" variant="soft" :loading="scanning" @click="scanGGUFs">Rescan</UButton>
           <UButton to="/models" color="neutral" variant="soft">Cancel</UButton>
-          <UButton type="submit" :loading="busy" :disabled="scanning || !form.gguf_path">Create model</UButton>
+          <UButton type="submit" :loading="busy" :disabled="scanning || !form.gguf_path || (createFirstInstance && !form.first_instance.name)">Create model</UButton>
         </div>
       </UForm>
     </UCard>
