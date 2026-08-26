@@ -91,7 +91,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 	serveErr := make(chan error, 1)
-	go lifecycleService.RunReconciler(ctx)
+	go lifecycleService.RunReconciler(ctx, cfg.AlwaysOnReconcileInterval)
 	go func() {
 		slog.Info("backend listening", "addr", cfg.ListenAddr)
 		err := server.ListenAndServe()
