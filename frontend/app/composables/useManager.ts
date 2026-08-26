@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'operator' | 'readonly'
 export type User = { id: number; username: string; role: Role; enabled: boolean }
-export type Model = { id: string; model_id: string; name: string; gguf_path: string; total_bytes: number; quantization?: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; routing_policy: string }
+export type Model = { id: string; model_id: string; name: string; gguf_path: string; total_bytes: number; quantization?: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; eviction_enabled: boolean; idle_unload_seconds: number; routing_policy: string }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string }> }
