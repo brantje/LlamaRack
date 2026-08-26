@@ -103,13 +103,13 @@ onMounted(load)
       <p class="mb-4 text-sm text-muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
       <UAlert v-if="error" class="mb-4" color="error" variant="subtle" :description="error" />
 
-      <UCard v-if="secret" class="mb-4 bg-default/60" variant="subtle">
+      <section v-if="secret" class="mb-4 border-y border-default py-4">
         <div class="space-y-3">
           <strong class="text-sm">Copy this key now. It will not be shown again.</strong>
           <code class="block break-all font-mono text-sm text-primary">{{ secret }}</code>
           <UButton data-testid="copy-key" color="neutral" variant="soft" size="sm" @click="copySecret">Copy</UButton>
         </div>
-      </UCard>
+      </section>
 
       <UTable v-if="keys.length" :data="keys" :columns="columns">
         <template #prefix-cell="{ row }">
