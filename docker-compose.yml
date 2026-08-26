@@ -9,7 +9,7 @@ services:
       LCM_DATA_DIR: /config
       LCM_MODELS_DIR: /models
       LCM_LLAMA_SERVER: /app/llama-server
-      LCM_ALLOWED_ORIGIN: http://localhost:3000
+      LCM_ALLOWED_ORIGIN: ${LCM_ALLOWED_ORIGIN:-http://localhost:3000}
     volumes:
       - ./data/config:/config
       - ./data/models:/models
@@ -28,7 +28,6 @@ services:
     working_dir: /app
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     environment:
-      NUXT_PUBLIC_API_BASE: http://localhost:8888
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./frontend:/app
