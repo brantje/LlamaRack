@@ -8,7 +8,6 @@ type AvailableGGUF = {
 
 const manager = useManager()
 const router = useRouter()
-const { canOperate } = manager
 const busy = ref(false)
 const scanning = ref(false)
 const error = ref('')
@@ -69,7 +68,6 @@ function markPublicIdEdited() {
 }
 
 async function scanGGUFs() {
-  if (!canOperate.value) return
   scanning.value = true
   error.value = ''
   try {
@@ -84,9 +82,7 @@ async function scanGGUFs() {
   }
 }
 
-watch(canOperate, (allowed) => {
-  if (allowed) void scanGGUFs()
-}, { immediate: true })
+onMounted(() => void scanGGUFs())
 
 async function createModel() {
   busy.value = true
@@ -115,7 +111,7 @@ async function createModel() {
       <UButton to="/models" color="neutral" variant="soft">Back to models</UButton>
     </div>
 
-    <UCard v-if="canOperate" class="max-w-3xl">
+    <UCard class="max-w-3xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
 
       <UForm :state="form" class="space-y-6" @submit="createModel">
@@ -188,7 +184,5 @@ async function createModel() {
         </div>
       </UForm>
     </UCard>
-
-    <UAlert v-else color="neutral" variant="subtle" description="Your role cannot create models." />
   </div>
 </template>
