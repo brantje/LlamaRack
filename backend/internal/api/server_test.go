@@ -43,7 +43,16 @@ func newAPIFixture(t *testing.T, profile func() (llamacpp.Profile, error)) *apiF
 	sup := supervisor.New(filepath.Join(root, "missing-llama"), "127.0.0.1", 31000, 100*time.Millisecond)
 	l := lifecycle.New(m, sup)
 	if profile == nil {
-		profile = func() (llamacpp.Profile, error) { return llamacpp.Profile{Path: "/app/llama-server", Version: "test", Fingerprint: "abc"}, nil }
+		profile = func() (llamacpp.Profile, error) {
+			return llamacpp.Profile{Path: "/app/llama-server", Version: "test", Fingerprint: "abc", Options: []llamacpp.Option{
+				{Key: "ctx-size", ValueHint: "N", Kind: "integer"},
+				{Key: "threads", ValueHint: "N", Kind: "integer"},
+				{Key: "flash-attn", Kind: "boolean"},
+				{Key: "cache-type-k", ValueHint: "<f16|q8_0>", Kind: "enum", Choices: []string{"f16", "q8_0"}},
+				{Key: "chat-template", ValueHint: "STRING", Kind: "string"},
+				{Key: "port", ValueHint: "N", Kind: "integer"},
+			}}, nil
+		}
 	}
 	return &apiFixture{server: New(a, m, l, profile), auth: a, models: m, dir: modelsDir, dbExec: func(q string, args ...any) {
 		t.Helper(); if _, err := db.ExecContext(ctx, q, args...); err != nil { t.Fatal(err) }
