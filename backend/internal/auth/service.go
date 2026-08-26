@@ -172,10 +172,44 @@ func (s *Service) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	return out, rows.Err()
 }
 
-func (s *Service) RevokeAPIKey(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE api_keys SET enabled=0 WHERE id=?", id)
-	return err
+func (s *Service) SetAPIKeyEnabled(ctx context.Context, id string, enabled bool) error {
+	value := 0
+	if enabled {
+		value = 1
+	}
+	res, err := s.db.ExecContext(ctx, "UPDATE api_keys SET enabled=? WHERE id=?", value, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
+
+func (s *Service) DeleteAPIKey(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM api_keys WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Service) RevokeAPIKey(ctx context.Context, id string) error {
+	return s.DeleteAPIKey(ctx, id)
+}
+
 func (s *Service) AuthenticateAPIKey(ctx context.Context, token string) error {
 	if token == "" {
 		return errors.New("missing api key")
