@@ -18,6 +18,14 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
 }
 
+watch(() => form.model_id, (modelID) => {
+  const model = manager.models.value.find(item => item.id === modelID)
+  if (!model) return
+  slugEdited.value = false
+  form.name = model.name
+  form.slug = slugify(model.name)
+})
+
 watch(() => form.name, (name) => {
   if (!slugEdited.value) form.slug = slugify(name)
 })
