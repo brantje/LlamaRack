@@ -160,6 +160,26 @@ Possible outcomes:
 
 The decision includes human-readable rationale suitable for diagnostics/UI.
 
+### 8.1 Delivery phase boundary
+
+Phase 5 implements the policy and planning primitives needed for eviction: inference activity tracking, LRU/last-used state, idle unloading, eviction eligibility/ranking, resource estimates and an eviction-plan API. Phase 5 may calculate or preview which instances would be evicted, but it does **not** automatically execute resource-pressure eviction before starting another model.
+
+The end-to-end `PLACE_AFTER_EVICTION` load path is a **Phase 7 — Hardware integration** requirement because it depends on real RAM/VRAM availability, per-device placement and refreshed hardware state.
+
+When Phase 7 is implemented, a start that cannot fit directly must follow this sequence:
+
+```text
+request model B
+-> calculate required capacity from model configuration
+-> read current RAM/VRAM and placement state
+-> choose eligible eviction victims
+-> revalidate and drain/stop those victims
+-> refresh resource state
+-> start model B
+```
+
+Until Phase 7, lifecycle may expose an eviction plan for diagnostics/testing, but model startup must not claim that resource-pressure eviction has been executed automatically.
+
 ## 9. Reservations
 
 Concurrent model starts must not all observe the same free VRAM and overcommit it.
@@ -312,9 +332,9 @@ The scheduler does not need a general-purpose job queue in v1, but placement ope
 
 ## 20. Interaction with lifecycle
 
-The scheduler returns a plan; lifecycle executes it.
+The scheduler returns a plan; lifecycle executes it. **Execution of `PLACE_AFTER_EVICTION` before loading the requested model is introduced in Phase 7.** Phase 5 only establishes the decision/planning inputs and output.
 
-For `PLACE_AFTER_EVICTION`:
+For `PLACE_AFTER_EVICTION` in Phase 7:
 
 1. scheduler creates reservation/plan;
 2. lifecycle revalidates victim eligibility;
@@ -426,7 +446,11 @@ Avoid device names or arbitrary error strings as uncontrolled metric labels.
 
 ## 28. Acceptance criteria
 
-Tests must demonstrate:
+Phase 5 tests must demonstrate the policy/planning behavior that does not require real hardware telemetry, including priority/LRU ordering, activity protection, Always-On protection and multi-victim planning.
+
+Phase 7 tests must additionally demonstrate that a model start which requires resource-pressure eviction actually performs the complete pre-load sequence: calculate the deficit, select eligible victims, drain/stop them, refresh resource state, and only then start the requested model.
+
+Across the completed scheduler implementation, tests must demonstrate:
 
 - a model that fits available GPU memory receives a direct placement plan;
 - two simultaneous starts cannot reserve the same VRAM twice;
