@@ -61,6 +61,10 @@ function formatBytes(value: number) {
   return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`
 }
 
+function updateDevices(value: unknown) {
+  emit('update:gpuDevices', Array.isArray(value) ? value.map(String) : [])
+}
+
 watch(() => props.gpuMode, (mode) => {
   if (mode === 'auto') {
     emit('update:gpuDevices', [])
@@ -102,7 +106,7 @@ onMounted(() => void refresh())
         <USelectMenu :model-value="gpuMode" class="w-full" :items="modeItems" label-key="label" value-key="value" @update:model-value="emit('update:gpuMode', String($event || 'auto'))" />
       </UFormField>
       <UFormField v-if="gpuMode === 'manual'" label="GPU devices" name="gpu_devices" description="Choose the exact llama.cpp device set. Manual selection is never expanded automatically.">
-        <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="emit('update:gpuDevices', ($event || []) as string[])" />
+        <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="updateDevices" />
       </UFormField>
       <UFormField v-if="gpuMode === 'manual' && gpuDevices.length > 1" label="Tensor split" name="tensor_split" description="Optional comma-separated proportions. Leave empty to let llama.cpp choose across the selected devices.">
         <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
