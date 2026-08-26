@@ -108,8 +108,6 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{}`)
 	if w.Code != 400 { t.Fatalf("missing model=%d %s", w.Code, w.Body.String()) }
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"missing"}`)
-	if w.Code != 400 { t.Fatalf("escaped malformed json=%d %s", w.Code, w.Body.String()) }
-	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"missing\"}")
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") { t.Fatalf("missing model=%d %s", w.Code, w.Body.String()) }
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"gateway-model\"}")
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "autoload disabled") { t.Fatalf("autoload disabled=%d %s", w.Code, w.Body.String()) }
