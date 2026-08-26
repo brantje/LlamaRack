@@ -82,7 +82,7 @@ onMounted(load)
     <UCard>
       <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">BASE URL</p>
       <h2 class="text-xl font-bold">Unified endpoint</h2>
-      <div class="my-4 rounded-lg border border-default bg-default px-4 py-3 font-mono text-sm text-primary">{{ apiBase }}/v1</div>
+      <code class="my-4 block break-all border-y border-default py-3 font-mono text-sm text-primary">{{ apiBase }}/v1</code>
       <p class="text-sm leading-6 text-muted">Supported initial routes: models, chat completions, completions, Responses and embeddings.</p>
     </UCard>
 
