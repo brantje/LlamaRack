@@ -1,9 +1,18 @@
 <script setup lang="ts">
+type AvailableGGUF = {
+  path: string
+  name: string
+  total_bytes: number
+  quantization?: string
+}
+
 const manager = useManager()
 const router = useRouter()
 const { canOperate } = manager
 const busy = ref(false)
+const scanning = ref(false)
 const error = ref('')
+const availableGGUFs = ref<AvailableGGUF[]>([])
 const publicIdEdited = ref(false)
 const form = reactive({
   gguf_path: '',
@@ -25,6 +34,10 @@ function slugifyModelID(value: string) {
     .replace(/^-+|-+$/g, '')
 }
 
+function messageFor(errorValue: any, fallback: string) {
+  return errorValue?.data?.error || errorValue?.message || fallback
+}
+
 watch(() => form.name, (name) => {
   if (!publicIdEdited.value) form.model_id = slugifyModelID(name)
 })
@@ -32,6 +45,24 @@ watch(() => form.name, (name) => {
 function markPublicIdEdited() {
   publicIdEdited.value = true
 }
+
+async function scanGGUFs() {
+  if (!canOperate.value) return
+  scanning.value = true
+  error.value = ''
+  try {
+    availableGGUFs.value = await manager.request<AvailableGGUF[]>('/api/v1/models/available') || []
+    if (!availableGGUFs.value.some(file => file.path === form.gguf_path)) form.gguf_path = ''
+  } catch (e: any) {
+    error.value = messageFor(e, 'Unable to scan model folder')
+    availableGGUFs.value = []
+    form.gguf_path = ''
+  } finally {
+    scanning.value = false
+  }
+}
+
+onMounted(scanGGUFs)
 
 async function createModel() {
   busy.value = true
@@ -41,7 +72,7 @@ async function createModel() {
     await manager.refresh()
     await router.push('/models')
   } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to create model'
+    error.value = messageFor(e, 'Unable to create model')
   } finally {
     busy.value = false
   }
@@ -54,7 +85,7 @@ async function createModel() {
       <div>
         <p class="eyebrow">MODEL REGISTRY</p>
         <h1>Add model</h1>
-        <p class="muted">Register a local GGUF file and configure its model in one step.</p>
+        <p class="muted">Select an unregistered GGUF file and configure its model in one step.</p>
       </div>
       <NuxtLink to="/models" class="ghost">Back to models</NuxtLink>
     </header>
@@ -63,9 +94,14 @@ async function createModel() {
       <p v-if="error" class="alert error">{{ error }}</p>
       <form @submit.prevent="createModel">
         <label>
-          GGUF path
-          <input v-model="form.gguf_path" placeholder="/models/qwen.gguf" required>
-          <small class="muted">The file must already exist inside the backend models directory.</small>
+          GGUF file
+          <select v-model="form.gguf_path" required :disabled="scanning || !availableGGUFs.length">
+            <option value="" disabled>{{ scanning ? 'Scanning model folder…' : availableGGUFs.length ? 'Select GGUF' : 'No unregistered GGUF files found' }}</option>
+            <option v-for="file in availableGGUFs" :key="file.path" :value="file.path">
+              {{ file.path }}{{ file.quantization ? ` · ${file.quantization}` : '' }}
+            </option>
+          </select>
+          <small class="muted">The model folder is scanned recursively. Already-added GGUF files are hidden.</small>
         </label>
 
         <label>
@@ -101,8 +137,9 @@ async function createModel() {
         <label class="check"><input v-model="form.always_on" type="checkbox"> Always on</label>
 
         <div class="row-actions">
+          <button type="button" class="ghost" :disabled="scanning" @click="scanGGUFs">{{ scanning ? 'Scanning…' : 'Rescan' }}</button>
           <NuxtLink to="/models" class="ghost">Cancel</NuxtLink>
-          <button class="primary" :disabled="busy">{{ busy ? 'Creating…' : 'Create model' }}</button>
+          <button class="primary" :disabled="busy || scanning || !form.gguf_path">{{ busy ? 'Creating…' : 'Create model' }}</button>
         </div>
       </form>
     </section>
