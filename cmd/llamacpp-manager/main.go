@@ -18,11 +18,13 @@ import (
 	"github.com/brantje/llamacpp-manager/internal/database"
 	"github.com/brantje/llamacpp-manager/internal/downloads"
 	"github.com/brantje/llamacpp-manager/internal/gateway"
+	"github.com/brantje/llamacpp-manager/internal/hardware"
 	"github.com/brantje/llamacpp-manager/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/internal/models"
 	"github.com/brantje/llamacpp-manager/internal/providers"
 	"github.com/brantje/llamacpp-manager/internal/router"
+	"github.com/brantje/llamacpp-manager/internal/scheduler"
 	"github.com/brantje/llamacpp-manager/internal/supervisor"
 )
 
@@ -39,8 +41,10 @@ func main() {
 	authService := auth.New(db.DB, cfg.SessionLifetime)
 	modelService := models.New(db.DB, cfg.ModelsDir)
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
-	lifecycleService := lifecycle.New(modelService, sup)
 	requestRouter := router.New(modelService, sup)
+	hardwareService := hardware.New()
+	schedulerService := scheduler.New(hardwareService, modelService, sup, requestRouter)
+	lifecycleService := lifecycle.New(modelService, sup, schedulerService)
 	hfProvider := providers.NewHuggingFace(os.Getenv("HF_TOKEN"))
 	downloadManager := downloads.New(cfg.ModelsDir, modelService, hfProvider)
 
