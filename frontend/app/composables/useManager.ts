@@ -4,7 +4,7 @@ export type Runtime = { instance_id: string; model_id: string; state: string; pi
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string }> }
 
-type RuntimeEvent = { type: string; runtime?: Runtime }
+type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[] }
 
 let runtimeSocket: WebSocket | null = null
 let runtimeReconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -27,6 +27,15 @@ export function useManager() {
     if (index === -1) items.push(runtime)
     else items[index] = runtime
     runtimes.value = { ...runtimes.value, [runtime.model_id]: items }
+  }
+
+  function applyRuntimeSnapshot(snapshot: Runtime[]) {
+    const grouped: Record<string, Runtime[]> = {}
+    for (const runtime of snapshot) {
+      if (!runtime.model_id || !runtime.instance_id) continue
+      ;(grouped[runtime.model_id] ||= []).push(runtime)
+    }
+    runtimes.value = Object.fromEntries(models.value.map(model => [model.id, grouped[model.id] || []]))
   }
 
   function disconnectRuntimeEvents() {
@@ -64,7 +73,8 @@ export function useManager() {
       } catch {
         return
       }
-      if (message.type === 'runtime' && message.runtime) applyRuntime(message.runtime)
+      if (message.type === 'runtime_snapshot' && Array.isArray(message.runtimes)) applyRuntimeSnapshot(message.runtimes)
+      else if (message.type === 'runtime' && message.runtime) applyRuntime(message.runtime)
     }
     socket.onclose = () => {
       if (runtimeSocket !== socket) return
