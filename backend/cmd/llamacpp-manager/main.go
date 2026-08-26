@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -30,24 +31,32 @@ func main() {
 		healthcheck()
 		return
 	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	cfg := config.Load()
-	if err := os.MkdirAll(cfg.ModelsDir, 0o755); err != nil {
-		slog.Error("create models dir", "error", err)
+	if err := run(ctx, config.Load()); err != nil {
+		slog.Error("backend failed", "error", err)
 		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, cfg config.Config) error {
+	if err := os.MkdirAll(cfg.ModelsDir, 0o755); err != nil {
+		return fmt.Errorf("create models dir: %w", err)
 	}
 	db, err := database.Open(ctx, cfg.DatabasePath)
 	if err != nil {
-		slog.Error("open database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
 
 	authService := auth.New(db, cfg.SessionLifetime)
 	modelService := models.New(db, cfg.ModelsDir)
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		sup.Shutdown(shutdownCtx)
+	}()
 	lifecycleService := lifecycle.New(modelService, sup)
 
 	var profileMu sync.RWMutex
@@ -85,20 +94,38 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"name": "llamacpp-manager", "status": "running"})
 	})
 
-	server := &http.Server{Addr: cfg.ListenAddr, Handler: cors(cfg.AllowedOrigin, mux), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	server := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           cors(cfg.AllowedOrigin, mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+	serveErr := make(chan error, 1)
 	go lifecycleService.RunReconciler(ctx)
 	go func() {
 		slog.Info("backend listening", "addr", cfg.ListenAddr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server failed", "error", err)
-			stop()
+		err := server.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
+		serveErr <- err
 	}()
-	<-ctx.Done()
+
+	select {
+	case <-ctx.Done():
+	case err := <-serveErr:
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	_ = server.Shutdown(shutdownCtx)
-	sup.Shutdown(shutdownCtx)
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func cors(allowedOrigins string, next http.Handler) http.Handler {
@@ -125,7 +152,6 @@ func originAllowed(origin, requestHost, configured string) bool {
 			return true
 		}
 	}
-
 	originURL, err := url.Parse(origin)
 	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
 		return false
@@ -138,13 +164,20 @@ func originAllowed(origin, requestHost, configured string) bool {
 }
 
 func healthcheck() {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:8000/health")
-	if err != nil {
+	if err := checkHealth("http://127.0.0.1:8000/health"); err != nil {
 		os.Exit(1)
+	}
+}
+
+func checkHealth(endpoint string) error {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		os.Exit(1)
+		return fmt.Errorf("health check returned HTTP %d", resp.StatusCode)
 	}
+	return nil
 }
