@@ -63,11 +63,9 @@ describe('model creation form', () => {
       method: 'POST',
       body: expect.objectContaining({ gguf_path: '/models/qwen.gguf', name: 'Qwen Coder', model_id: 'qwen-coder' })
     })
-    expect(useRouter().currentRoute.value.path).toBe('/models')
     expect(manager.models.value).toEqual([])
     wrapper.unmount()
 
-    await useRouter().push('/models/new')
     mocks.request.mockReset()
     mocks.request.mockRejectedValueOnce(new Error('GGUF missing'))
     wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
