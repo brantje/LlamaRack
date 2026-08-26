@@ -2,7 +2,7 @@ import type { Profile } from '~/composables/useManager'
 
 const managerOwnedOptions = new Set(['model', 'host', 'port', 'device', 'tensor-split'])
 
-type ProfileOption = Profile['options'][number]
+type ProfileOption = Profile['options'][number] & { kind?: string; choices?: string[] }
 
 function inferredKind(option: ProfileOption) {
   if (option.kind) return option.kind
@@ -46,7 +46,8 @@ function validateValue(option: ProfileOption, value: string) {
 
 export function parseLlamaCppOptions(text: string, profile: Profile | null) {
   const parsed: Record<string, string> = {}
-  const available = new Map((profile?.options || []).map(option => [option.key, option]))
+  const options = (profile?.options || []) as ProfileOption[]
+  const available = new Map(options.map(option => [option.key, option]))
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim()
