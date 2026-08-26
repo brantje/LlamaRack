@@ -1,0 +1,109 @@
+package lifecycle
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+)
+
+func waitForRuntimeState(t *testing.T, sup *supervisor.Supervisor, instanceID string, want supervisor.State) {
+	t.Helper()
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := sup.Status(instanceID).State; got == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("instance %s state=%s want=%s", instanceID, sup.Status(instanceID).State, want)
+}
+
+func TestAlwaysOnManualStopPersistsUntilLifecycleRestart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	s, ms, m, sup, _ := setupLifecycle(t, true, true)
+	instances, err := ms.Instances(ctx, m.ID)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("instances=%+v err=%v", instances, err)
+	}
+	instanceID := instances[0].ID
+
+	s.ReconcileAlwaysOn(ctx)
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+
+	if err := s.StopModel(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
+	if !s.isManuallyStopped(m.ID) {
+		t.Fatal("always-on model should be manually suppressed after Stop")
+	}
+
+	s.ReconcileAlwaysOn(ctx)
+	time.Sleep(150 * time.Millisecond)
+	if got := sup.Status(instanceID).State; got != supervisor.Unloaded {
+		t.Fatalf("reconcile restarted manually stopped model: %+v", sup.Status(instanceID))
+	}
+	if _, err := s.startModel(ctx, m.ID, false); err == nil || !strings.Contains(err.Error(), "manually stopped") {
+		t.Fatalf("background start should honor manual stop, got %v", err)
+	}
+	if _, err := s.EnsureReady(ctx, m.PublicID); err == nil || !strings.Contains(err.Error(), "manually stopped") {
+		t.Fatalf("autoload should honor manual stop, got %v", err)
+	}
+
+	if _, err := s.StartModel(ctx, m.ID); err != nil {
+		t.Fatalf("explicit start should clear manual stop: %v", err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+	if s.isManuallyStopped(m.ID) {
+		t.Fatal("explicit start should clear manual stop")
+	}
+
+	if err := s.StopModel(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
+
+	restarted := New(ms, sup)
+	if restarted.isManuallyStopped(m.ID) {
+		t.Fatal("manual stop must not persist across lifecycle restart")
+	}
+	restarted.ReconcileAlwaysOn(ctx)
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+}
+
+func TestNonAlwaysOnStopDoesNotSuppressAutoload(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+
+	s, ms, m, sup, _ := setupLifecycle(t, true, false)
+	instances, err := ms.Instances(ctx, m.ID)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("instances=%+v err=%v", instances, err)
+	}
+	instanceID := instances[0].ID
+
+	if _, err := s.StartModel(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+	if err := s.StopModel(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
+	if s.isManuallyStopped(m.ID) {
+		t.Fatal("non-always-on models should not get the always-on stop override")
+	}
+	if _, err := s.EnsureReady(ctx, m.PublicID); err != nil {
+		t.Fatalf("autoload should remain available for non-always-on model: %v", err)
+	}
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+
+	if err := s.StopModel(ctx, "missing-model"); err == nil {
+		t.Fatal("missing model stop should fail")
+	}
+}
