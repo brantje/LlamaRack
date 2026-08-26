@@ -26,6 +26,10 @@ async function load() {
   }
 }
 
+watch(isAdmin, (admin) => {
+  if (admin) void load()
+}, { immediate: true })
+
 async function createKey() {
   error.value = ''
   try {
@@ -67,8 +71,6 @@ async function revoke(key: APIKey) {
 async function copySecret() {
   if (secret.value) await navigator.clipboard.writeText(secret.value)
 }
-
-onMounted(load)
 </script>
 
 <template>
