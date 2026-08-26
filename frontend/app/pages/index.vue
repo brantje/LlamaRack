@@ -82,6 +82,7 @@ const columns: TableColumn<FleetRow>[] = [
 
       <UEmpty
         v-if="!models.length"
+        variant="naked"
         title="No models configured"
         description="Add a local GGUF model to start serving requests."
       />
