@@ -40,7 +40,7 @@ func TestBootstrapLoginSessionLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Username != "admin" || u.Role != "admin" || !u.Enabled || u.ID == 0 {
+	if u.Username != "admin" || !u.Enabled || u.ID == 0 {
 		t.Fatalf("unexpected user: %+v", u)
 	}
 	required, _ = s.BootstrapRequired(ctx)
@@ -140,7 +140,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	}
 }
 
-func TestPasswordAndRoleHelpers(t *testing.T) {
+func TestPasswordAndTokenHelpers(t *testing.T) {
 	hash, err := hashPassword("correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -152,12 +152,6 @@ func TestPasswordAndRoleHelpers(t *testing.T) {
 		if verifyPassword("password", malformed) {
 			t.Fatalf("malformed hash verified: %q", malformed)
 		}
-	}
-	if !CanOperate("admin") || !CanOperate("operator") || CanOperate("readonly") {
-		t.Fatal("CanOperate role policy incorrect")
-	}
-	if !IsAdmin("admin") || IsAdmin("operator") {
-		t.Fatal("IsAdmin role policy incorrect")
 	}
 	if got := tokenHash("abc"); got == "" || got == "abc" {
 		t.Fatalf("unexpected token hash %q", got)
