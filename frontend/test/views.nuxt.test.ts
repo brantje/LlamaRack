@@ -14,7 +14,8 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 function model(overrides: Partial<Model> = {}): Model {
   return {
     id: 'm1', model_id: 'coder', name: 'Coder', gguf_path: 'coder.gguf', total_bytes: 4,
-    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', routing_policy: 'least_active',
+    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true,
+    idle_unload_seconds: 0, routing_policy: 'least_active',
     ...overrides
   }
 }
@@ -24,7 +25,7 @@ function resetState() {
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
-  manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+  manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
@@ -52,12 +53,12 @@ describe('application shell', () => {
     manager.user.value = null
     manager.bootstrapRequired.value = true
     wrapper = await mountSuspended(App, { route: false })
-    expect(wrapper.text()).toContain('Create administrator')
+    expect(wrapper.text()).toContain('Create account')
     await wrapper.find('input[autocomplete="username"]').setValue('admin')
     await wrapper.find('input[type="password"]').setValue('correct-horse-battery')
     mocks.request.mockImplementation(async (path: string) => {
       if (path.endsWith('/auth/bootstrap')) return {}
-      if (path.endsWith('/auth/login')) return { id: 1, username: 'admin', role: 'admin', enabled: true }
+      if (path.endsWith('/auth/login')) return { id: 1, username: 'admin', enabled: true }
       if (path.endsWith('/models')) return []
       if (path.endsWith('/llamacpp/profile')) throw new Error('unavailable')
       return []
@@ -68,7 +69,7 @@ describe('application shell', () => {
     expect(wrapper.text()).toContain('Sign out')
     wrapper.unmount()
 
-    manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     wrapper = await mountSuspended(App, { route: false })
     expect(wrapper.text()).toContain('llamacpp')
     expect(wrapper.text()).toContain('admin')
@@ -81,10 +82,10 @@ describe('application shell', () => {
     manager.backendError.value = 'offline'
     mocks.request.mockImplementation(async (path: string) => {
       if (path.endsWith('/auth/bootstrap')) return { required: false }
-      if (path.endsWith('/me')) return { id: 1, username: 'admin', role: 'admin', enabled: true }
+      if (path.endsWith('/me')) return { id: 1, username: 'admin', enabled: true }
       if (path.endsWith('/models')) return []
       if (path.endsWith('/llamacpp/profile')) throw new Error('no profile')
-      if (path.endsWith('/auth/login')) return { id: 1, username: 'admin', role: 'admin', enabled: true }
+      if (path.endsWith('/auth/login')) return { id: 1, username: 'admin', enabled: true }
       if (path.endsWith('/auth/logout')) return {}
       return []
     })
@@ -161,9 +162,8 @@ describe('overview and settings', () => {
     expect(settings.text()).toContain('could not be discovered')
   })
 
-  it('covers empty and readonly overview states and refresh controls', async () => {
-    const manager = resetState()
-    manager.user.value = { id: 2, username: 'viewer', role: 'readonly', enabled: true }
+  it('covers empty overview and refresh controls', async () => {
+    resetState()
     mocks.request.mockImplementation(async (path: string) => {
       if (path.endsWith('/models')) return []
       if (path.endsWith('/llamacpp/profile')) throw new Error('no profile')
@@ -171,7 +171,7 @@ describe('overview and settings', () => {
     })
     const overview = await mountSuspended(IndexPage, { route: false })
     expect(overview.text()).toContain('No models configured')
-    expect(overview.text()).not.toContain('Manage models')
+    expect(overview.text()).toContain('Manage models')
     await overview.find('button').trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models')
@@ -229,26 +229,21 @@ describe('models page', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1', { method: 'DELETE' })
   })
 
-  it('supports cancelled deletion and readonly rendering', async () => {
+  it('supports cancelled deletion while retaining management controls', async () => {
     const manager = resetState()
     manager.models.value = [model({ autoload_enabled: false })]
     vi.stubGlobal('confirm', vi.fn(() => false))
-    let wrapper = await mountSuspended(ModelsPage, { route: false })
+    const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
     await flushPromises()
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1', { method: 'DELETE' })
-    wrapper.unmount()
-
-    manager.user.value = { id: 3, username: 'viewer', role: 'readonly', enabled: true }
-    wrapper = await mountSuspended(ModelsPage, { route: false })
-    expect(wrapper.text()).toContain('coder.gguf')
-    expect(wrapper.findAll('a').some(a => a.text() === 'Add model')).toBe(false)
-    expect(wrapper.findAll('button').some(b => ['Start', 'Stop', 'Delete'].includes(b.text()))).toBe(false)
+    expect(wrapper.findAll('a').some(a => a.text() === 'Add model')).toBe(true)
+    expect(wrapper.findAll('button').some(b => ['Start', 'Stop', 'Delete'].includes(b.text()))).toBe(true)
   })
 })
 
 describe('API page', () => {
-  it('loads, creates, copies, and revokes API keys for admins', async () => {
+  it('loads, creates, copies, and revokes API keys', async () => {
     resetState()
     let listed = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
@@ -273,16 +268,10 @@ describe('API page', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
   })
 
-  it('hides key management for non-admins and handles load/create errors', async () => {
-    const manager = resetState()
-    manager.user.value = { id: 2, username: 'operator', role: 'operator', enabled: true }
-    let wrapper = await mountSuspended(APIPage, { route: false })
-    expect(wrapper.text()).toContain('Only administrators')
-    wrapper.unmount()
-
-    manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+  it('handles API-key load and create errors', async () => {
+    resetState()
     mocks.request.mockRejectedValueOnce(new Error('key load failed'))
-    wrapper = await mountSuspended(APIPage, { route: false })
+    let wrapper = await mountSuspended(APIPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('key load failed')
     wrapper.unmount()
