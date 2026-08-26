@@ -1,46 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { useRequestURL, useRuntimeConfig } from '#app'
 import { useManagerApi } from '~/composables/useManagerApi'
 
-const mocks = vi.hoisted(() => ({
-  runtimeConfig: { public: { apiBase: '' } },
-  requestURL: { protocol: 'http:', hostname: '192.168.60.5' },
-  fetch: vi.fn()
-}))
-
-mockNuxtImport('useRuntimeConfig', () => () => mocks.runtimeConfig)
-mockNuxtImport('useRequestURL', () => () => mocks.requestURL)
+const fetchMock = vi.fn()
 
 beforeEach(() => {
-  mocks.runtimeConfig.public.apiBase = ''
-  mocks.requestURL.protocol = 'http:'
-  mocks.requestURL.hostname = '192.168.60.5'
-  mocks.fetch.mockReset()
-  vi.stubGlobal('$fetch', mocks.fetch)
+  const config = useRuntimeConfig()
+  ;(config.public as any).apiBase = ''
+  fetchMock.mockReset()
+  vi.stubGlobal('$fetch', fetchMock)
 })
 
 describe('useManagerApi', () => {
-  it('derives a LAN-safe API URL from the current host', () => {
+  it('derives the API URL from the current request host', () => {
+    const requestURL = useRequestURL()
     const { apiBase } = useManagerApi()
-    expect(apiBase.value).toBe('http://192.168.60.5:8888')
+    expect(apiBase.value).toBe(`${requestURL.protocol}//${requestURL.hostname}:8888`)
   })
 
   it('prefers and normalizes an explicitly configured API URL', () => {
-    mocks.runtimeConfig.public.apiBase = 'https://manager.example.test/'
+    const config = useRuntimeConfig()
+    ;(config.public as any).apiBase = 'https://manager.example.test/'
     const { apiBase } = useManagerApi()
     expect(apiBase.value).toBe('https://manager.example.test')
   })
 
   it('sends credentialed requests and preserves caller options', async () => {
-    mocks.fetch.mockResolvedValue({ ok: true })
-    const { request } = useManagerApi()
+    fetchMock.mockResolvedValue({ ok: true })
+    const { apiBase, request } = useManagerApi()
     const result = await request('/api/v1/models', {
       method: 'POST',
       body: { model_id: 'coder' },
       headers: { 'X-Test': 'yes' }
     })
     expect(result).toEqual({ ok: true })
-    expect(mocks.fetch).toHaveBeenCalledWith('http://192.168.60.5:8888/api/v1/models', {
+    expect(fetchMock).toHaveBeenCalledWith(`${apiBase.value}/api/v1/models`, {
       credentials: 'include',
       method: 'POST',
       body: { model_id: 'coder' },
@@ -49,7 +43,7 @@ describe('useManagerApi', () => {
   })
 
   it('propagates request failures', async () => {
-    mocks.fetch.mockRejectedValue(new Error('network down'))
+    fetchMock.mockRejectedValue(new Error('network down'))
     const { request } = useManagerApi()
     await expect(request('/health')).rejects.toThrow('network down')
   })
