@@ -14,7 +14,6 @@ function seedAdmin() {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
   manager.models.value = []
-  manager.artifacts.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
   return manager
