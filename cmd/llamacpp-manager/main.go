@@ -16,10 +16,12 @@ import (
 	"github.com/brantje/llamacpp-manager/internal/auth"
 	"github.com/brantje/llamacpp-manager/internal/config"
 	"github.com/brantje/llamacpp-manager/internal/database"
+	"github.com/brantje/llamacpp-manager/internal/downloads"
 	"github.com/brantje/llamacpp-manager/internal/gateway"
 	"github.com/brantje/llamacpp-manager/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/internal/models"
+	"github.com/brantje/llamacpp-manager/internal/providers"
 	"github.com/brantje/llamacpp-manager/internal/supervisor"
 )
 
@@ -37,6 +39,8 @@ func main() {
 	modelService := models.New(db.DB, cfg.ModelsDir)
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
 	lifecycleService := lifecycle.New(modelService, sup)
+	hfProvider := providers.NewHuggingFace(os.Getenv("HF_TOKEN"))
+	downloadManager := downloads.New(cfg.ModelsDir, modelService, hfProvider)
 
 	var profileMu sync.RWMutex
 	var profile llamacpp.Profile
@@ -49,7 +53,7 @@ func main() {
 	refreshProfile()
 	profileGetter := func() (llamacpp.Profile,error) { profileMu.RLock(); defer profileMu.RUnlock(); return profile, profileErr }
 
-	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
+	apiServer := api.New(authService, modelService, lifecycleService, hfProvider, downloadManager, profileGetter)
 	openAIGateway := gateway.New(authService, modelService, lifecycleService)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/", apiServer)
