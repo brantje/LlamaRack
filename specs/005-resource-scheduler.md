@@ -21,6 +21,7 @@ The scheduler must:
 - support manual tensor split configuration;
 - estimate resource demand conservatively;
 - protect Always-On models from normal eviction;
+- support independently protecting a loaded non-Always-On model from normal resource-pressure eviction;
 - use model priority and LRU/resource pressure when choosing eviction candidates;
 - avoid overcommitting the same resources during concurrent starts;
 - expose understandable scheduling decisions to the UI.
@@ -62,6 +63,7 @@ A scheduling decision uses a coherent snapshot containing:
 - batch/ubatch/parallel settings relevant to memory use;
 - model priority;
 - Always-On flag;
+- resource-pressure eviction policy;
 - startup policy.
 
 ### Instance definition
@@ -266,22 +268,30 @@ If total Always-On desired state exceeds physical capacity:
 
 A deterministic priority rule may decide which Always-On starts succeed, but it must not continuously churn.
 
-### 14.1 Phase 7 product decision — separate eviction protection
+### 14.1 Separate protection while loaded — resolved decision
 
-Before implementing Phase 7 resource-pressure eviction, the implementation must explicitly ask the product owner/user to resolve whether **Always-On is the only user-facing protection from normal eviction** or whether a second, independent protection concept is needed.
+Always-On and resource-pressure eviction protection are separate user-facing concepts and both are retained.
 
-The decision to request is:
+- **Always-On** controls desired loaded state: the manager proactively loads/reconciles the model and protects the final satisfying instance from normal eviction.
+- **Resource-pressure eviction protection** controls whether a model that is already loaded may be selected as a normal eviction victim. It does not by itself cause the model to load or restart.
 
-1. **Always-On only** — the final Always-On instance is protected; every non-Always-On idle model is eligible for resource-pressure eviction according to priority/LRU rules.
-2. **Separate protection while loaded** — keep a distinct setting such as `Pin while loaded` / `Protect from eviction`, allowing a model to remain non-Always-On (not proactively loaded/restarted) while still being excluded from normal resource-pressure eviction whenever it is loaded.
+This intentionally supports the combination:
 
-Do **not** infer this product decision from the Phase 5 `eviction_enabled` field. That field is provisional and may be removed or renamed. Phase 7 work must surface this question and record the chosen answer in this specification **before** finalizing the Phase 7 schema, UI or eviction-eligibility behavior.
+```text
+Always-On: false
+Allow resource-pressure eviction: false
+```
+
+which means **load on demand, but once loaded, protect it from normal VRAM-pressure eviction**.
+
+The Phase 5 API field is `eviction_enabled`; `false` means protected from normal resource-pressure eviction. Phase 7 must preserve this semantic distinction when implementing real pre-load eviction. A clearer UI label may be used later, but the capability itself is not provisional.
 
 ## 15. Eviction eligibility
 
 An instance is normally eligible for eviction only when:
 
 - it is READY;
+- its model allows normal resource-pressure eviction;
 - it is not the final protected Always-On instance;
 - it has no active inference requests;
 - it is not already DRAINING/STOPPING;
@@ -423,6 +433,7 @@ For each model, the UI should be able to show:
 - selected/automatic GPUs;
 - whether the model currently fits;
 - why a start cannot proceed;
+- whether the loaded model is protected from normal resource-pressure eviction;
 - which models would likely need eviction for a requested start, where safe to preview;
 - recommendation confidence/estimate quality.
 
@@ -448,16 +459,17 @@ Avoid device names or arbitrary error strings as uncontrolled metric labels.
 2. Pending reservations reduce schedulable capacity.
 3. Manual GPU assignment is never silently rewritten.
 4. The final required Always-On instance is not a normal eviction victim.
-5. Active inference requests protect an instance from normal eviction.
-6. Unknown hardware telemetry causes conservative behavior.
-7. Placement decisions include safety headroom.
-8. Resource state is revalidated after evictions before launch.
-9. Failed starts release reservations.
-10. Scheduling cannot enter an unbounded eviction/start loop.
+5. A model explicitly protected from resource-pressure eviction is not a normal eviction victim.
+6. Active inference requests protect an instance from normal eviction.
+7. Unknown hardware telemetry causes conservative behavior.
+8. Placement decisions include safety headroom.
+9. Resource state is revalidated after evictions before launch.
+10. Failed starts release reservations.
+11. Scheduling cannot enter an unbounded eviction/start loop.
 
 ## 28. Acceptance criteria
 
-Phase 5 tests must demonstrate the policy/planning behavior that does not require real hardware telemetry, including priority/LRU ordering, activity protection, Always-On protection and multi-victim planning.
+Phase 5 tests must demonstrate the policy/planning behavior that does not require real hardware telemetry, including priority/LRU ordering, activity protection, Always-On protection, explicit resource-pressure eviction protection and multi-victim planning.
 
 Phase 7 tests must additionally demonstrate that a model start which requires resource-pressure eviction actually performs the complete pre-load sequence: calculate the deficit, select eligible victims, drain/stop them, refresh resource state, and only then start the requested model.
 
@@ -472,6 +484,7 @@ Across the completed scheduler implementation, tests must demonstrate:
 - older idle usage wins among equal-priority candidates;
 - active instances are not normal eviction victims;
 - the final Always-On instance is protected;
+- a non-Always-On model with resource-pressure eviction disabled is also protected while loaded;
 - an extra instance of an Always-On model can be considered separately from the protected minimum;
 - insufficient capacity with no eligible victims fails cleanly;
 - multi-victim eviction can free enough capacity;
