@@ -8,36 +8,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type DB struct {
-	*sql.DB
-}
+type DB struct{ *sql.DB }
 
-func Open(ctx context.Context, path string) (*DB, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-	db.SetMaxOpenConns(1)
+func Open(ctx context.Context,path string)(*DB,error){db,err:=sql.Open("sqlite",path);if err!=nil{return nil,fmt.Errorf("open sqlite: %w",err)};db.SetMaxOpenConns(1);for _,pragma:=range []string{"PRAGMA journal_mode=WAL","PRAGMA foreign_keys=ON","PRAGMA busy_timeout=5000"}{if _,err:=db.ExecContext(ctx,pragma);err!=nil{db.Close();return nil,fmt.Errorf("apply %s: %w",pragma,err)}};if err:=migrate(ctx,db);err!=nil{db.Close();return nil,err};return &DB{DB:db},nil}
 
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	} {
-		if _, err := db.ExecContext(ctx, pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("apply %s: %w", pragma, err)
-		}
-	}
-	if err := migrate(ctx, db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return &DB{DB: db}, nil
-}
-
-func migrate(ctx context.Context, db *sql.DB) error {
-	const schema = `
+func migrate(ctx context.Context,db *sql.DB)error{const schema=`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
@@ -66,6 +41,11 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_used_at TEXT,
   revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS secrets (
+  name TEXT PRIMARY KEY,
+  ciphertext BLOB NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
@@ -127,9 +107,4 @@ CREATE INDEX IF NOT EXISTS idx_models_model_id ON models(model_id);
 CREATE INDEX IF NOT EXISTS idx_instances_model_id ON instances(model_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
-`
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("migrate sqlite schema: %w", err)
-	}
-	return nil
-}
+`;if _,err:=db.ExecContext(ctx,schema);err!=nil{return fmt.Errorf("migrate sqlite schema: %w",err)};return nil}
