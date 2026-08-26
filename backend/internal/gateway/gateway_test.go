@@ -125,6 +125,30 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 	}
 }
 
+func TestListModelsDatabaseError(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	authDB, err := database.Open(ctx, filepath.Join(root, "auth.db"))
+	if err != nil { t.Fatal(err) }
+	defer authDB.Close()
+	a := auth.New(authDB, time.Hour)
+	_, secret, err := a.CreateAPIKey(ctx, "gateway")
+	if err != nil { t.Fatal(err) }
+
+	modelDB, err := database.Open(ctx, filepath.Join(root, "models.db"))
+	if err != nil { t.Fatal(err) }
+	m := models.New(modelDB, filepath.Join(root, "models"))
+	if err := modelDB.Close(); err != nil { t.Fatal(err) }
+
+	sup := supervisor.New("unused", "127.0.0.1", 39000, time.Second)
+	l := lifecycle.New(m, sup)
+	g := New(a, m, l)
+	w := gatewayRequest(t, g, http.MethodGet, "/v1/models", secret, "")
+	if w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {
+		t.Fatalf("models database failure=%d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAuthenticateAndJSONHelpers(t *testing.T) {
 	f := newGatewayFixture(t, false)
 	if err := f.gateway.authenticate(context.Background(), "Basic abc"); err == nil { t.Fatal("expected bearer validation error") }
