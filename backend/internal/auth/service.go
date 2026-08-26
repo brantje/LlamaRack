@@ -201,19 +201,22 @@ func hashPassword(password string) (string, error) {
 }
 func verifyPassword(password, encoded string) bool {
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 5 {
+	if len(parts) != 5 || parts[0] != "argon2id" || parts[1] != "v=19" {
 		return false
 	}
 	params := strings.Split(parts[2], ",")
 	if len(params) != 3 {
 		return false
 	}
-	m64, _ := strconv.ParseUint(strings.TrimPrefix(params[0], "m="), 10, 32)
-	t64, _ := strconv.ParseUint(strings.TrimPrefix(params[1], "t="), 10, 32)
-	p64, _ := strconv.ParseUint(strings.TrimPrefix(params[2], "p="), 10, 8)
+	m64, errM := strconv.ParseUint(strings.TrimPrefix(params[0], "m="), 10, 32)
+	t64, errT := strconv.ParseUint(strings.TrimPrefix(params[1], "t="), 10, 32)
+	p64, errP := strconv.ParseUint(strings.TrimPrefix(params[2], "p="), 10, 8)
+	if errM != nil || errT != nil || errP != nil || t64 < 1 || p64 < 1 || m64 < 8*p64 {
+		return false
+	}
 	salt, err1 := base64.RawStdEncoding.DecodeString(parts[3])
 	expected, err2 := base64.RawStdEncoding.DecodeString(parts[4])
-	if err1 != nil || err2 != nil {
+	if err1 != nil || err2 != nil || len(salt) == 0 || len(expected) == 0 {
 		return false
 	}
 	actual := argon2.IDKey([]byte(password), salt, uint32(t64), uint32(m64), uint8(p64), uint32(len(expected)))
