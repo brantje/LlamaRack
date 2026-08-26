@@ -46,4 +46,12 @@ describe('frontend design rules', () => {
 
     expect(violations).toEqual([])
   })
+
+  it('keeps the model fleet as sibling model cards with a page-level log modal', () => {
+    const source = readFileSync(resolve(process.cwd(), 'app/pages/models/index.vue'), 'utf8')
+    expect(source).toContain('data-testid="model-card"')
+    expect(source).toMatch(/grid gap-4 md:grid-cols-2 2xl:grid-cols-3/)
+    expect(source).not.toMatch(/<UCard>[\s\S]*data-testid="model-card"/)
+    expect(source).toContain('<UModal')
+  })
 })
