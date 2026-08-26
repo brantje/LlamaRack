@@ -50,7 +50,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		if entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") || isProjectorGGUF(entry.Name()) {
+		if entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -58,7 +58,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 			return err
 		}
 		rel = filepath.Clean(rel)
-		if used[rel] {
+		if isProjectorGGUF(rel) || used[rel] {
 			return nil
 		}
 		info, err := entry.Info()
@@ -80,7 +80,9 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 	return files, nil
 }
 
-func isProjectorGGUF(name string) bool {
-	base := strings.ToLower(filepath.Base(name))
-	return strings.HasPrefix(base, "mmproj") || strings.HasPrefix(base, "mmoproj")
+func isProjectorGGUF(path string) bool {
+	name := strings.ToLower(filepath.ToSlash(path))
+	return strings.Contains(name, "mmproj") ||
+		strings.Contains(name, "mmoproj") ||
+		strings.Contains(name, "projector")
 }
