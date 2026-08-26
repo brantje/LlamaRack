@@ -36,10 +36,11 @@ function seedModel() {
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
-  manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+  manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = [{
     id: 'm1', model_id: 'coder', name: 'Coder', gguf_path: 'coder.gguf', total_bytes: 4,
-    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', routing_policy: 'least_active'
+    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true,
+    idle_unload_seconds: 0, routing_policy: 'least_active'
   }]
   manager.runtimes.value = { m1: [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] }
   manager.profile.value = null
@@ -60,7 +61,8 @@ describe('model diagnostics', () => {
     const manager = seedModel()
     manager.models.value.push({
       id: 'm2', model_id: 'chat', name: 'Chat', gguf_path: 'chat.gguf', total_bytes: 8,
-      enabled: true, autoload_enabled: false, always_on: true, priority: 'high', routing_policy: 'round_robin'
+      enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: true,
+      idle_unload_seconds: 0, routing_policy: 'round_robin'
     })
 
     const wrapper = await mountSuspended(ModelsPage, { route: false })
