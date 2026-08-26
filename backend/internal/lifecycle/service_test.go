@@ -60,7 +60,11 @@ func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Se
 	if err := os.WriteFile(modelPath, []byte("gguf"), 0o644); err != nil { t.Fatal(err) }
 	m, err := ms.Create(ctx, models.CreateModelInput{PublicID: "test-model", Name: "Test model", GGUFPath: modelPath, Autoload: &autoload, AlwaysOn: alwaysOn, Options: map[string]string{"ctx-size": "2048", "flash-attn": "true", "disabled": "false", "empty": ""}})
 	if err != nil { t.Fatal(err) }
-	sup := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", 29000, 5*time.Second)
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	portStart := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil { t.Fatal(err) }
+	sup := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", portStart, 5*time.Second)
 	t.Cleanup(func() { ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel(); sup.Shutdown(ctx) })
 	s := New(ms, sup)
 	exec := func(query string, args ...any) { t.Helper(); if _, err := db.ExecContext(ctx, query, args...); err != nil { t.Fatal(err) } }
