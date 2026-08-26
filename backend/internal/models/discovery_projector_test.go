@@ -19,6 +19,8 @@ func TestAvailableGGUFsExcludesMultimodalProjectors(t *testing.T) {
 	writeGGUF(t, nested, "mmproj-BF16.gguf")
 	writeGGUF(t, nested, "mmproj-model-f16.gguf")
 	writeGGUF(t, nested, "mmoproj-Q8_0.gguf")
+	writeGGUF(t, nested, "my-mmproj-model.gguf")
+	writeGGUF(t, nested, "asda-projector.gguf")
 
 	files, err := s.AvailableGGUFs(ctx)
 	if err != nil {
@@ -31,12 +33,19 @@ func TestAvailableGGUFsExcludesMultimodalProjectors(t *testing.T) {
 		t.Fatalf("unexpected available file: %+v", files[0])
 	}
 
-	for _, name := range []string{"mmproj-BF16.gguf", "MMPROJ-F16.GGUF", "mmoproj-Q8_0.gguf"} {
+	for _, name := range []string{
+		"mmproj-BF16.gguf",
+		"MMPROJ-F16.GGUF",
+		"mmoproj-Q8_0.gguf",
+		"my-mmproj-model.gguf",
+		"asda-projector.gguf",
+		"vision/projectors/model.gguf",
+	} {
 		if !isProjectorGGUF(name) {
 			t.Fatalf("expected %q to be recognized as projector", name)
 		}
 	}
-	if isProjectorGGUF("my-mmproj-model.gguf") {
-		t.Fatal("only projector-prefixed filenames should be filtered")
+	if isProjectorGGUF("projection-model.gguf") {
+		t.Fatal("projection is not a projector marker")
 	}
 }
