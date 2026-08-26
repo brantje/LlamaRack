@@ -34,9 +34,9 @@ func TestStartOneManualGPUAndModelPathEscape(t *testing.T) {
 	if err := s.StopModel(ctx, m.ID); err != nil { t.Fatal(err) }
 
 	exec("UPDATE models SET gguf_path='../escape.gguf' WHERE id=?", m.ID)
-	m2, err := s.models.GetByID(ctx, m.ID)
-	if err != nil { t.Fatal(err) }
-	if _, err := s.startOne(ctx, m2); err == nil || !strings.Contains(err.Error(), "escapes") {
+	items, err := s.instances.ListByModel(ctx, m.ID)
+	if err != nil || len(items) != 1 { t.Fatalf("instances=%v err=%v", items, err) }
+	if _, err := s.startOne(ctx, items[0]); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("expected path escape error, got %v", err)
 	}
 }
@@ -53,17 +53,20 @@ func TestSingleFlightWaiterHonorsContextCancellation(t *testing.T) {
 		defer stopCancel()
 		slowSup.Shutdown(stopCtx)
 	})
+	items, err := s.instances.ListByModel(ctx, m.ID)
+	if err != nil || len(items) != 1 { t.Fatalf("instances=%v err=%v", items, err) }
+	instanceID := items[0].ID
 
 	firstDone := make(chan error, 1)
 	go func() {
-		_, err := s.StartModel(ctx, m.ID)
+		_, err := s.StartInstance(ctx, instanceID)
 		firstDone <- err
 	}()
 
 	deadline := time.Now().Add(time.Second)
 	for {
 		s.mu.Lock()
-		loading := s.loads[m.ID] != nil
+		loading := s.loads[instanceID] != nil
 		s.mu.Unlock()
 		if loading { break }
 		if time.Now().After(deadline) { t.Fatal("load never entered single-flight map") }
@@ -72,7 +75,7 @@ func TestSingleFlightWaiterHonorsContextCancellation(t *testing.T) {
 
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer waitCancel()
-	if _, err := s.StartModel(waitCtx, m.ID); err == nil || err != context.DeadlineExceeded {
+	if _, err := s.StartInstance(waitCtx, instanceID); err == nil || err != context.DeadlineExceeded {
 		t.Fatalf("waiter error=%v", err)
 	}
 	if err := <-firstDone; err != nil { t.Fatalf("first load failed: %v", err) }
@@ -81,14 +84,14 @@ func TestSingleFlightWaiterHonorsContextCancellation(t *testing.T) {
 func TestReconcileSkipsDisabledAndAlreadyReady(t *testing.T) {
 	ctx := context.Background()
 	s, ms, m, sup, exec := setupLifecycle(t, true, true)
-	exec("UPDATE models SET enabled=0 WHERE id=?", m.ID)
-	s.ReconcileAlwaysOn(ctx)
 	instances, err := ms.Instances(ctx, m.ID)
 	if err != nil { t.Fatal(err) }
+	exec("UPDATE instances SET enabled=0 WHERE model_id=?", m.ID)
+	s.ReconcileAlwaysOn(ctx)
 	if got := sup.Status(instances[0].ID); got.State != supervisor.Unloaded {
 		t.Fatalf("disabled always-on started: %+v", got)
 	}
-	exec("UPDATE models SET enabled=1 WHERE id=?", m.ID)
+	exec("UPDATE instances SET enabled=1 WHERE model_id=?", m.ID)
 	s.ReconcileAlwaysOn(ctx)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && sup.Status(instances[0].ID).State != supervisor.Ready { time.Sleep(10 * time.Millisecond) }

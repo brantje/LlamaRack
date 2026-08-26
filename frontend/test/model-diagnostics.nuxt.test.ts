@@ -1,187 +1,200 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import ModelsPage from '~/pages/models/index.vue'
+import InstancesPage from '~/pages/instances/index.vue'
 import { useManager } from '~/composables/useManager'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), writeText: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
-class FakeEventSource {
-  static instances: FakeEventSource[] = []
-  static throwOnCreate = false
-  url: string
-  withCredentials: boolean
-  closed = false
-  onmessage: ((event: MessageEvent) => void) | null = null
-
-  constructor(url: string, init?: EventSourceInit) {
-    if (FakeEventSource.throwOnCreate) throw new Error('stream unavailable')
-    this.url = url
-    this.withCredentials = !!init?.withCredentials
-    FakeEventSource.instances.push(this)
-  }
-
-  emit(line: string) {
-    this.onmessage?.({ data: JSON.stringify(line) } as MessageEvent)
-  }
-
-  close() {
-    this.closed = true
-  }
-}
-
-function seedModel() {
+function seed() {
   const manager = useManager()
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{
-    id: 'm1', model_id: 'coder', name: 'Coder', gguf_path: 'coder.gguf', total_bytes: 4,
-    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true,
-    idle_unload_seconds: 0, routing_policy: 'least_active'
-  }]
-  manager.runtimes.value = { m1: [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] }
-  manager.profile.value = null
+  manager.models.value = [{ id: 'm1', name: 'Coder model', gguf_path: 'coder.gguf', total_bytes: 4, quantization: 'Q4_K_M', context_length: 8192 }]
+  manager.instances.value = [{ id: 'coder-primary', model_id: 'm1', name: 'Coder Primary', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }]
+  manager.runtimes.value = { m1: [{ instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }] }
   return manager
+}
+
+async function clickConfirmation(kind: 'confirm' | 'cancel') {
+  await flushPromises()
+  const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
+  const button = buttons.at(-1)
+  if (!button) throw new Error(`Missing confirmation ${kind} button`)
+  button.click()
+  await flushPromises()
 }
 
 beforeEach(() => {
   mocks.request.mockReset()
-  FakeEventSource.instances = []
-  FakeEventSource.throwOnCreate = false
-  vi.stubGlobal('EventSource', FakeEventSource as any)
-  vi.stubGlobal('confirm', vi.fn(() => true))
-  seedModel()
+  mocks.writeText.mockReset().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.writeText } })
+  seed()
 })
 
-describe('model diagnostics', () => {
-  it('renders configured models as sibling cards with the future edit affordance', async () => {
-    const manager = seedModel()
-    manager.models.value.push({
-      id: 'm2', model_id: 'chat', name: 'Chat', gguf_path: 'chat.gguf', total_bytes: 8,
-      enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: true,
-      idle_unload_seconds: 0, routing_policy: 'round_robin'
-    })
-
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    const cards = wrapper.findAll('[data-testid="model-card"]')
-    expect(cards).toHaveLength(2)
-    expect(wrapper.text()).toContain('Model fleet')
-    expect(wrapper.text()).toContain('Round robin')
-
-    const editButtons = wrapper.findAll('button[aria-label="Edit model (coming soon)"]')
-    expect(editButtons).toHaveLength(2)
-    expect(editButtons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
-  })
-
-  it('tests a model to READY and shows live worker logs in a flat timestamped terminal modal', async () => {
-    const manager = seedModel()
-    let started = false
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') { started = true; return [] }
-      if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state: started ? 'READY' : 'UNLOADED', pid: started ? 4242 : undefined, port: started ? 31000 : undefined }]
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
-      return []
-    })
-
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    await wrapper.findAll('button').find(button => button.text() === 'Test')!.trigger('click')
-    await flushPromises()
-
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/start', { method: 'POST' })
-    expect(FakeEventSource.instances).toHaveLength(1)
-    const source = FakeEventSource.instances[0]!
-    expect(source.url).toBe('http://manager.test:8888/api/v1/instances/instance-12345678/logs/stream')
-    expect(source.withCredentials).toBe(true)
-
-    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
-    await flushPromises()
-    expect(document.body.textContent).toContain('worker://coder')
-    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
-
-    source.emit('[stderr] model loaded')
-    source.emit('[stdout] server ready')
-    source.emit('scheduler tick')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('PASS · READY · PID 4242 · port 31000')
-    expect(document.body.textContent).toContain('LIVE · 3 lines')
-    expect(document.body.textContent).toContain('model loaded')
-    expect(document.body.querySelector('[data-stream="stderr"]')?.textContent).toContain('model loaded')
-    expect(document.body.querySelector('[data-stream="stdout"]')?.textContent).toContain('server ready')
-    expect(document.body.querySelector('[data-stream="log"]')?.textContent).toContain('scheduler tick')
-    const logTimes = [...document.body.querySelectorAll('[data-log-time]')].map(node => node.textContent || '')
-    expect(logTimes).toHaveLength(3)
-    expect(logTimes.every(value => /^\d{2}:\d{2}:\d{2}$/.test(value))).toBe(true)
-    expect(document.body.querySelector('[data-testid="log-terminal"]')?.textContent).not.toContain('$')
-    expect(wrapper.findAll('button').find(button => button.text() === 'Start')?.attributes('disabled')).toBeDefined()
-    wrapper.unmount()
-    expect(source.closed).toBe(true)
-  })
-
-  it('shows test failures and reuses the existing live stream when logs open', async () => {
-    const manager = seedModel()
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') throw { data: { error: 'worker exploded' } }
-      if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'FAILED', last_error: 'worker exploded' }]
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
-      return []
-    })
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    await wrapper.findAll('button').find(button => button.text() === 'Test')!.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('FAIL · worker exploded')
-    expect(FakeEventSource.instances).toHaveLength(1)
-    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
-    await flushPromises()
-    expect(FakeEventSource.instances).toHaveLength(1)
-    expect(document.body.textContent).toContain('worker://coder')
-  })
-
-  it('runs direct start and stop actions while keeping logs live', async () => {
-    const manager = seedModel()
-    let state = 'UNLOADED'
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') { state = 'READY'; return [] }
-      if (path === '/api/v1/models/m1/stop' && options?.method === 'POST') { state = 'UNLOADED'; return undefined }
-      if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state, pid: state === 'READY' ? 99 : undefined, port: state === 'READY' ? 32000 : undefined }]
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
-      return []
-    })
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    await wrapper.findAll('button').find(button => button.text() === 'Start')!.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('READY')
-    await wrapper.findAll('button').find(button => button.text() === 'Stop')!.trigger('click')
-    await flushPromises()
+describe('instance control plane', () => {
+  it('renders stopped instances as addressable cards with a copyable model ID', async () => {
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Coder Primary')
+    expect(wrapper.find('[data-testid="instance-id"]').text()).toBe('coder-primary')
+    expect(wrapper.text()).not.toContain('model=coder-primary')
     expect(wrapper.text()).toContain('UNLOADED')
-    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(wrapper.text()).toContain('Launch')
+    expect(wrapper.text()).toContain('Duplicate')
+    expect(wrapper.text()).toContain('Logs')
+
+    const copy = wrapper.find('[data-testid="copy-instance-id"]')
+    expect(copy.attributes('aria-label')).toBe('Copy coder-primary')
+    await copy.trigger('click')
+    await flushPromises()
+    expect(mocks.writeText).toHaveBeenCalledWith('coder-primary')
+    expect(copy.attributes('aria-label')).toBe('Copied coder-primary')
+    expect(copy.attributes('title')).toBe('Copied')
   })
 
-  it('handles models without runtimes and live stream construction failures', async () => {
-    const manager = seedModel()
-    let returnRuntime = false
-    mocks.request.mockImplementation(async (path: string) => {
+  it('surfaces clipboard copy failures', async () => {
+    mocks.writeText.mockRejectedValueOnce(new Error('clipboard blocked'))
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    await wrapper.find('[data-testid="copy-instance-id"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('clipboard blocked')
+    expect(wrapper.find('[data-testid="copy-instance-id"]').attributes('aria-label')).toBe('Copy coder-primary')
+  })
+
+  it('launches, stops, restarts, duplicates and kills the exact instance', async () => {
+    const manager = seed()
+    let runtimeState = 'UNLOADED'
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/instances/coder-primary/start' && options?.method === 'POST') runtimeState = 'READY'
+      if (path === '/api/v1/instances/coder-primary/stop' && options?.method === 'POST') runtimeState = 'UNLOADED'
+      if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/models/m1/runtime') return returnRuntime ? [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] : []
+      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: runtimeState }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
-      return []
+      return {}
     })
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', expect.anything())
+    await clickConfirmation('confirm')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', { method: 'POST' })
+
+    for (const label of ['Restart', 'Duplicate']) {
+      await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
+      await flushPromises()
+    }
+    await wrapper.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    expect(document.body.textContent).toContain('Active requests may fail')
+    await clickConfirmation('confirm')
+
+    const stop = wrapper.findAll('button').find(button => button.text() === 'Stop')
+    if (stop) { await stop.trigger('click'); await flushPromises() }
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/restart', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/duplicate', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/kill', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/stop', { method: 'POST' })
+  })
+
+  it('shows logs and deletes without deleting the registered model', async () => {
+    const manager = seed()
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.endsWith('/logs')) return { lines: ['worker ready', 'request complete'] }
+      if (path === '/api/v1/instances') return manager.instances.value
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }
+      return {}
+    })
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('WAITING · 0 lines')
-    expect(document.body.textContent).toContain('Waiting for worker output…')
-    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
-    returnRuntime = true
-    FakeEventSource.throwOnCreate = true
-    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    expect(document.body.textContent).toContain('worker ready')
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary', expect.anything())
+    await clickConfirmation('confirm')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary', { method: 'DELETE' })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1', expect.anything())
+  })
+
+  it('keeps instances visible on action errors and supports cancelled destructive actions', async () => {
+    mocks.request.mockRejectedValue({ data: { error: 'worker failed' } })
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
+    await clickConfirmation('cancel')
+    expect(mocks.request).not.toHaveBeenCalled()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('stream unavailable')
+    expect(wrapper.text()).toContain('worker failed')
+    expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
+  })
+
+  it('covers policy variants, state badges, model fallback and empty/error log branches', async () => {
+    const manager = seed()
+    manager.instances.value = [
+      { id: 'protected', model_id: 'missing-model', name: 'Protected', enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: false, idle_unload_seconds: 60, gpu_mode: 'manual', gpu_devices: ['0'] },
+      { id: 'ready', model_id: 'm1', name: 'Ready Instance', enabled: true, autoload_enabled: true, always_on: false, priority: 'low', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }
+    ]
+    manager.runtimes.value = {
+      'missing-model': [{ instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }],
+      m1: [{ instance_id: 'ready', model_id: 'm1', state: 'READY' }]
+    }
+    let logMode: 'empty' | 'error' = 'empty'
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/instances/protected/logs') {
+        if (logMode === 'error') throw new Error('log retrieval failed')
+        return {}
+      }
+      if (path === '/api/v1/instances/protected/start' && options?.method === 'POST') throw {}
+      if (path === '/api/v1/instances/protected/restart' && options?.method === 'POST') throw new Error('restart failed')
+      if (path === '/api/v1/instances') return manager.instances.value
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances/protected/runtime') return { instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }
+      if (path === '/api/v1/instances/ready/runtime') return { instance_id: 'ready', model_id: 'm1', state: 'READY' }
+      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      return {}
+    })
+
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    expect(wrapper.text()).toContain('missing-model')
+    expect(wrapper.text()).toContain('FAILED')
+    expect(wrapper.text()).toContain('READY')
+    expect(wrapper.text()).toContain('Always On')
+    expect(wrapper.text()).toContain('Manual load')
+    expect(wrapper.text()).toContain('Protected from resource-pressure eviction')
+
+    const protectedCard = wrapper.findAll('[data-testid="instance-card"]')[0]!
+    await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('No logs captured.')
+
+    await protectedCard.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to start Instance')
+
+    await protectedCard.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('restart failed')
+
+    logMode = 'error'
+    await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('log retrieval failed')
+
+    mocks.request.mockClear()
+    await protectedCard.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    await clickConfirmation('cancel')
+    expect(mocks.request).not.toHaveBeenCalled()
+  })
+
+  it('renders the empty state', async () => {
+    const manager = seed()
+    manager.instances.value = []
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    expect(wrapper.text()).toContain('No Instances configured')
+    expect(wrapper.text()).toContain('New Instance')
   })
 })

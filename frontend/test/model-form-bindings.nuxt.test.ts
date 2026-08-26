@@ -21,123 +21,122 @@ beforeEach(() => {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
+  manager.instances.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
 })
 
 function selectComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'Select' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'USelect' })
-}
-
-function checkboxComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'Checkbox' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'UCheckbox' })
-}
-
-function inputNumberComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'InputNumber' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'UInputNumber' })
+  const components = wrapper.findAllComponents({ name: 'SelectMenu' })
+  return components.length ? components : wrapper.findAllComponents({ name: 'USelectMenu' })
 }
 
 describe('model creation form', () => {
-  it('lists relative GGUF paths and exposes lifecycle and eviction settings', async () => {
+  it('lists relative GGUF paths and only exposes the small first-instance bootstrap set', async () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/available')
-    expect(wrapper.text()).toContain('Eviction')
-    expect(wrapper.text()).toContain('Idle unload timeout')
+    expect(wrapper.text()).toContain('Create a first Instance')
+    expect(wrapper.text()).toContain('Instance slug')
+    expect(wrapper.text()).toContain('Always on')
+    expect(wrapper.text()).toContain('Autoload on request')
     expect(wrapper.text()).toContain('Allow resource-pressure eviction')
+    expect(wrapper.text()).toContain('Launch this Instance after creation')
+    expect(wrapper.text()).not.toContain('Priority')
+    expect(wrapper.find('[name="priority"]').exists()).toBe(false)
+    expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
 
-    const selects = selectComponents(wrapper)
-    expect(selects).toHaveLength(3)
-    expect(selects[0]!.props('items')).toEqual(expect.arrayContaining([
+    const select = selectComponents(wrapper)[0]!
+    expect(select.props('items')).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Qwen/coder/qwen-Q4_K_M.gguf · Q4_K_M', value: 'Qwen/coder/qwen-Q4_K_M.gguf' })
     ]))
-    expect(JSON.stringify(selects[0]!.props('items'))).not.toContain('/models/')
-    selects[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
-    await flushPromises()
-
-    const nameInput = wrapper.get('[data-testid="model-name"]')
-    const idInput = wrapper.get('[data-testid="model-id"]')
-    await nameInput.setValue('Qwén Coder / 32B!')
-    await flushPromises()
-    expect((idInput.element as HTMLInputElement).value).toBe('qwen-coder-32b')
-
-    await idInput.setValue('custom-id')
-    await nameInput.setValue('Changed name')
-    await flushPromises()
-    expect((idInput.element as HTMLInputElement).value).toBe('custom-id')
-
-    selects[1]!.vm.$emit('update:modelValue', 'round_robin')
-    selects[2]!.vm.$emit('update:modelValue', 'high')
-    const numberInputs = inputNumberComponents(wrapper)
-    expect(numberInputs).toHaveLength(1)
-    numberInputs[0]!.vm.$emit('update:modelValue', 120)
-    const checkboxes = checkboxComponents(wrapper)
-    expect(checkboxes).toHaveLength(3)
-    checkboxes[0]!.vm.$emit('update:modelValue', false)
-    checkboxes[1]!.vm.$emit('update:modelValue', false)
-    checkboxes[2]!.vm.$emit('update:modelValue', true)
-    await flushPromises()
-
-    expect(selects[1]!.props('modelValue')).toBe('round_robin')
-    expect(selects[2]!.props('modelValue')).toBe('high')
-    expect(numberInputs[0]!.props('modelValue')).toBe(120)
-    expect(checkboxes[0]!.props('modelValue')).toBe(false)
-    expect(checkboxes[1]!.props('modelValue')).toBe(false)
-    expect(checkboxes[2]!.props('modelValue')).toBe(true)
+    expect(JSON.stringify(select.props('items'))).not.toContain('/models/')
   })
 
-  it('creates a model with eviction options and the selected relative GGUF path', async () => {
+  it('prefills first-instance name from the model name and keeps the generated slug in sync', async () => {
     const manager = useManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return discovered
-      if (path === '/api/v1/models' && options?.method === 'POST') return { id: 'm1' }
-      if (path === '/api/v1/models') return []
+      if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' }, instance: { id: 'coding-api' } }
+      if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       if (path === '/api/v1/llamacpp/profile') throw new Error('no profile')
       return []
     })
-    let wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    const selects = selectComponents(wrapper)
-    selects[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
-    selects[2]!.vm.$emit('update:modelValue', 'low')
-    inputNumberComponents(wrapper)[0]!.vm.$emit('update:modelValue', 45)
-    checkboxComponents(wrapper)[0]!.vm.$emit('update:modelValue', false)
-    await flushPromises()
+    selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
+
     await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder')
     await flushPromises()
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Qwen Coder')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coder')
+
+    await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder 32B')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Qwen Coder 32B')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coder-32b')
+
+    await wrapper.get('[data-testid="instance-name"]').setValue('Qwen Coding')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coding')
+
+    await wrapper.get('[data-testid="instance-slug"]').setValue('coding-api')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', {
       method: 'POST',
-      body: expect.objectContaining({
+      body: {
         gguf_path: 'Qwen/coder/qwen-Q4_K_M.gguf',
-        name: 'Qwen Coder',
-        model_id: 'qwen-coder',
-        priority: 'low',
-        eviction_enabled: false,
-        idle_unload_seconds: 45
-      })
+        name: 'Qwen Coder 32B',
+        context_length: 0,
+        first_instance: {
+          name: 'Qwen Coding', slug: 'coding-api', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
+        }
+      }
     })
     expect(manager.models.value).toEqual([])
-    wrapper.unmount()
+  })
 
+  it('prefills from the current model name when first-instance creation is enabled again', async () => {
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
+    await wrapper.get('[data-testid="model-name"]').setValue('Model While Disabled')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="instance-name"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Model While Disabled')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('model-while-disabled')
+  })
+
+  it('preserves durable records when launch fails and supports registry-only creation', async () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return discovered
-      if (path === '/api/v1/models' && options?.method === 'POST') throw new Error('GGUF missing')
+      if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' }, instance: { id: 'coder' }, start_error: 'worker exploded' }
+      if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       return []
     })
-    wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'deep/other.gguf')
-    await flushPromises()
-    await wrapper.get('[data-testid="model-name"]').setValue('Missing')
+    await wrapper.get('[data-testid="model-name"]').setValue('Coder')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('GGUF missing')
+    expect(wrapper.text()).toContain('Model and Instance were created')
+    expect(wrapper.text()).toContain('worker exploded')
+
+    await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="instance-name"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="instance-slug"]').exists()).toBe(false)
+    mocks.request.mockClear()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', expect.objectContaining({
+      method: 'POST', body: expect.objectContaining({ first_instance: undefined })
+    }))
   })
 
   it('shows scan failures and can rescan the model folder', async () => {
@@ -146,7 +145,6 @@ describe('model creation form', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('scan failed')
     expect(wrapper.text()).toContain('No unregistered GGUF files found')
-
     mocks.request.mockResolvedValueOnce(discovered)
     await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()

@@ -20,6 +20,15 @@ Preserve the existing llamacpp-manager theme unless a task explicitly requests a
 
 **Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered/elevated containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface. Components with surfaced defaults must also stay flat when nested: for example, `UEmpty` defaults to an outlined surface, so use `variant="naked"` whenever `UEmpty` is rendered inside a card.
 
+## Confirmation dialogs — hard rule
+
+Native browser confirmation dialogs are prohibited in the frontend. Never call `confirm()`, `window.confirm()`, or `globalThis.confirm()` from first-party application code.
+
+- Any user confirmation MUST use a Nuxt UI overlay, normally `UModal`, with explicit cancel and confirm actions.
+- Destructive or availability-impacting actions must explain the consequence in the modal before the user confirms.
+- Shared confirmation behavior should wrap Nuxt UI rather than recreating an overlay primitive with custom HTML/CSS.
+- CI MUST scan first-party frontend application sources and fail if a native confirmation call is introduced.
+
 ## Nuxt routing mount invariant — hard rule
 
 `[NUXT_E4011] Your project has pages but the <NuxtPage /> component has not been used` is a **hard regression and must never be shipped or ignored**.

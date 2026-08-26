@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brantje/llamacpp-manager/backend/internal/instances"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
@@ -21,6 +22,7 @@ type Activity struct {
 
 type Service struct {
 	models          *models.Service
+	instances       *instances.Service
 	sup             *supervisor.Supervisor
 	mu              sync.Mutex
 	loads           map[string]*loadCall
@@ -38,247 +40,274 @@ type loadCall struct {
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	return &Service{
-		models:          modelsService,
-		sup:             sup,
-		loads:           map[string]*loadCall{},
-		manuallyStopped: map[string]bool{},
-		activities:      map[string]Activity{},
-		idleLocks:       map[string]*sync.Mutex{},
-		now:             time.Now,
+		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup,
+		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{},
+		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{}, now: time.Now,
 	}
 }
 
-// Acquire resolves/loads a model for an inference request and marks that model
-// active until the returned release function is called. The gateway holds the
-// lease for the complete proxied response, including streaming responses.
-func (s *Service) Acquire(ctx context.Context, publicID string) (string, func(), error) {
-	m, err := s.models.GetByPublicID(ctx, publicID)
+func (s *Service) Instances() *instances.Service { return s.instances }
+
+// Acquire resolves exactly one addressable Instance. The OpenAI model field is
+// the stored instance.id; sibling Instances are never selected as fallback.
+func (s *Service) Acquire(ctx context.Context, instanceID string) (string, func(), error) {
+	i, err := s.instances.Get(ctx, instanceID)
 	if err != nil {
 		return "", nil, err
 	}
-
-	// Coordinate request admission with idle shutdown. If idle reconciliation is
-	// already stopping this model, admission waits for that stop to finish and
-	// normal autoload can start it again deterministically.
-	idleLock := s.idleLock(m.ID)
-	idleLock.Lock()
-	s.beginRequest(m.ID)
-	idleLock.Unlock()
-
-	endpoint, err := s.ensureReadyModel(ctx, m)
+	lock := s.idleLock(i.ID)
+	lock.Lock()
+	s.beginRequest(i.ID)
+	lock.Unlock()
+	endpoint, err := s.ensureReadyInstance(ctx, i)
 	if err != nil {
-		s.finishRequest(m.ID)
+		s.finishRequest(i.ID)
 		return "", nil, err
 	}
-
 	var once sync.Once
-	release := func() {
-		once.Do(func() { s.finishRequest(m.ID) })
-	}
-	return endpoint, release, nil
+	return endpoint, func() { once.Do(func() { s.finishRequest(i.ID) }) }, nil
 }
 
-func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, error) {
-	m, err := s.models.GetByPublicID(ctx, publicID)
+func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, error) {
+	i, err := s.instances.Get(ctx, instanceID)
 	if err != nil {
 		return "", err
 	}
-	return s.ensureReadyModel(ctx, m)
+	return s.ensureReadyInstance(ctx, i)
 }
 
-func (s *Service) ensureReadyModel(ctx context.Context, m models.Model) (string, error) {
-	if !m.Enabled {
-		return "", errors.New("model disabled")
+func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance) (string, error) {
+	if !i.Enabled {
+		return "", errors.New("instance disabled")
 	}
-	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
+	if endpoint, ok := s.sup.Endpoint(i.ID); ok {
 		return endpoint, nil
 	}
-	if !m.Autoload {
-		return "", errors.New("model unloaded and autoload disabled")
+	if !i.Autoload {
+		return "", errors.New("instance unloaded and autoload disabled")
 	}
-	if s.isManuallyStopped(m.ID) {
-		s.clearManualStop(m.ID)
-		slog.Info("manual stop overridden by inference request", "model_id", m.ID, "public_id", m.PublicID)
+	if s.isManuallyStopped(i.ID) {
+		s.clearManualStop(i.ID)
+		slog.Info("manual stop overridden by inference request", "instance_id", i.ID)
 	}
-	slog.Info("autoload requested", "model_id", m.ID, "public_id", m.PublicID)
-	return s.startSingleFlight(ctx, m)
+	return s.startSingleFlight(ctx, i)
 }
 
-func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
-	return s.startModel(ctx, id, true)
+func (s *Service) StartInstance(ctx context.Context, id string) (string, error) {
+	return s.startInstance(ctx, id, true)
 }
 
-func (s *Service) startModel(ctx context.Context, id string, explicit bool) (string, error) {
-	slog.Info("model start requested", "model_id", id)
-	m, err := s.models.GetByID(ctx, id)
+func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (string, error) {
+	i, err := s.instances.Get(ctx, id)
 	if err != nil {
-		slog.Error("model start failed", "model_id", id, "error", err)
 		return "", err
 	}
-	if !m.Enabled {
-		err := errors.New("model disabled")
-		slog.Warn("model start rejected", "model_id", id, "public_id", m.PublicID, "error", err)
-		return "", err
+	if !i.Enabled {
+		return "", errors.New("instance disabled")
 	}
 	if explicit {
 		s.clearManualStop(id)
 	} else if s.isManuallyStopped(id) {
-		return "", errors.New("model manually stopped until manager restart")
+		return "", errors.New("instance manually stopped until manager restart")
 	}
-	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
-		slog.Info("model already ready", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
+	if endpoint, ok := s.sup.Endpoint(id); ok {
 		return endpoint, nil
 	}
-	endpoint, err := s.startSingleFlight(ctx, m)
-	if err != nil {
-		slog.Error("model start failed", "model_id", id, "public_id", m.PublicID, "error", err)
-		return "", err
-	}
-	slog.Info("model start completed", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
-	return endpoint, nil
+	return s.startSingleFlight(ctx, i)
 }
 
-func (s *Service) StopModel(ctx context.Context, id string) error {
-	slog.Info("model stop requested", "model_id", id)
-	m, err := s.models.GetByID(ctx, id)
+func (s *Service) StopInstance(ctx context.Context, id string) error {
+	i, err := s.instances.Get(ctx, id)
 	if err != nil {
-		slog.Error("model stop failed", "model_id", id, "error", err)
 		return err
 	}
-	instances, err := s.models.Instances(ctx, id)
-	if err != nil {
-		slog.Error("model stop failed", "model_id", id, "error", err)
-		return err
-	}
-	if m.AlwaysOn {
+	if i.AlwaysOn {
 		s.markManualStop(id)
-		slog.Info("always-on model manually suppressed until manager restart", "model_id", id, "public_id", m.PublicID)
 	}
-	for _, x := range instances {
-		if err := s.sup.Stop(ctx, x.ID); err != nil {
-			if m.AlwaysOn {
-				s.clearManualStop(id)
-			}
-			slog.Error("model stop failed", "model_id", id, "instance_id", x.ID, "error", err)
-			return err
+	if err := s.sup.Stop(ctx, id); err != nil {
+		if i.AlwaysOn {
+			s.clearManualStop(id)
 		}
+		return err
 	}
-	slog.Info("model stop completed", "model_id", id, "instances", len(instances))
 	return nil
 }
 
-func (s *Service) Runtime(ctx context.Context, id string) ([]supervisor.Runtime, error) {
-	instances, err := s.models.Instances(ctx, id)
+func (s *Service) RestartInstance(ctx context.Context, id string) (string, error) {
+	s.clearManualStop(id)
+	if err := s.sup.Stop(ctx, id); err != nil {
+		return "", err
+	}
+	return s.startInstance(ctx, id, true)
+}
+
+func (s *Service) KillInstance(ctx context.Context, id string) error {
+	if _, err := s.instances.Get(ctx, id); err != nil {
+		return err
+	}
+	s.markManualStop(id)
+	return s.sup.Kill(id)
+}
+
+func (s *Service) RuntimeInstance(ctx context.Context, id string) (supervisor.Runtime, error) {
+	i, err := s.instances.Get(ctx, id)
+	if err != nil {
+		return supervisor.Runtime{}, err
+	}
+	rt := s.sup.Status(id)
+	if rt.ModelID == "" {
+		rt.ModelID = i.ModelID
+	}
+	return rt, nil
+}
+
+// Compatibility wrappers for pre-Phase-5.5 internal callers. Management routes
+// no longer expose Model lifecycle operations.
+func (s *Service) StartModel(ctx context.Context, modelID string) (string, error) {
+	return s.startModel(ctx, modelID, true)
+}
+func (s *Service) startModel(ctx context.Context, modelID string, explicit bool) (string, error) {
+	items, err := s.instances.ListByModel(ctx, modelID)
+	if err != nil {
+		return "", err
+	}
+	for _, i := range items {
+		if i.Enabled {
+			return s.startInstance(ctx, i.ID, explicit)
+		}
+	}
+	return "", errors.New("no enabled instance")
+}
+func (s *Service) StopModel(ctx context.Context, modelID string) error {
+	items, err := s.instances.ListByModel(ctx, modelID)
+	if err != nil {
+		return err
+	}
+	for _, i := range items {
+		if err := s.StopInstance(ctx, i.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *Service) Runtime(ctx context.Context, modelID string) ([]supervisor.Runtime, error) {
+	items, err := s.instances.ListByModel(ctx, modelID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]supervisor.Runtime, 0, len(instances))
-	for _, x := range instances {
-		out = append(out, s.sup.Status(x.ID))
+	out := make([]supervisor.Runtime, 0, len(items))
+	for _, i := range items {
+		rt := s.sup.Status(i.ID)
+		if rt.ModelID == "" {
+			rt.ModelID = i.ModelID
+		}
+		out = append(out, rt)
 	}
 	return out, nil
 }
 
 func (s *Service) Activity(id string) Activity {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activities[id]
+	activity, ok := s.activities[id]
+	s.mu.Unlock()
+	if ok {
+		return activity
+	}
+	// Compatibility aggregation when an older caller supplies a database Model ID.
+	items, err := s.instances.ListByModel(context.Background(), id)
+	if err != nil {
+		return Activity{}
+	}
+	var out Activity
+	for _, i := range items {
+		s.mu.Lock()
+		a := s.activities[i.ID]
+		s.mu.Unlock()
+		out.ActiveRequests += a.ActiveRequests
+		if a.LastUsed.After(out.LastUsed) {
+			out.LastUsed = a.LastUsed
+		}
+	}
+	return out
 }
 
-// EvictionPlan applies the Phase 5 eviction policy to currently loaded
-// instances. Model file size is the Level-1 resource estimate; Phase 7 will
-// replace/augment it with actual per-device VRAM demand and availability.
 func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (scheduler.Plan, error) {
-	items, err := s.models.List(ctx)
+	items, err := s.instances.List(ctx)
 	if err != nil {
 		return scheduler.Plan{}, err
 	}
-	candidates := make([]scheduler.Candidate, 0)
-	for _, m := range items {
-		if !m.EvictionEnabled {
+	candidates := make([]scheduler.Candidate, 0, len(items))
+	for _, i := range items {
+		if !i.EvictionEnabled {
 			continue
 		}
-		instances, err := s.models.Instances(ctx, m.ID)
+		m, err := s.models.GetByID(ctx, i.ModelID)
 		if err != nil {
 			return scheduler.Plan{}, err
 		}
-		activity := s.Activity(m.ID)
-		for _, instance := range instances {
-			runtime := s.sup.Status(instance.ID)
-			candidates = append(candidates, scheduler.Candidate{
-				ModelID:        m.ID,
-				InstanceID:     instance.ID,
-				Priority:       m.Priority,
-				AlwaysOn:       m.AlwaysOn,
-				ActiveRequests: activity.ActiveRequests,
-				LastUsed:       activity.LastUsed,
-				EstimatedBytes: m.TotalBytes,
-				Ready:          runtime.State == supervisor.Ready,
-			})
-		}
+		activity := s.Activity(i.ID)
+		candidates = append(candidates, scheduler.Candidate{
+			ModelID: i.ModelID, InstanceID: i.ID, Priority: i.Priority, AlwaysOn: i.AlwaysOn,
+			ActiveRequests: activity.ActiveRequests, LastUsed: activity.LastUsed,
+			EstimatedBytes: m.TotalBytes, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
+		})
 	}
 	return scheduler.PlanEvictions(candidates, requiredBytes), nil
 }
 
 func (s *Service) Logs(id string) []string { return s.sup.Logs(id) }
-
 func (s *Service) SubscribeLogs(id string) ([]string, <-chan string, func()) {
 	return s.sup.SubscribeLogs(id)
 }
 
 func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
-	items, err := s.models.List(ctx)
+	items, err := s.instances.List(ctx)
 	if err != nil {
 		return
 	}
-	for _, m := range items {
-		if !m.Enabled || !m.AlwaysOn || s.isManuallyStopped(m.ID) {
+	for _, i := range items {
+		if !i.Enabled || !i.AlwaysOn || s.isManuallyStopped(i.ID) {
 			continue
 		}
-		if _, ok := s.readyEndpoint(ctx, m); ok {
+		if _, ok := s.sup.Endpoint(i.ID); ok {
 			continue
 		}
-		go func(id string) { _, _ = s.startModel(context.Background(), id, false) }(m.ID)
+		go func(id string) { _, _ = s.startInstance(context.Background(), id, false) }(i.ID)
 	}
 }
 
 func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Duration) {
-	items, err := s.models.List(ctx)
+	items, err := s.instances.List(ctx)
 	if err != nil {
 		return
 	}
 	now := s.now().UTC()
-	for _, m := range items {
-		if !m.Enabled || m.AlwaysOn {
+	for _, i := range items {
+		if !i.Enabled || i.AlwaysOn {
 			continue
 		}
 		idleTimeout := globalIdleTimeout
-		if m.IdleUnloadSeconds > 0 {
-			idleTimeout = time.Duration(m.IdleUnloadSeconds) * time.Second
+		if i.IdleUnloadSeconds > 0 {
+			idleTimeout = time.Duration(i.IdleUnloadSeconds) * time.Second
 		}
 		if idleTimeout <= 0 {
 			continue
 		}
-
-		// Admission and the final idle check share a per-model lock. A request
-		// either becomes active before this check (and prevents the stop), or it
-		// waits until the stop is complete and then follows normal autoload.
-		idleLock := s.idleLock(m.ID)
-		idleLock.Lock()
-		activity := s.Activity(m.ID)
+		lock := s.idleLock(i.ID)
+		lock.Lock()
+		activity := s.Activity(i.ID)
 		if activity.ActiveRequests > 0 || activity.LastUsed.IsZero() || now.Sub(activity.LastUsed) < idleTimeout {
-			idleLock.Unlock()
+			lock.Unlock()
 			continue
 		}
-		if _, ok := s.readyEndpoint(ctx, m); !ok {
-			idleLock.Unlock()
+		if _, ok := s.sup.Endpoint(i.ID); !ok {
+			lock.Unlock()
 			continue
 		}
-		slog.Info("idle timeout reached; unloading model", "model_id", m.ID, "public_id", m.PublicID, "idle_for", now.Sub(activity.LastUsed), "idle_timeout", idleTimeout)
-		err := s.StopModel(ctx, m.ID)
-		idleLock.Unlock()
+		err := s.StopInstance(ctx, i.ID)
+		lock.Unlock()
 		if err != nil {
-			slog.Warn("idle unload failed", "model_id", m.ID, "public_id", m.PublicID, "error", err)
+			slog.Warn("idle unload failed", "instance_id", i.ID, "error", err)
 		}
 	}
 }
@@ -326,32 +355,29 @@ func (s *Service) RunIdleReconciler(ctx context.Context, globalIdleTimeout time.
 
 func (s *Service) beginRequest(id string) {
 	s.mu.Lock()
-	activity := s.activities[id]
-	activity.ActiveRequests++
-	activity.LastUsed = s.now().UTC()
-	s.activities[id] = activity
+	a := s.activities[id]
+	a.ActiveRequests++
+	a.LastUsed = s.now().UTC()
+	s.activities[id] = a
 	s.mu.Unlock()
 }
-
 func (s *Service) finishRequest(id string) {
 	s.mu.Lock()
-	activity := s.activities[id]
-	if activity.ActiveRequests > 0 {
-		activity.ActiveRequests--
+	a := s.activities[id]
+	if a.ActiveRequests > 0 {
+		a.ActiveRequests--
 	}
-	activity.LastUsed = s.now().UTC()
-	s.activities[id] = activity
+	a.LastUsed = s.now().UTC()
+	s.activities[id] = a
 	s.mu.Unlock()
 }
-
 func (s *Service) touch(id string) {
 	s.mu.Lock()
-	activity := s.activities[id]
-	activity.LastUsed = s.now().UTC()
-	s.activities[id] = activity
+	a := s.activities[id]
+	a.LastUsed = s.now().UTC()
+	s.activities[id] = a
 	s.mu.Unlock()
 }
-
 func (s *Service) idleLock(id string) *sync.Mutex {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -362,28 +388,25 @@ func (s *Service) idleLock(id string) *sync.Mutex {
 	}
 	return lock
 }
-
 func (s *Service) markManualStop(id string) {
 	s.mu.Lock()
 	s.manuallyStopped[id] = true
 	s.mu.Unlock()
 }
-
 func (s *Service) clearManualStop(id string) {
 	s.mu.Lock()
 	delete(s.manuallyStopped, id)
 	s.mu.Unlock()
 }
-
 func (s *Service) isManuallyStopped(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.manuallyStopped[id]
 }
 
-func (s *Service) startSingleFlight(ctx context.Context, m models.Model) (string, error) {
+func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (string, error) {
 	s.mu.Lock()
-	if c := s.loads[m.ID]; c != nil {
+	if c := s.loads[i.ID]; c != nil {
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -393,71 +416,54 @@ func (s *Service) startSingleFlight(ctx context.Context, m models.Model) (string
 		}
 	}
 	c := &loadCall{done: make(chan struct{})}
-	s.loads[m.ID] = c
+	s.loads[i.ID] = c
 	s.mu.Unlock()
-	endpoint, err := s.startOne(ctx, m)
+	endpoint, err := s.startOne(ctx, i)
 	c.endpoint, c.err = endpoint, err
 	close(c.done)
 	s.mu.Lock()
-	delete(s.loads, m.ID)
+	delete(s.loads, i.ID)
 	s.mu.Unlock()
 	return endpoint, err
 }
 
-func (s *Service) startOne(ctx context.Context, m models.Model) (string, error) {
-	instances, err := s.models.Instances(ctx, m.ID)
+func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, error) {
+	m, err := s.models.GetByID(ctx, i.ModelID)
 	if err != nil {
 		return "", err
-	}
-	var selected *models.Instance
-	for i := range instances {
-		if instances[i].Enabled {
-			selected = &instances[i]
-			break
-		}
-	}
-	if selected == nil {
-		return "", errors.New("no enabled instance")
 	}
 	path, err := s.models.ModelAbsolutePath(m)
 	if err != nil {
 		return "", err
 	}
-	opts, err := s.models.Options(ctx, m.ID)
+	modelOptions, err := s.models.Options(ctx, m.ID)
 	if err != nil {
 		return "", err
 	}
-	args := optionArgs(opts)
-	if selected.GPUMode == "manual" && len(selected.GPUDevices) > 0 {
-		args = append(args, "--device", strings.Join(selected.GPUDevices, ","))
-	}
-	if selected.TensorSplit != "" {
-		args = append(args, "--tensor-split", selected.TensorSplit)
-	}
-	slog.Info("starting model instance", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID, "model_path", path)
-	_, err = s.sup.Start(ctx, selected.ID, m.ID, path, args)
+	instanceOptions, err := s.instances.Options(ctx, i.ID)
 	if err != nil {
 		return "", err
 	}
-	endpoint, ok := s.sup.Endpoint(selected.ID)
+	for key, value := range instanceOptions {
+		modelOptions[key] = value
+	}
+	args := optionArgs(modelOptions)
+	if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
+		args = append(args, "--device", strings.Join(i.GPUDevices, ","))
+	}
+	if i.TensorSplit != "" {
+		args = append(args, "--tensor-split", i.TensorSplit)
+	}
+	_, err = s.sup.Start(ctx, i.ID, m.ID, path, args)
+	if err != nil {
+		return "", err
+	}
+	endpoint, ok := s.sup.Endpoint(i.ID)
 	if !ok {
 		return "", errors.New("worker did not reach ready state")
 	}
-	s.touch(m.ID)
+	s.touch(i.ID)
 	return endpoint, nil
-}
-
-func (s *Service) readyEndpoint(ctx context.Context, m models.Model) (string, bool) {
-	instances, err := s.models.Instances(ctx, m.ID)
-	if err != nil {
-		return "", false
-	}
-	for _, x := range instances {
-		if endpoint, ok := s.sup.Endpoint(x.ID); ok {
-			return endpoint, true
-		}
-	}
-	return "", false
 }
 
 func optionArgs(options map[string]string) []string {

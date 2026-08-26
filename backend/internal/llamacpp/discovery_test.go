@@ -16,21 +16,40 @@ func TestFirstLineAndParseHelp(t *testing.T) {
 		t.Fatalf("blank firstLine=%q", got)
 	}
 	help := `
-  --ctx-size N          context size
-  --flash-attn          enable flash attention
+  -c,    --ctx-size N          context size
+          --flash-attn [on|off|auto]  flash attention mode
   -x                    ignored short option
   --invalid
   --gpu-layers N        GPU layers to offload
+  prose mentioning --not-an-option should be ignored
 `
 	opts := parseHelp(help)
-	if len(opts) != 3 {
+	if len(opts) != 4 {
 		t.Fatalf("options=%+v", opts)
 	}
-	if opts[0].Key != "ctx-size" || opts[0].ValueHint != "N" || opts[0].Description != "context size" {
+	if opts[0].Key != "ctx-size" || opts[0].ValueHint != "N" || opts[0].Description != "context size" || opts[0].Kind != "integer" {
 		t.Fatalf("ctx option=%+v", opts[0])
 	}
-	if opts[1].Key != "flash-attn" || opts[1].ValueHint != "" || opts[1].Description != "enable flash attention" {
-		t.Fatalf("flag option=%+v", opts[1])
+	if opts[1].Key != "flash-attn" || opts[1].Kind != "enum" || len(opts[1].Choices) != 3 || opts[1].Choices[2] != "auto" {
+		t.Fatalf("flash option=%+v", opts[1])
+	}
+	if opts[2].Key != "invalid" || opts[2].Kind != "boolean" {
+		t.Fatalf("flag option=%+v", opts[2])
+	}
+}
+
+func TestClassifyValueHint(t *testing.T) {
+	for _, tc := range []struct {
+		hint string
+		kind string
+	}{
+		{"", "boolean"}, {"N", "integer"}, {"INT", "integer"}, {"FLOAT", "number"},
+		{"BOOL", "boolean"}, {"STRING", "string"}, {"N,N,...", "string"}, {"<cpu|gpu>", "enum"},
+	} {
+		kind, _ := classifyValueHint(tc.hint)
+		if kind != tc.kind {
+			t.Fatalf("hint %q kind=%q want=%q", tc.hint, kind, tc.kind)
+		}
 	}
 }
 
@@ -46,7 +65,7 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" = "--help" ]; then
-  printf '  --ctx-size N          context size\n  --flash-attn          enable flash attention\n'
+  printf '  -c, --ctx-size N      context size\n      --flash-attn       enable flash attention\n'
   exit 0
 fi
 exit 2
@@ -60,6 +79,9 @@ exit 2
 	}
 	if p.Path != path || p.Version != "llama.cpp test-version" || p.Fingerprint == "" || len(p.Options) != 2 {
 		t.Fatalf("profile=%+v", p)
+	}
+	if p.Options[0].Kind != "integer" || p.Options[1].Kind != "boolean" {
+		t.Fatalf("typed options=%+v", p.Options)
 	}
 	p2, err := Discover(context.Background(), path)
 	if err != nil || p2.Fingerprint != p.Fingerprint {

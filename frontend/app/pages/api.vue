@@ -9,6 +9,7 @@ const name = ref('default')
 const secret = ref('')
 const error = ref('')
 const pending = reactive<Record<string, 'toggle' | 'revoke' | undefined>>({})
+const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 
 const columns: TableColumn<APIKey>[] = [
   { accessorKey: 'name', header: 'Name' },
@@ -52,7 +53,13 @@ async function setEnabled(key: APIKey) {
 }
 
 async function revoke(key: APIKey) {
-  if (!confirm(`Revoke API key "${key.name}"? It will be permanently removed.`)) return
+  const confirmed = await confirmation.value?.request({
+    title: 'Revoke API key',
+    description: `Revoke API key “${key.name}”? It will be permanently removed.`,
+    confirmLabel: 'Revoke key',
+    color: 'error'
+  })
+  if (!confirmed) return
   pending[key.id] = 'revoke'
   error.value = ''
   try {
@@ -64,19 +71,11 @@ async function revoke(key: APIKey) {
     pending[key.id] = undefined
   }
 }
-
-async function copySecret() {
-  if (secret.value) await navigator.clipboard.writeText(secret.value)
-}
 </script>
 
 <template>
   <div class="space-y-5">
-    <UPageHeader
-      headline="OPENAI COMPATIBILITY"
-      title="API"
-      description="Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint."
-    />
+    <UPageHeader headline="OPENAI COMPATIBILITY" title="API" description="Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint." />
 
     <UCard>
       <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">BASE URL</p>
@@ -106,53 +105,36 @@ async function copySecret() {
         <div class="space-y-3">
           <strong class="text-sm">Copy this key now. It will not be shown again.</strong>
           <code class="block break-all font-mono text-sm text-primary">{{ secret }}</code>
-          <UButton data-testid="copy-key" color="neutral" variant="soft" size="sm" @click="copySecret">Copy</UButton>
+          <AppCopyButton
+            :text="secret"
+            color="neutral"
+            variant="soft"
+            size="sm"
+            error-message="Unable to copy API key. Select the key and copy it manually."
+            data-testid="copy-key"
+            @copied="error = ''"
+            @error="message => error = message"
+          />
         </div>
       </section>
 
       <UTable v-if="keys.length" :data="keys" :columns="columns">
-        <template #prefix-cell="{ row }">
-          <span class="font-mono text-xs">{{ row.original.prefix }}…</span>
-        </template>
+        <template #prefix-cell="{ row }"><span class="font-mono text-xs">{{ row.original.prefix }}…</span></template>
         <template #enabled-cell="{ row }">
-          <UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">
-            {{ row.original.enabled ? 'Enabled' : 'Disabled' }}
-          </UBadge>
+          <UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</UBadge>
         </template>
         <template #actions-cell="{ row }">
           <div class="flex justify-end">
             <UFieldGroup>
-              <UButton
-                color="neutral"
-                variant="soft"
-                size="sm"
-                :loading="pending[row.original.id] === 'toggle'"
-                :disabled="!!pending[row.original.id]"
-                @click="setEnabled(row.original)"
-              >
-                {{ row.original.enabled ? 'Disable' : 'Enable' }}
-              </UButton>
-              <UButton
-                color="error"
-                variant="soft"
-                size="sm"
-                :loading="pending[row.original.id] === 'revoke'"
-                :disabled="!!pending[row.original.id]"
-                @click="revoke(row.original)"
-              >
-                Revoke
-              </UButton>
+              <UButton color="neutral" variant="soft" size="sm" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</UButton>
+              <UButton color="error" variant="soft" size="sm" :loading="pending[row.original.id] === 'revoke'" :disabled="!!pending[row.original.id]" @click="revoke(row.original)">Revoke</UButton>
             </UFieldGroup>
           </div>
         </template>
       </UTable>
 
-      <UEmpty
-        v-else
-        variant="naked"
-        title="No API keys created yet."
-        description="Create a key to authenticate OpenAI-compatible clients."
-      />
+      <UEmpty v-else variant="naked" title="No API keys created yet." description="Create a key to authenticate OpenAI-compatible clients." />
     </UCard>
+    <AppConfirmationModal ref="confirmation" />
   </div>
 </template>

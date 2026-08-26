@@ -1,8 +1,43 @@
 export type User = { id: number; username: string; enabled: boolean }
-export type Model = { id: string; model_id: string; name: string; gguf_path: string; total_bytes: number; quantization?: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; eviction_enabled: boolean; idle_unload_seconds: number; routing_policy: string }
+export type Model = {
+  id: string
+  name: string
+  gguf_path: string
+  total_bytes: number
+  quantization?: string
+  context_length: number
+  // Transitional optional fields for older callers; the Models UI does not use them.
+  model_id?: string
+  enabled?: boolean
+  autoload_enabled?: boolean
+  always_on?: boolean
+  priority?: string
+  eviction_enabled?: boolean
+  idle_unload_seconds?: number
+  routing_policy?: string
+}
+export type Instance = {
+  id: string
+  model_id: string
+  name: string
+  enabled: boolean
+  autoload_enabled: boolean
+  always_on: boolean
+  priority: 'low' | 'normal' | 'high' | string
+  eviction_enabled: boolean
+  idle_unload_seconds: number
+  gpu_mode: 'auto' | 'manual' | string
+  gpu_devices?: string[]
+  tensor_split?: string
+}
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
-export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string }> }
+export type Profile = {
+  path: string
+  version?: string
+  fingerprint: string
+  options: Array<{ key: string; value_hint?: string; description?: string; kind?: string; choices?: string[] }>
+}
 
 type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[] }
 
@@ -15,6 +50,7 @@ export function useManager() {
   const initialized = useState('manager-initialized', () => false)
   const bootstrapRequired = useState('manager-bootstrap', () => false)
   const models = useState<Model[]>('manager-models', () => [])
+  const instances = useState<Instance[]>('manager-instances', () => [])
   const runtimes = useState<Record<string, Runtime[]>>('manager-runtimes', () => ({}))
   const profile = useState<Profile | null>('manager-profile', () => null)
   const backendError = useState('manager-backend-error', () => '')
@@ -55,7 +91,6 @@ export function useManager() {
       clearTimeout(runtimeReconnectTimer)
       runtimeReconnectTimer = undefined
     }
-
     let socket: WebSocket
     try {
       socket = new WebSocket(`${apiBase.value.replace(/^http/, 'ws')}/api/v1/ws`)
@@ -128,24 +163,29 @@ export function useManager() {
     disconnectRuntimeEvents()
     user.value = null
     models.value = []
+    instances.value = []
     runtimes.value = {}
   }
 
   async function refresh() {
     if (!user.value) return
-    const modelItems = await request<Model[]>('/api/v1/models')
+    const [modelItems, instanceItems] = await Promise.all([
+      request<Model[]>('/api/v1/models'),
+      request<Instance[]>('/api/v1/instances')
+    ])
     models.value = modelItems || []
+    instances.value = instanceItems || []
     if (runtimeEventsConnected.value) {
       runtimes.value = Object.fromEntries(models.value.map(model => [model.id, runtimes.value[model.id] || []]))
     } else {
-      const runtimeEntries = await Promise.all(models.value.map(async model => {
+      const runtimeItems = await Promise.all(instances.value.map(async instance => {
         try {
-          return [model.id, await request<Runtime[]>(`/api/v1/models/${model.id}/runtime`)] as const
+          return await request<Runtime>(`/api/v1/instances/${encodeURIComponent(instance.id)}/runtime`)
         } catch {
-          return [model.id, []] as const
+          return { instance_id: instance.id, model_id: instance.model_id, state: 'UNLOADED' } satisfies Runtime
         }
       }))
-      runtimes.value = Object.fromEntries(runtimeEntries)
+      applyRuntimeSnapshot(runtimeItems)
     }
     try {
       const result = await request<{ available: boolean; profile: Profile }>('/api/v1/llamacpp/profile')
@@ -164,12 +204,22 @@ export function useManager() {
       || 'UNLOADED'
   }
 
+  function runtimeForInstance(instance: Instance) {
+    return (runtimes.value[instance.model_id] || []).find(item => item.instance_id === instance.id)
+      || { instance_id: instance.id, model_id: instance.model_id, state: 'UNLOADED' } as Runtime
+  }
+
+  function instanceState(instance: Instance) {
+    return runtimeForInstance(instance).state
+  }
+
   return {
     apiBase,
     user,
     initialized,
     bootstrapRequired,
     models,
+    instances,
     runtimes,
     profile,
     backendError,
@@ -179,6 +229,8 @@ export function useManager() {
     logout,
     refresh,
     modelState,
+    runtimeForInstance,
+    instanceState,
     connectRuntimeEvents,
     disconnectRuntimeEvents,
     request
