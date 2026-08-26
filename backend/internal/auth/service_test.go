@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -101,15 +103,40 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	if keys[0].LastUsedAt == nil {
 		t.Fatal("last_used_at should be populated")
 	}
+
+	if err := s.SetAPIKeyEnabled(ctx, key.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AuthenticateAPIKey(ctx, secret); err == nil {
+		t.Fatal("disabled key should fail")
+	}
+	keys, err = s.ListAPIKeys(ctx)
+	if err != nil || len(keys) != 1 || keys[0].Enabled {
+		t.Fatalf("expected disabled key: %+v err=%v", keys, err)
+	}
+
+	if err := s.SetAPIKeyEnabled(ctx, key.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AuthenticateAPIKey(ctx, secret); err != nil {
+		t.Fatalf("re-enabled key should authenticate: %v", err)
+	}
+	if err := s.SetAPIKeyEnabled(ctx, "missing", true); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing enable error=%v", err)
+	}
+
 	if err := s.RevokeAPIKey(ctx, key.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AuthenticateAPIKey(ctx, secret); err == nil {
-		t.Fatal("revoked key should fail")
+		t.Fatal("deleted key should fail")
 	}
 	keys, err = s.ListAPIKeys(ctx)
-	if err != nil || keys[0].Enabled {
-		t.Fatalf("expected revoked key: %+v err=%v", keys, err)
+	if err != nil || len(keys) != 0 {
+		t.Fatalf("revoked key should be removed: %+v err=%v", keys, err)
+	}
+	if err := s.DeleteAPIKey(ctx, key.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing delete error=%v", err)
 	}
 }
 
