@@ -27,8 +27,8 @@ beforeEach(() => {
 })
 
 function selectComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'Select' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'USelect' })
+  const components = wrapper.findAllComponents({ name: 'SelectMenu' })
+  return components.length ? components : wrapper.findAllComponents({ name: 'USelectMenu' })
 }
 
 describe('model creation form', () => {
