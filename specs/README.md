@@ -10,7 +10,7 @@ These design specifications define the initial architecture and product contract
 - [006 — OpenAI-Compatible API](006-openai-api.md)
 - [007 — llama.cpp Configuration and Option Discovery](007-llamacpp-options.md)
 - [008 — Model Providers and Downloads](008-model-providers.md)
-- [009 — Authentication, API Keys and RBAC](009-auth-rbac.md)
+- [009 — Authentication, API Keys and Secret Storage](009-auth.md)
 - [010 — Web UI](010-ui.md)
 
 ## Review order
@@ -19,7 +19,7 @@ The recommended review order is the numeric order above. Architecture, data mode
 
 ## Model configuration UI parity
 
-Any specification or implementation change that introduces or changes a **model-scoped configuration option** must update `/models/new` in the same change. The model creation workflow must expose the same model-level controls, defaults, allowed values, validation and authorization rules as the post-creation model configuration surfaces.
+Any specification or implementation change that introduces or changes a **model-scoped configuration option** must update `/models/new` in the same change. The model creation workflow must expose the same model-level controls, defaults, allowed values and validation as the post-creation model configuration surfaces.
 
 This includes lifecycle, scheduler and routing settings such as Autoload, Always On, idle/startup timeout, priority and routing policy, as well as model-level llama.cpp overrides. A model configuration feature is incomplete if a user must create the model first and only then can configure that option.
 
