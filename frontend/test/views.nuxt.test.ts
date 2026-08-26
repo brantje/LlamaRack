@@ -235,6 +235,32 @@ describe('API page', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
   })
 
+  it('falls back when the Clipboard API is unavailable or rejected', async () => {
+    resetState()
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/api-keys' && options?.method === 'POST') return { key: { id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, secret: 'secret-value' }
+      if (path === '/api/v1/api-keys') return []
+      return []
+    })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    const execCommand = vi.fn(() => true)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
+
+    const wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(wrapper.text()).not.toContain('Unable to copy API key')
+
+    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    execCommand.mockReturnValue(false)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('secret-value')
+    expect(execCommand).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('Unable to copy API key. Select the key and copy it manually.')
+  })
+
   it('handles API-key load and create errors', async () => {
     resetState(); mocks.request.mockRejectedValueOnce(new Error('key load failed'))
     let wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
