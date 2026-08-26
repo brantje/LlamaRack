@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { parseLlamaCppOptions } from '~/utils/llamacppOptions'
+
 const manager = useManager()
 const router = useRouter()
 const busy = ref(false)
@@ -31,18 +33,6 @@ watch(() => form.name, (name) => {
   if (!slugEdited.value) form.slug = slugify(name)
 })
 
-function parseOptions(value: string) {
-  const out: Record<string, string> = {}
-  for (const line of value.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const at = trimmed.indexOf('=')
-    if (at <= 0) throw new Error(`Invalid option “${trimmed}”; use key=value`)
-    out[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim()
-  }
-  return out
-}
-
 async function submit() {
   busy.value = true
   error.value = ''
@@ -53,7 +43,7 @@ async function submit() {
         ...form,
         gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices.split(',').map(x => x.trim()).filter(Boolean) : [],
         tensor_split: form.tensor_split.trim(),
-        options: parseOptions(form.options)
+        options: parseLlamaCppOptions(form.options, manager.profile.value)
       }
     })
     if (launchAfterCreate.value) {
@@ -100,7 +90,7 @@ async function submit() {
         <USeparator label="Placement" />
         <div class="grid gap-4 md:grid-cols-2"><UFormField label="GPU placement" name="gpu_mode"><USelectMenu v-model="form.gpu_mode" class="w-full" :items="gpuItems" label-key="label" value-key="value" /></UFormField><UFormField v-if="form.gpu_mode === 'manual'" label="GPU devices" name="gpu_devices" description="Comma-separated device IDs."><UInput v-model="form.gpu_devices" class="w-full" placeholder="0,1" /></UFormField><UFormField label="Tensor split" name="tensor_split" description="Passed to llama.cpp when configured."><UInput v-model="form.tensor_split" class="w-full" placeholder="1,1" /></UFormField></div>
         <USeparator label="llama.cpp overrides" />
-        <UFormField label="Instance overrides" name="options" description="One key=value pair per line. These override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" placeholder="ctx-size=32768" /></UFormField>
+        <UFormField label="Instance overrides" name="options" description="One key=value pair per line. Validated against the detected llama-server; Instance values override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" placeholder="ctx-size=32768" /></UFormField>
         <UCheckbox v-model="launchAfterCreate" label="Launch after creation" />
         <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy" :disabled="!form.model_id || !form.name || !form.slug">Create Instance</UButton></div>
       </UForm>
