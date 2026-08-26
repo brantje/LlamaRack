@@ -11,6 +11,7 @@ services:
       LCM_LLAMA_SERVER: /app/llama-server
       LCM_ALLOWED_ORIGIN: ${LCM_ALLOWED_ORIGIN:-http://localhost:3000}
       LCM_ALWAYS_ON_RECONCILE_SECONDS: ${LCM_ALWAYS_ON_RECONCILE_SECONDS:-15}
+      LCM_IDLE_UNLOAD_SECONDS: ${LCM_IDLE_UNLOAD_SECONDS:-300}
     volumes:
       - ./data/config:/config
       - ./data/models:/models

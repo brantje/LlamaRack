@@ -10,8 +10,14 @@ import (
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
+
+type Activity struct {
+	ActiveRequests int       `json:"active_requests"`
+	LastUsed       time.Time `json:"last_used,omitempty"`
+}
 
 type Service struct {
 	models          *models.Service
@@ -19,6 +25,9 @@ type Service struct {
 	mu              sync.Mutex
 	loads           map[string]*loadCall
 	manuallyStopped map[string]bool
+	activities      map[string]Activity
+	idleLocks       map[string]*sync.Mutex
+	now             func() time.Time
 }
 
 type loadCall struct {
@@ -33,7 +42,40 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 		sup:             sup,
 		loads:           map[string]*loadCall{},
 		manuallyStopped: map[string]bool{},
+		activities:      map[string]Activity{},
+		idleLocks:       map[string]*sync.Mutex{},
+		now:             time.Now,
 	}
+}
+
+// Acquire resolves/loads a model for an inference request and marks that model
+// active until the returned release function is called. The gateway holds the
+// lease for the complete proxied response, including streaming responses.
+func (s *Service) Acquire(ctx context.Context, publicID string) (string, func(), error) {
+	m, err := s.models.GetByPublicID(ctx, publicID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Coordinate request admission with idle shutdown. If idle reconciliation is
+	// already stopping this model, admission waits for that stop to finish and
+	// normal autoload can start it again deterministically.
+	idleLock := s.idleLock(m.ID)
+	idleLock.Lock()
+	s.beginRequest(m.ID)
+	idleLock.Unlock()
+
+	endpoint, err := s.ensureReadyModel(ctx, m)
+	if err != nil {
+		s.finishRequest(m.ID)
+		return "", nil, err
+	}
+
+	var once sync.Once
+	release := func() {
+		once.Do(func() { s.finishRequest(m.ID) })
+	}
+	return endpoint, release, nil
 }
 
 func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, error) {
@@ -41,6 +83,10 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	return s.ensureReadyModel(ctx, m)
+}
+
+func (s *Service) ensureReadyModel(ctx context.Context, m models.Model) (string, error) {
 	if !m.Enabled {
 		return "", errors.New("model disabled")
 	}
@@ -133,6 +179,44 @@ func (s *Service) Runtime(ctx context.Context, id string) ([]supervisor.Runtime,
 	return out, nil
 }
 
+func (s *Service) Activity(id string) Activity {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activities[id]
+}
+
+// EvictionPlan applies the Phase 5 eviction policy to currently loaded
+// instances. Model file size is the Level-1 resource estimate; Phase 7 will
+// replace/augment it with actual per-device VRAM demand and availability.
+func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (scheduler.Plan, error) {
+	items, err := s.models.List(ctx)
+	if err != nil {
+		return scheduler.Plan{}, err
+	}
+	candidates := make([]scheduler.Candidate, 0)
+	for _, m := range items {
+		instances, err := s.models.Instances(ctx, m.ID)
+		if err != nil {
+			return scheduler.Plan{}, err
+		}
+		activity := s.Activity(m.ID)
+		for _, instance := range instances {
+			runtime := s.sup.Status(instance.ID)
+			candidates = append(candidates, scheduler.Candidate{
+				ModelID:        m.ID,
+				InstanceID:     instance.ID,
+				Priority:       m.Priority,
+				AlwaysOn:       m.AlwaysOn,
+				ActiveRequests: activity.ActiveRequests,
+				LastUsed:       activity.LastUsed,
+				EstimatedBytes: m.TotalBytes,
+				Ready:          runtime.State == supervisor.Ready,
+			})
+		}
+	}
+	return scheduler.PlanEvictions(candidates, requiredBytes), nil
+}
+
 func (s *Service) Logs(id string) []string { return s.sup.Logs(id) }
 
 func (s *Service) SubscribeLogs(id string) ([]string, <-chan string, func()) {
@@ -155,6 +239,43 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	}
 }
 
+func (s *Service) ReconcileIdle(ctx context.Context, idleTimeout time.Duration) {
+	if idleTimeout <= 0 {
+		return
+	}
+	items, err := s.models.List(ctx)
+	if err != nil {
+		return
+	}
+	now := s.now().UTC()
+	for _, m := range items {
+		if !m.Enabled || m.AlwaysOn {
+			continue
+		}
+
+		// Admission and the final idle check share a per-model lock. A request
+		// either becomes active before this check (and prevents the stop), or it
+		// waits until the stop is complete and then follows normal autoload.
+		idleLock := s.idleLock(m.ID)
+		idleLock.Lock()
+		activity := s.Activity(m.ID)
+		if activity.ActiveRequests > 0 || activity.LastUsed.IsZero() || now.Sub(activity.LastUsed) < idleTimeout {
+			idleLock.Unlock()
+			continue
+		}
+		if _, ok := s.readyEndpoint(ctx, m); !ok {
+			idleLock.Unlock()
+			continue
+		}
+		slog.Info("idle timeout reached; unloading model", "model_id", m.ID, "public_id", m.PublicID, "idle_for", now.Sub(activity.LastUsed))
+		err := s.StopModel(ctx, m.ID)
+		idleLock.Unlock()
+		if err != nil {
+			slog.Warn("idle unload failed", "model_id", m.ID, "public_id", m.PublicID, "error", err)
+		}
+	}
+}
+
 func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 	s.ReconcileAlwaysOn(ctx)
 	if interval <= 0 {
@@ -171,6 +292,69 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 			s.ReconcileAlwaysOn(ctx)
 		}
 	}
+}
+
+func (s *Service) RunIdleReconciler(ctx context.Context, idleTimeout time.Duration) {
+	if idleTimeout <= 0 {
+		<-ctx.Done()
+		return
+	}
+	interval := idleTimeout / 2
+	if interval > 15*time.Second {
+		interval = 15 * time.Second
+	}
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.ReconcileIdle(ctx, idleTimeout)
+		}
+	}
+}
+
+func (s *Service) beginRequest(id string) {
+	s.mu.Lock()
+	activity := s.activities[id]
+	activity.ActiveRequests++
+	activity.LastUsed = s.now().UTC()
+	s.activities[id] = activity
+	s.mu.Unlock()
+}
+
+func (s *Service) finishRequest(id string) {
+	s.mu.Lock()
+	activity := s.activities[id]
+	if activity.ActiveRequests > 0 {
+		activity.ActiveRequests--
+	}
+	activity.LastUsed = s.now().UTC()
+	s.activities[id] = activity
+	s.mu.Unlock()
+}
+
+func (s *Service) touch(id string) {
+	s.mu.Lock()
+	activity := s.activities[id]
+	activity.LastUsed = s.now().UTC()
+	s.activities[id] = activity
+	s.mu.Unlock()
+}
+
+func (s *Service) idleLock(id string) *sync.Mutex {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock := s.idleLocks[id]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.idleLocks[id] = lock
+	}
+	return lock
 }
 
 func (s *Service) markManualStop(id string) {
@@ -253,6 +437,7 @@ func (s *Service) startOne(ctx context.Context, m models.Model) (string, error) 
 	if !ok {
 		return "", errors.New("worker did not reach ready state")
 	}
+	s.touch(m.ID)
 	return endpoint, nil
 }
 
