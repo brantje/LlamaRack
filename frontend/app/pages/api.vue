@@ -148,7 +148,12 @@ onMounted(load)
         </template>
       </UTable>
 
-      <UEmpty v-else title="No API keys created yet." description="Create a key to authenticate OpenAI-compatible clients." />
+      <UEmpty
+        v-else
+        variant="naked"
+        title="No API keys created yet."
+        description="Create a key to authenticate OpenAI-compatible clients."
+      />
     </UCard>
 
     <UAlert v-else color="neutral" variant="subtle" description="Only administrators can manage inference API keys." />
