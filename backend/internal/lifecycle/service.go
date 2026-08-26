@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -13,6 +14,12 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
+type loadCall struct {
+	done     chan struct{}
+	endpoint string
+	err      error
+}
+
 type Service struct {
 	models *models.Service
 	sup    *supervisor.Supervisor
@@ -20,14 +27,8 @@ type Service struct {
 	loads  map[string]*loadCall
 }
 
-type loadCall struct {
-	done     chan struct{}
-	endpoint string
-	err      error
-}
-
-func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
-	return &Service{models: modelsService, sup: sup, loads: map[string]*loadCall{}}
+func New(m *models.Service, sup *supervisor.Supervisor) *Service {
+	return &Service{models: m, sup: sup, loads: map[string]*loadCall{}}
 }
 
 func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, error) {
@@ -49,44 +50,29 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 }
 
 func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
-	slog.Info("model start requested", "model_id", id)
 	m, err := s.models.GetByID(ctx, id)
 	if err != nil {
-		slog.Error("model start failed", "model_id", id, "error", err)
 		return "", err
 	}
 	if !m.Enabled {
-		err := errors.New("model disabled")
-		slog.Warn("model start rejected", "model_id", id, "public_id", m.PublicID, "error", err)
-		return "", err
+		return "", errors.New("model disabled")
 	}
 	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
-		slog.Info("model already ready", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
 		return endpoint, nil
 	}
-	endpoint, err := s.startSingleFlight(ctx, m)
-	if err != nil {
-		slog.Error("model start failed", "model_id", id, "public_id", m.PublicID, "error", err)
-		return "", err
-	}
-	slog.Info("model start completed", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
-	return endpoint, nil
+	return s.startSingleFlight(ctx, m)
 }
 
 func (s *Service) StopModel(ctx context.Context, id string) error {
-	slog.Info("model stop requested", "model_id", id)
 	instances, err := s.models.Instances(ctx, id)
 	if err != nil {
-		slog.Error("model stop failed", "model_id", id, "error", err)
 		return err
 	}
-	for _, x := range instances {
-		if err := s.sup.Stop(ctx, x.ID); err != nil {
-			slog.Error("model stop failed", "model_id", id, "instance_id", x.ID, "error", err)
+	for _, instance := range instances {
+		if err := s.sup.Stop(ctx, instance.ID); err != nil {
 			return err
 		}
 	}
-	slog.Info("model stop completed", "model_id", id, "instances", len(instances))
 	return nil
 }
 
@@ -124,9 +110,13 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	}
 }
 
-func (s *Service) RunReconciler(ctx context.Context) {
+func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 	s.ReconcileAlwaysOn(ctx)
-	ticker := time.NewTicker(15 * time.Second)
+	if interval <= 0 {
+		<-ctx.Done()
+		return
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -167,40 +157,39 @@ func (s *Service) startOne(ctx context.Context, m models.Model) (string, error) 
 		return "", err
 	}
 	var selected *models.Instance
-	for i := range instances {
-		if instances[i].Enabled {
-			selected = &instances[i]
+	for idx := range instances {
+		if instances[idx].Enabled {
+			selected = &instances[idx]
 			break
 		}
 	}
 	if selected == nil {
 		return "", errors.New("no enabled instance")
 	}
-	path, err := s.models.ModelAbsolutePath(m)
+	modelPath, err := s.models.ModelAbsolutePath(m)
 	if err != nil {
 		return "", err
 	}
-	opts, err := s.models.Options(ctx, m.ID)
+	options, err := s.models.Options(ctx, m.ID)
 	if err != nil {
 		return "", err
 	}
-	args := optionArgs(opts)
+	args := []string{"--model", modelPath}
 	if selected.GPUMode == "manual" && len(selected.GPUDevices) > 0 {
 		args = append(args, "--device", strings.Join(selected.GPUDevices, ","))
 	}
 	if selected.TensorSplit != "" {
 		args = append(args, "--tensor-split", selected.TensorSplit)
 	}
-	slog.Info("starting model instance", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID, "model_path", path)
-	_, err = s.sup.Start(ctx, selected.ID, m.ID, path, args)
+	args = append(args, optionArgs(options)...)
+	slog.Info("starting model worker", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID)
+	runtime, err := s.sup.Start(ctx, selected.ID, m.ID, modelPath, args)
 	if err != nil {
+		slog.Error("model worker start failed", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID, "error", err)
 		return "", err
 	}
-	endpoint, ok := s.sup.Endpoint(selected.ID)
-	if !ok {
-		return "", errors.New("worker did not reach ready state")
-	}
-	return endpoint, nil
+	slog.Info("model worker ready", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID, "pid", runtime.PID, "port", runtime.Port)
+	return s.sup.Endpoint(selected.ID), nil
 }
 
 func (s *Service) readyEndpoint(ctx context.Context, m models.Model) (string, bool) {
@@ -208,9 +197,12 @@ func (s *Service) readyEndpoint(ctx context.Context, m models.Model) (string, bo
 	if err != nil {
 		return "", false
 	}
-	for _, x := range instances {
-		if endpoint, ok := s.sup.Endpoint(x.ID); ok {
-			return endpoint, true
+	for _, instance := range instances {
+		if !instance.Enabled {
+			continue
+		}
+		if status := s.sup.Status(instance.ID); status.State == supervisor.Ready {
+			return s.sup.Endpoint(instance.ID), true
 		}
 	}
 	return "", false
@@ -218,22 +210,28 @@ func (s *Service) readyEndpoint(ctx context.Context, m models.Model) (string, bo
 
 func optionArgs(options map[string]string) []string {
 	keys := make([]string, 0, len(options))
-	for k := range options {
-		keys = append(keys, k)
+	for key := range options {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	var out []string
-	for _, k := range keys {
-		v := strings.TrimSpace(options[k])
-		flag := "--" + strings.TrimLeft(k, "-")
-		switch strings.ToLower(v) {
-		case "true":
-			out = append(out, flag)
-		case "false", "":
+	out := make([]string, 0, len(options)*2)
+	for _, key := range keys {
+		value := strings.TrimSpace(options[key])
+		key = strings.TrimSpace(key)
+		if key == "" || value == "" || strings.EqualFold(value, "false") {
 			continue
-		default:
-			out = append(out, flag, v)
+		}
+		if !strings.HasPrefix(key, "--") {
+			key = "--" + key
+		}
+		out = append(out, key)
+		if !strings.EqualFold(value, "true") {
+			out = append(out, value)
 		}
 	}
 	return out
+}
+
+func modelDescription(m models.Model) string {
+	return fmt.Sprintf("%s (%s)", m.PublicID, m.ID)
 }
