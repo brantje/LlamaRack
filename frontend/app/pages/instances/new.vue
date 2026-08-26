@@ -66,12 +66,12 @@ async function submit() {
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <UForm :state="form" class="space-y-6" @submit="submit">
         <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="Registered Model" name="model_id" required><USelect v-model="form.model_id" class="w-full" :items="modelItems" label-key="label" value-key="value" required /></UFormField>
+          <UFormField label="Registered Model" name="model_id" required><USelectMenu v-model="form.model_id" class="w-full" :items="modelItems" label-key="label" value-key="value" required /></UFormField>
           <UFormField label="Instance name" name="name" description="Slugified into the exact OpenAI model ID." required><UInput v-model="form.name" class="w-full" required /></UFormField>
         </div>
         <USeparator label="Lifecycle & scheduling" />
         <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="Priority" name="priority"><USelect v-model="form.priority" class="w-full" :items="priorityItems" label-key="label" value-key="value" /></UFormField>
+          <UFormField label="Priority" name="priority"><USelectMenu v-model="form.priority" class="w-full" :items="priorityItems" label-key="label" value-key="value" /></UFormField>
           <UFormField label="Idle unload timeout (seconds)" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
         </div>
         <div class="space-y-3">
@@ -82,7 +82,7 @@ async function submit() {
         </div>
         <USeparator label="Placement" />
         <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="GPU placement" name="gpu_mode"><USelect v-model="form.gpu_mode" class="w-full" :items="gpuItems" label-key="label" value-key="value" /></UFormField>
+          <UFormField label="GPU placement" name="gpu_mode"><USelectMenu v-model="form.gpu_mode" class="w-full" :items="gpuItems" label-key="label" value-key="value" /></UFormField>
           <UFormField v-if="form.gpu_mode === 'manual'" label="GPU devices" name="gpu_devices" description="Comma-separated device IDs."><UInput v-model="form.gpu_devices" class="w-full" placeholder="0,1" /></UFormField>
           <UFormField label="Tensor split" name="tensor_split" description="Passed to llama.cpp when configured."><UInput v-model="form.tensor_split" class="w-full" placeholder="1,1" /></UFormField>
         </div>
