@@ -176,7 +176,7 @@ func (s *Service) startOne(ctx context.Context, m models.Model) (string, error) 
 	if selected == nil {
 		return "", errors.New("no enabled instance")
 	}
-	path, err := s.models.ArtifactAbsolutePath(m)
+	path, err := s.models.ModelAbsolutePath(m)
 	if err != nil {
 		return "", err
 	}
