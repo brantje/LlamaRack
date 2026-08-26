@@ -28,7 +28,7 @@ async function load() {
 
 watch(isAdmin, (admin) => {
   if (admin) void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 async function createKey() {
   error.value = ''
