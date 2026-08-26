@@ -92,10 +92,12 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	logRing.reset()
 	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: logRing, done: make(chan struct{})}
 	s.workers[instanceID] = w
+	s.emitRuntimeLocked(w.runtime)
 	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs)
 	if err := cmd.Start(); err != nil {
 		w.runtime.State = Failed
 		w.runtime.LastError = err.Error()
+		s.emitRuntimeLocked(w.runtime)
 		s.mu.Unlock()
 		slog.Error("failed to start llama-server worker", "instance_id", instanceID, "model_id", modelID, "error", err)
 		return w.runtime, err
@@ -122,6 +124,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	if current := s.workers[instanceID]; current != nil {
 		current.runtime.State = Ready
 		current.runtime.ReadyAt = time.Now().UTC()
+		s.emitRuntimeLocked(current.runtime)
 	}
 	rt := s.workers[instanceID].runtime
 	s.mu.Unlock()
@@ -138,6 +141,7 @@ func (s *Supervisor) Stop(ctx context.Context, id string) error {
 		return nil
 	}
 	w.runtime.State = Stopping
+	s.emitRuntimeLocked(w.runtime)
 	p := w.cmd.Process
 	done := w.done
 	modelID := w.runtime.ModelID
@@ -251,6 +255,7 @@ func (s *Supervisor) wait(w *worker) {
 	}
 	state := w.runtime.State
 	lastError := w.runtime.LastError
+	s.emitRuntimeLocked(w.runtime)
 	close(w.done)
 	s.mu.Unlock()
 	if wasStopping {
@@ -310,6 +315,7 @@ func (s *Supervisor) setState(id string, state State, msg string) {
 	if w := s.workers[id]; w != nil {
 		w.runtime.State = state
 		w.runtime.LastError = msg
+		s.emitRuntimeLocked(w.runtime)
 	}
 }
 
