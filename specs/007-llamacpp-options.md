@@ -10,6 +10,25 @@ This specification defines how llamacpp-manager discovers, stores, validates, pr
 
 The central design requirement is that the manager must not require a new release every time llama.cpp adds a command-line flag. The active binary is inspected at runtime, while curated metadata improves the experience for common options.
 
+### 1.1 Delivery requirement — first task in Phase 7
+
+The llama.cpp configuration GUI was originally a Phase 3 deliverable and remains required before Phase 7 hardware integration proceeds.
+
+**The first implementation task in Phase 7 must be to complete the missing llama.cpp options GUI and its end-to-end configuration path.** Hardware telemetry, automatic GPU placement, visual GPU assignment and tensor-split work must not be treated as the first Phase 7 implementation work while this configuration surface is incomplete.
+
+This Phase 7 catch-up task includes, at minimum:
+
+- render the curated **Basic** llama.cpp configuration view from the discovered/curated option schema;
+- render the searchable **Advanced** view containing every configurable option discovered from the active `llama-server --help` schema;
+- support global defaults and per-model overrides with explicit inherit/unset semantics;
+- expose model-level llama.cpp configuration both when editing an existing model and on `/models/new` in the same implementation, preserving model-creation configuration parity;
+- validate values and conflicts through the backend configuration engine rather than duplicating authoritative validation in the frontend;
+- generate the effective deterministic worker argv from the saved configuration;
+- expose effective values/source and restart-required state where applicable;
+- ensure manager-owned/protected options remain non-editable while derived placement options can later be integrated with the Phase 7 GPU UI.
+
+Phase 7 hardware integration may build on this configuration surface immediately afterward, especially for GPU layers/offload, device selection, tensor split, context/KV settings and other options that affect VRAM placement. Phase 7 is not considered complete if the Basic/Advanced llama.cpp configuration GUI or `/models/new` parity remains missing.
+
 ## 2. Goals
 
 The option system must:

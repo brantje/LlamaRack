@@ -29,7 +29,7 @@ The architecture must support:
 - Hugging Face and direct URL model downloads;
 - OpenAI-compatible inference endpoints;
 - LiteLLM interoperability;
-- local authentication, RBAC and inference API keys;
+- local management authentication and inference API keys;
 - Prometheus metrics and per-instance logs.
 
 ## 3. Non-goals for v1
@@ -45,6 +45,7 @@ The following are intentionally excluded:
 - request-content-aware routing;
 - storage pools or tiering;
 - automatic filesystem model discovery;
+- management RBAC, differentiated roles or custom permission matrices;
 - OIDC;
 - multiple Hugging Face identities;
 - GraphQL;
@@ -72,7 +73,7 @@ OpenAI clients / LiteLLM / applications
         | Resource Scheduler  |
         | Process Supervisor  |
         | Download Manager    |
-        | Auth / RBAC         |
+        | Auth                |
         | Metrics             |
         +----------+----------+
                    |
@@ -226,14 +227,14 @@ Responsibilities:
 - split-GGUF grouping;
 - artifact metadata persistence.
 
-### 5.10 Authentication and authorization
+### 5.10 Authentication
 
 Two separate authentication surfaces exist:
 
 1. Dashboard/management API user sessions.
 2. Inference API bearer keys.
 
-Management RBAC roles are Admin, Operator and Read-only.
+V1 intentionally has no management RBAC. Every authenticated management user has the same full management access. Role-based or capability-based authorization may be introduced after v1 as a separate feature.
 
 ### 5.11 Persistence
 
@@ -365,7 +366,7 @@ Durable state errors are considered manager-level failures. The application must
 - Inference API keys are stored only as hashes after creation.
 - Provider tokens are encrypted at rest and never returned in full after storage.
 - Logs and API responses must redact known secrets.
-- Management authorization is enforced server-side for every protected operation.
+- Management authentication is enforced server-side for every protected operation.
 - User-provided model IDs, filenames and provider metadata must not be trusted as filesystem paths.
 - Download destinations must remain under the configured model directory.
 
@@ -432,6 +433,7 @@ The following are hard invariants:
 8. Persisted runtime state is never blindly trusted after process restart.
 9. A partially downloaded model is never treated as a usable completed artifact.
 10. New llama.cpp options should not require a manager release merely to become visible in Advanced configuration.
+11. V1 management access is authenticated but not role-differentiated.
 
 ## 16. Acceptance criteria
 
@@ -444,4 +446,5 @@ This architecture is considered correctly implemented when:
 - Always-On and idle unload policies can operate without client awareness;
 - OpenAI-compatible streaming can pass through the gateway without full-response buffering;
 - a new llama.cpp option discovered from the active binary can be represented without a hard-coded backend field;
+- authenticated management access works without requiring RBAC for v1;
 - the system can later add remote-host support without changing public model IDs or the external `/v1` contract.

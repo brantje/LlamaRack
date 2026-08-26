@@ -1,4 +1,4 @@
-# 009 — Authentication, API Keys and RBAC
+# 009 — Authentication, API Keys and Secret Storage
 
 Status: Draft
 
@@ -6,25 +6,26 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines authentication and authorization for the llamacpp-manager web UI, management REST API, inference API, and provider secrets.
+This specification defines authentication for the llamacpp-manager web UI and management REST API, bearer API keys for the inference API, and secure provider-secret storage.
 
 V1 uses local username/password authentication for the management plane and manager-generated bearer API keys for `/v1/*` inference access.
+
+**Role-based access control is explicitly out of scope for v1.**
 
 ## 2. Goals
 
 The security model must:
 
 - require authenticated management access from day one;
-- provide a secure bootstrap-admin flow;
-- support Admin, Operator and Read-only roles;
-- use server-side authorization for every management mutation/read requiring protection;
+- provide a secure first-user bootstrap flow;
+- use one flat management permission level in v1;
 - issue independent inference API keys;
 - store only hashes of inference API keys;
 - store provider secrets encrypted at rest;
-- support revocation/rotation;
+- support API-key revocation/rotation;
 - avoid exposing internal worker credentials or ports;
 - provide safe session expiration/logout behavior;
-- prevent authorization bypass through direct API calls even if the UI hides actions.
+- prevent unauthenticated direct API access even if the UI hides or exposes actions incorrectly.
 
 ## 3. Authentication domains
 
@@ -51,23 +52,38 @@ Credential type:
 
 - manager-generated bearer API key.
 
-A dashboard session token is not an inference API key, and an inference API key does not grant management access.
+A dashboard session is not an inference API key, and an inference API key does not grant management access.
 
-## 4. Bootstrap administrator
+## 4. V1 authorization model
 
-On first start with no users:
+V1 intentionally has **no RBAC, roles, permission matrix, custom roles, scopes or differentiated management capabilities**.
+
+Rules:
+
+- every authenticated management user has the same full management access;
+- every unauthenticated management request is rejected, except the narrowly scoped bootstrap/login endpoints;
+- the backend still enforces authentication server-side for every protected management endpoint;
+- the frontend must not contain role-based navigation, role badges, capability gating or role-specific controls;
+- user records do not need a role field for the v1 product contract;
+- if an implementation retains a role column internally for forward compatibility, it must not affect v1 behavior or be exposed as a configurable v1 feature.
+
+RBAC may be designed later without changing the separation between management sessions and inference API keys.
+
+## 5. First-user bootstrap
+
+On first start with no management users:
 
 - manager enters bootstrap state;
-- normal authenticated management operations are unavailable until an Admin exists;
-- UI shows a one-time setup flow to create the first administrator;
-- bootstrap creation is allowed only while the user table has no valid administrator/user according to the chosen bootstrap condition;
-- immediately after successful creation, bootstrap endpoint becomes permanently unavailable unless a documented recovery flow is explicitly invoked out of band.
+- normal authenticated management operations are unavailable until the first user exists;
+- UI shows a one-time setup flow to create the first management account;
+- bootstrap creation is allowed only while the configured bootstrap condition is true, normally while no user exists;
+- immediately after successful creation, the bootstrap endpoint becomes unavailable unless a documented recovery flow is explicitly invoked out of band.
 
 Do not ship a default username/password.
 
 If bootstrap is exposed over the network, the UI must clearly encourage initial setup before exposing the service broadly.
 
-## 5. Password handling
+## 6. Password handling
 
 Requirements:
 
@@ -77,10 +93,10 @@ Requirements:
 - enforce a reasonable minimum password length;
 - allow long passphrases;
 - do not impose arbitrary composition rules such as mandatory punctuation unless required later;
-- compare hashes in a timing-safe library implementation;
+- compare hashes using a timing-safe library implementation;
 - rehash on successful login when password-hash parameters are upgraded.
 
-## 6. Login
+## 7. Login
 
 Login accepts username and password and creates a management session.
 
@@ -93,27 +109,26 @@ Security behavior:
 - session identifier is unpredictable and protected as a secret;
 - authentication cookies use appropriate HttpOnly/Secure/SameSite settings when cookie-based sessions are used.
 
-## 7. Session model
+## 8. Session model
 
 Preferred v1 approach: server-side sessions referenced by an opaque secure cookie.
 
 Advantages:
 
 - immediate revocation;
-- simple role-change behavior;
-- no long-lived self-contained token containing stale authorization claims;
-- straightforward logout/all-sessions revocation.
+- straightforward logout/all-sessions revocation;
+- no long-lived self-contained management token;
+- simple future extension if differentiated authorization is added after v1.
 
 Requirements:
 
 - session expiration;
 - rolling/idle expiration may be used but must have a hard maximum if configured;
-- logout invalidates server-side session;
+- logout invalidates the server-side session;
 - password change can invalidate other sessions;
-- disabling a user invalidates or blocks existing sessions promptly;
-- role changes take effect without waiting for a long token lifetime.
+- disabling a user invalidates or blocks existing sessions promptly.
 
-## 8. CSRF
+## 9. CSRF
 
 If management authentication uses cookies, state-changing `/api/v1/*` operations require CSRF protection appropriate to the frontend architecture.
 
@@ -126,76 +141,47 @@ Do not rely solely on the fact that the API returns JSON.
 
 `/v1/*` bearer-key API is not cookie-authenticated and therefore uses a different CSRF threat model.
 
-## 9. Roles
+## 10. Management endpoint enforcement
 
-V1 roles:
+Authentication is enforced in backend handlers/services, not only in frontend navigation.
 
-- `admin`
-- `operator`
-- `readonly`
+Requirements:
 
-Roles are intentionally coarse. Fine-grained custom roles are out of scope.
+- every protected management endpoint requires a valid session;
+- unauthenticated protected requests return 401;
+- authenticated users have full v1 management access and must not receive role/capability-based 403 responses;
+- direct HTTP calls must not bypass authentication;
+- bootstrap endpoints must stop working after initial setup.
 
-## 10. Authorization matrix
+A future RBAC implementation may add authorization checks, but those are not part of the v1 acceptance criteria.
 
-Baseline permissions:
+## 11. User management
 
-| Capability | Admin | Operator | Read-only |
-|---|---:|---:|---:|
-| View dashboard/health | Yes | Yes | Yes |
-| View models/config | Yes | Yes | Yes |
-| View instance status/logs | Yes | Yes | Yes |
-| View download status | Yes | Yes | Yes |
-| Start/stop/restart models | Yes | Yes | No |
-| Create/edit model config | Yes | Yes | No |
-| Create instance definitions / GPU assignment | Yes | Yes | No |
-| Start/cancel/retry downloads | Yes | Yes | No |
-| Discover/browse provider models | Yes | Yes | Yes |
-| Delete model definitions | Yes | No | No |
-| Delete local artifacts/files | Yes | No | No |
-| Manage users/roles | Yes | No | No |
-| Manage inference API keys | Yes | No | No |
-| Manage Hugging Face token/secrets | Yes | No | No |
-| Change global/system settings | Yes | No | No |
-| Change global llama.cpp defaults | Yes | No | No |
-| View sensitive diagnostics | Yes | limited | limited |
+V1 may support multiple local management users, but all users are equivalent in permissions.
 
-Implementation may refine individual read-only diagnostic fields, but must not broaden Operator into security administration implicitly.
-
-## 11. Authorization enforcement
-
-Authorization is enforced in backend handlers/services, not only in frontend navigation.
-
-Every protected endpoint declares its required capability/role.
-
-The frontend consumes user role/capability data to hide/disable impossible actions for UX, but direct HTTP calls must still be rejected server-side.
-
-Authorization failures should return 403 for authenticated users lacking permission.
-
-## 12. User management
-
-Admin can:
+Authenticated management users may:
 
 - list users;
 - create users;
-- assign role;
 - enable/disable users;
 - reset/change another user's password through an explicit secure workflow;
 - remove users if product policy allows.
 
 Recommended safeguards:
 
-- prevent an administrator from accidentally leaving the system with zero enabled Admin users;
+- prevent accidentally leaving the system with zero enabled management users unless a documented recovery path exists;
 - require current-password reauthentication for changing one's own password or particularly sensitive actions if practical;
 - clearly warn before disabling/deleting the current account.
 
 Self-service password change is allowed for authenticated users.
 
-## 13. Inference API keys
+There is no role selector or role-management API in v1.
+
+## 12. Inference API keys
 
 API keys are generated by the manager using cryptographically secure randomness.
 
-Suggested display format can use a recognizable prefix such as `sk-lcm-`, but prefix is a UX choice, not a security control.
+Suggested display format can use a recognizable prefix such as `sk-lcm-`, but the prefix is a UX choice, not a security control.
 
 Store:
 
@@ -210,7 +196,9 @@ Store:
 
 Return plaintext only once immediately after creation/rotation.
 
-## 14. API key verification
+Any authenticated management user may manage inference API keys in v1.
+
+## 13. API key verification
 
 For each `/v1/*` request:
 
@@ -224,9 +212,9 @@ For each `/v1/*` request:
 
 Do not log the token or full Authorization header.
 
-## 15. API key lifecycle
+## 14. API key lifecycle
 
-Admin can:
+Authenticated management users can:
 
 - create;
 - name/rename metadata;
@@ -238,9 +226,9 @@ Rotation should produce a new secret rather than attempt to reveal/recover the o
 
 Immediate revocation is required for subsequent requests.
 
-V1 does not require per-key model allowlists, rate limits or user ownership. Those can be added later by extending key policy.
+V1 does not require per-key model allowlists, rate limits, user ownership or permission scopes. Those can be added later by extending key policy.
 
-## 16. Provider secrets
+## 15. Provider secrets
 
 Initial provider secret:
 
@@ -248,9 +236,9 @@ Initial provider secret:
 
 Requirements:
 
-- Admin-only write/delete;
+- writable/deletable by authenticated management users in v1;
 - encrypted before database storage;
-- decrypted only inside provider service when required;
+- decrypted only inside the provider service when required;
 - never returned after save;
 - never embedded into frontend state;
 - never included in logs, metrics, errors or crash reports;
@@ -258,7 +246,7 @@ Requirements:
 
 The UI displays status such as `Configured` and optional safe metadata, not the secret.
 
-## 17. Secret encryption key
+## 16. Secret encryption key
 
 The encryption-at-rest design requires a manager master key.
 
@@ -267,29 +255,26 @@ V1 should support a deployment-safe mechanism such as:
 - externally supplied secret/file mounted into the container; or
 - generated persistent key stored with restrictive permissions in the config directory.
 
-The exact implementation may choose one default and support another, but requirements are:
+Requirements:
 
 - key must survive container restart when using the same persistent configuration volume;
 - loss of key makes encrypted provider secrets unrecoverable but must not expose them;
 - key is not stored in the same SQLite row as ciphertext as if that provided meaningful encryption;
 - key never appears in UI/API.
 
-## 18. Password reset/recovery
+## 17. Password reset/recovery
 
 V1 does not have email-based recovery.
 
-A documented local administrator recovery path is required for self-hosted operation, for example a CLI/startup recovery command requiring direct access to the persistent config/container host.
+A documented local recovery path is required for self-hosted operation, for example a CLI/startup recovery command requiring direct access to the persistent config/container host.
 
 Recovery must not become an unauthenticated HTTP endpoint available during normal operation.
 
-Exact recovery command is implementation work, but the architecture must reserve a safe out-of-band method.
-
-## 19. Management API security
+## 18. Management API security
 
 Baseline protections:
 
 - authenticate every non-bootstrap protected endpoint;
-- authorize each operation;
 - validate JSON/body sizes;
 - use CSRF protection if cookie sessions are used;
 - set secure headers appropriate to same-origin web app deployment;
@@ -298,12 +283,12 @@ Baseline protections:
 
 Management API and UI are expected to be same-origin in standard deployment.
 
-## 20. Audit/security events
+## 19. Security events
 
 A full immutable audit log is not a v1 requirement, but security-sensitive actions should at least produce structured application events/logs, including:
 
-- login success/failure (without passwords);
-- user create/disable/role change;
+- login success/failure without passwords;
+- user create/disable/password reset;
 - API key create/revoke/rotate;
 - provider token set/remove;
 - destructive artifact deletion;
@@ -311,7 +296,7 @@ A full immutable audit log is not a v1 requirement, but security-sensitive actio
 
 If durable audit history is later required, these event points provide a foundation.
 
-## 21. Sensitive diagnostics
+## 20. Sensitive diagnostics
 
 Worker logs can contain upstream content or accidentally echo arguments/environment.
 
@@ -319,11 +304,11 @@ Therefore:
 
 - redact known manager secrets before storage/display where feasible;
 - never launch workers with provider tokens in command-line arguments;
-- restrict full logs to authenticated users;
-- Read-only may view logs because the selected RBAC model permits operational read access, but the UI should warn logs may contain model/application content produced by upstream llama.cpp;
+- restrict full logs to authenticated management users;
+- warn that logs may contain model/application content produced by upstream llama.cpp;
 - manager should not intentionally log inference prompts by default.
 
-## 22. Brute-force protection
+## 21. Brute-force protection
 
 Implement basic login protection using a bounded strategy such as:
 
@@ -335,7 +320,7 @@ Avoid permanent lockout that requires database edits after trivial attacks.
 
 Inference API keys are high-entropy and do not require the same password-style lockout, but repeated invalid keys may be rate-limited for abuse protection.
 
-## 23. Network assumptions
+## 22. Network assumptions
 
 The manager may be deployed on LAN or behind a reverse proxy.
 
@@ -349,7 +334,7 @@ Requirements:
 
 Built-in TLS is optional/not required for v1 if reverse-proxy deployment is documented.
 
-## 24. CORS
+## 23. CORS
 
 Default deployment serves UI and API same-origin, so permissive CORS is unnecessary.
 
@@ -361,12 +346,11 @@ Recommended default:
 
 A configurable allowed-origin list can be added if needed.
 
-## 25. Error behavior
+## 24. Error behavior
 
 Management auth errors:
 
 - unauthenticated: 401;
-- authenticated but unauthorized: 403;
 - invalid CSRF/session: safe 401/403 depending on framework semantics.
 
 Inference auth errors use the OpenAI-compatible envelope defined in `006-openai-api.md`.
@@ -379,7 +363,7 @@ Errors must not reveal:
 - whether a supplied invalid username exists during login;
 - internal crypto keys.
 
-## 26. Security-related configuration
+## 25. Security-related configuration
 
 Potential settings include:
 
@@ -392,50 +376,64 @@ Potential settings include:
 
 Do not expose low-level crypto parameters casually in UI unless there is a concrete operational use.
 
-## 27. Testing requirements
+## 26. Testing requirements
 
 Automated tests must cover:
 
-- bootstrap only when no admin exists;
+- bootstrap only when no management user exists;
 - valid/invalid login;
 - disabled account behavior;
 - session expiration and logout;
 - CSRF rejection for protected cookie-auth mutations;
-- every RBAC boundary in the authorization matrix;
-- prevention of last-admin removal/disable where policy requires;
+- all protected management endpoints reject unauthenticated requests;
+- authenticated management users can perform all management operations without role checks;
+- no role/capability-based behavior is required for v1;
 - API key creation returns plaintext once;
-- stored record cannot recover plaintext;
+- stored API-key record cannot recover plaintext;
 - revoked API key immediately fails;
 - invalid inference key cannot trigger autoload;
 - Hugging Face token API never returns stored plaintext;
 - secret encryption/decryption across manager restart with persistent master key;
-- logs redact known credential patterns;
-- non-Admin cannot change users, API keys, global settings or provider token.
+- logs redact known credential patterns.
 
-## 28. Invariants
+## 27. Invariants
 
 1. No default management password exists.
 2. Passwords are never stored reversibly.
 3. Inference API key plaintext is not stored.
 4. Management sessions and inference API keys are separate credential domains.
-5. Authorization is enforced server-side.
+5. Every protected management operation requires authentication server-side.
 6. Invalid inference authentication cannot cause model startup/resource consumption.
 7. Provider tokens are encrypted at rest and never returned after save.
-8. Admin-only operations cannot be reached by Operator/Read-only through direct API calls.
-9. Bootstrap HTTP functionality is disabled after initial admin creation.
+8. V1 has no RBAC or differentiated management permissions.
+9. Bootstrap HTTP functionality is disabled after initial account creation.
 10. Secret values never appear in metrics.
+
+## 28. Deferred authorization scope
+
+Explicitly deferred until after v1:
+
+- Admin / Operator / Read-only roles;
+- custom roles;
+- per-endpoint capability matrices;
+- role-specific frontend controls;
+- per-user model permissions;
+- per-key permission scopes or model allowlists.
+
+Adding RBAC later requires a separate design/update to this specification and the data/UI contracts.
 
 ## 29. Acceptance criteria
 
-Security/RBAC is complete for v1 when:
+Authentication/security is complete for v1 when:
 
-- first-run setup creates an Admin without a default credential;
-- subsequent access requires login;
-- Admin, Operator and Read-only behavior matches the matrix;
-- sessions can be revoked/expire and role changes take effect promptly;
+- first-run setup creates the first management user without a default credential;
+- subsequent management access requires login;
+- every authenticated management user has the same full management access;
+- sessions can be revoked and expire;
 - inference clients authenticate with independent generated keys;
 - key revocation works without manager restart;
 - Hugging Face token survives restart encrypted and is usable by the provider while remaining unreadable through management APIs;
-- direct unauthorized calls receive correct 401/403 results;
-- a lost-admin scenario has a documented local recovery path;
-- security-sensitive logs contain safe metadata but no plaintext credentials.
+- direct unauthenticated calls receive correct 401 results;
+- a lost-access scenario has a documented local recovery path;
+- security-sensitive logs contain safe metadata but no plaintext credentials;
+- no RBAC implementation or role-specific UI is required for v1.
