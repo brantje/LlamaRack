@@ -167,7 +167,6 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{"model": model, "instance": instance}
 	if in.FirstInstance.Start {
 		if _, err := s.lifecycle.StartInstance(r.Context(), instance.ID); err != nil {
-			// Both durable records intentionally survive a launch failure.
 			response["start_error"] = err.Error()
 		}
 	}
@@ -341,8 +340,6 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 			return
 		}
 		writeJSON(w, 200, items)
-	// Compatibility endpoints retained for older clients during development.
-	// The Phase 5.5 UI does not expose Model lifecycle controls.
 	case "start":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(405)
@@ -410,6 +407,14 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		default:
 			w.WriteHeader(405)
 		}
+		return
+	}
+	if len(parts) == 3 && parts[1] == "logs" && parts[2] == "stream" {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(405)
+			return
+		}
+		s.streamLogs(w, r, id)
 		return
 	}
 	if len(parts) != 2 {
@@ -498,12 +503,6 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 			return
 		}
 		writeJSON(w, 200, map[string]any{"lines": s.lifecycle.Logs(id)})
-	case "logs/stream":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(405)
-			return
-		}
-		s.streamLogs(w, r, id)
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 	}
