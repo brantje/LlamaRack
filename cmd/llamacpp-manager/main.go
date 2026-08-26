@@ -44,7 +44,7 @@ func main() {
 	requestRouter := router.New(modelService, sup)
 	hardwareService := hardware.New()
 	schedulerService := scheduler.New(hardwareService, modelService, sup, requestRouter)
-	lifecycleService := lifecycle.New(modelService, sup, schedulerService)
+	lifecycleService := lifecycle.New(modelService, sup, schedulerService, requestRouter, cfg.IdleTimeout)
 	hfProvider := providers.NewHuggingFace(os.Getenv("HF_TOKEN"))
 	downloadManager := downloads.New(cfg.ModelsDir, modelService, hfProvider)
 
