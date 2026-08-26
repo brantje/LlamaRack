@@ -69,9 +69,6 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, 200, items)
 	case path == "/api/v1/models/available" && r.Method == http.MethodGet:
-		if !requireOperate(w, user) {
-			return
-		}
 		items, err := s.models.AvailableGGUFs(r.Context())
 		if err != nil {
 			writeErr(w, 500, err)
@@ -79,9 +76,6 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, 200, items)
 	case path == "/api/v1/models" && r.Method == http.MethodPost:
-		if !requireOperate(w, user) {
-			return
-		}
 		var in models.CreateModelInput
 		if !decode(w, r, &in) {
 			return
@@ -100,10 +94,6 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, 200, map[string]any{"available": true, "profile": p})
 	case path == "/api/v1/api-keys" && r.Method == http.MethodGet:
-		if !auth.IsAdmin(user.Role) {
-			writeForbidden(w)
-			return
-		}
 		items, err := s.auth.ListAPIKeys(r.Context())
 		if err != nil {
 			writeErr(w, 500, err)
@@ -111,10 +101,6 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, 200, items)
 	case path == "/api/v1/api-keys" && r.Method == http.MethodPost:
-		if !auth.IsAdmin(user.Role) {
-			writeForbidden(w)
-			return
-		}
 		var in struct {
 			Name string `json:"name"`
 		}
@@ -128,9 +114,9 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, 201, map[string]any{"key": key, "secret": secret})
 	case strings.HasPrefix(path, "/api/v1/api-keys/"):
-		s.apiKeyRoute(w, r, path, user)
+		s.apiKeyRoute(w, r, path)
 	case strings.HasPrefix(path, "/api/v1/models/"):
-		s.modelRoute(w, r, path, user)
+		s.modelRoute(w, r, path)
 	case strings.HasPrefix(path, "/api/v1/instances/") && strings.HasSuffix(path, "/logs/stream") && r.Method == http.MethodGet:
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/instances/"), "/logs/stream")
 		s.streamLogs(w, r, id)
@@ -142,11 +128,7 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 	}
 }
 
-func (s *Server) apiKeyRoute(w http.ResponseWriter, r *http.Request, path string, user auth.User) {
-	if !auth.IsAdmin(user.Role) {
-		writeForbidden(w)
-		return
-	}
+func (s *Server) apiKeyRoute(w http.ResponseWriter, r *http.Request, path string) {
 	rest := strings.TrimPrefix(path, "/api/v1/api-keys/")
 	parts := strings.Split(rest, "/")
 	if len(parts) == 2 && parts[0] != "" && parts[1] == "revoke" {
@@ -259,7 +241,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, id string) {
 	}
 }
 
-func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string, user auth.User) {
+func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string) {
 	rest := strings.TrimPrefix(path, "/api/v1/models/")
 	parts := strings.Split(rest, "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -277,9 +259,6 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string,
 			}
 			writeJSON(w, 200, item)
 		case http.MethodDelete:
-			if !requireOperate(w, user) {
-				return
-			}
 			if err := s.lifecycle.StopModel(r.Context(), id); err != nil {
 				writeErr(w, 500, err)
 				return
@@ -304,9 +283,6 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string,
 			w.WriteHeader(405)
 			return
 		}
-		if !requireOperate(w, user) {
-			return
-		}
 		_, err := s.lifecycle.StartModel(r.Context(), id)
 		if err != nil {
 			writeErr(w, 503, err)
@@ -317,9 +293,6 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string,
 	case "stop":
 		if r.Method != http.MethodPost {
 			w.WriteHeader(405)
-			return
-		}
-		if !requireOperate(w, user) {
 			return
 		}
 		if err := s.lifecycle.StopModel(r.Context(), id); err != nil {
@@ -405,14 +378,6 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (auth.User,
 	}
 	return u, true
 }
-func requireOperate(w http.ResponseWriter, u auth.User) bool {
-	if !auth.CanOperate(u.Role) {
-		writeForbidden(w)
-		return false
-	}
-	return true
-}
-func writeForbidden(w http.ResponseWriter) { writeJSON(w, 403, map[string]string{"error": "forbidden"}) }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
 	dec.DisallowUnknownFields()
