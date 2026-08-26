@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os/exec"
@@ -61,11 +62,13 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	if w := s.workers[instanceID]; w != nil && w.runtime.State != Unloaded && w.runtime.State != Failed {
 		rt := w.runtime
 		s.mu.Unlock()
+		slog.Info("llama-server worker already active", "instance_id", instanceID, "model_id", modelID, "state", rt.State, "pid", rt.PID)
 		return rt, nil
 	}
 	port, err := s.allocatePortLocked()
 	if err != nil {
 		s.mu.Unlock()
+		slog.Error("unable to allocate llama-server port", "instance_id", instanceID, "model_id", modelID, "error", err)
 		return Runtime{}, err
 	}
 	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
@@ -83,23 +86,28 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	}
 	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: newRing(2000), done: make(chan struct{})}
 	s.workers[instanceID] = w
+	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs)
 	if err := cmd.Start(); err != nil {
 		w.runtime.State = Failed
 		w.runtime.LastError = err.Error()
 		s.mu.Unlock()
+		slog.Error("failed to start llama-server worker", "instance_id", instanceID, "model_id", modelID, "error", err)
 		return w.runtime, err
 	}
 	w.cmd = cmd
 	w.runtime.PID = cmd.Process.Pid
+	pid := w.runtime.PID
 	s.mu.Unlock()
-	go copyLogs(w.logs, "stdout", stdout)
-	go copyLogs(w.logs, "stderr", stderr)
+	slog.Info("llama-server process started", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port)
+	go copyLogs(w.logs, instanceID, modelID, "stdout", stdout)
+	go copyLogs(w.logs, instanceID, modelID, "stderr", stderr)
 	go s.wait(w)
 	s.setState(instanceID, Loading, "")
 
 	readyCtx, cancel := context.WithTimeout(ctx, s.startupTimeout)
 	defer cancel()
 	if err := s.waitReady(readyCtx, port); err != nil {
+		slog.Error("llama-server worker readiness failed", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port, "error", err)
 		_ = s.Stop(context.Background(), instanceID)
 		s.setState(instanceID, Failed, err.Error())
 		return s.Status(instanceID), err
@@ -111,6 +119,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	}
 	rt := s.workers[instanceID].runtime
 	s.mu.Unlock()
+	slog.Info("llama-server worker ready", "instance_id", instanceID, "model_id", modelID, "pid", rt.PID, "port", rt.Port)
 	return rt, nil
 }
 
@@ -119,22 +128,29 @@ func (s *Supervisor) Stop(ctx context.Context, id string) error {
 	w := s.workers[id]
 	if w == nil || w.cmd == nil || w.cmd.Process == nil {
 		s.mu.Unlock()
+		slog.Info("llama-server worker already stopped", "instance_id", id)
 		return nil
 	}
 	w.runtime.State = Stopping
 	p := w.cmd.Process
 	done := w.done
+	modelID := w.runtime.ModelID
+	pid := w.runtime.PID
 	s.mu.Unlock()
+	slog.Info("stopping llama-server worker", "instance_id", id, "model_id", modelID, "pid", pid)
 	_ = p.Signal(syscall.SIGTERM)
 	select {
 	case <-done:
+		slog.Info("llama-server worker stopped", "instance_id", id, "model_id", modelID, "pid", pid)
 		return nil
 	case <-ctx.Done():
 		_ = p.Kill()
+		slog.Warn("llama-server stop cancelled; killing worker", "instance_id", id, "model_id", modelID, "pid", pid, "error", ctx.Err())
 		return ctx.Err()
 	case <-time.After(15 * time.Second):
 		_ = p.Kill()
 		<-done
+		slog.Warn("llama-server worker did not stop after SIGTERM; killed", "instance_id", id, "model_id", modelID, "pid", pid)
 		return nil
 	}
 }
@@ -189,11 +205,13 @@ func (s *Supervisor) Shutdown(ctx context.Context) {
 func (s *Supervisor) wait(w *worker) {
 	err := w.cmd.Wait()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.workers[w.runtime.InstanceID] != w {
+		s.mu.Unlock()
 		return
 	}
 	wasStopping := w.runtime.State == Stopping
+	instanceID := w.runtime.InstanceID
+	modelID := w.runtime.ModelID
 	w.runtime.PID = 0
 	if wasStopping {
 		w.runtime.State = Unloaded
@@ -206,7 +224,15 @@ func (s *Supervisor) wait(w *worker) {
 			w.runtime.LastError = "worker exited unexpectedly"
 		}
 	}
+	state := w.runtime.State
+	lastError := w.runtime.LastError
 	close(w.done)
+	s.mu.Unlock()
+	if wasStopping {
+		slog.Info("llama-server process exited", "instance_id", instanceID, "model_id", modelID, "state", state)
+	} else {
+		slog.Error("llama-server process exited unexpectedly", "instance_id", instanceID, "model_id", modelID, "state", state, "error", lastError)
+	}
 }
 
 func (s *Supervisor) waitReady(ctx context.Context, port int) error {
@@ -286,9 +312,11 @@ func (r *ring) lines() []string {
 	copy(out, r.data)
 	return out
 }
-func copyLogs(dst *ring, source string, reader io.Reader) {
+func copyLogs(dst *ring, instanceID, modelID, source string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		dst.add("[" + source + "] " + scanner.Text())
+		line := scanner.Text()
+		dst.add("[" + source + "] " + line)
+		slog.Info("llama-server output", "instance_id", instanceID, "model_id", modelID, "stream", source, "line", line)
 	}
 }
