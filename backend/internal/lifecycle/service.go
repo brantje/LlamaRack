@@ -479,6 +479,7 @@ func (s *Service) runLoad(id string, c *loadCall) {
 		s.completeLoad(id, c, "", err)
 		return
 	}
+	defer release()
 
 	var endpoint string
 	if s.isManuallyStopped(id) {
@@ -497,7 +498,6 @@ func (s *Service) runLoad(id string, c *loadCall) {
 			}
 		}
 	}
-	release()
 	s.completeLoad(id, c, endpoint, err)
 }
 
