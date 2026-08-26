@@ -1,48 +1,90 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import ModelsPage from '~/pages/models.vue'
+import NewModelPage from '~/pages/models/new.vue'
 import { useManager } from '~/composables/useManager'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), push: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
+mockNuxtImport('useRouter', () => () => ({ push: mocks.push }))
 
 beforeEach(() => {
   mocks.request.mockReset()
-  mocks.request.mockResolvedValue([])
+  mocks.push.mockReset()
   const manager = useManager()
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
   manager.models.value = []
-  manager.artifacts.value = [{ id: 'a1', display_name: 'Artifact', local_path: 'artifact.gguf', total_bytes: 4 }]
   manager.runtimes.value = {}
   manager.profile.value = null
 })
 
-describe('model form bindings', () => {
-  it('updates optional fields and model settings', async () => {
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    const forms = wrapper.findAll('form')
+describe('model creation form', () => {
+  it('autofills a safe public ID and allows overriding model settings', async () => {
+    const wrapper = await mountSuspended(NewModelPage, { route: false })
+    const inputs = wrapper.findAll('input')
+    await inputs[1]!.setValue('Qwén Coder / 32B!')
+    await flushPromises()
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe('qwen-coder-32b')
 
-    const artifactInputs = forms[0]!.findAll('input')
-    await artifactInputs[1]!.setValue('Diagnostic artifact')
-    expect((artifactInputs[1]!.element as HTMLInputElement).value).toBe('Diagnostic artifact')
+    await inputs[2]!.setValue('custom-id')
+    await inputs[1]!.setValue('Changed name')
+    await flushPromises()
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe('custom-id')
 
-    const modelInputs = forms[1]!.findAll('input')
-    await modelInputs[1]!.setValue('Diagnostic model')
-    expect((modelInputs[1]!.element as HTMLInputElement).value).toBe('Diagnostic model')
-
-    const selects = forms[1]!.findAll('select')
-    await selects[1]!.setValue('high')
-    await selects[2]!.setValue('round_robin')
-    expect((selects[1]!.element as HTMLSelectElement).value).toBe('high')
-    expect((selects[2]!.element as HTMLSelectElement).value).toBe('round_robin')
-
-    const checkboxes = forms[1]!.findAll('input[type="checkbox"]')
+    const selects = wrapper.findAll('select')
+    await selects[0]!.setValue('high')
+    await selects[1]!.setValue('round_robin')
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
     await checkboxes[0]!.setValue(false)
     await checkboxes[1]!.setValue(true)
+    expect((selects[0]!.element as HTMLSelectElement).value).toBe('high')
+    expect((selects[1]!.element as HTMLSelectElement).value).toBe('round_robin')
     expect((checkboxes[0]!.element as HTMLInputElement).checked).toBe(false)
     expect((checkboxes[1]!.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('creates a model in one request and handles errors', async () => {
+    const manager = useManager()
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/models' && options?.method === 'POST') return { id: 'm1' }
+      if (path === '/api/v1/models') return []
+      if (path === '/api/v1/llamacpp/profile') throw new Error('no profile')
+      return []
+    })
+    let wrapper = await mountSuspended(NewModelPage, { route: false })
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('/models/qwen.gguf')
+    await inputs[1]!.setValue('Qwen Coder')
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', {
+      method: 'POST',
+      body: expect.objectContaining({ gguf_path: '/models/qwen.gguf', name: 'Qwen Coder', model_id: 'qwen-coder' })
+    })
+    expect(mocks.push).toHaveBeenCalledWith('/models')
+    expect(manager.models.value).toEqual([])
+    wrapper.unmount()
+
+    mocks.request.mockReset()
+    mocks.request.mockRejectedValueOnce(new Error('GGUF missing'))
+    wrapper = await mountSuspended(NewModelPage, { route: false })
+    const errorInputs = wrapper.findAll('input')
+    await errorInputs[0]!.setValue('/models/missing.gguf')
+    await errorInputs[1]!.setValue('Missing')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('GGUF missing')
+  })
+
+  it('hides creation controls from readonly users', async () => {
+    const manager = useManager()
+    manager.user.value = { id: 3, username: 'viewer', role: 'readonly', enabled: true }
+    const wrapper = await mountSuspended(NewModelPage, { route: false })
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.text()).toContain('cannot create models')
   })
 })
