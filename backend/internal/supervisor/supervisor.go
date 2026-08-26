@@ -51,10 +51,14 @@ type Supervisor struct {
 	portStart      int
 	startupTimeout time.Duration
 	workers        map[string]*worker
+	logs           map[string]*ring
 }
 
 func New(binary, host string, portStart int, startupTimeout time.Duration) *Supervisor {
-	return &Supervisor{binary: binary, host: host, portStart: portStart, startupTimeout: startupTimeout, workers: map[string]*worker{}}
+	return &Supervisor{
+		binary: binary, host: host, portStart: portStart, startupTimeout: startupTimeout,
+		workers: map[string]*worker{}, logs: map[string]*ring{},
+	}
 }
 
 func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, args []string) (Runtime, error) {
@@ -84,7 +88,9 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 		s.mu.Unlock()
 		return Runtime{}, err
 	}
-	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: newRing(2000), done: make(chan struct{})}
+	logRing := s.logRingLocked(instanceID)
+	logRing.reset()
+	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: logRing, done: make(chan struct{})}
 	s.workers[instanceID] = w
 	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs)
 	if err := cmd.Start(); err != nil {
@@ -174,12 +180,31 @@ func (s *Supervisor) Endpoint(id string) (string, bool) {
 
 func (s *Supervisor) Logs(id string) []string {
 	s.mu.RLock()
-	w := s.workers[id]
+	logRing := s.logs[id]
 	s.mu.RUnlock()
-	if w == nil {
+	if logRing == nil {
 		return nil
 	}
-	return w.logs.lines()
+	return logRing.lines()
+}
+
+// SubscribeLogs returns an atomic snapshot plus a live, non-blocking stream of
+// lines added after that snapshot. The subscription may be created before a
+// worker starts, allowing clients to observe the complete startup sequence.
+func (s *Supervisor) SubscribeLogs(id string) ([]string, <-chan string, func()) {
+	s.mu.Lock()
+	logRing := s.logRingLocked(id)
+	s.mu.Unlock()
+	return logRing.subscribe()
+}
+
+func (s *Supervisor) logRingLocked(id string) *ring {
+	logRing := s.logs[id]
+	if logRing == nil {
+		logRing = newRing(2000)
+		s.logs[id] = logRing
+	}
+	return logRing
 }
 
 func (s *Supervisor) Shutdown(ctx context.Context) {
@@ -292,18 +317,30 @@ type ring struct {
 	mu   sync.Mutex
 	max  int
 	data []string
+	subs map[chan string]struct{}
 }
 
-func newRing(max int) *ring { return &ring{max: max} }
-func (r *ring) add(s string) {
+func newRing(max int) *ring { return &ring{max: max, subs: map[chan string]struct{}{}} }
+func (r *ring) reset() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.data = nil
+	r.mu.Unlock()
+}
+func (r *ring) add(line string) {
+	r.mu.Lock()
 	if len(r.data) >= r.max {
 		copy(r.data, r.data[1:])
-		r.data[len(r.data)-1] = s
+		r.data[len(r.data)-1] = line
 	} else {
-		r.data = append(r.data, s)
+		r.data = append(r.data, line)
 	}
+	for ch := range r.subs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+	r.mu.Unlock()
 }
 func (r *ring) lines() []string {
 	r.mu.Lock()
@@ -311,6 +348,24 @@ func (r *ring) lines() []string {
 	out := make([]string, len(r.data))
 	copy(out, r.data)
 	return out
+}
+func (r *ring) subscribe() ([]string, <-chan string, func()) {
+	r.mu.Lock()
+	snapshot := make([]string, len(r.data))
+	copy(snapshot, r.data)
+	ch := make(chan string, 128)
+	r.subs[ch] = struct{}{}
+	r.mu.Unlock()
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() {
+			r.mu.Lock()
+			delete(r.subs, ch)
+			close(ch)
+			r.mu.Unlock()
+		})
+	}
+	return snapshot, ch, cancel
 }
 func copyLogs(dst *ring, instanceID, modelID, source string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
