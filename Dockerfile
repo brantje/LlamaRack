@@ -7,7 +7,7 @@ RUN npm install
 COPY web/ ./
 RUN npm run generate
 
-FROM golang:1.24-bookworm AS backend
+FROM golang:1.27-bookworm AS backend
 WORKDIR /src
 COPY go.mod ./
 RUN go mod download
