@@ -6,58 +6,58 @@ Related issue: #1
 
 ## 1. Purpose
 
-`llamacpp-manager` is a single-host web application that manages the complete lifecycle of llama.cpp model servers and exposes one stable OpenAI-compatible API to clients.
+`llamacpp-manager` is a single-host web application that manages `llama-server` processes and exposes one stable OpenAI-compatible API.
 
-The application must hide individual `llama-server` processes from clients. Users interact with a Nuxt web UI and a management API; management commands and resources use REST while observed runtime lifecycle state is pushed over an authenticated WebSocket. Inference clients interact only with the unified `/v1` gateway.
+The architecture separates **registered Models** from **runtime Instances**:
+
+- a **Model** is management-plane configuration for a GGUF artifact plus reusable llama.cpp defaults;
+- an **Instance** is one durable configured `llama-server` process definition and is the unit of lifecycle, routing, scheduling and inference identity.
+
+Workers remain private. The UI talks to `/api/v1/*`; inference clients talk only to `/v1/*`.
 
 ## 2. Product goals
 
 The architecture must support:
 
-- a single-container deployment for v1;
-- a Go backend and Nuxt/Vue frontend;
+- single-container deployment for v1;
+- Go backend and Nuxt/Vue frontend;
 - local `llama-server` process management;
-- user-defined public model IDs;
-- automatic request routing to the correct model instance;
-- optional model autoloading;
-- configurable idle unloading;
-- Always-On desired-state behavior;
-- manual multiple instances of one model;
+- registered Models independent from runtime state;
+- durable Instances that remain visible while stopped;
+- multiple Instances referencing one Model;
+- Instance-specific lifecycle/scheduler policy;
+- global + Model + Instance llama.cpp configuration layers;
+- Instance-name-derived inference identity;
+- automatic Instance autoloading;
+- Always-On desired state per Instance;
 - NVIDIA and AMD GPU awareness;
-- per-model llama.cpp configuration;
+- automatic single-GPU-first placement;
+- resource-pressure eviction;
 - dynamic discovery of llama.cpp CLI options;
 - Hugging Face and direct URL model downloads;
 - OpenAI-compatible inference endpoints;
 - LiteLLM interoperability;
 - local management authentication and inference API keys;
-- live observed runtime lifecycle events;
 - Prometheus metrics and per-instance logs.
 
 ## 3. Non-goals for v1
 
-The following are intentionally excluded:
-
-- remote hosts or agents;
-- SSH-based worker management;
-- Kubernetes orchestration;
+- remote hosts/agents;
+- SSH/Kubernetes orchestration;
 - automatic replica scaling;
 - non-llama.cpp inference providers;
-- cross-model fallback chains;
+- cross-instance/model fallback;
 - request-content-aware routing;
-- storage pools or tiering;
+- storage pools/tiering;
 - automatic filesystem model discovery;
-- management RBAC, differentiated roles or custom permission matrices;
+- management RBAC;
 - OIDC;
-- multiple Hugging Face identities;
 - GraphQL;
+- management WebSockets;
 - OpenTelemetry;
 - centralized external log aggregation.
 
-These features may be added later without changing the public OpenAI gateway contract.
-
 ## 4. Runtime topology
-
-The v1 runtime consists of one `llamacpp-manager` process plus zero or more child `llama-server` processes.
 
 ```text
 OpenAI clients / LiteLLM / applications
@@ -69,12 +69,12 @@ OpenAI clients / LiteLLM / applications
         | llamacpp-manager    |
         |                     |
         | OpenAI Gateway      |
-        | Request Router      |
+        | Instance Resolver   |
+        | Lifecycle Service   |
         | Resource Scheduler  |
         | Process Supervisor  |
         | Download Manager    |
-        | Auth                |
-        | Metrics             |
+        | Auth / Metrics      |
         +----------+----------+
                    |
           loopback-only ports
@@ -82,7 +82,7 @@ OpenAI clients / LiteLLM / applications
           |                 |
           v                 v
      llama-server      llama-server
-      instance A        instance B
+      Instance A        Instance B
 
 Browser
   |
@@ -90,364 +90,334 @@ Browser
 Nuxt UI -> /api/v1/* -> manager
 ```
 
-Workers must bind to loopback or another non-public interface controlled by the manager. The manager is the only externally exposed HTTP entry point.
+Workers bind only to manager-controlled private interfaces/ports.
 
-## 5. Major backend components
+## 5. Core domain ownership
 
-### 5.1 HTTP server
+### 5.1 Model
 
-Owns the external listener and dispatches requests into two API namespaces:
+A Model is a registered management-plane resource.
 
-- `/v1/*` — OpenAI-compatible inference API.
-- `/api/v1/*` — llamacpp-manager management API, including the authenticated runtime-event WebSocket.
+It owns:
 
-It also serves the compiled Nuxt application and `/metrics`.
+- name/identity used in the management UI;
+- one backing Model artifact;
+- reusable llama.cpp overrides/defaults;
+- model metadata such as path, size, quantization and context capability.
 
-### 5.2 OpenAI gateway
+A Model does **not** own:
 
-Responsible for:
+- READY/UNLOADED state;
+- Always On;
+- Autoload on request;
+- resource-pressure eviction policy;
+- GPU placement;
+- process lifecycle actions.
 
-- inference API authentication;
-- validating and resolving public model IDs;
-- waiting for autoload where permitted;
-- selecting a ready instance through the router;
-- proxying normal and streaming requests;
-- translating manager-level failures to OpenAI-style errors;
-- recording request and token metrics;
-- never exposing worker addresses to clients.
+A Model may exist with zero Instances.
 
-The gateway must not contain resource-placement logic. It requests capacity through the scheduler.
+### 5.2 Instance
 
-### 5.3 Request router
+An Instance is a durable configured `llama-server` process definition.
 
-Chooses one READY instance for a resolved model.
+It owns:
 
-Supported v1 policies:
+- `id`;
+- human-entered name;
+- Model reference;
+- Always On;
+- Autoload on request;
+- resource-pressure eviction policy;
+- priority and applicable timing policy;
+- GPU placement/tensor split;
+- Instance-level llama.cpp overrides;
+- observed runtime state.
 
-- least active requests;
-- round robin;
-- fixed/preferred instance;
-- lowest current load.
+Stopped Instances remain durable and visible in `/instances`.
 
-Routing is based on model ID only. The router must not inspect prompt content to choose another model.
+### 5.3 Instance identity
 
-### 5.4 Process supervisor
+Instance identity intentionally mirrors model-style slug creation:
 
-Owns every managed `llama-server` child process.
+```text
+Instance name
+   -> slugify
+   -> instance.id
+   -> OpenAI request "model" value
+```
+
+Example:
+
+```text
+Name: Qwen Coding 32B
+ID:   qwen-coding-32b
+
+POST /v1/chat/completions
+{"model":"qwen-coding-32b", ...}
+```
+
+There is no separate public Instance alias or inference-ID field.
+
+Rules:
+
+- `instance.id` is unique;
+- it uses a conservative URL/JSON-safe slug format;
+- renaming an Instance changes its slug/ID and therefore changes the OpenAI model identifier;
+- the UI must warn that renaming is API-breaking for clients.
+
+## 6. Configuration hierarchy
+
+Effective worker configuration is:
+
+```text
+Global llama.cpp defaults
+        +
+Model overrides/defaults
+        +
+Instance overrides
+        +
+manager-owned protected launch values
+        =
+Effective Instance launch configuration
+```
+
+Manager-owned values include worker bind address, private port, model path and generated placement flags.
+
+## 7. Major backend components
+
+### 7.1 HTTP server
+
+Owns:
+
+- `/v1/*` OpenAI-compatible API;
+- `/api/v1/*` management API;
+- Nuxt assets;
+- `/metrics`.
+
+### 7.2 OpenAI gateway / Instance resolver
 
 Responsibilities:
 
-- construct a process launch plan from model and instance configuration;
-- allocate a private worker port;
-- spawn the process;
+- authenticate inference API keys;
+- read the OpenAI `model` field;
+- resolve it directly to `instance.id`;
+- request autoload of that exact Instance when allowed;
+- proxy to the exact READY worker;
+- preserve streaming;
+- never expose private worker addresses.
+
+The gateway must not silently substitute a sibling Instance that references the same Model.
+
+### 7.3 Lifecycle service
+
+Coordinates desired and observed Instance state:
+
+- start/stop/restart/kill;
+- Autoload on request;
+- Always-On reconciliation;
+- idle unloading where enabled;
+- controlled restart after Instance configuration changes;
+- per-Instance single-flight startup;
+- temporary manual-stop suppression for Always-On Instances.
+
+### 7.4 Process supervisor
+
+Only the supervisor directly spawns or terminates `llama-server` processes.
+
+Responsibilities:
+
+- construct launch plans from effective Instance configuration;
+- allocate private ports;
+- spawn processes;
 - capture stdout/stderr;
-- probe readiness and health;
-- terminate or kill workers when required;
+- probe readiness/health;
+- graceful terminate and hard kill;
 - detect unexpected exits;
-- expose observed runtime state and ordered runtime transitions;
-- reconcile persisted configuration with actual processes after manager restart.
+- expose observed runtime state.
 
-Only the supervisor may directly spawn or terminate workers.
+### 7.5 Resource scheduler
 
-### 5.5 Resource scheduler
-
-Decides whether an instance may be started and what resources it should use.
+The scheduler decides whether and where an Instance may start.
 
 Inputs include:
 
-- RAM availability;
-- GPU inventory and free VRAM;
-- running instances;
-- model memory estimate;
-- model priority;
-- Always-On policy;
-- last-use time;
-- active and queued requests;
-- configured GPU assignment and tensor split.
+- system RAM;
+- GPU inventory/free VRAM;
+- effective Instance memory-affecting configuration;
+- Instance priority;
+- Instance Always-On and eviction policy;
+- last-used/active request state;
+- placement/tensor split configuration;
+- pending reservations.
 
-If capacity is insufficient, the scheduler may choose eligible instances for eviction. It must not perform process operations directly; it returns a scheduling decision to the lifecycle layer/supervisor.
+The scheduler returns plans. It never directly starts/stops processes.
 
-### 5.6 Model/lifecycle service
+Actual hardware-aware pre-load eviction is a Phase 7 requirement.
 
-Coordinates desired and observed model state.
+### 7.6 Model service
 
-Responsibilities:
+Owns registered Model CRUD, artifact association, Model metadata and reusable llama.cpp configuration.
 
-- create/update/delete model definitions;
-- autoload coordination;
-- Always-On reconciliation;
-- idle-unload decisions;
-- controlled restart after config changes;
-- single-flight loading so duplicate requests do not launch duplicate workers;
-- state transition validation.
+It does not own process lifecycle.
 
-### 5.7 llama.cpp capability service
+### 7.7 llama.cpp capability service
 
-Inspects the installed `llama-server` binary and stores a versioned capability description.
+Discovers `llama-server --help`, stores versioned option metadata, validates configuration and generates deterministic argv.
 
-It must:
+### 7.8 Hardware service
 
-- identify the binary/version/build;
-- execute `llama-server --help` when required;
-- parse available options;
-- produce a normalized option schema;
-- expose the schema to validation and the UI;
-- retain curated metadata for common options while preserving unknown/new options.
+Provides normalized CPU/RAM/NVIDIA/AMD state to scheduler/UI.
 
-### 5.8 Hardware service
+### 7.9 Download manager
 
-Collects local system and accelerator state.
+Handles Hugging Face/direct URL discovery and downloads, resumability, split GGUFs and artifact persistence.
 
-V1 providers:
-
-- system RAM/CPU;
-- NVIDIA GPUs;
-- AMD GPUs.
-
-The hardware service should expose a vendor-neutral normalized model to the scheduler and UI.
-
-### 5.9 Download manager
-
-Coordinates model artifact acquisition.
-
-Provider implementations:
-
-- Hugging Face;
-- direct URL.
-
-Responsibilities:
-
-- provider search/discovery where supported;
-- download queue;
-- progress and speed;
-- retries;
-- cancellation;
-- resumable transfers when supported;
-- temporary files and atomic completion;
-- split-GGUF grouping;
-- artifact metadata persistence.
-
-### 5.10 Authentication
-
-Two separate authentication surfaces exist:
-
-1. Dashboard/management API user sessions.
-2. Inference API bearer keys.
-
-V1 intentionally has no management RBAC. Every authenticated management user has the same full management access. Role-based or capability-based authorization may be introduced after v1 as a separate feature.
-
-### 5.11 Persistence
-
-SQLite is the authoritative persistent store for configuration and durable application state.
-
-SQLite stores model definitions, configuration overrides, users, API-key hashes, provider credential references/encrypted secrets, download history and other durable metadata.
-
-High-frequency metrics do not need to be persisted in SQLite unless needed for bounded recent-history UI views.
-
-## 6. Frontend architecture
-
-The frontend is a Nuxt/Vue application developed independently under `web/` but compiled into static/client assets for production.
-
-The Go application serves the built frontend. A Node.js runtime is not required in the production container.
-
-The UI communicates only with manager-owned `/api/v1/*` endpoints; it never talks directly to a worker. REST remains the command/configuration transport. `/api/v1/ws` is an authenticated WebSocket carrying supervisor-observed runtime state. The WebSocket is authoritative while connected; REST runtime reads are used for initial hydration and disconnected recovery.
-
-Primary UI areas:
-
-- Dashboard;
-- Models;
-- Discover;
-- Downloads;
-- API;
-- Settings.
-
-Detailed interaction requirements are defined in `010-ui.md`.
-
-## 7. API boundaries
-
-### 7.1 `/v1/*`
-
-This namespace is reserved for OpenAI compatibility. Management-specific fields must not leak into standard OpenAI response shapes unless they are explicitly supported extensions.
-
-### 7.2 `/api/v1/*`
-
-This namespace is owned by the management plane.
+## 8. Management API boundaries
 
 Conceptual resource groups:
 
-- `/api/v1/models`;
-- `/api/v1/models/{id}/instances`;
+- `/api/v1/models` — registered Models;
+- `/api/v1/instances` — durable Instance control plane;
+- `/api/v1/instances/{id}/start`;
+- `/api/v1/instances/{id}/stop`;
+- `/api/v1/instances/{id}/restart`;
+- `/api/v1/instances/{id}/kill`;
+- `/api/v1/instances/{id}/duplicate`;
 - `/api/v1/downloads`;
 - `/api/v1/providers/huggingface`;
 - `/api/v1/hardware`;
 - `/api/v1/llamacpp`;
 - `/api/v1/users`;
 - `/api/v1/api-keys`;
-- `/api/v1/settings`;
-- `/api/v1/metrics`;
-- `/api/v1/ws` — authenticated observed runtime lifecycle events.
+- `/api/v1/settings`.
 
-The exact endpoint contract will be refined during implementation without changing component ownership.
+## 9. OpenAI API boundary
 
-## 8. Deployment architecture
+`GET /v1/models` represents addressable inference Instances, not registered Models.
 
-V1 is distributed as one container image per accelerator family where needed, for example:
+Each returned model object's `id` is exactly `instance.id`.
 
-- CPU;
-- NVIDIA/CUDA;
-- AMD/ROCm.
+For all inference endpoints, the request `model` field resolves directly to `instance.id`.
 
-The exact image naming is a release concern, but the runtime contract is:
+Registered Models remain management-plane concepts and are not directly inferable unless an Instance exists for them.
 
-- one external HTTP port;
-- one persistent configuration/data directory;
-- one persistent model directory;
-- access to host GPUs when configured;
-- bundled or otherwise known `llama-server` binary.
+## 10. Frontend architecture
 
-Docker Compose may be added later as a deployment convenience, not as a different application architecture.
+Primary navigation:
 
-## 9. Startup sequence
+- Dashboard;
+- Models;
+- Instances;
+- Discover;
+- Downloads;
+- API;
+- Settings.
+
+`/models` is inventory/configuration only.
+
+`/instances` is the operational control plane.
+
+## 11. Model creation bootstrap
+
+`/models/new` may optionally create/start a first Instance after creating the Model.
+
+The first-Instance section exposes only:
+
+- Instance name;
+- Always On;
+- Autoload on request;
+- Allow resource-pressure eviction;
+- whether to launch immediately.
+
+The Instance name is slugified to `instance.id`.
+
+Full Instance configuration belongs to `/instances/new` and `/instances/:id/edit`.
+
+## 12. Running Instance edits
+
+Runtime-affecting Instance edits require confirmation and then automatically perform a controlled restart.
+
+```text
+save configuration
+-> drain
+-> stop
+-> start
+-> READY
+```
+
+Instance rename additionally requires an API-breaking-change warning because it changes `instance.id`.
+
+## 13. Development schema policy
+
+The project is still in active development.
+
+For Phase 5.5 and related development-only schema restructuring:
+
+- modify the current schema directly;
+- update fixtures/seeds/tests directly;
+- development databases may be recreated;
+- **do not add migration files for this work**.
+
+A release migration policy can be established before schema compatibility becomes a product requirement.
+
+## 14. Startup/recovery
 
 On manager startup:
 
-1. initialize configuration and logging;
-2. open SQLite and apply migrations;
-3. validate/create bootstrap authentication state;
-4. inspect the installed llama.cpp binary and option schema;
+1. initialize configuration/logging;
+2. open/create current development schema;
+3. initialize auth state;
+4. inspect llama.cpp binary/options;
 5. initialize hardware collectors;
-6. recover durable model/instance definitions;
-7. verify no stale runtime state is treated as live;
+6. load registered Models and durable Instances;
+7. treat old runtime observations as stale;
 8. start HTTP services;
-9. start lifecycle reconciliation loops;
-10. restore at least one instance for every enabled Always-On model as resources permit.
+9. reconcile Always-On Instances unless temporarily suppressed only within the current session (suppression therefore does not survive restart).
 
-The HTTP server may become available before all Always-On models finish loading, but API state must clearly report STARTING/LOADING rather than claiming readiness.
+## 15. Phase boundaries
 
-## 10. Concurrency model
+### Phase 5.5 — Model / Instance control-plane separation
 
-The architecture must avoid globally serializing all model operations.
+Introduces the durable separation, Instance identity, `/instances`, Instance-owned lifecycle/scheduler configuration, Model defaults + Instance overrides, and direct Instance routing.
 
-Required coordination scopes:
+No migrations are required.
 
-- per-model single-flight start/load operation;
-- per-instance start/stop lock;
-- scheduler-wide reservation/placement transaction;
-- per-download state machine;
-- safe round-robin counters and request counts.
+### Phase 6 — Multi-instance support
 
-A request waiting for an autoload must be cancellable when its client disconnects, but cancellation of one waiter must not automatically cancel the shared model load if other waiters or Always-On policy still require it.
+Builds remaining concurrent multi-Instance behavior on the durable Instance model.
 
-## 11. Failure boundaries
+### Phase 7 — Hardware integration
 
-### Worker failure
+The first task remains completing the llama.cpp options GUI. Then implement real NVIDIA/AMD hardware state, single-GPU-first placement, tensor split and actual pre-load resource-pressure eviction.
 
-A `llama-server` crash must not crash the manager. The supervisor records the exit and lifecycle policy decides whether to restart.
+## 16. Architectural invariants
 
-### Model load failure
-
-The model transitions to FAILED with a concise reason and retained logs. Waiting gateway requests fail with a compatible 5xx response.
-
-### Download failure
-
-A failed/incomplete artifact must never appear as a completed model file. Temporary files remain distinguishable and may be resumed or removed.
-
-### Hardware collector failure
-
-The manager remains usable, but scheduling that depends on unavailable resource data must fail conservatively rather than inventing capacity.
-
-### Database failure
-
-Durable state errors are considered manager-level failures. The application must not continue making destructive lifecycle changes if it cannot reliably persist required state.
-
-## 12. Security boundaries
-
-- Worker ports are private.
-- Passwords use a modern password hash.
-- Inference API keys are stored only as hashes after creation.
-- Provider tokens are encrypted at rest and never returned in full after storage.
-- Logs and API responses must redact known secrets.
-- Management authentication is enforced server-side for every protected operation, including the runtime WebSocket handshake.
-- User-provided model IDs, filenames and provider metadata must not be trusted as filesystem paths.
-- Download destinations must remain under the configured model directory.
-
-## 13. Observability
-
-The manager owns operational metrics even when data originates from workers.
-
-At minimum expose:
-
-- manager health;
-- configured/loaded model counts;
-- instance state counts;
-- request counts and errors;
-- active and queued requests;
-- load duration;
-- token throughput where available;
-- latency and TTFT where measurable;
-- download state;
-- hardware resource state.
-
-Per-instance stdout/stderr is captured separately for UI inspection.
-
-## 14. Repository layout
-
-Target layout:
-
-```text
-/
-├── cmd/
-│   └── llamacpp-manager/
-├── internal/
-│   ├── api/
-│   ├── auth/
-│   ├── config/
-│   ├── database/
-│   ├── downloads/
-│   ├── gateway/
-│   ├── hardware/
-│   ├── llamacpp/
-│   ├── metrics/
-│   ├── models/
-│   ├── scheduler/
-│   └── supervisor/
-├── web/
-├── migrations/
-├── specs/
-├── docs/
-└── Dockerfile
-```
-
-Package boundaries should follow responsibilities, not mirror database tables.
-
-## 15. Architectural invariants
-
-The following are hard invariants:
-
-1. Clients never need to know worker ports.
+1. Clients never see worker ports.
 2. Only the supervisor starts/stops worker processes.
-3. Only the scheduler decides resource placement/eviction plans.
-4. The router chooses only among READY instances.
-5. Public model IDs are stable independently of filenames and worker configuration.
-6. `/v1` is compatibility-focused; `/api/v1` is management-focused.
-7. Always-On is desired state, not merely a startup flag.
-8. Persisted runtime state is never blindly trusted after process restart.
-9. A partially downloaded model is never treated as a usable completed artifact.
-10. New llama.cpp options should not require a manager release merely to become visible in Advanced configuration.
-11. V1 management access is authenticated but not role-differentiated.
-12. While connected, frontend runtime state is driven by supervisor-observed WebSocket events rather than optimistic lifecycle mutations.
+3. Only the scheduler decides placement/eviction plans.
+4. Only READY Instances receive new inference requests.
+5. OpenAI `model` resolves exactly to `instance.id`.
+6. `instance.id` is the slug derived from Instance name; there is no second public alias field.
+7. Requests are never silently rerouted to a sibling Instance.
+8. Models contain no runtime lifecycle state.
+9. Always On, Autoload and eviction policy are Instance-owned.
+10. Persisted runtime observations are never blindly trusted after restart.
+11. New llama.cpp options can appear without a manager release.
+12. V1 management access is authenticated but not role-differentiated.
 
-## 16. Acceptance criteria
+## 17. Acceptance criteria
 
-This architecture is considered correctly implemented when:
+The architecture is correctly implemented when:
 
-- one manager process can supervise multiple independent llama.cpp workers;
-- the UI and clients use only manager-owned endpoints;
-- model lifecycle can recover from worker crashes and manager restarts;
-- observed lifecycle transitions are pushed to authenticated management clients without waiting for lifecycle command responses to finish;
-- model routing and scheduling are separate services with separate responsibilities;
-- Always-On and idle unload policies can operate without client awareness;
-- OpenAI-compatible streaming can pass through the gateway without full-response buffering;
-- a new llama.cpp option discovered from the active binary can be represented without a hard-coded backend field;
-- authenticated management access works without requiring RBAC for v1;
-- the system can later add remote-host support without changing public model IDs or the external `/v1` contract.
+- `/models` is registered inventory/configuration only;
+- `/instances` controls durable `llama-server` Instances;
+- stopped Instances remain listed;
+- one Model can back multiple differently configured Instances;
+- Instance names produce unique slug IDs;
+- that slug is exactly the OpenAI `model` value and `/v1/models` ID;
+- a stopped autoload-enabled Instance can be started by an inference request;
+- an Always-On Instance is reconciled independently of sibling Instances;
+- a manual Stop can suppress Always-On reconciliation until manual Launch, inference need or manager restart;
+- running Instance edits confirm and automatically restart;
+- Phase 7 performs real GPU-aware placement/eviction;
+- no Phase 5.5 migration files are introduced.

@@ -6,427 +6,342 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how inference requests arriving at the unified `/v1` gateway resolve a public model ID, wait for model availability when permitted, select a READY instance, and proxy traffic to a private llama.cpp worker.
+This specification defines how inference requests arriving at `/v1/*` resolve the OpenAI `model` field to one exact configured Instance and proxy traffic to that Instance's private `llama-server` worker.
 
-Routing must remain independent from resource placement. The router selects among already usable instances; the scheduler decides whether an instance may be started and what resources it receives.
+Routing is intentionally simple in v1: **the client-selected model value is the Instance ID**.
 
-## 2. Goals
+## 2. Identity contract
+
+Each Instance has:
+
+- a human-entered `name`;
+- an `id` created by slugifying that name.
+
+The stored `instance.id` is exactly the OpenAI-compatible model identifier.
+
+Example:
+
+```text
+Instance name: Qwen Coding 32B
+instance.id:   qwen-coding-32b
+```
+
+Client request:
+
+```json
+{"model":"qwen-coding-32b"}
+```
+
+There is no separate public alias/inference-ID field for Instances.
+
+## 3. Goals
 
 Routing must provide:
 
-- one stable client endpoint regardless of worker count or ports;
-- routing by user-defined public model ID;
-- transparent autoload integration;
-- support for multiple manually configured instances per model;
-- deterministic routing policies;
-- request accounting for scheduling/metrics;
+- one stable manager endpoint regardless of worker ports;
+- exact Instance resolution from the OpenAI `model` field;
+- transparent autoload of that exact Instance when permitted;
 - streaming proxy support;
+- request accounting;
 - client cancellation propagation;
-- correct handling of instance failure during requests;
-- LiteLLM/OpenAI client compatibility.
+- safe handling of Instance failure;
+- OpenAI SDK and LiteLLM compatibility.
 
-## 3. Non-goals for v1
+## 4. Non-goals for v1
 
 Routing does not:
 
-- inspect prompt content to choose a different model;
-- automatically fallback to another model ID;
-- autoscale instance count;
-- load-balance across remote hosts;
-- apply user-specific model routing policies;
-- implement semantic routing;
-- rewrite requests to external providers.
+- choose among sibling Instances of the same Model;
+- load-balance between Instances;
+- use least-active/round-robin/fixed/load-aware Model routing policies;
+- inspect prompt content to choose another target;
+- fallback to another Instance or Model;
+- autoscale Instance count;
+- route across remote hosts;
+- proxy to external inference providers.
 
-## 4. Public model resolution
+Those behaviors require a future explicit routing layer and must not be implied by Model/Instance relationships.
 
-Every inference request that requires a model resolves its `model` field against the configured Model registry.
+## 5. Instance resolution
 
-Rules:
+For every inference endpoint that includes `model`:
 
-1. Match the exact public `model_id`.
-2. The model must exist and be enabled.
-3. The endpoint must be compatible with the configured model/worker capability where such compatibility can be known before dispatch.
-4. Internal GGUF filenames, provider repository names and worker identifiers are not accepted as implicit alternate IDs unless explicitly configured as the public model ID.
+1. authenticate inference API key;
+2. parse the `model` value;
+3. look up the exact `instance.id`;
+4. validate that the referenced Model/artifact/configuration can serve the requested endpoint where known;
+5. evaluate Instance availability;
+6. proxy only to that Instance's worker.
 
-V1 supports one canonical public ID per Model. Additional alias fan-out can be added later if needed, but it is not required for the initial model.
+If no matching Instance exists, return model-not-found.
 
-## 5. `/v1/models`
+A matching registered Model name does not count as an inference target unless it is also the ID of an actual Instance by coincidence.
 
-The gateway owns `/v1/models` rather than forwarding it to an individual worker.
+## 6. `/v1/models`
 
-It lists all enabled configured models, including unloaded models.
-
-The returned ID is the public `model_id`.
-
-Runtime state such as READY/UNLOADED is management-plane information and should not be added to the standard OpenAI model object unless exposed through a clearly namespaced compatibility-safe extension. The management UI retrieves state from `/api/v1/models` instead.
-
-## 6. Request pipeline
-
-Conceptual request flow:
-
-```text
-HTTP request
-   |
-   v
-Authenticate inference API key
-   |
-   v
-Parse enough request data to identify endpoint + model
-   |
-   v
-Resolve configured model ID
-   |
-   v
-Check enabled/capability policy
-   |
-   v
-Find READY instances
-   |
-   +-- available --> route policy --> reserve request slot --> proxy
-   |
-   +-- unavailable
-          |
-          v
-     model loading already?
-          |
-          +-- yes --> wait for shared load result
-          |
-          +-- no
-                |
-                v
-          autoload enabled?
-             |      |
-            no     yes
-             |      |
-             v      v
-           error  lifecycle start request
-                    |
-                    v
-                 wait up to deadline
-                    |
-                    v
-                route when READY
-```
-
-## 7. Routing candidate set
-
-An instance is eligible only if all are true:
-
-- instance definition is enabled;
-- runtime state is READY;
-- instance is healthy according to supervisor/lifecycle state;
-- instance is not DRAINING or STOPPING;
-- instance belongs to the resolved model;
-- instance is not administratively excluded from routing;
-- any explicit fixed/preferred routing constraint permits it.
-
-Candidate evaluation must use a coherent snapshot sufficient to avoid intentionally selecting a worker already transitioning out of READY.
-
-A race may still occur after selection; failure handling is defined below.
-
-## 8. Routing policies
-
-The Model selects one routing policy.
-
-### 8.1 Least active requests — default
-
-Choose the READY instance with the lowest current active request count.
-
-Tie-break using stable ordering or round-robin among equals to avoid permanently favoring one instance.
-
-This should be the default because generation requests vary widely in duration and simple round-robin can produce uneven concurrent load.
-
-### 8.2 Round robin
-
-Select each eligible instance in turn.
+The gateway generates `/v1/models` from configured addressable Instances.
 
 Requirements:
 
-- counter/order is concurrency-safe;
-- removed/unhealthy instances are skipped;
-- adding/removing an instance does not require preserving perfect historical sequence.
+- include configured Instances that are valid/addressable even when currently stopped;
+- return `instance.id` as the standard model object's `id`;
+- do not expose Model database IDs, GGUF paths, PIDs or private ports;
+- do not add a second public identifier;
+- runtime state remains management-plane information.
 
-### 8.3 Fixed/preferred instance
+Registered Models are listed through `/api/v1/models` and the Models UI, not as inferable `/v1/models` entries unless an Instance exists.
 
-A model can select one configured preferred instance.
+## 7. Request pipeline
 
-Recommended behavior:
+```text
+HTTP /v1 request
+      |
+      v
+Authenticate API key
+      |
+      v
+Read model=<instance.id>
+      |
+      v
+Resolve exact Instance
+      |
+      +-- READY ---------------------> reserve/account -> proxy
+      |
+      +-- QUEUED/STARTING/LOADING --> join shared wait
+      |
+      +-- stopped
+             |
+             +-- autoload=true  --> lifecycle start exact Instance -> wait -> proxy
+             |
+             +-- autoload=false --> model-unavailable error
+```
 
-- if the preferred instance is READY, route to it;
-- if it is unavailable and other instances are READY, v1 should expose a model-level setting deciding strict vs soft preference only if needed;
-- absent such a setting, use **soft preference**: use the preferred instance when available, otherwise use the normal least-active selection among remaining READY instances.
+After autoload, re-check that the same Instance is READY before dispatch.
 
-This prevents an unnecessary outage when a manually preferred worker is restarting.
+## 8. No sibling substitution
 
-### 8.4 Lowest current load
+Suppose:
 
-Choose based on normalized runtime load signals available to the manager.
+```text
+Model: Qwen 32B
+  Instance A: qwen-fast
+  Instance B: qwen-large-context
+```
 
-Initial signal set can include:
+A request for:
 
-- active request count;
-- worker queue depth if available;
-- recent generation throughput/latency;
-- assigned GPU utilization if trustworthy.
+```json
+{"model":"qwen-fast"}
+```
 
-The exact score is implementation-specific and must be documented once chosen. It must not cause rapid oscillation based on noisy single-sample GPU utilization.
+may only use `qwen-fast`.
 
-If reliable load telemetry is unavailable, degrade to least-active requests.
+If `qwen-fast` is unavailable and cannot autoload, return an availability error. Do not silently use `qwen-large-context`.
 
-## 9. Request reservations
+This is required because sibling Instances may have different context, GPU placement, llama.cpp options and operational policies.
 
-Selection and active-request accounting must be coordinated so a burst of concurrent requests does not all observe the same zero-load instance before counters update.
+## 9. Request accounting
 
-Before proxying:
+Before proxying to a READY Instance:
 
-1. select candidate;
-2. atomically increment/reserve its active request count;
-3. verify it remains routable;
-4. dispatch;
-5. decrement the reservation exactly once when the request finishes, fails or is cancelled.
+1. reserve/increment active request accounting for that exact Instance;
+2. verify it remains routable;
+3. dispatch;
+4. release accounting exactly once on completion/failure/cancellation.
 
-For streaming requests, the request remains active until the stream ends or disconnects.
+For streaming requests, the reservation remains active until the stream ends or disconnects.
 
 ## 10. Autoload integration
 
-If no READY instance exists, the router does not itself spawn a worker.
+The gateway never spawns a process directly.
 
-It asks the lifecycle service for model availability.
+It asks lifecycle for availability of the exact Instance.
 
 Possible outcomes:
 
-- READY instance becomes available;
-- model is already loading and caller waits;
+- already READY;
+- existing startup joined;
+- startup initiated;
 - autoload disabled;
 - startup timeout;
 - insufficient resources;
-- invalid model configuration;
+- invalid configuration;
 - worker startup failure;
-- caller deadline/cancellation.
+- client cancellation/deadline.
 
-After lifecycle reports availability, candidate selection runs again from fresh state rather than assuming the newly started instance is the only option.
+Concurrent callers for the same `instance.id` share the lifecycle startup operation.
 
-## 11. Queueing semantics
+## 11. Load waiters
 
-There are two distinct forms of waiting:
+Each waiter retains independent cancellation/deadline.
 
-### 11.1 Load waiters
+Client disconnect removes that waiter but does not cancel startup needed by:
 
-Requests waiting for a model to reach READY.
+- other waiters;
+- Always-On policy;
+- another explicit lifecycle operation.
 
-They share a per-model lifecycle start operation but retain individual cancellation/deadlines.
+## 12. Startup deadline
 
-### 11.2 Worker/internal inference queue
+Effective wait deadline is the earliest applicable bound among:
 
-Once dispatched to a READY worker, llama.cpp may queue internally based on slots/parallelism.
+- client/request deadline;
+- Instance startup timeout;
+- manager hard upper bound if configured.
 
-The manager may expose worker queue metrics where available, but v1 does not require a separate centralized inference queue for already-ready models.
-
-A future manager-level queue may be added without changing public routing semantics.
-
-## 12. Model startup deadline
-
-The effective wait deadline is the earliest of:
-
-- client/request context deadline;
-- configured model startup timeout;
-- manager hard upper bound if one exists.
-
-If the deadline expires before a READY instance is available, return the appropriate gateway error and remove that request as a waiter.
-
-The shared load may continue if required by other waiters or Always-On policy.
+Timeout returns a compatible manager error and removes that request from the waiter set.
 
 ## 13. Proxying behavior
 
-The gateway is an HTTP-aware reverse proxy, not a raw TCP tunnel.
+The gateway is an HTTP-aware reverse proxy.
 
-It may need to:
+It may:
 
-- rewrite the upstream URL/port;
-- normalize the `model` field where required by a single-model worker;
-- remove manager-only headers;
-- inject worker authentication if the internal worker is configured to require it;
-- preserve content type and OpenAI-relevant headers;
-- stream response bytes promptly;
-- record timing and token metadata when observable;
-- translate only errors that originate at the manager layer or require compatibility normalization.
+- rewrite internal worker URL/port;
+- normalize the upstream `model` field if llama.cpp requires another internal value;
+- strip manager-only/hop-by-hop headers;
+- inject manager-owned worker auth if used;
+- preserve supported OpenAI fields;
+- stream bytes promptly;
+- record metrics.
 
-The worker's private address must never be copied into external error text, headers or response bodies.
+External responses should preserve the client-facing Instance identity where a model ID is returned.
 
-## 14. Model field rewriting
+Private worker addresses must never leak.
 
-The public `model_id` is a manager concept. A worker may not need or recognize the same value.
-
-The gateway may rewrite the upstream request `model` field to the value expected by the worker, but external responses should preserve the manager's public identity where the OpenAI response includes a model ID.
-
-This rewrite must be endpoint-aware and covered by compatibility tests.
-
-## 15. Streaming
-
-Streaming responses must be forwarded incrementally.
+## 14. Streaming
 
 Requirements:
 
-- do not buffer the full response;
-- flush SSE/data chunks promptly;
-- propagate client disconnect/cancellation to the upstream request;
-- keep the instance active-request reservation until stream closure;
-- record final metrics if the worker supplies usage at end-of-stream;
-- handle abrupt worker termination without inventing a syntactically successful stream ending.
+- incremental forwarding;
+- no full-response buffering;
+- prompt flushing of SSE/data chunks;
+- client cancellation propagated upstream;
+- active accounting held until stream completion;
+- never replay/retry after response bytes have been sent.
 
-Once response bytes have been sent to the client, the manager must not transparently retry the request on another instance because doing so can duplicate output and corrupt the stream.
+## 15. Retry policy
 
-## 16. Retry policy
+Because v1 targets one exact Instance, retries do not switch to sibling Instances.
 
-Automatic inference retries are intentionally conservative.
+Before response bytes begin, the manager may retry a transient connection/setup operation against the **same** Instance only when safe and bounded.
 
-### Before any upstream response bytes
+After bytes begin, never transparently retry.
 
-A request may be retried on another READY instance only for clearly safe connection/setup failures and only when the operation is considered retry-safe by implementation policy.
+## 16. Instance failure during dispatch
 
-### After response bytes begin
+If the target Instance leaves READY before dispatch:
 
-Never transparently retry.
-
-### Worker returns an application error
-
-Do not automatically reroute merely because another instance exists unless the error is a known worker-unavailable transport condition. Model/content errors must pass back to the caller.
-
-V1 should favor predictable errors over aggressive hidden retries.
-
-## 17. Instance failure during selection/dispatch
-
-If an instance leaves READY between selection and request dispatch:
-
-- release any reservation;
-- refresh candidates;
-- choose another READY instance if safe and no response has started;
-- if none exists, optionally enter normal availability/autoload waiting if the request deadline permits and model policy allows;
+- release the reservation;
+- re-evaluate the same Instance;
+- if lifecycle/autoload policy and deadline permit, wait for that same Instance to recover/start;
 - otherwise fail.
 
-The failed instance is reported to lifecycle/supervisor health handling; the router does not restart it itself.
+Do not choose a sibling Instance.
 
-## 18. Client cancellation
+## 17. Client cancellation
 
-Client disconnect or cancellation must:
+Cancellation must:
 
 - cancel the upstream request;
-- release active-request accounting;
-- remove the caller from any load-wait set;
-- not stop the model merely because one request ended;
-- allow idle-time tracking to proceed after request cleanup.
+- release active accounting;
+- remove the caller from startup waiters;
+- not stop the Instance merely because one request ended.
 
-For long-running generation, cancellation should reach llama.cpp as promptly as HTTP transport permits.
+## 18. Authentication ordering
 
-## 19. Authentication ordering
+Inference API-key authentication occurs before any expensive lifecycle/scheduler work.
 
-Inference API key authentication happens before expensive model startup work.
+Invalid keys must not trigger Instance autoload.
 
-Invalid/disabled keys must not be able to trigger autoload or consume model resources.
+## 19. Capability validation
 
-The gateway should parse only the minimum body needed for routing after basic request-size/security checks.
+Where known before dispatch, validate that the target Instance's effective Model/configuration can serve the requested endpoint, e.g. embeddings.
 
-## 20. Capability validation
+Never route to a different Instance/Model to compensate for unsupported capability.
 
-Some endpoints require a worker/model mode, such as embeddings.
+## 20. Rename behavior
 
-Where capability is known from configuration, fail before startup if the requested endpoint cannot be served by the model.
+Instance name determines `instance.id` by slugification.
 
-Where capability can only be confirmed by the worker, the gateway may rely on upstream validation but must preserve a compatible error shape.
+Renaming an Instance therefore changes the OpenAI model identifier.
 
-The manager must not silently route an embedding request to a different public model because the requested model lacks embedding support.
+Consequences:
 
-## 21. Metrics
+- old ID stops resolving after rename;
+- no automatic compatibility alias is retained in v1;
+- management UI must warn before rename;
+- `/v1/models` reflects the new `instance.id` after the durable update.
 
-Routing emits metrics such as:
+## 21. Metrics and logging
 
-- requests by public model ID and endpoint;
-- success/error count;
-- active request gauge;
-- load-wait count and duration;
-- route selection counts by instance;
-- upstream connection failures;
-- request duration;
-- TTFT where measurable;
-- input/output token counters when available.
-
-Do not use request IDs, prompt content or API key plaintext as metric labels.
-
-## 22. Logging
-
-Gateway logs should include a generated request correlation ID and safe identifiers such as:
+Metrics/logs may include bounded safe identifiers:
 
 - endpoint;
-- public model ID;
-- selected instance ID;
-- status;
-- timing;
-- error classification.
+- `instance.id`;
+- referenced Model ID internally;
+- result/error status;
+- active request count;
+- load-wait duration;
+- latency/TTFT/token counts where measurable.
 
-Do not log full prompts/completions by default.
+Do not use request IDs, prompt text or API-key plaintext as Prometheus labels.
 
-API key values and authorization headers must be redacted.
+Do not log prompts/completions by default.
 
-## 23. Concurrency and consistency
-
-The router must tolerate:
-
-- instances starting/stopping concurrently;
-- model configuration updates;
-- API requests arriving during manager reconciliation;
-- instance health changing after candidate snapshot;
-- simultaneous high request volume.
-
-No global lock should be held across a full inference request or model load.
-
-## 24. LiteLLM compatibility
+## 22. LiteLLM compatibility
 
 Compatibility target:
 
 ```text
-LiteLLM -> OpenAI-compatible base URL -> llamacpp-manager -> llama.cpp
+LiteLLM
+   -> OpenAI base URL
+   -> model=<instance.id>
+   -> llamacpp-manager
+   -> exact Instance worker
 ```
 
-The manager should require no special LiteLLM-only transport path. LiteLLM should interact through normal model IDs and `/v1` endpoints.
+LiteLLM configuration uses the Instance ID as the backend model name exposed by this manager.
 
-Test cases must cover:
+## 23. Concurrency
 
-- model listing;
-- chat completion;
-- streaming;
-- Responses API where supported by the LiteLLM version under test;
-- tools/structured outputs where supported;
-- model-not-found errors;
-- backend unavailable/startup errors.
+Routing must tolerate:
 
-## 25. Routing invariants
+- Instance start/stop while requests arrive;
+- Instance config updates;
+- exact Instance rename operations;
+- health changes after availability checks;
+- simultaneous high request volume.
 
-1. Only READY instances receive new requests.
-2. The client never chooses or sees a worker port.
-3. The resolved public model ID never routes to a different model as a fallback in v1.
-4. Autoload is coordinated by lifecycle, not by the router spawning workers.
-5. Active request accounting is released exactly once.
-6. DRAINING instances are excluded immediately from new routing.
-7. Streaming responses are not fully buffered.
-8. Requests are never transparently retried after response bytes start.
-9. Authentication failure cannot trigger model startup.
-10. Routing policy changes do not alter public model IDs.
+No global lock is held across an inference request or model load.
 
-## 26. Acceptance criteria
+## 24. Invariants
 
-Routing is complete when tests demonstrate:
+1. OpenAI `model` resolves directly to `instance.id`.
+2. `instance.id` is the slug derived from Instance name.
+3. `/v1/models` returns Instance IDs, not registered Model IDs.
+4. Only READY Instances receive new requests.
+5. The client never sees a worker port.
+6. A request never silently switches to a sibling Instance.
+7. Autoload is coordinated by lifecycle.
+8. Authentication failure cannot trigger startup.
+9. Request accounting is released exactly once.
+10. Streaming is not fully buffered or replayed after output begins.
 
-- requests to two public model IDs reach their respective workers through one external port;
-- `/v1/models` includes an unloaded configured model;
-- least-active routing distributes concurrent traffic toward the less-busy instance;
-- round-robin routing cycles across two READY instances;
-- fixed/preferred routing uses the preferred instance and degrades safely when unavailable;
-- no request is routed to DRAINING or FAILED instances;
-- a request to an unloaded autoload-enabled model waits for startup and then succeeds;
-- a request to an unloaded autoload-disabled model fails without spawning anything;
-- concurrent autoload callers share lifecycle startup;
-- client cancellation releases routing counters;
-- streaming data is forwarded incrementally;
-- a worker crash before response start can safely select another READY instance where policy permits;
-- a worker crash after stream start is surfaced without hidden replay;
-- internal addresses do not appear in external responses.
+## 25. Acceptance criteria
+
+Tests demonstrate:
+
+- Instance name `Qwen Coding` creates ID `qwen-coding`;
+- `/v1/models` exposes `qwen-coding` as a model ID;
+- chat/completion requests using `model=qwen-coding` reach that exact worker;
+- a registered Model without any Instance is absent from `/v1/models`;
+- stopped configured Instances remain listed in `/v1/models` when addressable;
+- autoload-enabled requests start the exact Instance and wait;
+- autoload-disabled requests fail without spawning;
+- concurrent requests share one startup for that Instance;
+- sibling Instances are never fallback targets;
+- client cancellation releases accounting;
+- streaming forwards incrementally;
+- Instance rename changes the accepted `model` value only after explicit management update;
+- worker/private addresses do not appear externally.
