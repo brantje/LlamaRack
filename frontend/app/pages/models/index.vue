@@ -244,18 +244,16 @@ async function remove(id: string) {
             :description="testResults[model.id]"
           />
 
-          <UCard v-if="workerLogs[model.id] !== undefined" class="mt-4 bg-default/60" variant="subtle">
-            <template #header>
-              <div class="flex items-center justify-between gap-3 text-xs">
-                <strong>Worker logs</strong>
-                <span class="text-dimmed">{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</span>
-              </div>
-            </template>
-            <UScrollArea v-if="workerLogs[model.id]?.length" class="max-h-80">
+          <section v-if="workerLogs[model.id] !== undefined" class="mt-4 border-t border-default pt-4">
+            <div class="flex items-center justify-between gap-3 text-xs">
+              <strong>Worker logs</strong>
+              <span class="text-dimmed">{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</span>
+            </div>
+            <UScrollArea v-if="workerLogs[model.id]?.length" class="mt-3 max-h-80">
               <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-muted">{{ workerLogs[model.id]?.join('\n') }}</pre>
             </UScrollArea>
-            <p v-else class="text-sm text-muted">Waiting for worker output…</p>
-          </UCard>
+            <p v-else class="mt-3 text-sm text-muted">Waiting for worker output…</p>
+          </section>
         </article>
       </div>
     </UCard>
