@@ -28,6 +28,7 @@ type Instance struct {
 type CreateInput struct {
 	ModelID           string            `json:"model_id"`
 	Name              string            `json:"name"`
+	Slug              string            `json:"slug,omitempty"`
 	Enabled           *bool             `json:"enabled,omitempty"`
 	Autoload          *bool             `json:"autoload_enabled,omitempty"`
 	AlwaysOn          bool              `json:"always_on"`
@@ -246,8 +247,15 @@ func normalize(in CreateInput) (Instance, error) {
 	if name == "" {
 		return Instance{}, errors.New("name is required")
 	}
-	id := Slugify(name)
+	slugSource := strings.TrimSpace(in.Slug)
+	if slugSource == "" {
+		slugSource = name
+	}
+	id := Slugify(slugSource)
 	if id == "" {
+		if strings.TrimSpace(in.Slug) != "" {
+			return Instance{}, errors.New("slug must contain at least one letter or number")
+		}
 		return Instance{}, errors.New("name must contain at least one letter or number")
 	}
 	modelID := strings.TrimSpace(in.ModelID)
