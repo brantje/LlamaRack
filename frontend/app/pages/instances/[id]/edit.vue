@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { parseLlamaCppOptions } from '~/utils/llamacppOptions'
+
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
@@ -19,17 +21,6 @@ const gpuItems = [{ label: 'Automatic', value: 'auto' }, { label: 'Manual', valu
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/-+/g, '-').replace(/^[-._]+|[-._]+$/g, '')
-}
-function parseOptions(value: string) {
-  const out: Record<string, string> = {}
-  for (const line of value.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const at = trimmed.indexOf('=')
-    if (at <= 0) throw new Error(`Invalid option “${trimmed}”; use key=value`)
-    out[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim()
-  }
-  return out
 }
 
 onMounted(async () => {
@@ -81,7 +72,7 @@ async function submit() {
         priority: form.priority, eviction_enabled: form.eviction_enabled,
         idle_unload_seconds: form.idle_unload_seconds, gpu_mode: form.gpu_mode,
         gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices.split(',').map(x => x.trim()).filter(Boolean) : [],
-        tensor_split: form.tensor_split.trim(), options: parseOptions(form.options),
+        tensor_split: form.tensor_split.trim(), options: parseLlamaCppOptions(form.options, manager.profile.value),
         restart_running: running, confirm_model_id_change: rename
       }
     })
@@ -110,7 +101,7 @@ async function submit() {
         <USeparator label="Placement" />
         <div class="grid gap-4 md:grid-cols-2"><UFormField label="GPU placement" name="gpu_mode"><USelectMenu v-model="form.gpu_mode" class="w-full" :items="gpuItems" label-key="label" value-key="value" /></UFormField><UFormField v-if="form.gpu_mode === 'manual'" label="GPU devices" name="gpu_devices"><UInput v-model="form.gpu_devices" class="w-full" placeholder="0,1" /></UFormField><UFormField label="Tensor split" name="tensor_split"><UInput v-model="form.tensor_split" class="w-full" placeholder="1,1" /></UFormField></div>
         <USeparator label="llama.cpp overrides" />
-        <UFormField label="Instance overrides" name="options" description="One key=value pair per line. Instance values override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" /></UFormField>
+        <UFormField label="Instance overrides" name="options" description="One key=value pair per line. Validated against the detected llama-server; Instance values override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" /></UFormField>
         <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy">Save & apply</UButton></div>
       </UForm>
     </UCard>
