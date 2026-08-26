@@ -72,8 +72,37 @@ async function revoke(key: APIKey) {
   }
 }
 
+function legacyCopy(text: string) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  const copied = document.execCommand?.('copy') ?? false
+  textarea.remove()
+  return copied
+}
+
 async function copySecret() {
-  if (secret.value) await navigator.clipboard.writeText(secret.value)
+  if (!secret.value) return
+  error.value = ''
+
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(secret.value)
+      return
+    } catch {
+      // Firefox may expose the API while still rejecting clipboard access.
+      // Fall back to copying the selected text from the click handler below.
+    }
+  }
+
+  if (!legacyCopy(secret.value)) {
+    error.value = 'Unable to copy API key. Select the key and copy it manually.'
+  }
 }
 </script>
 
