@@ -3,10 +3,15 @@ package hardware
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
+
+func commandNotFound(name string) error {
+	return &exec.Error{Name: name, Err: exec.ErrNotFound}
+}
 
 func TestSnapshotParsesNVIDIAAndRAM(t *testing.T) {
 	d := New()
@@ -17,7 +22,7 @@ func TestSnapshotParsesNVIDIAAndRAM(t *testing.T) {
 	d.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
 		if name != "nvidia-smi" {
-			return nil, errors.New("executable file not found")
+			return nil, commandNotFound(name)
 		}
 		if strings.Contains(joined, "query-gpu") {
 			return []byte("0, GPU-aaa, RTX 4090, 24564, 1024, 12\n1, GPU-bbb, RTX 3090, 24576, 2048, 33\n"), nil
@@ -48,7 +53,7 @@ func TestSnapshotParsesROCm(t *testing.T) {
 	d.run = func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		switch name {
 		case "nvidia-smi":
-			return nil, errors.New("executable file not found")
+			return nil, commandNotFound(name)
 		case "rocm-smi":
 			return []byte(`{"card0":{"Card series":"AMD Radeon RX 7900 XTX","Unique ID":"abc","GPU use (%)":"7","VRAM Total Memory (B)":"25753026560","VRAM Total Used Memory (B)":"172716032"}}`), nil
 		default:
@@ -71,7 +76,7 @@ func TestSnapshotParsesROCm(t *testing.T) {
 func TestSnapshotWithoutGPUUtilitiesStillReturnsRAM(t *testing.T) {
 	d := New()
 	d.readFile = func(string) ([]byte, error) { return []byte("MemTotal: 1000 kB\nMemAvailable: 500 kB\n"), nil }
-	d.run = func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("executable file not found") }
+	d.run = func(_ context.Context, name string, _ ...string) ([]byte, error) { return nil, commandNotFound(name) }
 	snapshot, err := d.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
