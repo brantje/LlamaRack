@@ -1,4 +1,4 @@
-export function useManagerApi() {
+export function useManagerApi(fetcher: typeof $fetch = $fetch) {
   const config = useRuntimeConfig()
   const requestURL = useRequestURL()
   const apiBase = computed(() => {
@@ -8,7 +8,7 @@ export function useManagerApi() {
   })
 
   async function request<T = unknown>(path: string, options: any = {}): Promise<T> {
-    return await $fetch<T>(`${apiBase.value}${path}`, {
+    return await fetcher<T>(`${apiBase.value}${path}`, {
       credentials: 'include',
       ...options
     })
