@@ -74,7 +74,7 @@ describe('model diagnostics', () => {
     expect(editButtons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
-  it('tests a model to READY and shows live worker logs in a terminal modal', async () => {
+  it('tests a model to READY and shows live worker logs in a flat timestamped terminal modal', async () => {
     const manager = seedModel()
     let started = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
@@ -97,7 +97,7 @@ describe('model diagnostics', () => {
 
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('coder logs')
+    expect(document.body.textContent).toContain('worker://coder')
     expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
 
     source.emit('[stderr] model loaded')
@@ -111,6 +111,10 @@ describe('model diagnostics', () => {
     expect(document.body.querySelector('[data-stream="stderr"]')?.textContent).toContain('model loaded')
     expect(document.body.querySelector('[data-stream="stdout"]')?.textContent).toContain('server ready')
     expect(document.body.querySelector('[data-stream="log"]')?.textContent).toContain('scheduler tick')
+    const logTimes = [...document.body.querySelectorAll('[data-log-time]')].map(node => node.textContent || '')
+    expect(logTimes).toHaveLength(3)
+    expect(logTimes.every(value => /^\d{2}:\d{2}:\d{2}$/.test(value))).toBe(true)
+    expect(document.body.querySelector('[data-testid="log-terminal"]')?.textContent).not.toContain('$')
     expect(wrapper.findAll('button').find(button => button.text() === 'Start')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
     expect(source.closed).toBe(true)
@@ -133,7 +137,7 @@ describe('model diagnostics', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
     expect(FakeEventSource.instances).toHaveLength(1)
-    expect(document.body.textContent).toContain('coder logs')
+    expect(document.body.textContent).toContain('worker://coder')
   })
 
   it('runs direct start and stop actions while keeping logs live', async () => {
@@ -170,7 +174,7 @@ describe('model diagnostics', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('WAITING · 0 lines')
-    expect(document.body.textContent).toContain('waiting for worker output')
+    expect(document.body.textContent).toContain('Waiting for worker output…')
     expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
     returnRuntime = true
     FakeEventSource.throwOnCreate = true
