@@ -1,4 +1,5 @@
 export default defineNuxtConfig({
+  modules: ['@nuxt/ui'],
   devtools: { enabled: true },
   runtimeConfig: {
     public: {
@@ -13,6 +14,10 @@ export default defineNuxtConfig({
         { name: 'color-scheme', content: 'dark' }
       ]
     }
+  },
+  colorMode: {
+    preference: 'dark',
+    fallback: 'dark'
   },
   css: ['~/assets/css/main.css'],
   typescript: { strict: true }
