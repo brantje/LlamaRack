@@ -104,13 +104,14 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	}
 	w.cmd = cmd
 	w.runtime.PID = cmd.Process.Pid
+	w.runtime.State = Loading
+	s.emitRuntimeLocked(w.runtime)
 	pid := w.runtime.PID
 	s.mu.Unlock()
 	slog.Info("llama-server process started", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port)
 	go copyLogs(w.logs, instanceID, modelID, "stdout", stdout)
 	go copyLogs(w.logs, instanceID, modelID, "stderr", stderr)
 	go s.wait(w)
-	s.setState(instanceID, Loading, "")
 
 	readyCtx, cancel := context.WithTimeout(ctx, s.startupTimeout)
 	defer cancel()
@@ -121,12 +122,16 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 		return s.Status(instanceID), err
 	}
 	s.mu.Lock()
-	if current := s.workers[instanceID]; current != nil {
-		current.runtime.State = Ready
-		current.runtime.ReadyAt = time.Now().UTC()
-		s.emitRuntimeLocked(current.runtime)
+	current := s.workers[instanceID]
+	if current != w || current.runtime.State != Loading || current.runtime.PID == 0 {
+		rt := w.runtime
+		s.mu.Unlock()
+		return rt, errors.New("worker exited during startup")
 	}
-	rt := s.workers[instanceID].runtime
+	current.runtime.State = Ready
+	current.runtime.ReadyAt = time.Now().UTC()
+	s.emitRuntimeLocked(current.runtime)
+	rt := current.runtime
 	s.mu.Unlock()
 	slog.Info("llama-server worker ready", "instance_id", instanceID, "model_id", modelID, "pid", rt.PID, "port", rt.Port)
 	return rt, nil
@@ -140,10 +145,17 @@ func (s *Supervisor) Stop(ctx context.Context, id string) error {
 		slog.Info("llama-server worker already stopped", "instance_id", id)
 		return nil
 	}
+	done := w.done
+	select {
+	case <-done:
+		s.mu.Unlock()
+		slog.Info("llama-server worker already exited", "instance_id", id)
+		return nil
+	default:
+	}
 	w.runtime.State = Stopping
 	s.emitRuntimeLocked(w.runtime)
 	p := w.cmd.Process
-	done := w.done
 	modelID := w.runtime.ModelID
 	pid := w.runtime.PID
 	s.mu.Unlock()
