@@ -20,6 +20,18 @@ Preserve the existing llamacpp-manager theme unless a task explicitly requests a
 
 **Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered/elevated containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface. Components with surfaced defaults must also stay flat when nested: for example, `UEmpty` defaults to an outlined surface, so use `variant="naked"` whenever `UEmpty` is rendered inside a card.
 
+## Nuxt routing mount invariant — hard rule
+
+`[NUXT_E4011] Your project has pages but the <NuxtPage /> component has not been used` is a **hard regression and must never be shipped or ignored**.
+
+- `frontend/app/app.vue` MUST render exactly one `<NuxtPage />` and it MUST be mounted unconditionally. Never put `<NuxtPage />` behind `v-if`, `v-else-if`, or `v-else`, directly or through an ancestor.
+- Never replace `<NuxtPage />` with `<RouterView />`. Nuxt pages must use Nuxt's router integration.
+- Every Nuxt layout MUST render its default `<slot />` unconditionally. A conditional layout slot makes the `<NuxtPage />` passed through `NuxtLayout` effectively conditional and can trigger `NUXT_E4011` during bootstrap.
+- Loading, backend-error, authentication, and authorization screens MUST be rendered as siblings/overlays or with `v-show` while the page slot remains mounted. Do not solve those states by conditionally omitting the page slot.
+- Pages that must wait for authentication/authorization MUST react to permission state becoming available (for example with `watch(..., { immediate: true })`) instead of depending on the page being mounted only after login.
+- Do not set `pages: false` merely to silence `NUXT_E4011`. That is only allowed if the project intentionally removes Nuxt file-based pages, and requires explicit user approval.
+- CI MUST enforce this invariant with the frontend design-rule tests. A change that makes `<NuxtPage />` or a layout's default slot conditional must fail tests.
+
 ### Nuxt UI component inventory
 
 This inventory mirrors the official Nuxt UI component catalog (v4.11.0 at the time this rule was added). **Check this list before writing a custom UI primitive.** If the installed Nuxt UI version changes, consult the current catalog and update this inventory.
