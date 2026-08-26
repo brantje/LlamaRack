@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/brantje/llamacpp-manager/internal/models"
 	"github.com/brantje/llamacpp-manager/internal/supervisor"
@@ -20,15 +21,17 @@ type Reservation struct {
 func (r *Reservation) Release() { if r != nil && r.release != nil { r.once.Do(r.release) } }
 
 type Service struct {
-	models *models.Service
-	sup    *supervisor.Supervisor
-	mu     sync.Mutex
-	active map[string]int
-	rr     map[string]uint64
+	models   *models.Service
+	sup      *supervisor.Supervisor
+	mu       sync.Mutex
+	active   map[string]int
+	activeByModel map[string]int
+	lastUsed map[string]time.Time
+	rr       map[string]uint64
 }
 
 func New(modelService *models.Service, sup *supervisor.Supervisor) *Service {
-	return &Service{models:modelService,sup:sup,active:map[string]int{},rr:map[string]uint64{}}
+	return &Service{models:modelService,sup:sup,active:map[string]int{},activeByModel:map[string]int{},lastUsed:map[string]time.Time{},rr:map[string]uint64{}}
 }
 
 type candidate struct { id, endpoint string; preferred bool }
@@ -42,10 +45,12 @@ func (s *Service) Reserve(ctx context.Context, model models.Model) (*Reservation
 	s.mu.Lock()
 	selected:=s.selectLocked(model,candidates)
 	s.active[selected.id]++
+	s.activeByModel[model.ID]++
+	s.lastUsed[model.ID]=time.Now().UTC()
 	s.mu.Unlock()
 
-	if _,ok:=s.sup.Endpoint(selected.id);!ok{s.release(selected.id);return s.Reserve(ctx,model)}
-	return &Reservation{InstanceID:selected.id,Endpoint:selected.endpoint,release:func(){s.release(selected.id)}},nil
+	if _,ok:=s.sup.Endpoint(selected.id);!ok{s.release(selected.id,model.ID);return s.Reserve(ctx,model)}
+	return &Reservation{InstanceID:selected.id,Endpoint:selected.endpoint,release:func(){s.release(selected.id,model.ID)}},nil
 }
 
 func(s *Service)selectLocked(model models.Model,candidates []candidate)candidate{
@@ -56,13 +61,14 @@ func(s *Service)selectLocked(model models.Model,candidates []candidate)candidate
 		for _,c:=range candidates{if c.preferred{return c}}
 		return s.leastActiveLocked(candidates)
 	case "lowest_load":
-		// Until normalized worker/GPU load telemetry is available, active requests are
-		// the most reliable comparable load signal and intentionally serve as fallback.
 		return s.leastActiveLocked(candidates)
 	default:
 		return s.leastActiveLocked(candidates)
 	}
 }
+
 func(s *Service)leastActiveLocked(candidates []candidate)candidate{best:=candidates[0];count:=math.MaxInt;for _,c:=range candidates{if s.active[c.id]<count{best=c;count=s.active[c.id]}};return best}
-func(s *Service)release(id string){s.mu.Lock();defer s.mu.Unlock();if s.active[id]>0{s.active[id]--}}
+func(s *Service)release(instanceID,modelID string){s.mu.Lock();defer s.mu.Unlock();if s.active[instanceID]>0{s.active[instanceID]--};if s.activeByModel[modelID]>0{s.activeByModel[modelID]--};s.lastUsed[modelID]=time.Now().UTC()}
 func(s *Service)Active(instanceID string)int{s.mu.Lock();defer s.mu.Unlock();return s.active[instanceID]}
+func(s *Service)ActiveModel(modelID string)int{s.mu.Lock();defer s.mu.Unlock();return s.activeByModel[modelID]}
+func(s *Service)LastUsed(modelID string)(time.Time,bool){s.mu.Lock();defer s.mu.Unlock();value,ok:=s.lastUsed[modelID];return value,ok}
