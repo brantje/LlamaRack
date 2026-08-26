@@ -248,10 +248,7 @@ async function remove(id: string) {
             <template #header>
               <div class="flex items-center justify-between gap-3 text-xs">
                 <strong>Worker logs</strong>
-                <div class="flex items-center gap-2 text-dimmed">
-                  <UBadge v-if="liveLogModels[model.id]" color="primary" variant="subtle" size="xs">LIVE</UBadge>
-                  <span>{{ workerLogs[model.id]?.length || 0 }} lines</span>
-                </div>
+                <span class="text-dimmed">{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</span>
               </div>
             </template>
             <UScrollArea v-if="workerLogs[model.id]?.length" class="max-h-80">
