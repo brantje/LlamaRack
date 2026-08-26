@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS models (
  display_name TEXT,
  artifact_id TEXT NOT NULL REFERENCES artifacts(id),
  enabled INTEGER NOT NULL DEFAULT 1,
- autoload INTEGER NOT NULL DEFAULT 1,
+ autoload_enabled INTEGER NOT NULL DEFAULT 1,
  always_on INTEGER NOT NULL DEFAULT 0,
  priority TEXT NOT NULL DEFAULT 'normal',
  routing_policy TEXT NOT NULL DEFAULT 'least_active',
@@ -96,6 +96,50 @@ CREATE TABLE IF NOT EXISTS instances (
  created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 `
-	_, err := db.ExecContext(ctx, schema)
-	return err
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+
+	// Early development databases used `autoload`; the model service and API use
+	// `autoload_enabled`. Keep upgrades safe by adding the canonical column and
+	// copying the legacy value once when needed.
+	hasAutoloadEnabled, err := columnExists(ctx, db, "models", "autoload_enabled")
+	if err != nil {
+		return err
+	}
+	if !hasAutoloadEnabled {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE models ADD COLUMN autoload_enabled INTEGER NOT NULL DEFAULT 1"); err != nil {
+			return fmt.Errorf("add models.autoload_enabled: %w", err)
+		}
+		hasLegacyAutoload, err := columnExists(ctx, db, "models", "autoload")
+		if err != nil {
+			return err
+		}
+		if hasLegacyAutoload {
+			if _, err := db.ExecContext(ctx, "UPDATE models SET autoload_enabled=autoload"); err != nil {
+				return fmt.Errorf("migrate models.autoload: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
