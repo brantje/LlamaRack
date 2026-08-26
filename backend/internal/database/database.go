@@ -25,14 +25,14 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("sqlite pragma: %w", err)
 		}
 	}
-	if err := migrate(ctx, db); err != nil {
+	if err := initializeSchema(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-func migrate(ctx context.Context, db *sql.DB) error {
+func initializeSchema(ctx context.Context, db *sql.DB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,19 +57,13 @@ CREATE TABLE IF NOT EXISTS api_keys (
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  last_used_at INTEGER
 );
-CREATE TABLE IF NOT EXISTS artifacts (
- id TEXT PRIMARY KEY,
- display_name TEXT NOT NULL,
- local_path TEXT NOT NULL UNIQUE,
- total_bytes INTEGER NOT NULL,
- quantization TEXT,
- created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
 CREATE TABLE IF NOT EXISTS models (
  id TEXT PRIMARY KEY,
  public_id TEXT NOT NULL UNIQUE,
- display_name TEXT,
- artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+ name TEXT NOT NULL,
+ gguf_path TEXT NOT NULL,
+ total_bytes INTEGER NOT NULL,
+ quantization TEXT,
  enabled INTEGER NOT NULL DEFAULT 1,
  autoload_enabled INTEGER NOT NULL DEFAULT 1,
  always_on INTEGER NOT NULL DEFAULT 0,
@@ -96,50 +90,6 @@ CREATE TABLE IF NOT EXISTS instances (
  created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 `
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		return err
-	}
-
-	// Early development databases used `autoload`; the model service and API use
-	// `autoload_enabled`. Keep upgrades safe by adding the canonical column and
-	// copying the legacy value once when needed.
-	hasAutoloadEnabled, err := columnExists(ctx, db, "models", "autoload_enabled")
-	if err != nil {
-		return err
-	}
-	if !hasAutoloadEnabled {
-		if _, err := db.ExecContext(ctx, "ALTER TABLE models ADD COLUMN autoload_enabled INTEGER NOT NULL DEFAULT 1"); err != nil {
-			return fmt.Errorf("add models.autoload_enabled: %w", err)
-		}
-		hasLegacyAutoload, err := columnExists(ctx, db, "models", "autoload")
-		if err != nil {
-			return err
-		}
-		if hasLegacyAutoload {
-			if _, err := db.ExecContext(ctx, "UPDATE models SET autoload_enabled=autoload"); err != nil {
-				return fmt.Errorf("migrate models.autoload: %w", err)
-			}
-		}
-	}
-	return nil
-}
-
-func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, notNull, pk int
-		var name, typ string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
+	_, err := db.ExecContext(ctx, schema)
+	return err
 }
