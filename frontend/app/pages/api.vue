@@ -71,39 +71,6 @@ async function revoke(key: APIKey) {
     pending[key.id] = undefined
   }
 }
-
-function legacyCopy(text: string) {
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-  const copied = document.execCommand?.('copy') ?? false
-  textarea.remove()
-  return copied
-}
-
-async function copySecret() {
-  if (!secret.value) return
-  error.value = ''
-
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(secret.value)
-      return
-    } catch {
-      // Firefox may expose the API while still rejecting clipboard access.
-      // Fall back to copying the selected text from the click handler below.
-    }
-  }
-
-  if (!legacyCopy(secret.value)) {
-    error.value = 'Unable to copy API key. Select the key and copy it manually.'
-  }
-}
 </script>
 
 <template>
@@ -138,7 +105,16 @@ async function copySecret() {
         <div class="space-y-3">
           <strong class="text-sm">Copy this key now. It will not be shown again.</strong>
           <code class="block break-all font-mono text-sm text-primary">{{ secret }}</code>
-          <UButton data-testid="copy-key" color="neutral" variant="soft" size="sm" @click="copySecret">Copy</UButton>
+          <AppCopyButton
+            :text="secret"
+            color="neutral"
+            variant="soft"
+            size="sm"
+            error-message="Unable to copy API key. Select the key and copy it manually."
+            data-testid="copy-key"
+            @copied="error = ''"
+            @error="message => error = message"
+          />
         </div>
       </section>
 
