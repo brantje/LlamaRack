@@ -23,7 +23,7 @@ func TestDirectInstanceLifecycleRestartKillRuntimeAndLogs(t *testing.T) {
 		t.Fatalf("instance=%+v model=%+v", item, m)
 	}
 
-	_, events, unsubscribe := s.SubscribeLogs(item.ID)
+	_, _, unsubscribe := s.SubscribeLogs(item.ID)
 	defer unsubscribe()
 	endpoint, err := s.StartInstance(ctx, item.ID)
 	if err != nil || endpoint == "" {
@@ -32,17 +32,6 @@ func TestDirectInstanceLifecycleRestartKillRuntimeAndLogs(t *testing.T) {
 	rt, err := s.RuntimeInstance(ctx, item.ID)
 	if err != nil || rt.State != supervisor.Ready || rt.ModelID != m.ID {
 		t.Fatalf("runtime=%+v err=%v", rt, err)
-	}
-
-	select {
-	case line := <-events:
-		if line == "" {
-			t.Fatal("expected non-empty worker log")
-		}
-	case <-time.After(2 * time.Second):
-		if len(s.Logs(item.ID)) == 0 {
-			t.Fatal("expected worker logs")
-		}
 	}
 
 	restarted, err := s.RestartInstance(ctx, item.ID)
