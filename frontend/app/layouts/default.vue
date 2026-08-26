@@ -84,7 +84,7 @@ async function submitAuth() {
     </UCard>
   </UMain>
 
-  <UDashboardGroup v-else>
+  <UDashboardGroup v-show="initialized && !backendError && !!user">
     <UDashboardSidebar id="manager-sidebar" collapsible>
       <template #header>
         <UButton to="/" color="neutral" variant="link" class="h-auto justify-start gap-3 px-1 py-2">
@@ -97,7 +97,7 @@ async function submitAuth() {
 
       <template #footer>
         <div class="flex w-full items-center justify-between gap-3">
-          <UUser :name="user.username" :description="user.role" size="sm" />
+          <UUser :name="user?.username || ''" :description="user?.role || ''" size="sm" />
           <UButton
             data-testid="sign-out"
             color="neutral"
