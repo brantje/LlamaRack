@@ -73,7 +73,7 @@ func TestWorkerLogStreamRequiresAuthAndStreamsLiveWorkerOutput(t *testing.T) {
 	}
 
 	cookie := bootstrapAndLogin(t, f, "admin")
-	_, model := createArtifactAndModel(t, f, cookie)
+	model := createModel(t, f, cookie)
 	instances, err := f.models.Instances(context.Background(), model.ID)
 	if err != nil || len(instances) != 1 {
 		t.Fatalf("instances=%v err=%v", instances, err)
@@ -98,7 +98,6 @@ func TestWorkerLogStreamRequiresAuthAndStreamsLiveWorkerOutput(t *testing.T) {
 		close(done)
 	}()
 
-	// Give the SSE handler time to subscribe before the worker is launched.
 	time.Sleep(25 * time.Millisecond)
 	started := doRequest(t, f.server, http.MethodPost, "/api/v1/models/"+model.ID+"/start", nil, cookie)
 	if started.Code != http.StatusAccepted {
