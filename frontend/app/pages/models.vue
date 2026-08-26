@@ -8,6 +8,9 @@ const message = ref('')
 const pending = reactive<Record<string, 'start' | 'stop' | 'test' | 'logs' | undefined>>({})
 const testResults = reactive<Record<string, string>>({})
 const workerLogs = reactive<Record<string, string[] | undefined>>({})
+const liveLogModels = reactive<Record<string, boolean>>({})
+const liveSources = new Map<string, EventSource>()
+const streamModels = new Map<string, string>()
 const artifactForm = reactive({ path: '', display_name: '' })
 const modelForm = reactive({ model_id: '', display_name: '', artifact_id: '', always_on: false, autoload_enabled: true, priority: 'normal', routing_policy: 'least_active' })
 
@@ -18,6 +21,39 @@ function errorMessage(error: any, fallback: string) {
 function runtimeFor(model: Model): Runtime[] {
   return manager.runtimes.value[model.id] || []
 }
+
+function appendWorkerLog(modelId: string, instanceId: string, line: string) {
+  const lines = workerLogs[modelId] || (workerLogs[modelId] = [])
+  lines.push(`[${instanceId.slice(0, 8)}] ${line}`)
+  if (lines.length > 2000) lines.splice(0, lines.length - 2000)
+}
+
+function ensureLogStream(modelId: string, runtime: Runtime) {
+  if (liveSources.has(runtime.instance_id)) return
+  const url = `${manager.apiBase.value}/api/v1/instances/${encodeURIComponent(runtime.instance_id)}/logs/stream`
+  const source = new EventSource(url, { withCredentials: true })
+  source.onmessage = (event) => {
+    let line = event.data
+    try {
+      line = JSON.parse(event.data)
+    } catch {
+      // Keep raw SSE data if it was not JSON encoded.
+    }
+    appendWorkerLog(modelId, runtime.instance_id, String(line))
+  }
+  liveSources.set(runtime.instance_id, source)
+  streamModels.set(runtime.instance_id, modelId)
+  liveLogModels[modelId] = true
+}
+
+function closeLogStreams() {
+  for (const source of liveSources.values()) source.close()
+  liveSources.clear()
+  streamModels.clear()
+  for (const modelId of Object.keys(liveLogModels)) liveLogModels[modelId] = false
+}
+
+onBeforeUnmount(closeLogStreams)
 
 async function registerArtifact() {
   formBusy.value = true
@@ -55,6 +91,7 @@ async function action(id: string, operation: 'start' | 'stop') {
   message.value = ''
   testResults[id] = ''
   try {
+    await loadLogs(id)
     await manager.request(`/api/v1/models/${id}/${operation}`, { method: 'POST' })
     await manager.refresh()
   } catch (error: any) {
@@ -70,18 +107,16 @@ async function loadLogs(id: string) {
   message.value = ''
   try {
     await manager.refresh()
-    const runtimes = runtimeFor(models.value.find(model => model.id === id) as Model)
+    const model = models.value.find(item => item.id === id)
+    const runtimes = model ? runtimeFor(model) : []
     if (!runtimes.length) {
       workerLogs[id] = []
       return
     }
-    const chunks = await Promise.all(runtimes.map(async runtime => {
-      const result = await manager.request<{ lines: string[] }>(`/api/v1/instances/${runtime.instance_id}/logs`)
-      return (result.lines || []).map(line => `[${runtime.instance_id.slice(0, 8)}] ${line}`)
-    }))
-    workerLogs[id] = chunks.flat()
+    if (workerLogs[id] === undefined) workerLogs[id] = []
+    for (const runtime of runtimes) ensureLogStream(id, runtime)
   } catch (error: any) {
-    message.value = errorMessage(error, 'Unable to load worker logs')
+    message.value = errorMessage(error, 'Unable to open live worker logs')
   } finally {
     if (!previous) pending[id] = undefined
   }
@@ -92,6 +127,7 @@ async function testModel(model: Model) {
   message.value = ''
   testResults[model.id] = ''
   try {
+    await loadLogs(model.id)
     await manager.request(`/api/v1/models/${model.id}/start`, { method: 'POST' })
     await manager.refresh()
     const runtimes = runtimeFor(model)
@@ -101,11 +137,9 @@ async function testModel(model: Model) {
       throw new Error(failed?.last_error || 'Worker did not reach READY state')
     }
     testResults[model.id] = `PASS · READY · PID ${ready.pid || 'n/a'} · port ${ready.port || 'n/a'}`
-    await loadLogs(model.id)
   } catch (error: any) {
     testResults[model.id] = `FAIL · ${errorMessage(error, 'Model test failed')}`
     await manager.refresh().catch(() => undefined)
-    await loadLogs(model.id).catch(() => undefined)
   } finally {
     pending[model.id] = undefined
   }
@@ -183,7 +217,7 @@ async function remove(id: string) {
                 {{ pending[model.id] === 'test' ? 'Testing…' : 'Test' }}
               </button>
               <button class="ghost small" :disabled="!!pending[model.id]" @click="loadLogs(model.id)">
-                {{ pending[model.id] === 'logs' ? 'Loading…' : 'Logs' }}
+                {{ pending[model.id] === 'logs' ? 'Opening…' : liveLogModels[model.id] ? 'Logs · Live' : 'Logs' }}
               </button>
               <button class="danger small" :disabled="!!pending[model.id]" @click="remove(model.id)">Delete</button>
             </div>
@@ -195,10 +229,10 @@ async function remove(id: string) {
           <div v-if="workerLogs[model.id] !== undefined" class="worker-log">
             <div class="worker-log-header">
               <strong>Worker logs</strong>
-              <small>{{ workerLogs[model.id]?.length || 0 }} lines</small>
+              <small>{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</small>
             </div>
             <pre v-if="workerLogs[model.id]?.length">{{ workerLogs[model.id]?.join('\n') }}</pre>
-            <p v-else class="muted">No worker output captured yet.</p>
+            <p v-else class="muted">Waiting for worker output…</p>
           </div>
         </article>
       </section>
