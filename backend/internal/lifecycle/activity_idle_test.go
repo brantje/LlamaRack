@@ -86,6 +86,49 @@ func TestIdleUnloadStopsInactiveModelButNotActiveRequest(t *testing.T) {
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
 }
 
+func TestIdleUnloadUsesPerModelOverrideAndGlobalFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	t.Run("override works when global is disabled", func(t *testing.T) {
+		s, ms, m, sup, exec := setupLifecycle(t, true, false)
+		exec("UPDATE models SET idle_unload_seconds=60 WHERE id=?", m.ID)
+		instances, err := ms.Instances(ctx, m.ID)
+		if err != nil || len(instances) != 1 {
+			t.Fatalf("instances=%+v err=%v", instances, err)
+		}
+		now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+		s.now = func() time.Time { return now }
+		if _, err := s.StartModel(ctx, m.ID); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(61 * time.Second)
+		s.ReconcileIdle(ctx, 0)
+		waitForRuntimeState(t, sup, instances[0].ID, supervisor.Unloaded)
+	})
+
+	t.Run("zero inherits global", func(t *testing.T) {
+		s, ms, m, sup, _ := setupLifecycle(t, true, false)
+		instances, err := ms.Instances(ctx, m.ID)
+		if err != nil || len(instances) != 1 {
+			t.Fatalf("instances=%+v err=%v", instances, err)
+		}
+		now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+		s.now = func() time.Time { return now }
+		if _, err := s.StartModel(ctx, m.ID); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(30 * time.Second)
+		s.ReconcileIdle(ctx, time.Minute)
+		if got := sup.Status(instances[0].ID).State; got != supervisor.Ready {
+			t.Fatalf("model unloaded before inherited timeout: %+v", sup.Status(instances[0].ID))
+		}
+		now = now.Add(31 * time.Second)
+		s.ReconcileIdle(ctx, time.Minute)
+		waitForRuntimeState(t, sup, instances[0].ID, supervisor.Unloaded)
+	})
+}
+
 func TestIdleUnloadSkipsAlwaysOnAndDisabledTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
@@ -111,12 +154,12 @@ func TestIdleUnloadSkipsAlwaysOnAndDisabledTimeout(t *testing.T) {
 	}
 }
 
-func TestEvictionPlanUsesActivityAndAlwaysOnProtection(t *testing.T) {
+func TestEvictionPlanUsesActivityAlwaysOnAndModelPolicy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 
-	t.Run("inactive model eligible", func(t *testing.T) {
-		s, _, m, _, _ := setupLifecycle(t, true, false)
+	t.Run("inactive model eligible unless eviction disabled", func(t *testing.T) {
+		s, _, m, _, exec := setupLifecycle(t, true, false)
 		if _, err := s.StartModel(ctx, m.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -125,11 +168,23 @@ func TestEvictionPlanUsesActivityAndAlwaysOnProtection(t *testing.T) {
 			t.Fatalf("inactive plan=%+v err=%v", plan, err)
 		}
 
+		exec("UPDATE models SET eviction_enabled=0 WHERE id=?", m.ID)
+		plan, err = s.EvictionPlan(ctx, 1)
+		if err != nil || plan.Fits || len(plan.Evict) != 0 {
+			t.Fatalf("eviction-disabled plan=%+v err=%v", plan, err)
+		}
+	})
+
+	t.Run("active model protected", func(t *testing.T) {
+		s, _, m, _, _ := setupLifecycle(t, true, false)
+		if _, err := s.StartModel(ctx, m.ID); err != nil {
+			t.Fatal(err)
+		}
 		_, release, err := s.Acquire(ctx, m.PublicID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		plan, err = s.EvictionPlan(ctx, 1)
+		plan, err := s.EvictionPlan(ctx, 1)
 		release()
 		if err != nil || plan.Fits || len(plan.Evict) != 0 {
 			t.Fatalf("active plan=%+v err=%v", plan, err)
