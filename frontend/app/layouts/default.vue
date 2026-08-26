@@ -59,8 +59,8 @@ async function submitAuth() {
     <UCard class="w-full max-w-md bg-muted/90 shadow-2xl">
       <div class="text-4xl font-black text-primary">λ</div>
       <p class="mt-5 mb-2 text-xs font-extrabold tracking-[0.18em] text-dimmed">LLAMA.CPP CONTROL PLANE</p>
-      <h1 class="text-3xl font-bold">{{ bootstrapRequired ? 'Create administrator' : 'Welcome back' }}</h1>
-      <p class="mt-2 leading-6 text-muted">{{ bootstrapRequired ? 'Create the first local administrator account.' : 'Sign in to manage local inference.' }}</p>
+      <h1 class="text-3xl font-bold">{{ bootstrapRequired ? 'Create account' : 'Welcome back' }}</h1>
+      <p class="mt-2 leading-6 text-muted">{{ bootstrapRequired ? 'Create the first local management account.' : 'Sign in to manage local inference.' }}</p>
       <UAlert v-if="authError" class="mt-5" color="error" variant="subtle" :description="authError" />
 
       <UForm :state="credentials" class="mt-6 space-y-4" @submit="submitAuth">
@@ -78,7 +78,7 @@ async function submitAuth() {
           />
         </UFormField>
         <UButton class="w-full justify-center" type="submit" :loading="authenticating">
-          {{ bootstrapRequired ? 'Create admin' : 'Sign in' }}
+          {{ bootstrapRequired ? 'Create account' : 'Sign in' }}
         </UButton>
       </UForm>
     </UCard>
@@ -97,7 +97,7 @@ async function submitAuth() {
 
       <template #footer>
         <div class="flex w-full items-center justify-between gap-3">
-          <UUser :name="user?.username || ''" :description="user?.role || ''" size="sm" />
+          <UUser :name="user?.username || ''" size="sm" />
           <UButton
             data-testid="sign-out"
             color="neutral"
