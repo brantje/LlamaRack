@@ -53,6 +53,8 @@ async function copy() {
   copied.value = false
   if (!props.text) return
 
+  let clipboardError = ''
+
   if (typeof navigator !== 'undefined') {
     try {
       if (navigator.clipboard?.writeText) {
@@ -61,7 +63,8 @@ async function copy() {
           copied.value = true
           emit('copied', props.text)
           return
-        } catch {
+        } catch (value: any) {
+          clipboardError = value?.message || ''
           // Firefox can expose Clipboard while rejecting it outside a secure
           // context. Continue with the selection-based fallback.
         }
@@ -78,7 +81,7 @@ async function copy() {
     return
   }
 
-  emit('error', props.errorMessage)
+  emit('error', clipboardError ? `${clipboardError}. ${props.errorMessage}` : props.errorMessage)
 }
 
 const accessibleLabel = computed(() => {
