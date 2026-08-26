@@ -127,7 +127,7 @@ describe('application shell', () => {
 })
 
 describe('overview and settings', () => {
-  it('renders fleet state and capability information', async () => {
+  it('renders instance fleet state and capability information', async () => {
     const manager = resetState()
     manager.models.value = [model({ id: 'm1', name: 'Ready Model', gguf_path: 'ready.gguf' }), model({ id: 'm2', name: 'Failed Model', gguf_path: 'failed.gguf' })]
     manager.instances.value = [instance({ id: 'ready', model_id: 'm1', name: 'Ready', always_on: true }), instance({ id: 'failed', model_id: 'm2', name: 'Failed', autoload_enabled: false })]
@@ -135,7 +135,9 @@ describe('overview and settings', () => {
     manager.profile.value = { path: '/app/llama-server', version: 'b123', fingerprint: 'abcdefghijklmnopqrstuvwxyz', options: [{ key: 'ctx-size' }] }
     const overview = await mountSuspended(IndexPage, { route: false })
     expect(overview.text()).toContain('Ready Model')
-    expect(overview.text()).toContain('ready.gguf')
+    expect(overview.text()).toContain('Failed Model')
+    expect(overview.text()).toContain('Always on')
+    expect(overview.text()).toContain('READY')
     const settings = await mountSuspended(SettingsPage, { route: false })
     expect(settings.text()).toContain('http://manager.test:8888')
     expect(settings.text()).toContain('/app/llama-server')
@@ -152,7 +154,7 @@ describe('overview and settings', () => {
       return []
     })
     const overview = await mountSuspended(IndexPage, { route: false })
-    expect(overview.text()).toContain('No models configured')
+    expect(overview.text()).toContain('No Instances configured')
     await overview.find('button').trigger('click'); await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models')
     const settings = await mountSuspended(SettingsPage, { route: false })
