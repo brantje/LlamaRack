@@ -32,7 +32,12 @@ export type Instance = {
 }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
-export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string }> }
+export type Profile = {
+  path: string
+  version?: string
+  fingerprint: string
+  options: Array<{ key: string; value_hint?: string; description?: string; kind?: string; choices?: string[] }>
+}
 
 type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[] }
 
