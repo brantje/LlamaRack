@@ -82,25 +82,7 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
 	openAI := gateway.New(authService, modelService, lifecycleService)
-	mux := http.NewServeMux()
-	mux.Handle("/api/v1/", apiServer)
-	mux.Handle("/v1/", openAI)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"name": "llamacpp-manager", "status": "running"})
-	})
+	mux := newMux(apiServer, openAI)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -134,6 +116,21 @@ func run(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	return nil
+}
+
+func newMux(apiServer, openAI http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1/", apiServer)
+	mux.Handle("/v1/", openAI)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "llamacpp-manager", "status": "running"})
+	})
+	return mux
 }
 
 func cors(allowedOrigins string, next http.Handler) http.Handler {
