@@ -1,5 +1,4 @@
-export type Role = 'admin' | 'operator' | 'readonly'
-export type User = { id: number; username: string; role: Role; enabled: boolean }
+export type User = { id: number; username: string; enabled: boolean }
 export type Model = { id: string; model_id: string; name: string; gguf_path: string; total_bytes: number; quantization?: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; eviction_enabled: boolean; idle_unload_seconds: number; routing_policy: string }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
@@ -14,9 +13,6 @@ export function useManager() {
   const runtimes = useState<Record<string, Runtime[]>>('manager-runtimes', () => ({}))
   const profile = useState<Profile | null>('manager-profile', () => null)
   const backendError = useState('manager-backend-error', () => '')
-
-  const canOperate = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
-  const isAdmin = computed(() => user.value?.role === 'admin')
 
   async function initialize() {
     backendError.value = ''
@@ -82,5 +78,5 @@ export function useManager() {
       || 'UNLOADED'
   }
 
-  return { apiBase, user, initialized, bootstrapRequired, models, runtimes, profile, backendError, canOperate, isAdmin, initialize, authenticate, logout, refresh, modelState, request }
+  return { apiBase, user, initialized, bootstrapRequired, models, runtimes, profile, backendError, initialize, authenticate, logout, refresh, modelState, request }
 }

@@ -11,7 +11,7 @@ import (
 
 func TestAPIKeyEnableDisableDeleteAndRevokeRoutes(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	cookie := bootstrapAndLogin(t, f, "admin")
+	cookie := bootstrapAndLogin(t, f)
 
 	created := doRequest(t, f.server, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "sdk"}, cookie)
 	if created.Code != http.StatusCreated {
@@ -90,28 +90,5 @@ func TestAPIKeyEnableDisableDeleteAndRevokeRoutes(t *testing.T) {
 	badPath := doRequest(t, f.server, http.MethodDelete, "/api/v1/api-keys/a/b/c", nil, cookie)
 	if badPath.Code != http.StatusNotFound {
 		t.Fatalf("bad path status=%d", badPath.Code)
-	}
-}
-
-func TestAPIKeyMutationRoutesRequireAdmin(t *testing.T) {
-	f := newAPIFixture(t, nil)
-	cookie := bootstrapAndLogin(t, f, "operator")
-	key, _, err := f.auth.CreateAPIKey(t.Context(), "operator-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		method string
-		path   string
-		body   any
-	}{
-		{http.MethodPatch, "/api/v1/api-keys/" + key.ID, map[string]bool{"enabled": false}},
-		{http.MethodDelete, "/api/v1/api-keys/" + key.ID, nil},
-		{http.MethodPost, "/api/v1/api-keys/" + key.ID + "/revoke", nil},
-	} {
-		w := doRequest(t, f.server, tc.method, tc.path, tc.body, cookie)
-		if w.Code != http.StatusForbidden {
-			t.Fatalf("%s %s status=%d body=%s", tc.method, tc.path, w.Code, w.Body.String())
-		}
 	}
 }

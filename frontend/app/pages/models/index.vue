@@ -7,7 +7,7 @@ type WorkerLogLine = {
 }
 
 const manager = useManager()
-const { models, canOperate } = manager
+const { models } = manager
 const message = ref('')
 const pending = reactive<Record<string, 'start' | 'stop' | 'test' | 'logs' | 'delete' | undefined>>({})
 const testResults = reactive<Record<string, string>>({})
@@ -170,7 +170,7 @@ async function remove(id: string) {
       />
       <div class="flex flex-wrap justify-end gap-2">
         <UButton color="neutral" variant="soft" @click="manager.refresh">Refresh</UButton>
-        <UButton v-if="canOperate" to="/models/new">Add model</UButton>
+        <UButton to="/models/new">Add model</UButton>
       </div>
     </div>
 
@@ -181,7 +181,7 @@ async function remove(id: string) {
       title="No models configured"
       description="Add a GGUF model to get started."
     >
-      <template v-if="canOperate" #actions>
+      <template #actions>
         <UButton to="/models/new" size="sm">Add model</UButton>
       </template>
     </UEmpty>
@@ -206,7 +206,6 @@ async function remove(id: string) {
             </div>
 
             <UButton
-              v-if="canOperate"
               icon="i-lucide-pencil"
               color="neutral"
               variant="ghost"
@@ -249,7 +248,7 @@ async function remove(id: string) {
           :description="testResults[model.id]"
         />
 
-        <template v-if="canOperate" #footer>
+        <template #footer>
           <div class="flex flex-wrap gap-2">
             <UButton
               color="neutral"

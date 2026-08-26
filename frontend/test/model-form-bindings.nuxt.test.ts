@@ -19,7 +19,7 @@ beforeEach(() => {
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
-  manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+  manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
@@ -151,15 +151,5 @@ describe('model creation form', () => {
     await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()
     expect(JSON.stringify(selectComponents(wrapper)[0]!.props('items'))).toContain('deep/other.gguf')
-  })
-
-  it('hides creation controls from readonly users', async () => {
-    const manager = useManager()
-    manager.user.value = { id: 3, username: 'viewer', role: 'readonly', enabled: true }
-    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
-    await flushPromises()
-    expect(wrapper.find('form').exists()).toBe(false)
-    expect(wrapper.text()).toContain('cannot create models')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/available')
   })
 })

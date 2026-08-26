@@ -19,7 +19,6 @@ import (
 type User struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
-	Role     string `json:"role"`
 	Enabled  bool   `json:"enabled"`
 }
 
@@ -73,7 +72,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 	if err != nil {
 		return User{}, err
 	}
-	res, err := tx.ExecContext(ctx, "INSERT INTO users(username,password_hash,role) VALUES(?,?,'admin')", username, hash)
+	res, err := tx.ExecContext(ctx, "INSERT INTO users(username,password_hash) VALUES(?,?)", username, hash)
 	if err != nil {
 		return User{}, err
 	}
@@ -81,14 +80,14 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 	if err := tx.Commit(); err != nil {
 		return User{}, err
 	}
-	return User{ID: id, Username: username, Role: "admin", Enabled: true}, nil
+	return User{ID: id, Username: username, Enabled: true}, nil
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, User, error) {
 	var user User
 	var hash string
 	var enabled int
-	err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,role,enabled FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &user.Role, &enabled)
+	err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled)
 	if err != nil || !verifyPassword(password, hash) || enabled == 0 {
 		return "", User{}, errors.New("invalid credentials")
 	}
@@ -113,16 +112,13 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 func (s *Service) SessionUser(ctx context.Context, token string) (User, error) {
 	var user User
 	var enabled int
-	err := s.db.QueryRowContext(ctx, `SELECT u.id,u.username,u.role,u.enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`, tokenHash(token), time.Now().Unix()).Scan(&user.ID, &user.Username, &user.Role, &enabled)
+	err := s.db.QueryRowContext(ctx, `SELECT u.id,u.username,u.enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`, tokenHash(token), time.Now().Unix()).Scan(&user.ID, &user.Username, &enabled)
 	if err != nil || enabled == 0 {
 		return User{}, errors.New("session invalid")
 	}
 	user.Enabled = true
 	return user, nil
 }
-
-func CanOperate(role string) bool { return role == "admin" || role == "operator" }
-func IsAdmin(role string) bool     { return role == "admin" }
 
 func (s *Service) CreateAPIKey(ctx context.Context, name string) (APIKey, string, error) {
 	name = strings.TrimSpace(name)

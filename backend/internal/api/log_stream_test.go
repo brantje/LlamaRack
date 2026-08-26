@@ -72,7 +72,7 @@ func TestWorkerLogStreamRequiresAuthAndStreamsLiveWorkerOutput(t *testing.T) {
 		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
 	}
 
-	cookie := bootstrapAndLogin(t, f, "admin")
+	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
 	instances, err := f.models.Instances(context.Background(), model.ID)
 	if err != nil || len(instances) != 1 {
