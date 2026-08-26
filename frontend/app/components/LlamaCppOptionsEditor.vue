@@ -15,8 +15,8 @@ type EffectiveConfig = {
   sources: Record<string, string>
 }
 type ConfigResponse = {
-  profile: { options: OptionDefinition[] }
-  effective: EffectiveConfig
+  profile?: { options?: OptionDefinition[] }
+  effective?: EffectiveConfig
   unsupported?: string[]
 }
 
@@ -47,20 +47,20 @@ const overrides = computed(() => props.modelValue || {})
 const inherited = computed(() => {
   const effective = config.value?.effective
   if (!effective || props.scope === 'global') return {} as Record<string, string>
-  if (props.scope === 'model') return { ...effective.global }
-  return { ...effective.global, ...effective.model }
+  if (props.scope === 'model') return { ...(effective.global || {}) }
+  return { ...(effective.global || {}), ...(effective.model || {}) }
 })
 const inheritedSources = computed(() => {
   const effective = config.value?.effective
   const out: Record<string, string> = {}
   if (!effective || props.scope === 'global') return out
-  for (const key of Object.keys(effective.global)) out[key] = 'global'
-  if (props.scope === 'instance') for (const key of Object.keys(effective.model)) out[key] = 'model'
+  for (const key of Object.keys(effective.global || {})) out[key] = 'global'
+  if (props.scope === 'instance') for (const key of Object.keys(effective.model || {})) out[key] = 'model'
   return out
 })
 
 const allOptions = computed<OptionDefinition[]>(() => {
-  const discovered = [...(config.value?.profile.options || manager.profile.value?.options || [])]
+  const discovered = [...(config.value?.profile?.options || manager.profile.value?.options || [])]
   const known = new Set(discovered.map(option => option.key))
   for (const key of Object.keys(overrides.value)) {
     if (!known.has(key)) discovered.push({ key, description: 'Retained from an older llama-server schema.', kind: 'string', unsupported: true })
@@ -88,8 +88,10 @@ async function loadConfig() {
   loading.value = true
   loadError.value = ''
   try {
-    config.value = await manager.request<ConfigResponse>(endpoint())
+    const result = await manager.request<ConfigResponse>(endpoint())
+    config.value = result && typeof result === 'object' && !Array.isArray(result) ? result : null
   } catch (error: any) {
+    config.value = null
     loadError.value = error?.data?.error || error?.message || 'Unable to load llama.cpp configuration'
   } finally {
     loading.value = false
