@@ -11,10 +11,10 @@ type GPU = {
   utilization_pct: number
 }
 type HardwareSnapshot = {
-  ram_total_bytes: number
-  ram_available_bytes: number
-  gpus: GPU[]
-  collected_at: string
+  ram_total_bytes?: number
+  ram_available_bytes?: number
+  gpus?: GPU[]
+  collected_at?: string
 }
 
 const props = defineProps<{
@@ -33,7 +33,8 @@ const snapshot = ref<HardwareSnapshot | null>(null)
 const loading = ref(false)
 const error = ref('')
 const modeItems = [{ label: 'Automatic · single GPU first', value: 'auto' }, { label: 'Manual', value: 'manual' }]
-const deviceItems = computed(() => (snapshot.value?.gpus || []).map(gpu => ({
+const gpus = computed(() => snapshot.value?.gpus || [])
+const deviceItems = computed(() => gpus.value.map(gpu => ({
   label: `${gpu.id} · ${gpu.name} · ${formatBytes(gpu.free_bytes)} free`, value: gpu.id
 })))
 
@@ -41,8 +42,10 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    snapshot.value = await manager.request<HardwareSnapshot>('/api/v1/hardware')
+    const result = await manager.request<HardwareSnapshot>('/api/v1/hardware')
+    snapshot.value = result && typeof result === 'object' && !Array.isArray(result) ? result : null
   } catch (value: any) {
+    snapshot.value = null
     error.value = value?.data?.error || value?.message || 'Unable to read hardware state'
   } finally {
     loading.value = false
@@ -86,7 +89,7 @@ onMounted(() => void refresh())
 
     <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
     <div v-if="snapshot" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <UCard v-for="gpu in snapshot.gpus" :key="gpu.id" :ui="{ body: 'p-4 sm:p-4' }">
+      <UCard v-for="gpu in gpus" :key="gpu.id" :ui="{ body: 'p-4 sm:p-4' }">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0"><p class="font-mono text-sm font-bold">{{ gpu.id }}</p><p class="truncate text-xs text-muted">{{ gpu.name }}</p></div>
           <UBadge size="sm" color="neutral" variant="subtle">{{ gpu.backend.toUpperCase() }}</UBadge>
@@ -98,7 +101,7 @@ onMounted(() => void refresh())
           <div><dt class="text-dimmed">VRAM used</dt><dd class="font-semibold">{{ formatBytes(gpu.used_bytes) }}</dd></div>
         </dl>
       </UCard>
-      <UAlert v-if="!snapshot.gpus.length" class="sm:col-span-2" color="neutral" variant="subtle" description="No NVIDIA or ROCm GPUs were detected. Automatic mode will leave device placement to CPU/other available llama.cpp backends." />
+      <UAlert v-if="!gpus.length" class="sm:col-span-2" color="neutral" variant="subtle" description="No NVIDIA or ROCm GPUs were detected. Automatic mode will leave device placement to CPU/other available llama.cpp backends." />
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
