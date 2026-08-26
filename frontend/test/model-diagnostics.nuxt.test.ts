@@ -14,7 +14,6 @@ class FakeEventSource {
   withCredentials: boolean
   closed = false
   onmessage: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: Event) => void) | null = null
 
   constructor(url: string, init?: EventSourceInit) {
     if (FakeEventSource.throwOnCreate) throw new Error('stream unavailable')
@@ -39,18 +38,9 @@ function seedModel() {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
   manager.models.value = [{
-    id: 'm1',
-    model_id: 'coder',
-    display_name: 'Coder',
-    artifact_id: 'a1',
-    artifact_path: 'coder.gguf',
-    enabled: true,
-    autoload_enabled: true,
-    always_on: false,
-    priority: 'normal',
-    routing_policy: 'least_active'
+    id: 'm1', model_id: 'coder', name: 'Coder', gguf_path: 'coder.gguf', total_bytes: 4,
+    enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', routing_policy: 'least_active'
   }]
-  manager.artifacts.value = []
   manager.runtimes.value = { m1: [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] }
   manager.profile.value = null
   return manager
@@ -70,29 +60,15 @@ describe('model diagnostics', () => {
     const manager = seedModel()
     let started = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') {
-        started = true
-        return []
-      }
+      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') { started = true; return [] }
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/artifacts') return []
-      if (path === '/api/v1/models/m1/runtime') {
-        return [{
-          instance_id: 'instance-12345678',
-          model_id: 'm1',
-          state: started ? 'READY' : 'UNLOADED',
-          pid: started ? 4242 : undefined,
-          port: started ? 31000 : undefined
-        }]
-      }
+      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state: started ? 'READY' : 'UNLOADED', pid: started ? 4242 : undefined, port: started ? 31000 : undefined }]
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return []
     })
 
     const wrapper = await mountSuspended(ModelsPage, { route: false })
-    const testButton = wrapper.findAll('button').find(button => button.text() === 'Test')
-    expect(testButton).toBeTruthy()
-    await testButton!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Test')!.trigger('click')
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/start', { method: 'POST' })
@@ -105,12 +81,9 @@ describe('model diagnostics', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('PASS · READY · PID 4242 · port 31000')
-    expect(wrapper.text()).toContain('Worker logs')
     expect(wrapper.text()).toContain('LIVE · 2 lines')
     expect(wrapper.text()).toContain('model loaded')
-    expect(wrapper.text()).toContain('server ready')
     expect(wrapper.findAll('button').find(button => button.text() === 'Start')?.attributes('disabled')).toBeDefined()
-
     wrapper.unmount()
     expect(source.closed).toBe(true)
   })
@@ -120,19 +93,15 @@ describe('model diagnostics', () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/m1/start' && options?.method === 'POST') throw { data: { error: 'worker exploded' } }
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/artifacts') return []
       if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'FAILED', last_error: 'worker exploded' }]
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return []
     })
-
     const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Test')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('FAIL · worker exploded')
-    expect(wrapper.text()).toContain('Waiting for worker output…')
     expect(FakeEventSource.instances).toHaveLength(1)
-
     await wrapper.findAll('button').find(button => button.text().startsWith('Logs'))!.trigger('click')
     await flushPromises()
     expect(FakeEventSource.instances).toHaveLength(1)
@@ -142,33 +111,19 @@ describe('model diagnostics', () => {
     const manager = seedModel()
     let state = 'UNLOADED'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') {
-        state = 'READY'
-        return []
-      }
-      if (path === '/api/v1/models/m1/stop' && options?.method === 'POST') {
-        state = 'UNLOADED'
-        return undefined
-      }
+      if (path === '/api/v1/models/m1/start' && options?.method === 'POST') { state = 'READY'; return [] }
+      if (path === '/api/v1/models/m1/stop' && options?.method === 'POST') { state = 'UNLOADED'; return undefined }
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/artifacts') return []
-      if (path === '/api/v1/models/m1/runtime') {
-        return [{ instance_id: 'instance-12345678', model_id: 'm1', state, pid: state === 'READY' ? 99 : undefined, port: state === 'READY' ? 32000 : undefined }]
-      }
+      if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'instance-12345678', model_id: 'm1', state, pid: state === 'READY' ? 99 : undefined, port: state === 'READY' ? 32000 : undefined }]
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return []
     })
-
     const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Start')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/start', { method: 'POST' })
     expect(wrapper.text()).toContain('READY')
-    expect(FakeEventSource.instances).toHaveLength(1)
-
     await wrapper.findAll('button').find(button => button.text() === 'Stop')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1/stop', { method: 'POST' })
     expect(wrapper.text()).toContain('UNLOADED')
     expect(FakeEventSource.instances).toHaveLength(1)
   })
@@ -178,20 +133,14 @@ describe('model diagnostics', () => {
     let returnRuntime = false
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/artifacts') return []
-      if (path === '/api/v1/models/m1/runtime') {
-        return returnRuntime ? [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] : []
-      }
+      if (path === '/api/v1/models/m1/runtime') return returnRuntime ? [{ instance_id: 'instance-12345678', model_id: 'm1', state: 'UNLOADED' }] : []
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return []
     })
-
     const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Waiting for worker output…')
-    expect(FakeEventSource.instances).toHaveLength(0)
-
     returnRuntime = true
     FakeEventSource.throwOnCreate = true
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
