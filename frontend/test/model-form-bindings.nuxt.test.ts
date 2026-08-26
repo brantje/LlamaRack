@@ -4,13 +4,11 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewModelPage from '~/pages/models/new.vue'
 import { useManager } from '~/composables/useManager'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), push: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
-mockNuxtImport('useRouter', () => () => ({ push: mocks.push }))
 
 beforeEach(() => {
   mocks.request.mockReset()
-  mocks.push.mockReset()
   const manager = useManager()
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
@@ -23,7 +21,7 @@ beforeEach(() => {
 
 describe('model creation form', () => {
   it('autofills a safe public ID and allows overriding model settings', async () => {
-    const wrapper = await mountSuspended(NewModelPage, { route: false })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     const inputs = wrapper.findAll('input')
     await inputs[1]!.setValue('Qwén Coder / 32B!')
     await flushPromises()
@@ -54,7 +52,7 @@ describe('model creation form', () => {
       if (path === '/api/v1/llamacpp/profile') throw new Error('no profile')
       return []
     })
-    let wrapper = await mountSuspended(NewModelPage, { route: false })
+    let wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     const inputs = wrapper.findAll('input')
     await inputs[0]!.setValue('/models/qwen.gguf')
     await inputs[1]!.setValue('Qwen Coder')
@@ -65,13 +63,14 @@ describe('model creation form', () => {
       method: 'POST',
       body: expect.objectContaining({ gguf_path: '/models/qwen.gguf', name: 'Qwen Coder', model_id: 'qwen-coder' })
     })
-    expect(mocks.push).toHaveBeenCalledWith('/models')
+    expect(useRouter().currentRoute.value.path).toBe('/models')
     expect(manager.models.value).toEqual([])
     wrapper.unmount()
 
+    await useRouter().push('/models/new')
     mocks.request.mockReset()
     mocks.request.mockRejectedValueOnce(new Error('GGUF missing'))
-    wrapper = await mountSuspended(NewModelPage, { route: false })
+    wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     const errorInputs = wrapper.findAll('input')
     await errorInputs[0]!.setValue('/models/missing.gguf')
     await errorInputs[1]!.setValue('Missing')
@@ -83,7 +82,7 @@ describe('model creation form', () => {
   it('hides creation controls from readonly users', async () => {
     const manager = useManager()
     manager.user.value = { id: 3, username: 'viewer', role: 'readonly', enabled: true }
-    const wrapper = await mountSuspended(NewModelPage, { route: false })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.text()).toContain('cannot create models')
   })
