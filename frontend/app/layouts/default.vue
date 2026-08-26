@@ -10,6 +10,7 @@ const authenticating = ref(false)
 const navigation: NavigationMenuItem[] = [
   { label: 'Overview', to: '/' },
   { label: 'Models', to: '/models' },
+  { label: 'Instances', to: '/instances' },
   { label: 'API', to: '/api' },
   { label: 'Settings', to: '/settings' }
 ]
