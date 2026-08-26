@@ -18,6 +18,7 @@ The scheduler must:
 - support NVIDIA and AMD GPUs;
 - honor explicit GPU assignments;
 - support automatic placement when assignment is not fixed;
+- prefer single-GPU placement when the requested model safely fits on one device;
 - support manual tensor split configuration;
 - estimate resource demand conservatively;
 - protect Always-On models from normal eviction;
@@ -212,16 +213,29 @@ This protects manual multi-GPU configurations from changing meaning after device
 
 ## 11. Automatic GPU placement
 
-For automatic placement, choose compatible healthy devices using a deterministic score.
+Automatic placement is manager-owned placement. When usable per-device telemetry is available, the manager must make the intended device set explicit rather than launching `llama-server` with unrestricted defaults and allowing llama.cpp to spread a model across every visible GPU.
 
-The algorithm should prefer:
+The default policy is **single-GPU first**:
 
-- enough available VRAM without eviction;
-- fewer devices when one device can efficiently fit the requested configuration, unless the user's effective llama.cpp settings indicate multi-GPU use;
-- balanced use when multiple devices are required;
-- avoiding highly utilized devices when comparable free alternatives exist.
+1. Calculate the requested configuration's estimated VRAM demand, including weights, context/KV cache, runtime overhead and scheduler safety margin.
+2. Evaluate each compatible healthy GPU independently against scheduler-usable available VRAM, including pending reservations.
+3. If one or more individual GPUs can fit the complete requested placement, choose exactly one GPU using the deterministic placement score.
+4. Generate explicit placement launch configuration that keeps the model on that selected GPU and prevents llama.cpp's default multi-GPU/layer-splitting behavior from spreading it onto other GPUs.
+5. Only when no single eligible GPU can safely fit the requested placement may automatic placement consider a multi-GPU plan.
+6. When multiple GPUs are required, use the minimum practical number of devices and calculate/derive a split based on their usable VRAM and the effective model configuration.
 
-Exact scoring is implementation-specific and should remain testable/deterministic given the same snapshot.
+For example, on a host with two 16 GiB GPUs, a model whose complete estimated demand plus safety margin fits on one of those GPUs should consume one GPU in automatic mode and leave the other GPU available for another model. It must not be split approximately 50/50 merely because both devices are visible to llama.cpp.
+
+The single-GPU-first rule may be overridden only by explicit user placement/configuration that intentionally requests multi-GPU execution, such as a manual device set or tensor split. Automatic mode itself is not an instruction to use all GPUs.
+
+The deterministic score should prefer, in order of correctness constraints:
+
+- a device with enough scheduler-usable VRAM without eviction;
+- fewer devices for the placement;
+- preserving useful contiguous free capacity on other devices where practical;
+- avoiding highly utilized devices when comparable alternatives exist.
+
+If no direct placement fits, the scheduler may evaluate `PLACE_AFTER_EVICTION` candidates according to the normal eviction policy. Exact scoring remains implementation-specific, but given the same hardware snapshot, reservations and model configuration it must produce the same placement.
 
 ## 12. Tensor split
 
@@ -232,7 +246,11 @@ The UI supports:
 
 ### Automatic
 
-The scheduler/launch configuration may allow llama.cpp to choose or may generate an appropriate split based on available VRAM and supported flags.
+Automatic tensor split is subordinate to the scheduler's selected device set. The manager must not simply expose all visible GPUs and delegate unrestricted placement to llama.cpp.
+
+If the scheduler selected one GPU, no multi-GPU tensor split is generated and launch arguments/configuration must enforce that single-device placement.
+
+If the scheduler determined that multiple GPUs are required, it may generate the appropriate device list and tensor split based on scheduler-usable VRAM, supported llama.cpp flags and the effective model configuration.
 
 ### Manual
 
@@ -362,7 +380,7 @@ For `PLACE_AFTER_EVICTION` in Phase 7:
 3. lifecycle drains/stops victims;
 4. hardware snapshot is refreshed as needed;
 5. lifecycle asks scheduler to confirm placement;
-6. supervisor starts target instance;
+6. supervisor starts target instance using the scheduler's explicit device placement;
 7. reservation converts/releases based on outcome.
 
 If a victim becomes active before drain starts, re-plan rather than violating the active-request rule.
@@ -431,6 +449,7 @@ For each model, the UI should be able to show:
 
 - estimated RAM/VRAM requirement;
 - selected/automatic GPUs;
+- whether automatic placement selected one GPU or a required multi-GPU split;
 - whether the model currently fits;
 - why a start cannot proceed;
 - whether the loaded model is protected from normal resource-pressure eviction;
@@ -463,9 +482,12 @@ Avoid device names or arbitrary error strings as uncontrolled metric labels.
 6. Active inference requests protect an instance from normal eviction.
 7. Unknown hardware telemetry causes conservative behavior.
 8. Placement decisions include safety headroom.
-9. Resource state is revalidated after evictions before launch.
-10. Failed starts release reservations.
-11. Scheduling cannot enter an unbounded eviction/start loop.
+9. Automatic placement uses one GPU when the complete requested configuration safely fits on one eligible GPU, unless explicit user configuration requires multiple GPUs.
+10. Multi-GPU automatic placement is considered only when no single eligible GPU can safely fit the request.
+11. The worker launch configuration explicitly enforces the scheduler-selected device set instead of relying on llama.cpp's unrestricted default GPU spreading.
+12. Resource state is revalidated after evictions before launch.
+13. Failed starts release reservations.
+14. Scheduling cannot enter an unbounded eviction/start loop.
 
 ## 28. Acceptance criteria
 
@@ -476,6 +498,10 @@ Phase 7 tests must additionally demonstrate that a model start which requires re
 Across the completed scheduler implementation, tests must demonstrate:
 
 - a model that fits available GPU memory receives a direct placement plan;
+- when the model's complete estimated VRAM demand plus safety margin fits on one GPU, automatic placement selects exactly one GPU and leaves other GPUs unallocated for that model;
+- automatic placement does not split a fitting model across multiple visible GPUs merely because llama.cpp would do so by default;
+- multi-GPU automatic placement occurs only when no single eligible GPU can safely fit the request, unless the user explicitly configured multi-GPU execution;
+- generated worker arguments/configuration enforce the scheduler-selected single- or multi-GPU device set;
 - two simultaneous starts cannot reserve the same VRAM twice;
 - explicit GPU selection is honored;
 - missing configured GPU causes a clear placement failure;
