@@ -1,7 +1,6 @@
 export type Role = 'admin' | 'operator' | 'readonly'
 export type User = { id: number; username: string; role: Role; enabled: boolean }
-export type Artifact = { id: string; display_name: string; local_path: string; total_bytes: number; quantization?: string }
-export type Model = { id: string; model_id: string; display_name?: string; artifact_id: string; artifact_path: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; routing_policy: string }
+export type Model = { id: string; model_id: string; name: string; gguf_path: string; total_bytes: number; quantization?: string; enabled: boolean; autoload_enabled: boolean; always_on: boolean; priority: string; routing_policy: string }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string }> }
@@ -12,7 +11,6 @@ export function useManager() {
   const initialized = useState('manager-initialized', () => false)
   const bootstrapRequired = useState('manager-bootstrap', () => false)
   const models = useState<Model[]>('manager-models', () => [])
-  const artifacts = useState<Artifact[]>('manager-artifacts', () => [])
   const runtimes = useState<Record<string, Runtime[]>>('manager-runtimes', () => ({}))
   const profile = useState<Profile | null>('manager-profile', () => null)
   const backendError = useState('manager-backend-error', () => '')
@@ -53,18 +51,13 @@ export function useManager() {
     await request('/api/v1/auth/logout', { method: 'POST' })
     user.value = null
     models.value = []
-    artifacts.value = []
     runtimes.value = {}
   }
 
   async function refresh() {
     if (!user.value) return
-    const [modelItems, artifactItems] = await Promise.all([
-      request<Model[]>('/api/v1/models'),
-      request<Artifact[]>('/api/v1/artifacts')
-    ])
+    const modelItems = await request<Model[]>('/api/v1/models')
     models.value = modelItems || []
-    artifacts.value = artifactItems || []
     const runtimeEntries = await Promise.all(models.value.map(async model => {
       try {
         return [model.id, await request<Runtime[]>(`/api/v1/models/${model.id}/runtime`)] as const
@@ -89,5 +82,5 @@ export function useManager() {
       || 'UNLOADED'
   }
 
-  return { apiBase, user, initialized, bootstrapRequired, models, artifacts, runtimes, profile, backendError, canOperate, isAdmin, initialize, authenticate, logout, refresh, modelState, request }
+  return { apiBase, user, initialized, bootstrapRequired, models, runtimes, profile, backendError, canOperate, isAdmin, initialize, authenticate, logout, refresh, modelState, request }
 }
