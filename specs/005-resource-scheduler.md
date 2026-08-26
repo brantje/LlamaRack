@@ -266,6 +266,17 @@ If total Always-On desired state exceeds physical capacity:
 
 A deterministic priority rule may decide which Always-On starts succeed, but it must not continuously churn.
 
+### 14.1 Phase 7 product decision — separate eviction protection
+
+Before implementing Phase 7 resource-pressure eviction, the implementation must explicitly ask the product owner/user to resolve whether **Always-On is the only user-facing protection from normal eviction** or whether a second, independent protection concept is needed.
+
+The decision to request is:
+
+1. **Always-On only** — the final Always-On instance is protected; every non-Always-On idle model is eligible for resource-pressure eviction according to priority/LRU rules.
+2. **Separate protection while loaded** — keep a distinct setting such as `Pin while loaded` / `Protect from eviction`, allowing a model to remain non-Always-On (not proactively loaded/restarted) while still being excluded from normal resource-pressure eviction whenever it is loaded.
+
+Do **not** infer this product decision from the Phase 5 `eviction_enabled` field. That field is provisional and may be removed or renamed. Phase 7 work must surface this question and record the chosen answer in this specification **before** finalizing the Phase 7 schema, UI or eviction-eligibility behavior.
+
 ## 15. Eviction eligibility
 
 An instance is normally eligible for eviction only when:
