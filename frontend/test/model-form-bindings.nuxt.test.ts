@@ -37,6 +37,7 @@ describe('model creation form', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/available')
     expect(wrapper.text()).toContain('Create a first Instance')
+    expect(wrapper.text()).toContain('Instance slug')
     expect(wrapper.text()).toContain('Always on')
     expect(wrapper.text()).toContain('Autoload on request')
     expect(wrapper.text()).toContain('Allow resource-pressure eviction')
@@ -52,11 +53,11 @@ describe('model creation form', () => {
     expect(JSON.stringify(select.props('items'))).not.toContain('/models/')
   })
 
-  it('creates a registry model with the optional first instance payload', async () => {
+  it('creates a registry model with an editable generated first-instance slug', async () => {
     const manager = useManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return discovered
-      if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' }, instance: { id: 'qwen-coder' } }
+      if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' }, instance: { id: 'coding-api' } }
       if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       if (path === '/api/v1/llamacpp/profile') throw new Error('no profile')
       return []
@@ -67,6 +68,8 @@ describe('model creation form', () => {
     await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder')
     await flushPromises()
     expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Qwen Coder')
+    expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('qwen-coder')
+    await wrapper.get('[data-testid="instance-slug"]').setValue('coding-api')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', {
@@ -76,7 +79,7 @@ describe('model creation form', () => {
         name: 'Qwen Coder',
         context_length: 0,
         first_instance: {
-          name: 'Qwen Coder', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
+          name: 'Qwen Coder', slug: 'coding-api', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
         }
       }
     })
@@ -102,6 +105,7 @@ describe('model creation form', () => {
     await wrapper.get('[data-testid="create-first-instance"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="instance-name"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="instance-slug"]').exists()).toBe(false)
     mocks.request.mockClear()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
