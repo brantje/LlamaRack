@@ -3,7 +3,7 @@ import type { TableColumn } from '@nuxt/ui'
 import type { APIKey } from '~/composables/useManager'
 
 const manager = useManager()
-const { isAdmin, apiBase } = manager
+const { apiBase } = manager
 const keys = ref<APIKey[]>([])
 const name = ref('default')
 const secret = ref('')
@@ -18,7 +18,6 @@ const columns: TableColumn<APIKey>[] = [
 ]
 
 async function load() {
-  if (!isAdmin.value) return
   try {
     keys.value = await manager.request<APIKey[]>('/api/v1/api-keys')
   } catch (e: any) {
@@ -26,9 +25,7 @@ async function load() {
   }
 }
 
-watch(isAdmin, (admin) => {
-  if (admin) void load()
-}, { immediate: true, flush: 'sync' })
+onMounted(() => void load())
 
 async function createKey() {
   error.value = ''
@@ -88,7 +85,7 @@ async function copySecret() {
       <p class="text-sm leading-6 text-muted">Supported initial routes: models, chat completions, completions, Responses and embeddings.</p>
     </UCard>
 
-    <UCard v-if="isAdmin">
+    <UCard>
       <template #header>
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
@@ -157,7 +154,5 @@ async function copySecret() {
         description="Create a key to authenticate OpenAI-compatible clients."
       />
     </UCard>
-
-    <UAlert v-else color="neutral" variant="subtle" description="Only administrators can manage inference API keys." />
   </div>
 </template>
