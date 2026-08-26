@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
@@ -62,6 +63,42 @@ func TestCreateValidation(t *testing.T) {
 	}
 }
 
+func TestAvailableGGUFsRecursiveAndExcludesRegistered(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	rootFile := writeGGUF(t, dir, "alpha-Q4_K_M.gguf")
+	nestedDir := filepath.Join(dir, "Qwen", "coder")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGGUF(t, nestedDir, "beta-Q8_0.GGUF")
+	if err := os.WriteFile(filepath.Join(nestedDir, "ignore.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := s.AvailableGGUFs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("available files=%+v", files)
+	}
+	if files[0].Path != "Qwen/coder/beta-Q8_0.GGUF" || files[0].Name != "beta-Q8_0.GGUF" || files[0].Quantization != "Q8_0" || files[0].TotalBytes == 0 {
+		t.Fatalf("unexpected nested discovery: %+v", files[0])
+	}
+	if files[1].Path != "alpha-Q4_K_M.gguf" || strings.Contains(files[1].Path, "/models/") {
+		t.Fatalf("unexpected relative path: %+v", files[1])
+	}
+
+	if _, err := s.Create(ctx, CreateModelInput{PublicID: "alpha", Name: "Alpha", GGUFPath: rootFile}); err != nil {
+		t.Fatal(err)
+	}
+	files, err = s.AvailableGGUFs(ctx)
+	if err != nil || len(files) != 1 || files[0].Path != "Qwen/coder/beta-Q8_0.GGUF" {
+		t.Fatalf("available after registration=%+v err=%v", files, err)
+	}
+}
+
 func TestCreateGetListOptionsInstancesAndDelete(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
@@ -115,8 +152,12 @@ func TestCreateGetListOptionsInstancesAndDelete(t *testing.T) {
 	if _, err := s.Create(ctx, CreateModelInput{PublicID: "coder", Name: "Duplicate", GGUFPath: path}); err == nil {
 		t.Fatal("expected duplicate public id error")
 	}
-	if _, err := s.Create(ctx, CreateModelInput{PublicID: "coder-2", Name: "Second", GGUFPath: path}); err != nil {
-		t.Fatalf("same GGUF should support multiple model configs: %v", err)
+	if _, err := s.Create(ctx, CreateModelInput{PublicID: "coder-2", Name: "Duplicate file", GGUFPath: path}); err == nil || !strings.Contains(err.Error(), "already been added") {
+		t.Fatalf("expected duplicate GGUF rejection, got %v", err)
+	}
+	secondPath := writeGGUF(t, dir, "second.gguf")
+	if _, err := s.Create(ctx, CreateModelInput{PublicID: "coder-2", Name: "Second", GGUFPath: secondPath}); err != nil {
+		t.Fatalf("second GGUF should create another model: %v", err)
 	}
 	if err := s.Delete(ctx, m.ID); err != nil {
 		t.Fatal(err)
