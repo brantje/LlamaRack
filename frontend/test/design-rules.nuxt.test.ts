@@ -17,23 +17,17 @@ function flatCardViolations(source: string): string[] {
 
   for (const match of tokens) {
     const tag = match[0]
-
     if (/^<\/(?:UCard|UPageCard)/.test(tag)) {
       cardDepth = Math.max(0, cardDepth - 1)
       continue
     }
-
     if (/^<(?:UCard|UPageCard)\b/.test(tag)) {
       if (cardDepth > 0) violations.push(`nested card: ${tag}`)
       if (!/\/\s*>$/.test(tag)) cardDepth += 1
       continue
     }
-
-    if (/^<UEmpty\b/.test(tag) && cardDepth > 0 && !/\bvariant=["']naked["']/.test(tag)) {
-      violations.push(`surfaced UEmpty inside card: ${tag}`)
-    }
+    if (/^<UEmpty\b/.test(tag) && cardDepth > 0 && !/\bvariant=["']naked["']/.test(tag)) violations.push(`surfaced UEmpty inside card: ${tag}`)
   }
-
   return violations
 }
 
@@ -47,50 +41,43 @@ function conditionalMountViolations(source: string, target: 'NuxtPage' | 'slot')
     const tag = match[0]
     const name = tag.match(/^<\/?([A-Za-z][A-Za-z0-9.-]*)/)?.[1]
     if (!name) continue
-
     if (tag.startsWith('</')) {
       const index = stack.map(entry => entry.name).lastIndexOf(name)
       if (index >= 0) stack.length = index
       continue
     }
-
     const ancestorConditional = stack.some(entry => entry.conditional)
     const ownConditional = /\bv-(?:if|else-if|else)(?:\s|=|>)/.test(tag)
     const conditional = ancestorConditional || ownConditional
     const isDefaultSlot = name === 'slot' && !/\bname\s*=/.test(tag)
     const isTarget = target === 'NuxtPage' ? name === 'NuxtPage' : isDefaultSlot
-
     if (isTarget && conditional) violations.push(tag)
     if (!/\/\s*>$/.test(tag)) stack.push({ name, conditional })
   }
-
   return violations
 }
 
 describe('frontend design rules', () => {
   it('keeps card hierarchy flat', () => {
     const appRoot = resolve(process.cwd(), 'app')
-    const violations = vueFiles(appRoot).flatMap(file =>
-      flatCardViolations(readFileSync(file, 'utf8')).map(message => `${relative(appRoot, file)}: ${message}`)
-    )
-
+    const violations = vueFiles(appRoot).flatMap(file => flatCardViolations(readFileSync(file, 'utf8')).map(message => `${relative(appRoot, file)}: ${message}`))
     expect(violations).toEqual([])
   })
 
-  it('keeps the model fleet as sibling model cards with a page-level log modal', () => {
-    const source = readFileSync(resolve(process.cwd(), 'app/pages/models/index.vue'), 'utf8')
-    expect(source).toContain('data-testid="model-card"')
-    expect(source).toMatch(/grid gap-4 md:grid-cols-2 2xl:grid-cols-3/)
-    expect(source).not.toMatch(/<UCard>[\s\S]*data-testid="model-card"/)
-    expect(source).toContain('<UModal')
+  it('keeps Models as registry rows and Instances as sibling runtime cards', () => {
+    const models = readFileSync(resolve(process.cwd(), 'app/pages/models/index.vue'), 'utf8')
+    expect(models).toContain('data-testid="models-table"')
+    expect(models).toContain('data-testid="model-row"')
+    expect(models).not.toContain('data-testid="model-card"')
+    expect(models).not.toMatch(/>Start<|>Stop<|>Logs</)
 
-    const logsClick = source.indexOf('@click="openLogs(model)"')
-    expect(logsClick).toBeGreaterThan(-1)
-    const logsButtonStart = source.lastIndexOf('<UButton', logsClick)
-    const logsButtonEnd = source.indexOf('</UButton>', logsClick)
-    const logsButton = source.slice(logsButtonStart, logsButtonEnd)
-    expect(logsButton).not.toContain(':disabled=')
-    expect(logsButton).not.toMatch(/\sdisabled(?:\s|>|=)/)
+    const instances = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')
+    expect(instances).toContain('data-testid="instance-card"')
+    expect(instances).toMatch(/grid gap-4 md:grid-cols-2 2xl:grid-cols-3/)
+    expect(instances).toContain('<UModal')
+    expect(instances).toContain('>Launch</UButton>')
+    expect(instances).toContain('>Stop</UButton>')
+    expect(instances).toContain('>Logs</UButton>')
   })
 
   it('keeps Nuxt file-based pages mounted unconditionally', () => {
@@ -102,11 +89,7 @@ describe('frontend design rules', () => {
 
     expect(appSource.match(/<NuxtPage\b/g) || []).toHaveLength(1)
     expect(conditionalMountViolations(appSource, 'NuxtPage')).toEqual([])
-
-    const routerViewFiles = vueSources
-      .filter(({ source }) => /<RouterView\b/.test(source))
-      .map(({ file }) => relative(appRoot, file))
-    expect(routerViewFiles).toEqual([])
+    expect(vueSources.filter(({ source }) => /<RouterView\b/.test(source)).map(({ file }) => relative(appRoot, file))).toEqual([])
 
     const layoutViolations = vueFiles(layoutsRoot).flatMap(file => {
       const source = readFileSync(file, 'utf8')
@@ -118,7 +101,6 @@ describe('frontend design rules', () => {
       return messages.map(message => `${relative(appRoot, file)}: ${message}`)
     })
     expect(layoutViolations).toEqual([])
-
     expect(configSource).not.toMatch(/\bpages\s*:\s*false\b/)
   })
 })
