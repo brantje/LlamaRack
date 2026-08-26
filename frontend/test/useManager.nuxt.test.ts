@@ -175,7 +175,7 @@ describe('useManager', () => {
     socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: '', model_id: 'm1', state: 'READY' }, { instance_id: 'i1', model_id: '', state: 'READY' }] })
     socket.emit({ type: 'runtime', runtime: { instance_id: '', model_id: 'm1', state: 'READY' } })
     socket.emit({ type: 'runtime', runtime: { instance_id: 'i1', model_id: '', state: 'READY' } })
-    expect(manager.runtimes.value).toEqual({ m1: [] })
+    expect(manager.runtimes.value).toEqual({})
   })
 
   it('logs out, closes runtime events, and clears local state', async () => {
