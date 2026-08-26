@@ -8,6 +8,6 @@ Default container paths:
 
 - `/config/manager.db` — SQLite state
 - `/models` — GGUF model files
-- `llama-server` — managed worker binary
+- `/app/llama-server` — managed worker binary from the upstream llama.cpp server image
 
 The HTTP API listens on port `8000` inside the container and is mapped to host port `8888` by the root Compose file.
