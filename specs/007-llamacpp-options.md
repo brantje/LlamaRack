@@ -6,453 +6,435 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how llamacpp-manager discovers, stores, validates, presents and applies `llama-server` configuration options.
+This specification defines how `llamacpp-manager` discovers, stores, validates, presents and applies `llama-server` options.
 
-The central design requirement is that the manager must not require a new release every time llama.cpp adds a command-line flag. The active binary is inspected at runtime, while curated metadata improves the experience for common options.
+The manager must not require a release whenever llama.cpp adds a flag. The active binary is inspected at runtime and a normalized option schema drives validation and UI rendering.
 
-### 1.1 Delivery requirement — first task in Phase 7
+## 2. Phase 7 first task
 
-The llama.cpp configuration GUI was originally a Phase 3 deliverable and remains required before Phase 7 hardware integration proceeds.
+The llama.cpp configuration GUI remains the **first implementation task in Phase 7** before hardware integration proceeds.
 
-**The first implementation task in Phase 7 must be to complete the missing llama.cpp options GUI and its end-to-end configuration path.** Hardware telemetry, automatic GPU placement, visual GPU assignment and tensor-split work must not be treated as the first Phase 7 implementation work while this configuration surface is incomplete.
+This catch-up task must complete:
 
-This Phase 7 catch-up task includes, at minimum:
+- Basic configuration UI from curated option metadata;
+- searchable Advanced UI containing every configurable option discovered from `llama-server --help`;
+- global defaults;
+- Model overrides/defaults;
+- Instance overrides;
+- backend validation;
+- deterministic argv generation;
+- effective-value/source display;
+- protected manager-owned options;
+- integration points for later GPU placement/tensor split controls.
 
-- render the curated **Basic** llama.cpp configuration view from the discovered/curated option schema;
-- render the searchable **Advanced** view containing every configurable option discovered from the active `llama-server --help` schema;
-- support global defaults and per-model overrides with explicit inherit/unset semantics;
-- expose model-level llama.cpp configuration both when editing an existing model and on `/models/new` in the same implementation, preserving model-creation configuration parity;
-- validate values and conflicts through the backend configuration engine rather than duplicating authoritative validation in the frontend;
-- generate the effective deterministic worker argv from the saved configuration;
-- expose effective values/source and restart-required state where applicable;
-- ensure manager-owned/protected options remain non-editable while derived placement options can later be integrated with the Phase 7 GPU UI.
+Phase 7 is not complete if the option GUI remains missing.
 
-Phase 7 hardware integration may build on this configuration surface immediately afterward, especially for GPU layers/offload, device selection, tensor split, context/KV settings and other options that affect VRAM placement. Phase 7 is not considered complete if the Basic/Advanced llama.cpp configuration GUI or `/models/new` parity remains missing.
+## 3. Configuration layers
 
-## 2. Goals
-
-The option system must:
-
-- expose every discoverable `llama-server` option in Advanced configuration;
-- provide a curated Basic view for commonly used options;
-- discover options from the active `llama-server --help` output;
-- detect binary/version changes and refresh the schema;
-- infer useful value types and validation metadata;
-- preserve options the manager does not yet understand;
-- support global defaults plus per-model overrides;
-- render effective configuration clearly;
-- generate deterministic launch arguments;
-- validate conflicting/unsupported settings before process startup where possible;
-- allow visual GPU/tensor-split controls without hiding their underlying llama.cpp configuration.
-
-## 3. Non-goals for v1
-
-- named reusable model presets beyond global defaults;
-- host-level inheritance because v1 is single-host;
-- environment-variable-based per-model configuration;
-- automatic editing of arbitrary llama.cpp config files;
-- runtime hot-reload of options that llama.cpp itself cannot change live;
-- remote binary schema discovery.
-
-## 4. Configuration layers
-
-V1 has two user-controlled layers:
+V1 uses three user-controlled layers:
 
 ```text
 Global llama.cpp defaults
           +
-Per-model overrides
+Model overrides/defaults
+          +
+Instance overrides
           =
-Effective model configuration
+Effective Instance configuration
 ```
 
-Instance definitions may add placement-specific settings such as selected GPUs/tensor split, but ordinary inference/server options belong to the model unless a documented exception exists.
+### Global defaults
 
-There is no general Model -> Preset -> Host -> Instance inheritance graph in v1.
+Shared manager-wide defaults.
 
-## 5. Binary discovery
+### Model overrides/defaults
 
-At manager startup, identify the active `llama-server` executable.
+Reusable configuration attached to a registered Model and inherited by every Instance referencing that Model unless overridden.
 
-Record at least:
+### Instance overrides
+
+Per-Instance changes allowing sibling Instances of the same Model to differ in context, cache, batch, specialized modes and other supported llama.cpp settings.
+
+There is no named preset inheritance tree in v1.
+
+## 4. Model creation configuration
+
+`/models/new` is the canonical surface for Model-level llama.cpp defaults.
+
+Any **Model-scoped llama.cpp option** available when editing a Model must also be available during Model creation with the same defaults, validation and semantics.
+
+This parity requirement applies only to Model-scoped llama.cpp configuration.
+
+It does **not** mean `/models/new` must expose the full Instance editor.
+
+## 5. Optional first Instance on `/models/new`
+
+Model creation may optionally bootstrap and launch a first Instance.
+
+That first-Instance section intentionally exposes only:
+
+- Instance name;
+- Always On;
+- Autoload on request;
+- Allow resource-pressure eviction;
+- launch immediately choice.
+
+Do not expose on `/models/new`:
+
+- Instance llama.cpp overrides;
+- GPU selection;
+- tensor split;
+- priority;
+- idle/startup timeout;
+- other advanced Instance settings.
+
+Full Instance configuration belongs to `/instances/new` and `/instances/:id/edit`.
+
+## 6. Instance identity
+
+Instance name is slugified to `instance.id`.
+
+That ID is also the OpenAI `model` value.
+
+Changing llama.cpp configuration does not change Instance identity. Renaming the Instance does.
+
+There is no separate inference alias field.
+
+## 7. Goals
+
+The option system must:
+
+- expose every discoverable configurable `llama-server` option in Advanced mode;
+- provide curated Basic mode;
+- discover from the active binary;
+- detect binary changes and refresh schema;
+- infer useful types/validation metadata;
+- retain unknown/unsupported configured options;
+- support Global + Model + Instance layers;
+- show effective source/value clearly;
+- generate deterministic launch argv;
+- validate conflicts before startup where possible;
+- allow visual GPU/tensor controls without conflicting duplicate configuration paths.
+
+## 8. Non-goals
+
+- named reusable presets beyond Global/Model/Instance inheritance;
+- environment-variable-based per-Model/Instance config;
+- arbitrary shell command fields;
+- runtime hot reload for immutable llama.cpp options;
+- remote binary schema discovery.
+
+## 9. Binary discovery
+
+Record active `llama-server`:
 
 - path/identity;
-- version string if available;
-- build/commit information if available;
-- executable fingerprint/hash where practical;
+- version/build/commit where available;
+- executable fingerprint;
 - backend/build flavor where detectable;
 - help-output fingerprint.
 
-The option schema is tied to this binary profile.
+The option schema is tied to the binary profile.
 
-## 6. Schema refresh triggers
+## 10. Schema refresh triggers
 
-Run/re-run option discovery when:
+Refresh when:
 
-- no schema exists for the active binary;
+- no matching schema exists;
 - executable fingerprint changes;
 - version/build identity changes;
-- user explicitly requests capability refresh;
-- previous discovery failed and retry policy permits.
+- user requests refresh;
+- prior discovery failed and retry is appropriate.
 
-Do not execute `--help` before every model start.
+Do not run `--help` before every Instance launch.
 
-## 7. Help parser
+## 11. Help parser
 
-The parser consumes `llama-server --help` and creates normalized definitions.
+Parse where possible:
 
-It should recognize, where possible:
+- long/short names;
+- boolean positive/negative forms;
+- argument placeholders;
+- descriptions;
+- defaults;
+- enum choices;
+- repeatability;
+- sections/categories.
 
-- long option names;
-- short aliases;
-- positive/negative boolean forms;
-- argument placeholder(s);
-- description text;
-- default values stated in help;
-- enumerated choices;
-- repeatable/multiple values;
-- environment references shown by upstream, without making env vars a manager configuration mechanism;
-- sections/categories in help output.
+Parser uncertainty must not hide the option. Use raw/unclassified representation when needed.
 
-The parser must be tolerant of formatting changes. A failure to perfectly infer a type must not cause the option to disappear.
+## 12. Normalized option definition
 
-## 8. Normalized option definition
-
-Each option definition conceptually contains:
+Conceptually:
 
 - canonical key;
-- CLI spellings/aliases;
+- aliases;
 - description;
 - category;
-- inferred data type;
+- inferred type;
 - optional default;
-- optional min/max or allowed values when discoverable;
-- repeatable flag;
-- value required/optional metadata;
+- optional allowed/min/max metadata;
+- repeatable/value-required metadata;
 - boolean polarity metadata;
-- curated/basic metadata;
-- parser confidence;
-- raw source fragment or diagnostic metadata where useful.
+- curated Basic metadata;
+- parser confidence.
 
-## 9. Supported value types
+## 13. Supported value types
 
-The normalized schema should support at least:
+At least:
 
 - boolean;
 - integer;
 - float;
 - string;
-- enum/string choice;
-- list of strings;
-- list of numbers;
-- size-like values where upstream accepts units;
-- duration-like values where upstream accepts units;
+- enum;
+- string/number lists;
+- size/duration-like values where appropriate;
 - raw/unclassified.
 
-When inference is uncertain, use `raw` rather than forcing an incorrect type.
+## 14. Curated metadata
 
-## 10. Curated metadata layer
+Manager-owned metadata may provide:
 
-Runtime discovery provides breadth; a manager-owned curated layer provides UX quality.
-
-Curated metadata may define:
-
-- friendly label;
-- explanation/help text;
+- friendly labels;
+- help text;
 - category;
-- Basic vs Advanced visibility;
-- recommended UI control;
+- Basic visibility;
+- recommended control;
 - units;
 - known incompatibilities;
-- known restart implications;
-- mapping to visual hardware controls;
-- safe suggested values.
+- restart implications;
+- hardware-control mapping.
 
-Curated metadata is keyed by canonical option identity and should degrade gracefully if a flag is absent in the active binary.
+Curated metadata must never fabricate support missing from the active schema.
 
-It must never fabricate support for an option that the active schema does not expose.
+## 15. Basic view
 
-## 11. Basic configuration view
-
-The Basic view should prioritize commonly adjusted settings, potentially including when supported by the active binary:
+Basic mode may include supported common options such as:
 
 - context size;
 - GPU layers/offload;
-- GPU selection;
-- tensor split;
 - CPU threads;
-- batch size;
-- ubatch size;
+- batch/ubatch;
 - parallel slots;
 - flash attention;
-- chat template / Jinja controls;
-- reasoning-related controls;
-- speculative decoding controls;
+- template/Jinja controls;
+- reasoning controls;
+- speculative decoding;
 - embedding/reranking mode;
-- KV/cache settings;
-- commonly needed server behavior.
+- KV/cache settings.
 
-The exact list is maintained by curated metadata rather than hard-coded frontend forms scattered throughout the application.
+GPU device assignment and tensor split are primarily Instance placement controls rather than ordinary Model configuration.
 
-## 12. Advanced configuration view
+## 16. Advanced view
 
-Advanced configuration lists every option exposed by the current discovered schema, grouped by category where possible.
+Advanced mode:
 
-Requirements:
+- shows every discovered configurable option;
+- supports search/category navigation;
+- displays canonical CLI spelling;
+- shows source: upstream/global/Model/Instance;
+- allows adding/removing the override for the current configuration layer;
+- marks unsupported-retained values;
+- provides raw input for uncertain types;
+- shows manager-protected values read-only.
 
-- searchable by flag name and description;
-- show upstream CLI flag spelling;
-- show effective value and source (global/default/model);
-- permit adding/removing a per-model override;
-- expose unclassified/new options rather than hiding them;
-- clearly mark options unsupported by the active binary but retained in stored config;
-- provide raw input for values whose type cannot be confidently inferred.
+## 17. Effective value/source
 
-## 13. Effective value model
+For each option distinguish:
 
-For every option, the UI/API should be able to distinguish:
+- upstream default;
+- Global manager value;
+- Model override;
+- Instance override;
+- final effective launch value;
+- omitted/unset state.
 
-- upstream/binary default where known;
-- manager global override/default;
-- model override;
-- effective launch value;
-- whether the option is omitted entirely from the generated CLI.
+Explicit value equal to inherited value is still a distinct source state.
 
-An inherited value and an explicitly set value equal to the same number are semantically different for configuration management. Preserve source information.
+## 18. Reset/inheritance
 
-## 14. Explicit unset/reset
+Removing:
 
-A model override can be removed to inherit the global/default behavior again.
+- a Model override restores Global inheritance;
+- an Instance override restores Model/Global inheritance.
 
-Do not model “reset” by copying the current global value into the model; that would block future global changes from flowing through.
+Do not implement reset by copying the current parent value.
 
-For flags where llama.cpp has explicit positive and negative forms, the normalized representation must be able to express true, false and unset/inherit distinctly.
+Boolean options must represent true/false/unset where necessary.
 
-## 15. Unsupported retained options
+## 19. Unsupported retained options
 
-If a configured option is absent after changing llama.cpp versions:
+If a configured key disappears from a later binary:
 
-- retain the stored override;
-- mark it `unsupported` for the active binary;
-- exclude it from worker launch by default;
-- show a clear warning/restart/config invalid state according to severity;
-- allow the user to remove it;
-- automatically reactivate it if a later binary exposes the same canonical option again and validation succeeds.
+- retain it in storage;
+- mark unsupported;
+- normally exclude it from launch;
+- display warning;
+- allow removal;
+- reactivate when a compatible future schema exposes it again.
 
-Never silently delete user configuration because upstream removed/renamed a flag.
+Never silently delete configuration because upstream changed.
 
-## 16. Option aliases and canonical keys
-
-Different help versions may expose aliases or renamed spellings.
-
-Use one canonical internal key per discovered option definition.
-
-Curated metadata may define known alias/rename mappings, but automatic migrations must be conservative. If two flags may differ semantically, keep them separate and surface migration guidance rather than guessing.
-
-Generated launch arguments should prefer the active binary's canonical long form for readability/logging.
-
-## 17. Validation layers
-
-Validation occurs at multiple levels.
+## 20. Validation
 
 ### Schema validation
 
-Examples:
-
-- integer expected;
-- enum value allowed;
-- required value present.
+Type/range/enum/value-required checks.
 
 ### Curated semantic validation
 
 Examples:
 
-- mutually exclusive options;
-- required companion options;
-- GPU-only flag used in CPU build;
-- invalid tensor split length for selected devices;
-- embedding mode inconsistent with intended model API use where known.
+- mutually exclusive flags;
+- companion requirements;
+- GPU-only flag on CPU build;
+- invalid tensor split/device relationships;
+- mode/capability conflicts.
 
 ### Runtime validation
 
-llama.cpp remains authoritative for constraints the manager cannot know. Startup errors are captured and mapped back to configuration diagnostics when possible.
+llama.cpp remains authoritative for unknown constraints. Startup errors feed diagnostics.
 
-## 18. Raw CLI escape hatch
+## 21. Command construction
 
-The requirement is “friendly basic UI + advanced raw options,” not an unrestricted shell command field.
+Worker argv is generated deterministically from:
 
-The Advanced UI should expose raw/discovered **option values**, but avoid a generic arbitrary command-line text box that can inject unknown process arguments or shell syntax.
+1. manager-owned mandatory values;
+2. effective Global + Model + Instance llama.cpp configuration;
+3. scheduler/Instance placement-derived values;
+4. manager safety/integration flags.
 
-If a future “extra args” feature is added, it must be parsed as argv tokens without shell execution and clearly marked unsupported/unvalidated.
+Generate argv arrays directly, never shell command strings.
 
-V1 should not require it because all detected options are already visible.
+## 22. Protected options
 
-## 19. Command construction
+Manager-owned values may include:
 
-Worker launch arguments are generated deterministically from:
-
-1. manager-owned mandatory worker arguments (model path, private bind/port, etc.);
-2. effective global/model llama.cpp configuration;
-3. instance placement/GPU settings;
-4. manager-owned safety/internal flags where required.
-
-User configuration must not override manager-critical settings in ways that expose workers publicly or collide with assigned ports.
-
-Manager-owned options therefore have protected status.
-
-## 20. Protected options
-
-Examples of values the manager may need to own:
-
-- worker listen host/interface;
+- worker host/interface;
 - worker port;
-- model path selected from the model artifact;
-- internal auth key if used;
-- metrics/health flags required for manager functionality;
-- process/logging integration settings required for supervision.
+- Model artifact path;
+- internal auth;
+- required health/metrics integration;
+- device/tensor flags generated by placement.
 
-If the same llama.cpp option appears in the general schema, the UI should explain that the manager controls it and make it read-only/hidden from ordinary per-model override editing.
+If discovered in the generic schema, show them read-only/managed rather than allowing conflicts.
 
-## 21. GPU UI integration
+## 23. GPU UI integration
 
-Visual GPU settings must map into the same effective launch configuration rather than creating a parallel conflicting path.
+GPU assignment/tensor split are first-class Instance placement fields.
 
-The configuration service exposes a normalized placement representation to the scheduler and converts it into the appropriate active llama.cpp arguments.
+The placement representation must map into the same final launch argv.
 
-If a user changes the corresponding raw Advanced option, the UI should either:
+Corresponding raw flags should be derived/read-only where necessary to avoid two conflicting sources of truth.
 
-- update the visual representation if safely parseable; or
-- declare one source authoritative and prevent conflicting edits.
+Phase 7 automatic placement remains single-GPU first.
 
-Preferred design: GPU assignment/tensor split are first-class instance placement fields; corresponding protected/generated CLI flags are shown as derived/read-only in Advanced view.
+## 24. Configuration fingerprint
 
-## 22. Configuration fingerprints
-
-Generate a deterministic effective configuration fingerprint including:
+The effective Instance fingerprint includes:
 
 - active binary profile;
 - artifact identity;
-- effective launch option values;
-- relevant instance placement-derived args;
-- manager-required launch behavior that affects worker semantics.
+- effective Global/Model/Instance options;
+- placement-derived args;
+- manager-owned launch behavior affecting semantics.
 
-A running worker stores its launch fingerprint.
+A running worker records its actual launch fingerprint.
 
-If current desired fingerprint differs, expose `restart_required`.
+## 25. Save semantics
 
-## 23. Save semantics
+### Direct Instance edit
 
-Saving model configuration updates durable desired state.
+Runtime-affecting save on a running Instance:
 
-The API/UI should support:
+- show restart confirmation;
+- persist;
+- drain;
+- stop;
+- restart automatically.
 
-- Save only — persist changes and mark running instances restart-required;
-- Save and restart — persist, then perform a controlled restart;
-- Cancel/discard unsaved frontend changes.
+Do not offer a normal long-lived Save-only path for direct running-Instance edits.
 
-Do not automatically restart a large running model on every field edit.
+### Model/global edit
 
-## 24. Global default changes
+A Model/global default change can affect multiple running Instances.
 
-When a global default changes:
+These broader edits may mark affected Instances restart-required and use an explicit impact/restart workflow rather than silently restarting many workers.
 
-- models without an override inherit the new effective value;
-- recompute fingerprints;
-- affected running instances become restart-required;
-- models with their own override remain unchanged for that option.
+## 26. Instance rename
 
-The UI should be able to preview how many configured/running models are affected before applying broad global changes where practical.
+Rename is not an option-system change but affects the Instance configuration surface.
 
-## 25. API representation
+Because Instance name slugifies into `instance.id`, rename changes the OpenAI model ID.
 
-Management API should expose:
+The UI must separately warn about API breakage before saving.
 
-- active llama.cpp binary profile;
-- discovered option schema;
-- curated metadata merged for presentation;
-- global default values;
-- model overrides;
-- effective configuration;
-- validation warnings/errors;
-- restart-required status.
+## 27. API representation
 
-Avoid forcing the frontend to reproduce inheritance and support logic itself.
+Management APIs should expose:
 
-## 26. Security
+- active binary profile;
+- option schema + curated metadata;
+- Global values;
+- Model overrides;
+- Instance overrides;
+- effective Instance configuration;
+- support/validation state;
+- fingerprint/restart state.
 
-- Run `llama-server --help` as a direct executable call, never through a shell with user-supplied interpolation.
-- Generate argv arrays, not shell command strings.
-- Treat all descriptions/help text as untrusted display text in the browser.
-- Prevent model options from overriding manager-owned bind/port/path safety.
-- Do not expose secret values through the options system.
-- Bound stored option value sizes.
+The frontend must not duplicate authoritative inheritance logic.
 
-## 27. Failure handling
+## 28. Security
 
-### Discovery fails
+- execute `llama-server --help` directly, never through shell interpolation;
+- generate argv arrays;
+- treat upstream help text as untrusted display text;
+- prevent overrides of manager-owned bind/port/path controls;
+- keep secrets outside the option system;
+- bound option value sizes.
 
-Keep the last schema only if it is positively tied to the same binary fingerprint; otherwise expose degraded configuration capability and block unsafe starts requiring unknown validation as appropriate.
+## 29. Testing
 
-### Parser cannot understand one option
-
-Store it as raw/unclassified and expose it in Advanced mode.
-
-### Generated args rejected by llama.cpp
-
-Capture startup logs, classify invalid configuration where possible, and make the relevant effective values visible for troubleshooting.
-
-### Binary changes while workers run
-
-Existing workers remain associated with their launch profile. New starts use the active profile. Mark affected configurations/restarts clearly; do not imply already-running processes changed binary semantics.
-
-## 28. Testing strategy
-
-Maintain parser fixtures from multiple llama.cpp help versions.
-
-Tests should cover:
+Maintain parser fixtures across llama.cpp versions and cover:
 
 - boolean flags;
-- flags with aliases;
-- numeric/string values;
-- enum-like descriptions;
+- aliases;
+- numeric/string/enum values;
 - repeated values;
-- sections/categories;
-- formatting changes;
 - unknown/raw options;
-- removed options;
-- newly introduced options;
-- curated metadata merge;
-- protected manager-owned options;
-- deterministic argv generation.
+- removed/new options;
+- curated merge;
+- Global/Model/Instance inheritance;
+- protected options;
+- deterministic argv;
+- sibling Instances with different overrides.
 
-Do not make CI depend exclusively on the newest network-downloaded llama.cpp binary; keep fixtures for reproducibility.
+## 30. Invariants
 
-## 29. Invariants
+1. Advanced mode never intentionally hides a discovered configurable option.
+2. Global + Model + Instance layers remain distinguishable.
+3. Instance overrides can differ between sibling Instances.
+4. Removing an override restores inheritance.
+5. Manager-owned launch values cannot be overridden unsafely.
+6. Generated argv is deterministic for the same effective Instance configuration.
+7. Direct running-Instance edits confirm and automatically restart when required.
+8. `/models/new` exposes all Model-scoped llama.cpp options but only the small three-policy first-Instance bootstrap.
+9. Instance identity remains the slug-derived `instance.id`, independent from llama.cpp option values.
+10. No shell construction is required.
 
-1. Advanced view never intentionally hides a successfully discovered configurable option.
-2. New upstream flags can appear without adding a dedicated backend field.
-3. User overrides are not silently deleted when a binary changes.
-4. Manager-owned bind/port/model-path settings cannot be overridden by model config.
-5. Global defaults and model overrides remain distinguishable.
-6. Removing an override restores inheritance.
-7. Generated worker args are deterministic for the same effective configuration.
-8. Running workers retain the fingerprint/profile they actually launched with.
-9. Configuration changes that require restart are not presented as already active.
-10. No shell command construction is required to launch llama.cpp.
+## 31. Acceptance criteria
 
-## 30. Acceptance criteria
-
-The feature is complete when:
-
-- manager discovers the active binary and parses its help output;
-- a newly discovered unknown flag appears in Advanced configuration without manager code specific to that flag;
-- curated common flags appear in Basic configuration with improved labels/help;
-- global defaults flow into models without overrides;
-- per-model overrides replace inherited values;
-- removing an override restores inheritance;
-- unsupported retained options survive a binary profile change and are clearly flagged;
-- manager-owned port/bind/model-path options cannot be changed by a model;
-- visual GPU settings generate consistent protected llama.cpp arguments;
-- effective configuration produces a deterministic launch fingerprint;
-- changing an effective option marks a running instance restart-required;
-- generated argv is passed directly to the child process without shell interpolation.
+- active binary help is parsed;
+- unknown new flag appears in Advanced mode without dedicated backend code;
+- curated flags appear in Basic mode;
+- Global defaults flow into Models/Instances;
+- Model overrides flow into sibling Instances;
+- Instance override changes only that Instance;
+- removing Instance override restores Model inheritance;
+- unsupported values survive binary change;
+- protected port/bind/model-path options cannot be overridden;
+- effective configuration yields deterministic argv/fingerprint;
+- `/models/new` provides Model llama.cpp config plus only Instance name/Always On/Autoload/Eviction/launch bootstrap fields;
+- `/instances/new` and edit expose full Instance override/placement configuration;
+- running Instance save confirms and restarts automatically.
