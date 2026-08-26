@@ -146,6 +146,8 @@ describe('useManager', () => {
     expect(manager.modelState(item)).toBe('UNLOADED')
     manager.runtimes.value.m1 = [{ instance_id: 'i', model_id: 'm1', state: 'FAILED' }]
     expect(manager.modelState(item)).toBe('FAILED')
+    manager.runtimes.value.m1.push({ instance_id: 'i-stop', model_id: 'm1', state: 'STOPPING' })
+    expect(manager.modelState(item)).toBe('STOPPING')
     manager.runtimes.value.m1.push({ instance_id: 'i2', model_id: 'm1', state: 'STARTING' })
     expect(manager.modelState(item)).toBe('STARTING')
     manager.runtimes.value.m1.push({ instance_id: 'i3', model_id: 'm1', state: 'READY' })

@@ -8,13 +8,14 @@ const readyWorkers = computed(() => Object.values(runtimes.value).flat().filter(
 const failedWorkers = computed(() => Object.values(runtimes.value).flat().filter(x => x.state === 'FAILED').length)
 
 type FleetRow = Model & { state: string; loading: string }
-type BadgeColor = 'success' | 'error' | 'warning' | 'neutral'
+type BadgeColor = 'success' | 'error' | 'warning' | 'neutral' | 'secondary'
 
 const statusColors: Record<string, BadgeColor> = {
   READY: 'success',
   FAILED: 'error',
   STARTING: 'warning',
   LOADING: 'warning',
+  STOPPING: 'secondary',
   UNLOADED: 'neutral'
 }
 
@@ -31,7 +32,6 @@ const columns: TableColumn<FleetRow>[] = [
   { accessorKey: 'priority', header: 'Priority' },
   { accessorKey: 'gguf_path', header: 'GGUF' }
 ]
-
 </script>
 
 <template>

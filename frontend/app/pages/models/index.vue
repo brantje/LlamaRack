@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { Model, Runtime } from '~/composables/useManager'
 
-type BadgeColor = 'success' | 'error' | 'warning' | 'neutral'
+type BadgeColor = 'success' | 'error' | 'warning' | 'neutral' | 'secondary'
 
 const statusColors: Record<string, BadgeColor> = {
   READY: 'success',
   FAILED: 'error',
   STARTING: 'warning',
   LOADING: 'warning',
+  STOPPING: 'secondary',
   UNLOADED: 'neutral'
 }
 
@@ -23,7 +24,6 @@ const liveSources = new Map<string, EventSource>()
 function errorMessage(error: any, fallback: string) {
   return error?.data?.error || error?.message || fallback
 }
-
 
 function runtimeFor(model: Model): Runtime[] {
   return manager.runtimes.value[model.id] || []

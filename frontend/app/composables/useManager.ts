@@ -78,6 +78,7 @@ export function useManager() {
     const items = runtimes.value[model.id] || []
     return items.find(x => x.state === 'READY')?.state
       || items.find(x => ['STARTING', 'LOADING'].includes(x.state))?.state
+      || items.find(x => x.state === 'STOPPING')?.state
       || items.find(x => x.state === 'FAILED')?.state
       || 'UNLOADED'
   }
