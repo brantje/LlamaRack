@@ -36,6 +36,7 @@ describe('model creation form', () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/available')
+    expect(wrapper.text()).toContain('Model llama.cpp defaults')
     expect(wrapper.text()).toContain('Create a first Instance')
     expect(wrapper.text()).toContain('Instance slug')
     expect(wrapper.text()).toContain('Always on')
@@ -89,6 +90,7 @@ describe('model creation form', () => {
         gguf_path: 'Qwen/coder/qwen-Q4_K_M.gguf',
         name: 'Qwen Coder 32B',
         context_length: 0,
+        options: {},
         first_instance: {
           name: 'Qwen Coding', slug: 'coding-api', always_on: false, autoload_enabled: true, eviction_enabled: true, start: false
         }
@@ -135,7 +137,7 @@ describe('model creation form', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', expect.objectContaining({
-      method: 'POST', body: expect.objectContaining({ first_instance: undefined })
+      method: 'POST', body: expect.objectContaining({ options: {}, first_instance: undefined })
     }))
   })
 
@@ -144,7 +146,7 @@ describe('model creation form', () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     expect(wrapper.text()).toContain('scan failed')
-    expect(wrapper.text()).toContain('No unregistered GGUF files found')
+    expect(selectComponents(wrapper)[0]!.props('items')).toEqual([])
     mocks.request.mockResolvedValueOnce(discovered)
     await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()
