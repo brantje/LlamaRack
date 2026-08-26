@@ -23,7 +23,7 @@ func slowLifecycleBinary(t *testing.T) string {
 	return path
 }
 
-func TestStartOneManualGPUAndArtifactEscape(t *testing.T) {
+func TestStartOneManualGPUAndModelPathEscape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	s, _, m, _, exec := setupLifecycle(t, true, false)
@@ -33,7 +33,7 @@ func TestStartOneManualGPUAndArtifactEscape(t *testing.T) {
 	}
 	if err := s.StopModel(ctx, m.ID); err != nil { t.Fatal(err) }
 
-	exec("UPDATE artifacts SET local_path='../escape.gguf' WHERE id=?", m.ArtifactID)
+	exec("UPDATE models SET gguf_path='../escape.gguf' WHERE id=?", m.ID)
 	m2, err := s.models.GetByID(ctx, m.ID)
 	if err != nil { t.Fatal(err) }
 	if _, err := s.startOne(ctx, m2); err == nil || !strings.Contains(err.Error(), "escapes") {
