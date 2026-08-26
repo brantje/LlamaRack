@@ -6,514 +6,430 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how llamacpp-manager decides whether a model instance can be started on the local machine, how GPU/RAM resources are reserved, and how eligible running instances are selected for eviction when capacity is insufficient.
+This specification defines how `llamacpp-manager` decides whether a configured Instance can start on the local machine, how RAM/VRAM is reserved, how GPU placement is selected, and how eligible running Instances are chosen for resource-pressure eviction.
 
-The scheduler is a decision engine. It does not spawn or stop processes directly.
+The scheduler is a decision engine. It never directly starts or stops processes.
 
-## 2. Goals
+## 2. Ownership
+
+Scheduling operates on **Instances**.
+
+A Model contributes static/resource-relevant inputs such as:
+
+- artifact size;
+- architecture/parameter metadata;
+- Model-level llama.cpp defaults.
+
+An Instance contributes runtime policy and effective configuration such as:
+
+- `instance.id`;
+- priority;
+- Always On;
+- `eviction_enabled`;
+- effective context/KV/batch/offload configuration;
+- GPU placement mode;
+- selected GPUs;
+- tensor split configuration;
+- last-used/activity state.
+
+Lifecycle/scheduler policy must not be stored on the Model.
+
+## 3. Goals
 
 The scheduler must:
 
 - understand local CPU RAM and GPU resources;
 - support NVIDIA and AMD GPUs;
-- honor explicit GPU assignments;
-- support automatic placement when assignment is not fixed;
-- prefer single-GPU placement when the requested model safely fits on one device;
-- support manual tensor split configuration;
-- estimate resource demand conservatively;
-- protect Always-On models from normal eviction;
-- support independently protecting a loaded non-Always-On model from normal resource-pressure eviction;
-- use model priority and LRU/resource pressure when choosing eviction candidates;
-- avoid overcommitting the same resources during concurrent starts;
-- expose understandable scheduling decisions to the UI.
+- honor manual GPU assignments;
+- support automatic placement;
+- prefer one GPU when the Instance safely fits on one device;
+- support automatic/manual tensor split;
+- estimate memory conservatively;
+- protect Always-On Instances from normal eviction;
+- independently protect non-Always-On Instances when `eviction_enabled=false`;
+- use Instance priority and LRU/resource benefit for eviction ordering;
+- avoid overcommitting resources during concurrent starts;
+- expose understandable scheduling decisions.
 
-## 3. Non-goals for v1
+## 4. Non-goals for v1
 
-The scheduler does not:
+- remote-machine scheduling;
+- automatic replica scaling;
+- live GPU migration of a running worker;
+- preempting active inference for ordinary resource pressure;
+- perfect memory prediction;
+- user-facing tuning of every scoring coefficient.
 
-- schedule across remote machines;
-- create/remove replicas automatically;
-- dynamically move a running model between GPUs;
-- preempt an active inference request merely to free VRAM under normal conditions;
-- optimize electricity cost;
-- predict model quality;
-- guarantee perfect memory estimates for every llama.cpp build/model combination.
-
-## 4. Inputs
-
-A scheduling decision uses a coherent snapshot containing:
+## 5. Inputs
 
 ### Hardware
 
-- total system RAM;
-- currently available system RAM;
+- system RAM total/available;
 - GPU inventory;
-- per-GPU total VRAM;
-- per-GPU free/used VRAM;
-- GPU utilization where available;
+- per-GPU total/free/used VRAM;
+- utilization where available;
+- stable device identity;
 - device health/availability;
-- runtime backend/device identifiers.
+- backend/runtime-visible indices.
 
 ### Model
 
-- artifact size and parsed GGUF metadata when available;
-- model architecture/parameter count if known;
-- effective context size;
-- KV cache configuration;
-- GPU layer/offload configuration;
-- batch/ubatch/parallel settings relevant to memory use;
-- model priority;
-- Always-On flag;
-- resource-pressure eviction policy;
-- startup policy.
+- artifact identity/size;
+- GGUF metadata where available;
+- architecture/parameter count;
+- inherited Model llama.cpp values.
 
-### Instance definition
+### Instance
 
-- selected GPU devices or automatic mode;
-- manual/automatic tensor split;
+- `instance.id`;
+- effective Global + Model + Instance llama.cpp configuration;
+- priority;
+- Always On;
+- `eviction_enabled`;
+- automatic/manual placement;
+- selected GPU IDs;
+- automatic/manual tensor split;
 - enabled state;
-- instance-specific placement constraints.
+- startup/resource constraints.
 
 ### Runtime
 
-- running instances;
-- observed per-process/GPU memory where measurable;
-- active request counts;
+- running Instances;
+- observed RAM/VRAM where measurable;
+- active/queued request counts;
 - last-used time;
 - lifecycle state;
-- pending scheduler reservations.
+- pending reservations.
 
-## 5. Resource model
+## 6. Resource estimation
 
-The scheduler uses a normalized resource representation.
+Estimate demand progressively:
 
-Conceptually:
+1. file-size fallback plus headroom;
+2. GGUF metadata + context/KV/runtime settings;
+3. observed memory for the same artifact/config/binary fingerprint.
 
-```text
-SystemMemory:
-  total
-  available
+Never treat disk file size as exact runtime memory.
 
-GPUDevice:
-  id
-  vendor
-  total_vram
-  available_vram
-  utilization
-  healthy
-
-InstanceDemand:
-  estimated_ram
-  estimated_vram_by_device_or_total
-  uncertainty
-```
-
-The exact internal types are implementation details.
-
-## 6. Resource estimates
-
-Estimation should progressively improve as more information becomes available.
-
-### Level 1 — file-size fallback
-
-Before full GGUF metadata is available, file size gives a lower-quality estimate. Add safety headroom rather than treating disk size as exact runtime memory.
-
-### Level 2 — GGUF metadata
-
-Use parsed model metadata to estimate:
-
-- weights;
-- architecture overhead;
-- context/KV cache;
-- configured GPU offload;
-- parallel slots;
-- known llama.cpp memory-affecting settings.
-
-### Level 3 — observed historical load
-
-After a model has been successfully loaded, observed peak/steady memory may inform future estimates for the same artifact/config fingerprint.
-
-Observed values must be tied to configuration and binary fingerprints; do not blindly reuse measurements after major configuration changes.
+Observed historical values are only reusable when tied to compatible configuration/binary fingerprints.
 
 ## 7. Safety margin
 
-The scheduler must not target 100% reported free RAM/VRAM.
+Do not target 100% reported free RAM/VRAM.
 
-Use configurable or implementation-defined reserve margins for:
+Reserve headroom for:
 
-- operating system/manager memory;
+- OS/manager memory;
 - GPU driver/runtime overhead;
 - llama.cpp allocation variance;
-- temporary startup allocations.
+- startup/transient allocation spikes.
 
-The UI may show both raw hardware availability and scheduler-usable capacity.
+The UI may show both raw free memory and scheduler-usable memory.
 
-## 8. Scheduling request
-
-A lifecycle start asks the scheduler for a plan.
+## 8. Scheduling result
 
 Possible outcomes:
 
-- `PLACE` — resources available immediately;
-- `PLACE_AFTER_EVICTION` — resources can be made available by stopping specific eligible instances;
-- `WAIT` — temporary reservations/start operations may soon free/resolve capacity;
+- `PLACE`;
+- `PLACE_AFTER_EVICTION`;
+- `WAIT`;
 - `REJECT_INSUFFICIENT_RESOURCES`;
 - `REJECT_INVALID_PLACEMENT`;
 - `REJECT_HARDWARE_UNAVAILABLE`.
 
-The decision includes human-readable rationale suitable for diagnostics/UI.
+Results include human-readable rationale.
 
-### 8.1 Delivery phase boundary
+## 9. Delivery phase boundary
 
-Phase 5 implements the policy and planning primitives needed for eviction: inference activity tracking, LRU/last-used state, idle unloading, eviction eligibility/ranking, resource estimates and an eviction-plan API. Phase 5 may calculate or preview which instances would be evicted, but it does **not** automatically execute resource-pressure eviction before starting another model.
+Phase 5 provides policy/planning primitives: activity tracking, LRU state, idle unload, eviction eligibility/ranking, estimates and an eviction-plan API.
 
-The end-to-end `PLACE_AFTER_EVICTION` load path is a **Phase 7 — Hardware integration** requirement because it depends on real RAM/VRAM availability, per-device placement and refreshed hardware state.
+Phase 5.5 moves those policies onto durable Instances and establishes the Instance control plane.
 
-When Phase 7 is implemented, a start that cannot fit directly must follow this sequence:
+Actual hardware-aware execution of `PLACE_AFTER_EVICTION` remains a **Phase 7 — Hardware integration** requirement.
+
+Phase 7 load flow:
 
 ```text
-request model B
--> calculate required capacity from model configuration
--> read current RAM/VRAM and placement state
--> choose eligible eviction victims
--> revalidate and drain/stop those victims
--> refresh resource state
--> start model B
+request Instance
+-> calculate effective Instance demand
+-> read current RAM/VRAM + reservations
+-> choose placement
+-> if insufficient, choose eligible victim Instances
+-> revalidate victims
+-> drain/stop victims
+-> refresh hardware state
+-> confirm placement
+-> start requested Instance
 ```
 
-Until Phase 7, lifecycle may expose an eviction plan for diagnostics/testing, but model startup must not claim that resource-pressure eviction has been executed automatically.
+Before Phase 7, code may calculate/preview eviction plans but must not claim real pre-load VRAM eviction has been executed.
 
-## 9. Reservations
+## 10. Reservations
 
-Concurrent model starts must not all observe the same free VRAM and overcommit it.
-
-Before lifecycle begins evictions/startup, the scheduler creates an in-memory reservation for expected resources.
+Concurrent starts must not all consume the same apparent free capacity.
 
 Reservations:
 
-- have an owner operation/instance;
-- reduce available schedulable capacity;
-- expire or are explicitly released on failure/cancellation;
-- convert into observed runtime allocation after successful startup;
-- are reconstructed conservatively after manager restart rather than persisted as active truth.
+- belong to one start operation/Instance;
+- reduce schedulable capacity;
+- expire/release on failure/cancellation;
+- convert to observed allocation after successful startup;
+- are reconstructed conservatively after manager restart rather than persisted as live truth.
 
-Scheduler reservation updates must be serialized enough to guarantee consistent placement decisions without locking unrelated inference traffic.
+## 11. Explicit GPU assignment
 
-## 10. Explicit GPU assignment
+Manual placement must be honored exactly.
 
-If an instance definition selects specific GPUs, the scheduler must honor that selection.
-
-If a configured device no longer exists or is unavailable:
+If a configured GPU is missing/unavailable:
 
 - do not silently substitute another device;
-- return an invalid/unavailable placement decision;
-- show the unresolved assignment in the UI.
+- return invalid/unavailable placement;
+- preserve configuration for user correction.
 
-This protects manual multi-GPU configurations from changing meaning after device-order changes.
+## 12. Automatic GPU placement
 
-## 11. Automatic GPU placement
+Automatic placement is manager-owned.
 
-Automatic placement is manager-owned placement. When usable per-device telemetry is available, the manager must make the intended device set explicit rather than launching `llama-server` with unrestricted defaults and allowing llama.cpp to spread a model across every visible GPU.
+Default policy is **single-GPU first**:
 
-The default policy is **single-GPU first**:
+1. calculate complete estimated VRAM demand plus safety margin;
+2. evaluate each healthy compatible GPU individually;
+3. if any one GPU fits, choose exactly one GPU;
+4. generate explicit llama.cpp placement so the worker stays on that device;
+5. only consider multi-GPU if no single GPU safely fits;
+6. when multi-GPU is needed, use the minimum practical number of devices and derive a split from usable VRAM/effective configuration.
 
-1. Calculate the requested configuration's estimated VRAM demand, including weights, context/KV cache, runtime overhead and scheduler safety margin.
-2. Evaluate each compatible healthy GPU independently against scheduler-usable available VRAM, including pending reservations.
-3. If one or more individual GPUs can fit the complete requested placement, choose exactly one GPU using the deterministic placement score.
-4. Generate explicit placement launch configuration that keeps the model on that selected GPU and prevents llama.cpp's default multi-GPU/layer-splitting behavior from spreading it onto other GPUs.
-5. Only when no single eligible GPU can safely fit the requested placement may automatic placement consider a multi-GPU plan.
-6. When multiple GPUs are required, use the minimum practical number of devices and calculate/derive a split based on their usable VRAM and the effective model configuration.
+The manager must not expose all GPUs and let llama.cpp spread across them by default when one GPU can hold the Instance.
 
-For example, on a host with two 16 GiB GPUs, a model whose complete estimated demand plus safety margin fits on one of those GPUs should consume one GPU in automatic mode and leave the other GPU available for another model. It must not be split approximately 50/50 merely because both devices are visible to llama.cpp.
+Manual user configuration can intentionally request multi-GPU behavior.
 
-The single-GPU-first rule may be overridden only by explicit user placement/configuration that intentionally requests multi-GPU execution, such as a manual device set or tensor split. Automatic mode itself is not an instruction to use all GPUs.
-
-The deterministic score should prefer, in order of correctness constraints:
-
-- a device with enough scheduler-usable VRAM without eviction;
-- fewer devices for the placement;
-- preserving useful contiguous free capacity on other devices where practical;
-- avoiding highly utilized devices when comparable alternatives exist.
-
-If no direct placement fits, the scheduler may evaluate `PLACE_AFTER_EVICTION` candidates according to the normal eviction policy. Exact scoring remains implementation-specific, but given the same hardware snapshot, reservations and model configuration it must produce the same placement.
-
-## 12. Tensor split
-
-The UI supports:
-
-- automatic split;
-- manual split.
+## 13. Tensor split
 
 ### Automatic
 
-Automatic tensor split is subordinate to the scheduler's selected device set. The manager must not simply expose all visible GPUs and delegate unrestricted placement to llama.cpp.
+Automatic tensor split follows the scheduler-selected device set.
 
-If the scheduler selected one GPU, no multi-GPU tensor split is generated and launch arguments/configuration must enforce that single-device placement.
-
-If the scheduler determined that multiple GPUs are required, it may generate the appropriate device list and tensor split based on scheduler-usable VRAM, supported llama.cpp flags and the effective model configuration.
+- one selected GPU => no multi-GPU split;
+- multiple selected GPUs => generate a calculated split.
 
 ### Manual
 
-User-specified proportions/values are preserved and validated against selected GPUs.
+User-provided split values are validated against selected GPUs and are not silently changed just to make an Instance fit.
 
-The scheduler evaluates capacity according to the intended split. It must not silently alter a manual split just to make a model fit.
+## 14. Priority
 
-## 13. Priority
-
-User-visible priorities:
+User-visible priority:
 
 - Low;
 - Normal;
 - High.
 
-Internally these map to ordered weights.
+Priority affects start competition and eviction ordering for **Instances**.
 
-Priority affects eviction preference and start competition. It does not automatically give one inference request latency priority inside an already-running llama.cpp worker.
+It does not imply per-request priority inside a running llama.cpp worker.
 
-## 14. Always-On protection
+## 15. Always-On and eviction protection
 
-Always-On means at least one instance of the model should remain available.
+These are separate Instance properties.
 
-Normal eviction rules must not select the final satisfying instance of an Always-On model.
+### Always On
 
-If an Always-On model has multiple loaded instances, extra instances beyond the required minimum may be eligible for eviction if they are otherwise safe and manually configured policy allows them to stop.
+`always_on=true` means that exact Instance is reconciled toward running/READY state, except during session-local manual-stop suppression.
 
-If total Always-On desired state exceeds physical capacity:
+Normal resource-pressure eviction must not select an Always-On Instance.
 
-- return/report unsatisfied desired state;
-- avoid endless alternating evictions/restarts;
-- expose which models cannot currently be satisfied and why.
+### Resource-pressure eviction
 
-A deterministic priority rule may decide which Always-On starts succeed, but it must not continuously churn.
+`eviction_enabled=false` means that loaded Instance is protected from normal resource-pressure eviction.
 
-### 14.1 Separate protection while loaded — resolved decision
-
-Always-On and resource-pressure eviction protection are separate user-facing concepts and both are retained.
-
-- **Always-On** controls desired loaded state: the manager proactively loads/reconciles the model and protects the final satisfying instance from normal eviction.
-- **Resource-pressure eviction protection** controls whether a model that is already loaded may be selected as a normal eviction victim. It does not by itself cause the model to load or restart.
-
-This intentionally supports the combination:
+Important supported combination:
 
 ```text
-Always-On: false
+Always On: false
+Autoload on request: true
 Allow resource-pressure eviction: false
 ```
 
-which means **load on demand, but once loaded, protect it from normal VRAM-pressure eviction**.
+Meaning:
 
-The Phase 5 API field is `eviction_enabled`; `false` means protected from normal resource-pressure eviction. Phase 7 must preserve this semantic distinction when implementing real pre-load eviction. A clearer UI label may be used later, but the capability itself is not provisional.
+> Start this Instance on demand, but once loaded, protect this exact Instance from normal RAM/VRAM-pressure eviction.
 
-## 15. Eviction eligibility
+## 16. Eviction eligibility
 
-An instance is normally eligible for eviction only when:
+An Instance is normally eligible only when:
 
-- it is READY;
-- its model allows normal resource-pressure eviction;
-- it is not the final protected Always-On instance;
-- it has no active inference requests;
-- it is not already DRAINING/STOPPING;
-- no management operation currently pins it;
-- stopping it does not violate explicit placement/lifecycle constraints.
+- READY;
+- `eviction_enabled=true`;
+- not Always On;
+- no active inference requests;
+- not already DRAINING/STOPPING;
+- not pinned by another management operation;
+- stopping it does not violate another explicit constraint.
 
-V1 should not forcibly evict an active generation for ordinary resource pressure.
+V1 does not forcibly evict active generation for ordinary pressure.
 
-If no idle eligible victim exists, the new model start may wait or fail depending on deadline/policy.
+## 17. Eviction ordering
 
-## 16. Eviction ordering
+Combine:
 
-Combine priority, recency and resource benefit.
+1. Instance priority — lower before higher;
+2. LRU/last-used age;
+3. resource benefit;
+4. disruption/minimal victim count.
 
-Recommended ordering principles:
+Prefer one suitable victim over several equivalent smaller victims when practical.
 
-1. lower-priority models before higher-priority models;
-2. within the same priority, least recently used before recently used;
-3. prefer a victim/set of victims that frees sufficient resources with minimal disruption;
-4. avoid evicting multiple small models if one equally low-priority idle model can satisfy the requirement;
-5. consider startup/load cost only as a secondary optimization after correctness.
+A deterministic greedy algorithm is acceptable in v1.
 
-A conceptual score may use:
+## 18. Multiple victims
 
-```text
-eviction desirability =
-  priority penalty
-+ idle age benefit
-+ resource-recovery benefit
-- protection/pinning penalties
-```
+A placement may require multiple victims.
 
-Do not expose an unstable opaque number as the main UX. Present plain-language rationale.
+The ordered victim set must collectively free sufficient resources plus safety margin.
 
-## 17. Multiple victims
+Revalidate each victim immediately before drain because runtime activity can change after planning.
 
-A start may require more than one eviction.
+## 19. LRU definition
 
-The scheduler should produce an ordered set whose combined released resources satisfy the estimated need plus safety margin.
+`last_used_at` is based on meaningful inference activity, preferably request completion/end time.
 
-Avoid combinatorial optimization complexity in v1. A deterministic greedy algorithm based on eligibility/order/resource benefit is acceptable if tests demonstrate reasonable behavior.
+Active requests are treated as pinned/newest.
 
-## 18. LRU definition
+A manually started but unused Instance can use `loaded_at` as fallback when `last_used_at` is null.
 
-`last_used_at` should be based on meaningful inference activity, preferably the completion/end time of the most recent request, with active requests considered newer/pinned.
+## 20. Start competition
 
-Manual start without any inference traffic should not forever outrank actually used models. The implementation may track `loaded_at` separately and use it as a fallback when `last_used_at` is null.
+If two stopped Instances request start and only one fits:
 
-## 19. Start competition
+- reservations make the choice deterministic;
+- higher Instance priority wins when competition exists before commitment;
+- equal priority can use FIFO/start-request time;
+- avoid canceling a committed expensive plan merely because another equal request appears.
 
-If two unloaded models request startup concurrently and capacity can satisfy only one:
+## 21. Manual launch warning
 
-- reservations make the decision deterministic;
-- higher-priority request should win when both compete before placement is committed;
-- equal-priority requests may use FIFO/start-request time;
-- once an expensive eviction/start plan is committed, avoid unnecessary cancellation merely because another equal request arrives.
+A user-initiated Launch that may require eviction must show a confirmation explaining that other idle Instances may be stopped automatically according to configured policy.
 
-The scheduler does not need a general-purpose job queue in v1, but placement operations need ordered coordination.
+The user does **not** manually select victim Instances.
 
-## 20. Interaction with lifecycle
+After confirmation, scheduler policy chooses victims.
 
-The scheduler returns a plan; lifecycle executes it. **Execution of `PLACE_AFTER_EVICTION` before loading the requested model is introduced in Phase 7.** Phase 5 only establishes the decision/planning inputs and output.
+Inference-triggered autoload cannot wait for an interactive confirmation and proceeds according to policy automatically.
 
-For `PLACE_AFTER_EVICTION` in Phase 7:
+## 22. Interaction with lifecycle
 
-1. scheduler creates reservation/plan;
+Scheduler returns a plan; lifecycle executes it.
+
+For Phase 7 `PLACE_AFTER_EVICTION`:
+
+1. scheduler reserves capacity and returns target placement + victims;
 2. lifecycle revalidates victim eligibility;
 3. lifecycle drains/stops victims;
-4. hardware snapshot is refreshed as needed;
-5. lifecycle asks scheduler to confirm placement;
-6. supervisor starts target instance using the scheduler's explicit device placement;
+4. hardware state is refreshed;
+5. scheduler confirms the target placement;
+6. supervisor starts the requested Instance using explicit placement;
 7. reservation converts/releases based on outcome.
 
-If a victim becomes active before drain starts, re-plan rather than violating the active-request rule.
+If a victim becomes active before drain, re-plan.
 
-## 21. Startup failure and resource release
+## 23. Startup failure
 
-If worker startup fails:
+If requested Instance startup fails:
 
-- release scheduler reservation;
-- refresh observed hardware state;
-- do not automatically restart evicted models unless their lifecycle policy (e.g. Always-On) requires reconciliation;
-- preserve failure reason for the requesting model.
+- release reservation;
+- refresh hardware state;
+- keep the Instance configured;
+- do not automatically restart evicted Instances unless their own lifecycle policy requires it;
+- preserve failure reason for the requested Instance.
 
-An eviction is a real lifecycle change, so users should understand that a failed new model load may leave previously idle models unloaded.
+A failed new start may therefore leave previously evicted idle Instances stopped.
 
-## 22. OOM handling
+## 24. OOM handling
 
-Despite estimates, llama.cpp startup may fail due to OOM.
-
-Classify this separately when detectable.
-
-On OOM:
+When OOM is detectable:
 
 - terminate failed worker;
 - refresh hardware state;
-- record actual/estimated mismatch;
-- increase conservative estimate/headroom for that config fingerprint if possible;
-- optionally attempt one re-plan with additional free capacity if request deadline and bounded retry policy permit;
-- never enter infinite eviction/retry loops.
+- record estimate mismatch for the effective fingerprint;
+- increase conservative headroom where practical;
+- optionally perform one bounded re-plan if deadline/policy permits;
+- never loop indefinitely.
 
-## 23. Hardware collectors
+## 25. Hardware collectors
 
 ### NVIDIA
 
-Collect at least:
-
-- stable device identity;
-- index/runtime-visible ID;
-- name;
-- total/free/used VRAM;
-- utilization;
-- relevant process memory when available.
+Collect stable ID, runtime index, name, total/free/used VRAM, utilization and relevant process memory where available.
 
 ### AMD
 
-Collect an equivalent normalized set where ROCm/driver tools expose it.
+Provide equivalent normalized data where ROCm/driver tools permit.
 
-Vendor collectors may use different mechanisms, but downstream scheduler logic consumes a common model.
+Collector failure must be represented as unknown/unavailable, not zero free memory.
 
-Collector absence/failure must be visible. Unknown is not the same as zero free memory.
+## 26. CPU-only mode
 
-## 24. CPU-only mode
+Without GPUs:
 
-The scheduler must work without GPUs.
-
-In CPU mode:
-
-- evaluate system RAM;
+- schedule against system RAM;
 - reject GPU-specific manual assignments;
-- generate/validate effective llama.cpp configuration consistent with CPU execution;
-- still apply priority, Always-On and idle eviction logic based on RAM/resource pressure.
+- generate CPU-compatible llama.cpp configuration;
+- retain Instance priority/Always-On/eviction behavior for RAM pressure.
 
-## 25. Scheduler visibility in UI
+## 27. Scheduler UI visibility
 
-For each model, the UI should be able to show:
+The Instance control plane should eventually expose:
 
-- estimated RAM/VRAM requirement;
-- selected/automatic GPUs;
-- whether automatic placement selected one GPU or a required multi-GPU split;
-- whether the model currently fits;
-- why a start cannot proceed;
-- whether the loaded model is protected from normal resource-pressure eviction;
-- which models would likely need eviction for a requested start, where safe to preview;
-- recommendation confidence/estimate quality.
+- estimated RAM/VRAM;
+- automatic/manual placement;
+- selected GPU(s);
+- whether automatic placement chose one GPU or multi-GPU;
+- fit/cannot-fit reason;
+- eviction protection state;
+- possible eviction consequence for manual Launch;
+- observed resource usage where available.
 
-For running instances, show observed memory when available alongside estimates.
+Do not put these operational fields on the `/models` table.
 
-## 26. Metrics
+## 28. Metrics
 
-Expose scheduler metrics including:
+Expose metrics such as:
 
-- placement requests;
-- placement successes/failures;
-- reservation counts;
-- eviction count by reason/model priority;
+- placement requests/success/failure;
+- reservations;
+- eviction count by Instance priority/reason;
 - scheduling duration;
-- estimate vs observed memory error where practical;
-- unsatisfied Always-On model count.
+- estimate vs observed error;
+- unsatisfied Always-On Instance count.
 
-Avoid device names or arbitrary error strings as uncontrolled metric labels.
+Avoid uncontrolled high-cardinality labels.
 
-## 27. Scheduler invariants
+## 29. Invariants
 
-1. The scheduler never directly kills or starts a process.
-2. Pending reservations reduce schedulable capacity.
-3. Manual GPU assignment is never silently rewritten.
-4. The final required Always-On instance is not a normal eviction victim.
-5. A model explicitly protected from resource-pressure eviction is not a normal eviction victim.
-6. Active inference requests protect an instance from normal eviction.
-7. Unknown hardware telemetry causes conservative behavior.
-8. Placement decisions include safety headroom.
-9. Automatic placement uses one GPU when the complete requested configuration safely fits on one eligible GPU, unless explicit user configuration requires multiple GPUs.
-10. Multi-GPU automatic placement is considered only when no single eligible GPU can safely fit the request.
-11. The worker launch configuration explicitly enforces the scheduler-selected device set instead of relying on llama.cpp's unrestricted default GPU spreading.
-12. Resource state is revalidated after evictions before launch.
-13. Failed starts release reservations.
-14. Scheduling cannot enter an unbounded eviction/start loop.
+1. Scheduler operates on Instances.
+2. Scheduler never starts/kills a process directly.
+3. Pending reservations reduce schedulable capacity.
+4. Manual GPU assignment is never silently rewritten.
+5. Automatic placement is single-GPU first.
+6. Always-On Instances are not normal eviction victims.
+7. `eviction_enabled=false` protects that exact Instance.
+8. Active requests protect an Instance from normal eviction.
+9. Eviction execution before target load is a Phase 7 responsibility.
+10. Model rows do not own scheduler/lifecycle policy.
 
-## 28. Acceptance criteria
+## 30. Acceptance criteria
 
-Phase 5 tests must demonstrate the policy/planning behavior that does not require real hardware telemetry, including priority/LRU ordering, activity protection, Always-On protection, explicit resource-pressure eviction protection and multi-victim planning.
+Tests/spec behavior demonstrate:
 
-Phase 7 tests must additionally demonstrate that a model start which requires resource-pressure eviction actually performs the complete pre-load sequence: calculate the deficit, select eligible victims, drain/stop them, refresh resource state, and only then start the requested model.
-
-Across the completed scheduler implementation, tests must demonstrate:
-
-- a model that fits available GPU memory receives a direct placement plan;
-- when the model's complete estimated VRAM demand plus safety margin fits on one GPU, automatic placement selects exactly one GPU and leaves other GPUs unallocated for that model;
-- automatic placement does not split a fitting model across multiple visible GPUs merely because llama.cpp would do so by default;
-- multi-GPU automatic placement occurs only when no single eligible GPU can safely fit the request, unless the user explicitly configured multi-GPU execution;
-- generated worker arguments/configuration enforce the scheduler-selected single- or multi-GPU device set;
-- two simultaneous starts cannot reserve the same VRAM twice;
-- explicit GPU selection is honored;
-- missing configured GPU causes a clear placement failure;
-- manual tensor split is preserved;
-- a low-priority idle model is selected before a high-priority idle model;
-- older idle usage wins among equal-priority candidates;
-- active instances are not normal eviction victims;
-- the final Always-On instance is protected;
-- a non-Always-On model with resource-pressure eviction disabled is also protected while loaded;
-- an extra instance of an Always-On model can be considered separately from the protected minimum;
-- insufficient capacity with no eligible victims fails cleanly;
-- multi-victim eviction can free enough capacity;
-- OOM startup failure releases reservations and records the mismatch;
-- CPU-only scheduling works without GPU collectors;
-- mutually impossible Always-On desired state is reported without endless churn.
+- two sibling Instances can have different priorities/eviction policies;
+- a non-Always-On protected Instance is not selected as a victim;
+- an Always-On Instance is not normally evicted;
+- active requests pin an Instance;
+- lower-priority idle Instances are preferred victims;
+- automatic placement chooses one GPU when one safely fits;
+- multi-GPU is considered only when needed or manually requested;
+- missing manually assigned GPUs fail safely;
+- reservations prevent concurrent overcommit;
+- manual Launch warns about possible automatic eviction;
+- inference-triggered autoload follows policy without interactive confirmation;
+- Phase 7 executes drain/stop/refresh/start for real `PLACE_AFTER_EVICTION` flows.
