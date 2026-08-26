@@ -15,7 +15,7 @@ import (
 func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	mux := http.NewServeMux()
-	mux.Handle("/api/v1/ws", NewRuntimeWebSocketHandler(f.auth, f.server.lifecycle))
+	mux.Handle("/api/v1/ws", NewRuntimeWebSocketHandler(f.auth, f.server.lifecycle, ""))
 	mux.Handle("/", f.server)
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -78,7 +78,7 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 
 func TestRuntimeWebSocketMethodAndOriginValidation(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	handler := NewRuntimeWebSocketHandler(f.auth, f.server.lifecycle)
+	handler := NewRuntimeWebSocketHandler(f.auth, f.server.lifecycle, "")
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/ws", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -87,13 +87,16 @@ func TestRuntimeWebSocketMethodAndOriginValidation(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name   string
-		host   string
-		origin string
-		want   bool
+		name       string
+		host       string
+		origin     string
+		configured string
+		want       bool
 	}{
 		{name: "no origin", host: "manager.test:8888", want: true},
 		{name: "same host different port", host: "manager.test:8888", origin: "http://manager.test:3000", want: true},
+		{name: "configured cross host", host: "manager.test:8888", origin: "https://ui.example", configured: "https://ui.example", want: true},
+		{name: "configured list", host: "manager.test:8888", origin: "https://ui.example", configured: "https://other.example, https://ui.example ", want: true},
 		{name: "different host", host: "manager.test:8888", origin: "https://evil.example", want: false},
 		{name: "invalid scheme", host: "manager.test:8888", origin: "file:///tmp/index.html", want: false},
 		{name: "invalid request host", host: "://", origin: "http://manager.test", want: false},
@@ -104,7 +107,7 @@ func TestRuntimeWebSocketMethodAndOriginValidation(t *testing.T) {
 			if tc.origin != "" {
 				r.Header.Set("Origin", tc.origin)
 			}
-			if got := websocketOriginAllowed(r); got != tc.want {
+			if got := websocketOriginAllowed(r, tc.configured); got != tc.want {
 				t.Fatalf("websocketOriginAllowed=%v want=%v", got, tc.want)
 			}
 		})
