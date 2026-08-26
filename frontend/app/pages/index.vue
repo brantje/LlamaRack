@@ -3,7 +3,7 @@ import type { TableColumn } from '@nuxt/ui'
 import type { Model } from '~/composables/useManager'
 
 const manager = useManager()
-const { models, runtimes, profile, canOperate } = manager
+const { models, runtimes, profile } = manager
 const readyWorkers = computed(() => Object.values(runtimes.value).flat().filter(x => x.state === 'READY').length)
 const failedWorkers = computed(() => Object.values(runtimes.value).flat().filter(x => x.state === 'FAILED').length)
 
@@ -76,7 +76,7 @@ const columns: TableColumn<FleetRow>[] = [
             <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">FLEET</p>
             <h2 class="text-xl font-bold">Model activity</h2>
           </div>
-          <UButton v-if="canOperate" to="/models" size="sm">Manage models</UButton>
+          <UButton to="/models" size="sm">Manage models</UButton>
         </div>
       </template>
 
