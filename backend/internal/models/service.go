@@ -71,6 +71,14 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	if err != nil {
 		return Model{}, err
 	}
+	var existing int
+	err = s.db.QueryRowContext(ctx, "SELECT 1 FROM models WHERE gguf_path=? LIMIT 1", ggufPath).Scan(&existing)
+	if err == nil {
+		return Model{}, errors.New("GGUF file has already been added")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Model{}, err
+	}
 	enabled := true
 	if in.Enabled != nil {
 		enabled = *in.Enabled
