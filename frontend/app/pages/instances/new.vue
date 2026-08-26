@@ -4,14 +4,23 @@ const router = useRouter()
 const busy = ref(false)
 const error = ref('')
 const launchAfterCreate = ref(false)
+const slugEdited = ref(false)
 const form = reactive({
-  model_id: '', name: '', enabled: true, always_on: false, autoload_enabled: true,
+  model_id: '', name: '', slug: '', enabled: true, always_on: false, autoload_enabled: true,
   priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0,
   gpu_mode: 'auto', gpu_devices: '', tensor_split: '', options: ''
 })
 const modelItems = computed(() => manager.models.value.map(model => ({ label: model.name, value: model.id })))
 const priorityItems = ['low', 'normal', 'high'].map(value => ({ label: value[0]!.toUpperCase() + value.slice(1), value }))
 const gpuItems = [{ label: 'Automatic', value: 'auto' }, { label: 'Manual', value: 'manual' }]
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
+}
+
+watch(() => form.name, (name) => {
+  if (!slugEdited.value) form.slug = slugify(name)
+})
 
 function parseOptions(value: string) {
   const out: Record<string, string> = {}
@@ -59,7 +68,7 @@ async function submit() {
 <template>
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
-      <UPageHeader class="min-w-0 flex-1" headline="CONTROL PLANE" title="New Instance" description="Configure one durable llama-server process. The Instance name is slugified into the OpenAI model ID." />
+      <UPageHeader class="min-w-0 flex-1" headline="CONTROL PLANE" title="New Instance" description="Configure one durable llama-server process. The slug is the exact OpenAI model ID and defaults from the Instance name." />
       <UButton to="/instances" color="neutral" variant="soft">Back to Instances</UButton>
     </div>
     <UCard class="max-w-4xl">
@@ -67,7 +76,8 @@ async function submit() {
       <UForm :state="form" class="space-y-6" @submit="submit">
         <div class="grid gap-4 md:grid-cols-2">
           <UFormField label="Registered Model" name="model_id" required><USelectMenu v-model="form.model_id" class="w-full" :items="modelItems" label-key="label" value-key="value" required /></UFormField>
-          <UFormField label="Instance name" name="name" description="Slugified into the exact OpenAI model ID." required><UInput v-model="form.name" class="w-full" required /></UFormField>
+          <UFormField label="Instance name" name="name" required><UInput v-model="form.name" data-testid="instance-name" class="w-full" required /></UFormField>
+          <UFormField label="Instance slug" name="slug" description="Exact OpenAI model ID. Defaults from the name but can be customized." required><UInput v-model="form.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="slugEdited = true" /></UFormField>
         </div>
         <USeparator label="Lifecycle & scheduling" />
         <div class="grid gap-4 md:grid-cols-2">
@@ -89,7 +99,7 @@ async function submit() {
         <USeparator label="llama.cpp overrides" />
         <UFormField label="Instance overrides" name="options" description="One key=value pair per line. These override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" placeholder="ctx-size=32768" /></UFormField>
         <UCheckbox v-model="launchAfterCreate" label="Launch after creation" />
-        <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy" :disabled="!form.model_id || !form.name">Create Instance</UButton></div>
+        <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy" :disabled="!form.model_id || !form.name || !form.slug">Create Instance</UButton></div>
       </UForm>
     </UCard>
   </div>
