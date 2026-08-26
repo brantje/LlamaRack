@@ -13,8 +13,9 @@ import (
 )
 
 type runtimeWebSocketHandler struct {
-	auth      *auth.Service
-	lifecycle *lifecycle.Service
+	auth           *auth.Service
+	lifecycle      *lifecycle.Service
+	allowedOrigins string
 }
 
 type runtimeEvent struct {
@@ -27,10 +28,8 @@ type runtimeSnapshotEvent struct {
 	Runtimes []supervisor.Runtime `json:"runtimes"`
 }
 
-var runtimeUpgrader = websocket.Upgrader{CheckOrigin: websocketOriginAllowed}
-
-func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service) http.Handler {
-	return &runtimeWebSocketHandler{auth: a, lifecycle: l}
+func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string) http.Handler {
+	return &runtimeWebSocketHandler{auth: a, lifecycle: l, allowedOrigins: allowedOrigins}
 }
 
 func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +47,10 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	conn, err := runtimeUpgrader.Upgrade(w, r, nil)
+	upgrader := websocket.Upgrader{CheckOrigin: func(request *http.Request) bool {
+		return websocketOriginAllowed(request, h.allowedOrigins)
+	}}
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
@@ -90,10 +92,15 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func websocketOriginAllowed(r *http.Request) bool {
+func websocketOriginAllowed(r *http.Request, configured string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
+	}
+	for _, allowed := range strings.Split(configured, ",") {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
 	}
 	originURL, err := url.Parse(origin)
 	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
