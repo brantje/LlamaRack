@@ -10,7 +10,6 @@ const scanning = ref(false)
 const error = ref('')
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
-const firstInstanceNameEdited = ref(false)
 const firstInstanceSlugEdited = ref(false)
 const form = reactive({
   gguf_path: '',
@@ -39,7 +38,11 @@ function slugify(value: string) {
 }
 
 watch(() => form.name, (name) => {
-  if (!firstInstanceNameEdited.value) form.first_instance.name = name
+  if (createFirstInstance.value) form.first_instance.name = name
+})
+
+watch(createFirstInstance, (enabled) => {
+  if (enabled) form.first_instance.name = form.name
 })
 
 watch(() => form.first_instance.name, (name) => {
@@ -123,8 +126,8 @@ async function createModel() {
         <UCheckbox v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
 
         <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
-          <UFormField label="Instance name" name="first_instance.name" required>
-            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required @update:model-value="firstInstanceNameEdited = true" />
+          <UFormField label="Instance name" name="first_instance.name" description="Defaults from the Model name while first-Instance creation is enabled." required>
+            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
           </UFormField>
           <UFormField label="Instance slug" name="first_instance.slug" description="Exact OpenAI model ID. Defaults from the Instance name but can be customized." required>
             <UInput v-model="form.first_instance.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="firstInstanceSlugEdited = true" />
