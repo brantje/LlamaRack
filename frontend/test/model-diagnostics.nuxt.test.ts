@@ -19,9 +19,17 @@ function seed() {
   return manager
 }
 
+async function clickConfirmation(kind: 'confirm' | 'cancel') {
+  await flushPromises()
+  const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
+  const button = buttons.at(-1)
+  if (!button) throw new Error(`Missing confirmation ${kind} button`)
+  button.click()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
-  vi.stubGlobal('confirm', vi.fn(() => true))
   seed()
 })
 
@@ -51,12 +59,18 @@ describe('instance control plane', () => {
     })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
-    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', expect.anything())
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', { method: 'POST' })
-    for (const label of ['Restart', 'Duplicate', 'Kill']) {
+
+    for (const label of ['Restart', 'Duplicate']) {
       await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
       await flushPromises()
     }
+    await wrapper.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    expect(document.body.textContent).toContain('Active requests may fail')
+    await clickConfirmation('confirm')
+
     const stop = wrapper.findAll('button').find(button => button.text() === 'Stop')
     if (stop) { await stop.trigger('click'); await flushPromises() }
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/restart', { method: 'POST' })
@@ -79,19 +93,19 @@ describe('instance control plane', () => {
     await flushPromises()
     expect(document.body.textContent).toContain('worker ready')
     await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
-    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary', expect.anything())
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary', { method: 'DELETE' })
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1', expect.anything())
   })
 
   it('keeps instances visible on action errors and supports cancelled destructive actions', async () => {
     mocks.request.mockRejectedValue({ data: { error: 'worker failed' } })
-    const confirm = vi.mocked(globalThis.confirm)
-    confirm.mockReturnValueOnce(false)
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
-    confirm.mockReturnValue(true)
+
     await wrapper.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('worker failed')
@@ -150,9 +164,9 @@ describe('instance control plane', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('log retrieval failed')
 
-    vi.mocked(globalThis.confirm).mockReturnValueOnce(false)
     mocks.request.mockClear()
     await protectedCard.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
   })
 

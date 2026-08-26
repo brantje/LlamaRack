@@ -31,10 +31,18 @@ function resetState() {
   return manager
 }
 
+async function clickConfirmation(kind: 'confirm' | 'cancel') {
+  await flushPromises()
+  const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
+  const button = buttons.at(-1)
+  if (!button) throw new Error(`Missing confirmation ${kind} button`)
+  button.click()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockResolvedValue([])
-  vi.stubGlobal('confirm', vi.fn(() => true))
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn() } })
   resetState()
 })
@@ -183,11 +191,14 @@ describe('models page', () => {
     const manager = resetState(); manager.models.value = [model()]
     mocks.request.mockRejectedValueOnce({ data: { error: 'delete failed' } })
     const wrapper = await mountSuspended(ModelsPage, { route: false })
-    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalled()
+    await clickConfirmation('confirm')
     expect(wrapper.text()).toContain('delete failed')
-    vi.mocked(globalThis.confirm).mockReturnValue(false)
+
     mocks.request.mockClear()
-    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
+    await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
   })
 
@@ -218,7 +229,9 @@ describe('API page', () => {
     expect(wrapper.text()).toContain('secret-value')
     await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('secret-value')
-    await wrapper.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', expect.anything())
+    await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
   })
 
