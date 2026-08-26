@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS models (
  id TEXT PRIMARY KEY,
  public_id TEXT NOT NULL UNIQUE,
  name TEXT NOT NULL,
- gguf_path TEXT NOT NULL,
+ gguf_path TEXT NOT NULL UNIQUE,
  total_bytes INTEGER NOT NULL,
  quantization TEXT,
  enabled INTEGER NOT NULL DEFAULT 1,
