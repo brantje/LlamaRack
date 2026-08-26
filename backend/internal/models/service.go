@@ -93,7 +93,9 @@ func (s *Service) ListArtifacts(ctx context.Context) ([]Artifact, error) {
 	var out []Artifact
 	for rows.Next() {
 		var a Artifact
-		if err := rows.Scan(&a.ID, &a.DisplayName, &a.LocalPath, &a.TotalBytes, &a.Quantization); err != nil { return nil, err }
+		var quantization sql.NullString
+		if err := rows.Scan(&a.ID, &a.DisplayName, &a.LocalPath, &a.TotalBytes, &quantization); err != nil { return nil, err }
+		if quantization.Valid { a.Quantization = quantization.String }
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -104,7 +106,9 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	if in.PublicID == "" || strings.ContainsAny(in.PublicID, " /\\\t\r\n") { return Model{}, errors.New("invalid model_id") }
 	if strings.TrimSpace(in.ArtifactID) == "" { return Model{}, errors.New("artifact_id is required") }
 	var artifact Artifact
-	if err := s.db.QueryRowContext(ctx, "SELECT id,display_name,local_path,total_bytes,quantization FROM artifacts WHERE id=?", in.ArtifactID).Scan(&artifact.ID, &artifact.DisplayName, &artifact.LocalPath, &artifact.TotalBytes, &artifact.Quantization); err != nil { return Model{}, err }
+	var quantization sql.NullString
+	if err := s.db.QueryRowContext(ctx, "SELECT id,display_name,local_path,total_bytes,quantization FROM artifacts WHERE id=?", in.ArtifactID).Scan(&artifact.ID, &artifact.DisplayName, &artifact.LocalPath, &artifact.TotalBytes, &quantization); err != nil { return Model{}, err }
+	if quantization.Valid { artifact.Quantization = quantization.String }
 	enabled := true
 	if in.Enabled != nil { enabled = *in.Enabled }
 	autoload := true
@@ -170,10 +174,15 @@ func (s *Service) Instances(ctx context.Context, modelID string) ([]Instance, er
 	for rows.Next() {
 		var i Instance
 		var enabled, preferred int
-		var devices string
-		if err := rows.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &preferred, &i.GPUMode, &devices, &i.TensorSplit); err != nil { return nil, err }
+		var devices, tensorSplit sql.NullString
+		if err := rows.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &preferred, &i.GPUMode, &devices, &tensorSplit); err != nil { return nil, err }
 		i.Enabled, i.Preferred = enabled != 0, preferred != 0
-		if strings.TrimSpace(devices) != "" { for _, d := range strings.Split(devices, ",") { if d = strings.TrimSpace(d); d != "" { i.GPUDevices = append(i.GPUDevices, d) } } }
+		if devices.Valid && strings.TrimSpace(devices.String) != "" {
+			for _, d := range strings.Split(devices.String, ",") {
+				if d = strings.TrimSpace(d); d != "" { i.GPUDevices = append(i.GPUDevices, d) }
+			}
+		}
+		if tensorSplit.Valid { i.TensorSplit = tensorSplit.String }
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -191,8 +200,10 @@ func (s *Service) ArtifactAbsolutePath(m Model) (string, error) {
 type scanner interface{ Scan(...any) error }
 func scanModel(row scanner) (Model, error) {
 	var m Model
+	var displayName sql.NullString
 	var en, au, ao int
-	if err := row.Scan(&m.ID, &m.PublicID, &m.DisplayName, &m.ArtifactID, &m.ArtifactPath, &en, &au, &ao, &m.Priority, &m.RoutingPolicy); err != nil { return Model{}, err }
+	if err := row.Scan(&m.ID, &m.PublicID, &displayName, &m.ArtifactID, &m.ArtifactPath, &en, &au, &ao, &m.Priority, &m.RoutingPolicy); err != nil { return Model{}, err }
+	if displayName.Valid { m.DisplayName = displayName.String }
 	m.Enabled, m.Autoload, m.AlwaysOn = en != 0, au != 0, ao != 0
 	return m, nil
 }
