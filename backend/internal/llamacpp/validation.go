@@ -13,6 +13,8 @@ var managerOwnedOptions = map[string]bool{
 	"port":         true,
 	"device":       true,
 	"tensor-split": true,
+	"split-mode":   true,
+	"main-gpu":     true,
 }
 
 // ValidateOptions validates and canonicalizes free-form llama.cpp overrides
