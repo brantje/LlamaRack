@@ -23,7 +23,7 @@ Open:
 - Backend: http://localhost:8888
 - Health: http://localhost:8888/health
 
-On first load, create the bootstrap administrator account. GGUF files placed under `data/models/` are visible inside the backend as `/models/<file>.gguf` and can then be registered from the Models page.
+On first load, create the bootstrap administrator account. GGUF files placed under `data/models/` are visible inside the backend as `/models/<file>.gguf`. Add them from **Models → Add model** (or `/models/new`) by entering that GGUF path together with the model name and settings. Model registration and GGUF-path registration are a single step; there is no separate artifact registry.
 
 The default backend image uses the standard llama.cpp server image. To test a different llama.cpp image variant, set `LLAMA_IMAGE` while building, for example:
 
