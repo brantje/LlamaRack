@@ -13,9 +13,7 @@ func waitForRuntimeState(t *testing.T, sup *supervisor.Supervisor, instanceID st
 	t.Helper()
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := sup.Status(instanceID).State; got == want {
-			return
-		}
+		if got := sup.Status(instanceID).State; got == want { return }
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("instance %s state=%s want=%s", instanceID, sup.Status(instanceID).State, want)
@@ -24,63 +22,36 @@ func waitForRuntimeState(t *testing.T, sup *supervisor.Supervisor, instanceID st
 func TestAlwaysOnManualStopPersistsUntilDemandOrLifecycleRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	s, ms, m, sup, _ := setupLifecycle(t, true, true)
 	instances, err := ms.Instances(ctx, m.ID)
-	if err != nil || len(instances) != 1 {
-		t.Fatalf("instances=%+v err=%v", instances, err)
-	}
+	if err != nil || len(instances) != 1 { t.Fatalf("instances=%+v err=%v", instances, err) }
 	instanceID := instances[0].ID
 
 	s.ReconcileAlwaysOn(ctx)
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
-
-	if err := s.StopModel(ctx, m.ID); err != nil {
-		t.Fatal(err)
-	}
+	if err := s.StopInstance(ctx, instanceID); err != nil { t.Fatal(err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
-	if !s.isManuallyStopped(m.ID) {
-		t.Fatal("always-on model should be manually suppressed after Stop")
-	}
+	if !s.isManuallyStopped(instanceID) { t.Fatal("always-on instance should be manually suppressed after Stop") }
 
 	s.ReconcileAlwaysOn(ctx)
 	time.Sleep(150 * time.Millisecond)
-	if got := sup.Status(instanceID).State; got != supervisor.Unloaded {
-		t.Fatalf("reconcile restarted manually stopped model: %+v", sup.Status(instanceID))
-	}
-	if _, err := s.startModel(ctx, m.ID, false); err == nil || !strings.Contains(err.Error(), "manually stopped") {
-		t.Fatalf("background start should honor manual stop, got %v", err)
-	}
+	if got := sup.Status(instanceID).State; got != supervisor.Unloaded { t.Fatalf("reconcile restarted manually stopped instance: %+v", sup.Status(instanceID)) }
+	if _, err := s.startInstance(ctx, instanceID, false); err == nil || !strings.Contains(err.Error(), "manually stopped") { t.Fatalf("background start should honor manual stop, got %v", err) }
 
-	if _, err := s.EnsureReady(ctx, m.PublicID); err != nil {
-		t.Fatalf("inference demand should resume manually stopped model: %v", err)
-	}
+	if _, err := s.EnsureReady(ctx, instanceID); err != nil { t.Fatalf("inference demand should resume manually stopped instance: %v", err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
-	if s.isManuallyStopped(m.ID) {
-		t.Fatal("inference-triggered start should clear manual stop")
-	}
+	if s.isManuallyStopped(instanceID) { t.Fatal("inference-triggered start should clear manual stop") }
 
-	if err := s.StopModel(ctx, m.ID); err != nil {
-		t.Fatal(err)
-	}
+	if err := s.StopInstance(ctx, instanceID); err != nil { t.Fatal(err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
-	if _, err := s.StartModel(ctx, m.ID); err != nil {
-		t.Fatalf("explicit start should clear manual stop: %v", err)
-	}
+	if _, err := s.StartInstance(ctx, instanceID); err != nil { t.Fatalf("explicit start should clear manual stop: %v", err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
-	if s.isManuallyStopped(m.ID) {
-		t.Fatal("explicit start should clear manual stop")
-	}
+	if s.isManuallyStopped(instanceID) { t.Fatal("explicit start should clear manual stop") }
 
-	if err := s.StopModel(ctx, m.ID); err != nil {
-		t.Fatal(err)
-	}
+	if err := s.StopInstance(ctx, instanceID); err != nil { t.Fatal(err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
-
 	restarted := New(ms, sup)
-	if restarted.isManuallyStopped(m.ID) {
-		t.Fatal("manual stop must not persist across lifecycle restart")
-	}
+	if restarted.isManuallyStopped(instanceID) { t.Fatal("manual stop must not persist across lifecycle restart") }
 	restarted.ReconcileAlwaysOn(ctx)
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
 }
@@ -88,31 +59,16 @@ func TestAlwaysOnManualStopPersistsUntilDemandOrLifecycleRestart(t *testing.T) {
 func TestNonAlwaysOnStopDoesNotSuppressAutoload(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-
 	s, ms, m, sup, _ := setupLifecycle(t, true, false)
 	instances, err := ms.Instances(ctx, m.ID)
-	if err != nil || len(instances) != 1 {
-		t.Fatalf("instances=%+v err=%v", instances, err)
-	}
+	if err != nil || len(instances) != 1 { t.Fatalf("instances=%+v err=%v", instances, err) }
 	instanceID := instances[0].ID
-
-	if _, err := s.StartModel(ctx, m.ID); err != nil {
-		t.Fatal(err)
-	}
+	if _, err := s.StartInstance(ctx, instanceID); err != nil { t.Fatal(err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
-	if err := s.StopModel(ctx, m.ID); err != nil {
-		t.Fatal(err)
-	}
+	if err := s.StopInstance(ctx, instanceID); err != nil { t.Fatal(err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
-	if s.isManuallyStopped(m.ID) {
-		t.Fatal("non-always-on models should not get the always-on stop override")
-	}
-	if _, err := s.EnsureReady(ctx, m.PublicID); err != nil {
-		t.Fatalf("autoload should remain available for non-always-on model: %v", err)
-	}
+	if s.isManuallyStopped(instanceID) { t.Fatal("non-always-on instances should not get the always-on stop override") }
+	if _, err := s.EnsureReady(ctx, instanceID); err != nil { t.Fatalf("autoload should remain available for non-always-on instance: %v", err) }
 	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
-
-	if err := s.StopModel(ctx, "missing-model"); err == nil {
-		t.Fatal("missing model stop should fail")
-	}
+	if err := s.StopInstance(ctx, "missing-instance"); err == nil { t.Fatal("missing instance stop should fail") }
 }
