@@ -12,8 +12,8 @@ import (
 
 func TestSharedStartupSurvivesFirstWaiterCancellation(t *testing.T) {
 	ctx := context.Background()
-	s, ms, m, sup, exec := setupLifecycle(t, true, false)
-	modelInstances, err := ms.Instances(ctx, m.ID)
+	s, _, m, sup, exec := setupLifecycle(t, true, false)
+	modelInstances, err := s.Instances().ListByModel(ctx, m.ID)
 	if err != nil || len(modelInstances) != 1 {
 		t.Fatalf("instances=%+v err=%v", modelInstances, err)
 	}
@@ -142,8 +142,8 @@ func TestOperationGateIsPerInstanceAndContextAware(t *testing.T) {
 
 func TestQueuedLoadRechecksManualStopAndEnabledState(t *testing.T) {
 	ctx := context.Background()
-	s, ms, m, sup, exec := setupLifecycle(t, true, false)
-	modelInstances, err := ms.Instances(ctx, m.ID)
+	s, _, m, sup, exec := setupLifecycle(t, true, false)
+	modelInstances, err := s.Instances().ListByModel(ctx, m.ID)
 	if err != nil || len(modelInstances) != 1 {
 		t.Fatalf("instances=%+v err=%v", modelInstances, err)
 	}
