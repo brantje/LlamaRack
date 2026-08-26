@@ -97,7 +97,7 @@ async function createModel() {
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <UForm :state="form" class="space-y-6" @submit="createModel">
         <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files are hidden." required>
-          <USelect v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
+          <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
 
         <UFormField label="Model name" name="name" required>
