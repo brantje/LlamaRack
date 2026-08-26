@@ -4,7 +4,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import InstancesPage from '~/pages/instances/index.vue'
 import { useManager } from '~/composables/useManager'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), writeText: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 function seed() {
@@ -30,19 +30,39 @@ async function clickConfirmation(kind: 'confirm' | 'cancel') {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  mocks.writeText.mockReset().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.writeText } })
   seed()
 })
 
 describe('instance control plane', () => {
-  it('renders stopped instances as addressable cards with lifecycle actions', async () => {
+  it('renders stopped instances as addressable cards with a copyable model ID', async () => {
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Coder Primary')
-    expect(wrapper.text()).toContain('model=coder-primary')
+    expect(wrapper.find('[data-testid="instance-id"]').text()).toBe('coder-primary')
+    expect(wrapper.text()).not.toContain('model=coder-primary')
     expect(wrapper.text()).toContain('UNLOADED')
     expect(wrapper.text()).toContain('Launch')
     expect(wrapper.text()).toContain('Duplicate')
     expect(wrapper.text()).toContain('Logs')
+
+    const copy = wrapper.find('[data-testid="copy-instance-id"]')
+    expect(copy.attributes('aria-label')).toBe('Copy coder-primary')
+    await copy.trigger('click')
+    await flushPromises()
+    expect(mocks.writeText).toHaveBeenCalledWith('coder-primary')
+    expect(copy.attributes('aria-label')).toBe('Copied coder-primary')
+    expect(copy.attributes('title')).toBe('Copied')
+  })
+
+  it('surfaces clipboard copy failures', async () => {
+    mocks.writeText.mockRejectedValueOnce(new Error('clipboard blocked'))
+    const wrapper = await mountSuspended(InstancesPage, { route: false })
+    await wrapper.find('[data-testid="copy-instance-id"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('clipboard blocked')
+    expect(wrapper.find('[data-testid="copy-instance-id"]').attributes('aria-label')).toBe('Copy coder-primary')
   })
 
   it('launches, stops, restarts, duplicates and kills the exact instance', async () => {
