@@ -84,7 +84,9 @@ async function scanGGUFs() {
   }
 }
 
-onMounted(scanGGUFs)
+watch(canOperate, (allowed) => {
+  if (allowed) void scanGGUFs()
+}, { immediate: true })
 
 async function createModel() {
   busy.value = true
