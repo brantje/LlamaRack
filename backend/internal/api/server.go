@@ -68,6 +68,16 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 			return
 		}
 		writeJSON(w, 200, items)
+	case path == "/api/v1/models/available" && r.Method == http.MethodGet:
+		if !requireOperate(w, user) {
+			return
+		}
+		items, err := s.models.AvailableGGUFs(r.Context())
+		if err != nil {
+			writeErr(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, items)
 	case path == "/api/v1/models" && r.Method == http.MethodPost:
 		if !requireOperate(w, user) {
 			return
