@@ -9,9 +9,10 @@ Test coverage is a hard repository rule.
 - Coverage must exercise behavior, error paths, validation, authorization, persistence, and lifecycle transitions. Tests that only execute lines without asserting meaningful behavior do not satisfy this rule.
 - Do not lower the threshold, exclude packages/files, add coverage ignore directives, or move logic into unmeasured code to make the gate pass.
 - Generated code and genuinely non-testable glue may only be excluded when the exclusion is explicit, narrowly scoped, documented in this file, and approved by the user.
-- Backend Go coverage is measured with `go test ./... -coverprofile=coverage.out` and MUST report a total statement coverage of at least 90.0%.
-- Frontend code must also maintain at least 90.0% coverage once its test runner is configured. Any new frontend business logic must add/extend frontend tests; do not use the absence of a coverage tool as an excuse to skip tests.
-- CI MUST fail when the enforced coverage threshold is not met.
+- Backend Go coverage is measured with `go test ./... -covermode=atomic -coverprofile=coverage.out` and MUST report total statement coverage of at least 90.0%.
+- Frontend coverage is measured with `npm run test:coverage` from `frontend/`. Vitest/V8 MUST report at least 90.0% for **statements, branches, functions, and lines** across `app/**/*.{ts,vue}`.
+- Any new frontend logic or view behavior MUST add or extend frontend tests in the same change.
+- CI MUST fail when either backend or frontend coverage is below the enforced threshold.
 - Before considering implementation complete, run the relevant test suite, coverage gate, formatter/linter/type checks, and build checks.
 
 ## Repository layout
