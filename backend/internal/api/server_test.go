@@ -107,21 +107,18 @@ func bootstrapAndLogin(t *testing.T, f *apiFixture, role string) *http.Cookie {
 	return nil
 }
 
-func createArtifactAndModel(t *testing.T, f *apiFixture, cookie *http.Cookie) (models.Artifact, models.Model) {
+func createModel(t *testing.T, f *apiFixture, cookie *http.Cookie) models.Model {
 	t.Helper()
 	path := filepath.Join(f.dir, "api-Q4_K_M.gguf")
 	if err := os.WriteFile(path, []byte("gguf"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	w := doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": path, "display_name": "API Model"}, cookie)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("register status=%d body=%s", w.Code, w.Body.String())
-	}
-	var a models.Artifact
-	if err := json.Unmarshal(w.Body.Bytes(), &a); err != nil {
-		t.Fatal(err)
-	}
-	w = doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]any{"model_id": "api-model", "artifact_id": a.ID, "options": map[string]string{"ctx-size": "1024"}}, cookie)
+	w := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]any{
+		"model_id": "api-model",
+		"name": "API Model",
+		"gguf_path": path,
+		"options": map[string]string{"ctx-size": "1024"},
+	}, cookie)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create model status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -129,7 +126,7 @@ func createArtifactAndModel(t *testing.T, f *apiFixture, cookie *http.Cookie) (m
 	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	return a, m
+	return m
 }
 
 func TestPublicAuthAndSessionRoutes(t *testing.T) {
@@ -174,26 +171,25 @@ func TestPublicAuthAndSessionRoutes(t *testing.T) {
 	}
 }
 
-func TestAdminModelArtifactProfileAndAPIKeyRoutes(t *testing.T) {
+func TestAdminModelProfileAndAPIKeyRoutes(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f, "admin")
-	a, m := createArtifactAndModel(t, f, cookie)
+	m := createModel(t, f, cookie)
 
 	for _, tc := range []struct{ path string; want int }{
-		{"/api/v1/artifacts", 200},
 		{"/api/v1/models", 200},
 		{"/api/v1/models/" + m.ID, 200},
 		{"/api/v1/models/" + m.ID + "/runtime", 200},
 		{"/api/v1/models/" + m.ID + "/options", 200},
 		{"/api/v1/llamacpp/profile", 200},
 		{"/api/v1/instances/missing/logs", 200},
+		{"/api/v1/artifacts", 404},
 	} {
 		w := doRequest(t, f.server, http.MethodGet, tc.path, nil, cookie)
 		if w.Code != tc.want {
 			t.Fatalf("GET %s=%d body=%s", tc.path, w.Code, w.Body.String())
 		}
 	}
-	_ = a
 
 	w := doRequest(t, f.server, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "sdk"}, cookie)
 	if w.Code != 201 || !strings.Contains(w.Body.String(), "secret") {
@@ -236,13 +232,13 @@ func TestAuthorizationMethodsNotFoundAndProfileUnavailable(t *testing.T) {
 	f := newAPIFixture(t, func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("no llama") })
 	cookie := bootstrapAndLogin(t, f, "readonly")
 
-	w := doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": "x"}, cookie)
-	if w.Code != 403 {
-		t.Fatalf("readonly artifact=%d", w.Code)
-	}
-	w = doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]string{}, cookie)
+	w := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]string{}, cookie)
 	if w.Code != 403 {
 		t.Fatalf("readonly model=%d", w.Code)
+	}
+	w = doRequest(t, f.server, http.MethodPost, "/api/v1/artifacts/register", map[string]string{"path": "x"}, cookie)
+	if w.Code != 404 {
+		t.Fatalf("removed artifact route=%d", w.Code)
 	}
 	w = doRequest(t, f.server, http.MethodGet, "/api/v1/api-keys", nil, cookie)
 	if w.Code != 403 {
