@@ -147,6 +147,12 @@ func TestStartFailuresAndStatusDefaults(t *testing.T) {
 	if got := s.Status("exit"); got.State != Failed || got.LastError == "" {
 		t.Fatalf("failed readiness status=%+v", got)
 	}
+	if err := s.Stop(context.Background(), "exit"); err != nil {
+		t.Fatalf("stopping exited worker: %v", err)
+	}
+	if got := s.Status("exit"); got.State != Failed {
+		t.Fatalf("stopping exited worker changed state=%+v", got)
+	}
 }
 
 func TestRingCopyLogsPortAllocationAndShutdown(t *testing.T) {
