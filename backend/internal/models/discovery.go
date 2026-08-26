@@ -50,7 +50,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		if entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+		if entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") || isProjectorGGUF(entry.Name()) {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -78,4 +78,9 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
+}
+
+func isProjectorGGUF(name string) bool {
+	base := strings.ToLower(filepath.Base(name))
+	return strings.HasPrefix(base, "mmproj") || strings.HasPrefix(base, "mmoproj")
 }
