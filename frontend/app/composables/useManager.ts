@@ -125,14 +125,18 @@ export function useManager() {
     if (!user.value) return
     const modelItems = await request<Model[]>('/api/v1/models')
     models.value = modelItems || []
-    const runtimeEntries = await Promise.all(models.value.map(async model => {
-      try {
-        return [model.id, await request<Runtime[]>(`/api/v1/models/${model.id}/runtime`)] as const
-      } catch {
-        return [model.id, []] as const
-      }
-    }))
-    runtimes.value = Object.fromEntries(runtimeEntries)
+    if (runtimeEventsConnected.value) {
+      runtimes.value = Object.fromEntries(models.value.map(model => [model.id, runtimes.value[model.id] || []]))
+    } else {
+      const runtimeEntries = await Promise.all(models.value.map(async model => {
+        try {
+          return [model.id, await request<Runtime[]>(`/api/v1/models/${model.id}/runtime`)] as const
+        } catch {
+          return [model.id, []] as const
+        }
+      }))
+      runtimes.value = Object.fromEntries(runtimeEntries)
+    }
     try {
       const result = await request<{ available: boolean; profile: Profile }>('/api/v1/llamacpp/profile')
       profile.value = result.profile
