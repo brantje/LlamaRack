@@ -19,6 +19,8 @@ const form = reactive({
   name: '',
   model_id: '',
   priority: 'normal',
+  eviction_enabled: true,
+  idle_unload_seconds: 0,
   routing_policy: 'least_active',
   autoload_enabled: true,
   always_on: false
@@ -115,6 +117,16 @@ async function createModel() {
           <small class="muted">Auto-filled from the model name. You can override it.</small>
         </label>
 
+        <label>
+          Routing
+          <select v-model="form.routing_policy">
+            <option value="least_active">Least active</option>
+            <option value="round_robin">Round robin</option>
+          </select>
+        </label>
+
+        <h2>Eviction</h2>
+        <p class="muted">Controls idle unloading now and resource-pressure eviction when Phase 7 hardware scheduling is enabled.</p>
         <div class="field-row">
           <label>
             Priority
@@ -123,16 +135,18 @@ async function createModel() {
               <option value="normal">Normal</option>
               <option value="high">High</option>
             </select>
+            <small class="muted">Lower-priority models are preferred eviction candidates.</small>
           </label>
           <label>
-            Routing
-            <select v-model="form.routing_policy">
-              <option value="least_active">Least active</option>
-              <option value="round_robin">Round robin</option>
-            </select>
+            Idle unload timeout (seconds)
+            <input v-model.number="form.idle_unload_seconds" type="number" min="0" step="1">
+            <small class="muted">0 inherits the global LCM_IDLE_UNLOAD_SECONDS setting.</small>
           </label>
         </div>
+        <label class="check"><input v-model="form.eviction_enabled" type="checkbox"> Allow resource-pressure eviction</label>
+        <small class="muted">Always-On models remain protected from normal eviction even when this is enabled.</small>
 
+        <h2>Lifecycle</h2>
         <label class="check"><input v-model="form.autoload_enabled" type="checkbox"> Autoload on request</label>
         <label class="check"><input v-model="form.always_on" type="checkbox"> Always on</label>
 

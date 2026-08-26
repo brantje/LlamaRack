@@ -56,6 +56,7 @@ func TestCreateValidation(t *testing.T) {
 		{PublicID: "model", Name: "Name", GGUFPath: filepath.Join(dir, "missing.gguf")},
 		{PublicID: "model", Name: "Name", GGUFPath: valid, Priority: "urgent"},
 		{PublicID: "model", Name: "Name", GGUFPath: valid, RoutingPolicy: "mystery"},
+		{PublicID: "model", Name: "Name", GGUFPath: valid, IdleUnloadSeconds: -1},
 	} {
 		if _, err := s.Create(ctx, tc); err == nil {
 			t.Fatalf("expected create validation error for %+v", tc)
@@ -104,6 +105,7 @@ func TestCreateGetListOptionsInstancesAndDelete(t *testing.T) {
 	s, dir := testModelService(t)
 	path := writeGGUF(t, dir, "coder-IQ2_XS.gguf")
 	autoload := false
+	evictionEnabled := false
 	m, err := s.Create(ctx, CreateModelInput{
 		PublicID: "coder",
 		Name: "Coder Model",
@@ -111,6 +113,8 @@ func TestCreateGetListOptionsInstancesAndDelete(t *testing.T) {
 		Autoload: &autoload,
 		AlwaysOn: true,
 		Priority: "high",
+		EvictionEnabled: &evictionEnabled,
+		IdleUnloadSeconds: 90,
 		RoutingPolicy: "round_robin",
 		Options: map[string]string{"ctx-size": "4096", "flash-attn": "true", "": "ignored"},
 	})
@@ -120,20 +124,20 @@ func TestCreateGetListOptionsInstancesAndDelete(t *testing.T) {
 	if m.PublicID != "coder" || m.Name != "Coder Model" || m.GGUFPath != "coder-IQ2_XS.gguf" || m.TotalBytes == 0 || m.Quantization != "IQ2_XS" {
 		t.Fatalf("unexpected model identity: %+v", m)
 	}
-	if m.Autoload || !m.AlwaysOn || !m.Enabled || m.Priority != "high" || m.RoutingPolicy != "round_robin" {
+	if m.Autoload || !m.AlwaysOn || !m.Enabled || m.Priority != "high" || m.RoutingPolicy != "round_robin" || m.EvictionEnabled || m.IdleUnloadSeconds != 90 {
 		t.Fatalf("unexpected model settings: %+v", m)
 	}
 
 	byID, err := s.GetByID(ctx, m.ID)
-	if err != nil || byID.PublicID != m.PublicID || byID.Name != m.Name {
+	if err != nil || byID.PublicID != m.PublicID || byID.Name != m.Name || byID.EvictionEnabled || byID.IdleUnloadSeconds != 90 {
 		t.Fatalf("GetByID=%+v err=%v", byID, err)
 	}
 	byPublic, err := s.GetByPublicID(ctx, "coder")
-	if err != nil || byPublic.ID != m.ID {
+	if err != nil || byPublic.ID != m.ID || byPublic.EvictionEnabled || byPublic.IdleUnloadSeconds != 90 {
 		t.Fatalf("GetByPublicID=%+v err=%v", byPublic, err)
 	}
 	items, err := s.List(ctx)
-	if err != nil || len(items) != 1 {
+	if err != nil || len(items) != 1 || items[0].EvictionEnabled || items[0].IdleUnloadSeconds != 90 {
 		t.Fatalf("List=%+v err=%v", items, err)
 	}
 	opts, err := s.Options(ctx, m.ID)
@@ -175,7 +179,7 @@ func TestDefaultModelSettingsAndHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !m.Autoload || m.Priority != "normal" || m.RoutingPolicy != "least_active" || m.Quantization != "F16" {
+	if !m.Autoload || m.Priority != "normal" || m.RoutingPolicy != "least_active" || m.Quantization != "F16" || !m.EvictionEnabled || m.IdleUnloadSeconds != 0 {
 		t.Fatalf("unexpected defaults: %+v", m)
 	}
 	if abs, err := s.ModelAbsolutePath(m); err != nil || abs != path {

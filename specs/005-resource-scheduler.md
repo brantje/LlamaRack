@@ -21,6 +21,7 @@ The scheduler must:
 - support manual tensor split configuration;
 - estimate resource demand conservatively;
 - protect Always-On models from normal eviction;
+- support independently protecting a loaded non-Always-On model from normal resource-pressure eviction;
 - use model priority and LRU/resource pressure when choosing eviction candidates;
 - avoid overcommitting the same resources during concurrent starts;
 - expose understandable scheduling decisions to the UI.
@@ -62,6 +63,7 @@ A scheduling decision uses a coherent snapshot containing:
 - batch/ubatch/parallel settings relevant to memory use;
 - model priority;
 - Always-On flag;
+- resource-pressure eviction policy;
 - startup policy.
 
 ### Instance definition
@@ -160,6 +162,26 @@ Possible outcomes:
 
 The decision includes human-readable rationale suitable for diagnostics/UI.
 
+### 8.1 Delivery phase boundary
+
+Phase 5 implements the policy and planning primitives needed for eviction: inference activity tracking, LRU/last-used state, idle unloading, eviction eligibility/ranking, resource estimates and an eviction-plan API. Phase 5 may calculate or preview which instances would be evicted, but it does **not** automatically execute resource-pressure eviction before starting another model.
+
+The end-to-end `PLACE_AFTER_EVICTION` load path is a **Phase 7 — Hardware integration** requirement because it depends on real RAM/VRAM availability, per-device placement and refreshed hardware state.
+
+When Phase 7 is implemented, a start that cannot fit directly must follow this sequence:
+
+```text
+request model B
+-> calculate required capacity from model configuration
+-> read current RAM/VRAM and placement state
+-> choose eligible eviction victims
+-> revalidate and drain/stop those victims
+-> refresh resource state
+-> start model B
+```
+
+Until Phase 7, lifecycle may expose an eviction plan for diagnostics/testing, but model startup must not claim that resource-pressure eviction has been executed automatically.
+
 ## 9. Reservations
 
 Concurrent model starts must not all observe the same free VRAM and overcommit it.
@@ -246,11 +268,30 @@ If total Always-On desired state exceeds physical capacity:
 
 A deterministic priority rule may decide which Always-On starts succeed, but it must not continuously churn.
 
+### 14.1 Separate protection while loaded — resolved decision
+
+Always-On and resource-pressure eviction protection are separate user-facing concepts and both are retained.
+
+- **Always-On** controls desired loaded state: the manager proactively loads/reconciles the model and protects the final satisfying instance from normal eviction.
+- **Resource-pressure eviction protection** controls whether a model that is already loaded may be selected as a normal eviction victim. It does not by itself cause the model to load or restart.
+
+This intentionally supports the combination:
+
+```text
+Always-On: false
+Allow resource-pressure eviction: false
+```
+
+which means **load on demand, but once loaded, protect it from normal VRAM-pressure eviction**.
+
+The Phase 5 API field is `eviction_enabled`; `false` means protected from normal resource-pressure eviction. Phase 7 must preserve this semantic distinction when implementing real pre-load eviction. A clearer UI label may be used later, but the capability itself is not provisional.
+
 ## 15. Eviction eligibility
 
 An instance is normally eligible for eviction only when:
 
 - it is READY;
+- its model allows normal resource-pressure eviction;
 - it is not the final protected Always-On instance;
 - it has no active inference requests;
 - it is not already DRAINING/STOPPING;
@@ -312,9 +353,9 @@ The scheduler does not need a general-purpose job queue in v1, but placement ope
 
 ## 20. Interaction with lifecycle
 
-The scheduler returns a plan; lifecycle executes it.
+The scheduler returns a plan; lifecycle executes it. **Execution of `PLACE_AFTER_EVICTION` before loading the requested model is introduced in Phase 7.** Phase 5 only establishes the decision/planning inputs and output.
 
-For `PLACE_AFTER_EVICTION`:
+For `PLACE_AFTER_EVICTION` in Phase 7:
 
 1. scheduler creates reservation/plan;
 2. lifecycle revalidates victim eligibility;
@@ -392,6 +433,7 @@ For each model, the UI should be able to show:
 - selected/automatic GPUs;
 - whether the model currently fits;
 - why a start cannot proceed;
+- whether the loaded model is protected from normal resource-pressure eviction;
 - which models would likely need eviction for a requested start, where safe to preview;
 - recommendation confidence/estimate quality.
 
@@ -417,16 +459,21 @@ Avoid device names or arbitrary error strings as uncontrolled metric labels.
 2. Pending reservations reduce schedulable capacity.
 3. Manual GPU assignment is never silently rewritten.
 4. The final required Always-On instance is not a normal eviction victim.
-5. Active inference requests protect an instance from normal eviction.
-6. Unknown hardware telemetry causes conservative behavior.
-7. Placement decisions include safety headroom.
-8. Resource state is revalidated after evictions before launch.
-9. Failed starts release reservations.
-10. Scheduling cannot enter an unbounded eviction/start loop.
+5. A model explicitly protected from resource-pressure eviction is not a normal eviction victim.
+6. Active inference requests protect an instance from normal eviction.
+7. Unknown hardware telemetry causes conservative behavior.
+8. Placement decisions include safety headroom.
+9. Resource state is revalidated after evictions before launch.
+10. Failed starts release reservations.
+11. Scheduling cannot enter an unbounded eviction/start loop.
 
 ## 28. Acceptance criteria
 
-Tests must demonstrate:
+Phase 5 tests must demonstrate the policy/planning behavior that does not require real hardware telemetry, including priority/LRU ordering, activity protection, Always-On protection, explicit resource-pressure eviction protection and multi-victim planning.
+
+Phase 7 tests must additionally demonstrate that a model start which requires resource-pressure eviction actually performs the complete pre-load sequence: calculate the deficit, select eligible victims, drain/stop them, refresh resource state, and only then start the requested model.
+
+Across the completed scheduler implementation, tests must demonstrate:
 
 - a model that fits available GPU memory receives a direct placement plan;
 - two simultaneous starts cannot reserve the same VRAM twice;
@@ -437,6 +484,7 @@ Tests must demonstrate:
 - older idle usage wins among equal-priority candidates;
 - active instances are not normal eviction victims;
 - the final Always-On instance is protected;
+- a non-Always-On model with resource-pressure eviction disabled is also protected while loaded;
 - an extra instance of an Always-On model can be considered separately from the protected minimum;
 - insufficient capacity with no eligible victims fails cleanly;
 - multi-victim eviction can free enough capacity;

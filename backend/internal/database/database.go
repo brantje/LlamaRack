@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS models (
  autoload_enabled INTEGER NOT NULL DEFAULT 1,
  always_on INTEGER NOT NULL DEFAULT 0,
  priority TEXT NOT NULL DEFAULT 'normal',
+ eviction_enabled INTEGER NOT NULL DEFAULT 1,
+ idle_unload_seconds INTEGER NOT NULL DEFAULT 0 CHECK(idle_unload_seconds >= 0),
  routing_policy TEXT NOT NULL DEFAULT 'least_active',
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  updated_at INTEGER NOT NULL DEFAULT (unixepoch())

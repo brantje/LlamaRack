@@ -26,11 +26,15 @@ beforeEach(() => {
 })
 
 describe('model creation form', () => {
-  it('lists relative GGUF paths and autofills a safe public ID', async () => {
+  it('lists relative GGUF paths and exposes lifecycle and eviction settings', async () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/available')
+    expect(wrapper.text()).toContain('Eviction')
+    expect(wrapper.text()).toContain('Idle unload timeout')
+    expect(wrapper.text()).toContain('Allow resource-pressure eviction')
+
     const selects = wrapper.findAll('select')
     expect(selects[0]!.text()).toContain('Qwen/coder/qwen-Q4_K_M.gguf')
     expect(selects[0]!.text()).not.toContain('/models/')
@@ -46,18 +50,22 @@ describe('model creation form', () => {
     await flushPromises()
     expect((inputs[1]!.element as HTMLInputElement).value).toBe('custom-id')
 
-    await selects[1]!.setValue('high')
-    await selects[2]!.setValue('round_robin')
+    await selects[1]!.setValue('round_robin')
+    await selects[2]!.setValue('high')
+    await inputs[2]!.setValue('120')
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
     await checkboxes[0]!.setValue(false)
-    await checkboxes[1]!.setValue(true)
-    expect((selects[1]!.element as HTMLSelectElement).value).toBe('high')
-    expect((selects[2]!.element as HTMLSelectElement).value).toBe('round_robin')
+    await checkboxes[1]!.setValue(false)
+    await checkboxes[2]!.setValue(true)
+    expect((selects[1]!.element as HTMLSelectElement).value).toBe('round_robin')
+    expect((selects[2]!.element as HTMLSelectElement).value).toBe('high')
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe('120')
     expect((checkboxes[0]!.element as HTMLInputElement).checked).toBe(false)
-    expect((checkboxes[1]!.element as HTMLInputElement).checked).toBe(true)
+    expect((checkboxes[1]!.element as HTMLInputElement).checked).toBe(false)
+    expect((checkboxes[2]!.element as HTMLInputElement).checked).toBe(true)
   })
 
-  it('creates a model with the selected relative GGUF path and handles errors', async () => {
+  it('creates a model with eviction options and the selected relative GGUF path', async () => {
     const manager = useManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return discovered
@@ -70,14 +78,25 @@ describe('model creation form', () => {
     await flushPromises()
     const selects = wrapper.findAll('select')
     await selects[0]!.setValue('Qwen/coder/qwen-Q4_K_M.gguf')
+    await selects[2]!.setValue('low')
     const inputs = wrapper.findAll('input')
     await inputs[0]!.setValue('Qwen Coder')
+    await inputs[2]!.setValue('45')
+    const checkboxes = wrapper.findAll('input[type="checkbox"]')
+    await checkboxes[0]!.setValue(false)
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models', {
       method: 'POST',
-      body: expect.objectContaining({ gguf_path: 'Qwen/coder/qwen-Q4_K_M.gguf', name: 'Qwen Coder', model_id: 'qwen-coder' })
+      body: expect.objectContaining({
+        gguf_path: 'Qwen/coder/qwen-Q4_K_M.gguf',
+        name: 'Qwen Coder',
+        model_id: 'qwen-coder',
+        priority: 'low',
+        eviction_enabled: false,
+        idle_unload_seconds: 45
+      })
     })
     expect(manager.models.value).toEqual([])
     wrapper.unmount()

@@ -52,11 +52,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request_error", "model_required", "A model ID is required")
 		return
 	}
-	endpoint, err := g.lifecycle.EnsureReady(r.Context(), envelope.Model)
+	endpoint, release, err := g.lifecycle.Acquire(r.Context(), envelope.Model)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}
+	defer release()
+
 	target, err := url.Parse(endpoint)
 	if err != nil {
 		writeError(w, 500, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
