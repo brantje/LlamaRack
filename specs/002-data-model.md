@@ -19,6 +19,7 @@ SQLite is the authoritative durable store for application configuration and stat
 - Secrets are stored separately from ordinary settings.
 - High-frequency metrics are not modeled as permanent relational history by default.
 - Download artifacts remain distinct from configured models so one artifact can exist before a model is created.
+- V1 management users do not have differentiated roles or permissions.
 
 ## 3. Core entities
 
@@ -31,7 +32,6 @@ Fields:
 - `id` — internal stable identifier;
 - `username` — unique case-normalized login name;
 - `password_hash`;
-- `role` — `admin`, `operator`, `readonly`;
 - `enabled`;
 - `created_at`;
 - `updated_at`;
@@ -41,7 +41,10 @@ Invariants:
 
 - usernames are unique;
 - disabled users cannot create new authenticated sessions;
-- the system should protect against accidentally removing/disabling the last administrator unless a documented recovery flow exists.
+- all authenticated users have the same full management access in v1;
+- the system should protect against accidentally removing/disabling the last enabled management user unless a documented recovery flow exists.
+
+RBAC fields such as `role`, capability grants or per-user scopes are not part of the v1 product contract. An implementation may retain dormant schema fields for forward compatibility, but they must not affect v1 behavior or be exposed as configurable v1 features.
 
 ### 3.2 Session
 
@@ -365,7 +368,7 @@ Examples:
 - definition;
 - desired enabled state;
 - observed state;
-- PID/private port only for authorized diagnostic views;
+- PID/private port as secondary diagnostics;
 - GPU allocation;
 - request counts;
 - current health;
@@ -466,6 +469,7 @@ Requirements:
 8. Instance GPU assignments cannot silently retarget an unknown different device.
 9. Model deletion and artifact deletion are separate operations.
 10. Metrics/history retention must remain bounded.
+11. V1 user records do not require RBAC semantics.
 
 ## 13. Acceptance criteria
 
@@ -481,4 +485,5 @@ The data model is adequate when it can represent:
 - a resumable Hugging Face/direct URL download;
 - a disabled API key without retaining its plaintext secret;
 - an encrypted global Hugging Face credential;
+- one or more equivalent local management users without role-specific behavior;
 - Always-On and idle-timeout lifecycle policies without encoding them into worker runtime state.
