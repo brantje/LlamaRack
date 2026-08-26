@@ -10,9 +10,8 @@ import (
 func TestInstanceGPUParsingAndClosedDatabaseErrors(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
-	a, err := s.RegisterArtifact(ctx, writeGGUF(t, dir, "gpu-Q5_K_M.gguf"), "gpu")
-	if err != nil { t.Fatal(err) }
-	m, err := s.Create(ctx, CreateModelInput{PublicID: "gpu-model", ArtifactID: a.ID})
+	path := writeGGUF(t, dir, "gpu-Q5_K_M.gguf")
+	m, err := s.Create(ctx, CreateModelInput{PublicID: "gpu-model", Name: "GPU model", GGUFPath: path})
 	if err != nil { t.Fatal(err) }
 	if _, err := s.db.ExecContext(ctx, "UPDATE instances SET preferred=1,gpu_mode='manual',gpu_devices='0,1',tensor_split='1,1' WHERE model_id=?", m.ID); err != nil { t.Fatal(err) }
 	instances, err := s.Instances(ctx, m.ID)
@@ -21,11 +20,9 @@ func TestInstanceGPUParsingAndClosedDatabaseErrors(t *testing.T) {
 		t.Fatalf("unexpected instance: %+v", instances[0])
 	}
 
-	path := writeGGUF(t, dir, "after-close.gguf")
+	closedPath := writeGGUF(t, dir, "after-close.gguf")
 	if err := s.db.Close(); err != nil { t.Fatal(err) }
-	if _, err := s.RegisterArtifact(ctx, path, "closed"); err == nil { t.Fatal("expected register DB error") }
-	if _, err := s.ListArtifacts(ctx); err == nil { t.Fatal("expected list artifacts DB error") }
-	if _, err := s.Create(ctx, CreateModelInput{PublicID:"closed", ArtifactID:a.ID}); err == nil { t.Fatal("expected create DB error") }
+	if _, err := s.Create(ctx, CreateModelInput{PublicID:"closed", Name:"Closed", GGUFPath:closedPath}); err == nil { t.Fatal("expected create DB error") }
 	if _, err := s.List(ctx); err == nil { t.Fatal("expected list DB error") }
 	if _, err := s.GetByID(ctx, m.ID); err == nil { t.Fatal("expected get by id DB error") }
 	if _, err := s.GetByPublicID(ctx, m.PublicID); err == nil { t.Fatal("expected get by public id DB error") }
@@ -34,14 +31,14 @@ func TestInstanceGPUParsingAndClosedDatabaseErrors(t *testing.T) {
 	if _, err := s.Instances(ctx, m.ID); err == nil { t.Fatal("expected instances DB error") }
 }
 
-func TestRegisterArtifactRelativePathAndCustomDisplayName(t *testing.T) {
+func TestCreateRelativePathAndDerivedMetadata(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
 	path := filepath.Join(dir, "relative-Q6_K.gguf")
 	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil { t.Fatal(err) }
-	a, err := s.RegisterArtifact(ctx, "relative-Q6_K.gguf", "Custom")
+	m, err := s.Create(ctx, CreateModelInput{PublicID: "relative", Name: "Custom", GGUFPath: "relative-Q6_K.gguf"})
 	if err != nil { t.Fatal(err) }
-	if a.DisplayName != "Custom" || a.LocalPath != "relative-Q6_K.gguf" || a.Quantization != "Q6_K" {
-		t.Fatalf("artifact=%+v", a)
+	if m.Name != "Custom" || m.GGUFPath != "relative-Q6_K.gguf" || m.Quantization != "Q6_K" || m.TotalBytes != 3 {
+		t.Fatalf("model=%+v", m)
 	}
 }
