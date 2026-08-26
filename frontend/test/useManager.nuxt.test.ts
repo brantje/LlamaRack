@@ -20,6 +20,8 @@ function model(overrides: Partial<Model> = {}): Model {
     autoload_enabled: true,
     always_on: false,
     priority: 'normal',
+    eviction_enabled: true,
+    idle_unload_seconds: 0,
     routing_policy: 'least_active',
     ...overrides
   }
@@ -57,7 +59,7 @@ describe('useManager', () => {
   it('restores an existing session and refreshes manager state', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return { required: false }
-      if (path === '/api/v1/me') return { id: 1, username: 'admin', role: 'admin', enabled: true }
+      if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true }
       if (path === '/api/v1/models') return [model()]
       if (path === '/api/v1/models/m1/runtime') return [{ instance_id: 'i1', model_id: 'm1', state: 'READY' }]
       if (path === '/api/v1/llamacpp/profile') return { available: true, profile: { path: '/app/llama-server', version: '1', fingerprint: 'abc', options: [] } }
@@ -69,8 +71,6 @@ describe('useManager', () => {
     expect(manager.models.value).toHaveLength(1)
     expect(manager.runtimes.value.m1?.[0]?.state).toBe('READY')
     expect(manager.profile.value?.version).toBe('1')
-    expect(manager.canOperate.value).toBe(true)
-    expect(manager.isAdmin.value).toBe(true)
   })
 
   it('treats a failed session restore as signed out', async () => {
@@ -94,22 +94,20 @@ describe('useManager', () => {
     manager.bootstrapRequired.value = true
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return {}
-      if (path === '/api/v1/auth/login') return { id: 1, username: 'admin', role: 'operator', enabled: true }
+      if (path === '/api/v1/auth/login') return { id: 1, username: 'admin', enabled: true }
       if (path === '/api/v1/models') return []
       if (path === '/api/v1/llamacpp/profile') throw new Error('not installed')
       throw new Error(`unexpected path ${path}`)
     })
     await manager.authenticate('admin', 'correct-horse-battery')
     expect(manager.bootstrapRequired.value).toBe(false)
-    expect(manager.user.value?.role).toBe('operator')
-    expect(manager.canOperate.value).toBe(true)
-    expect(manager.isAdmin.value).toBe(false)
+    expect(manager.user.value?.username).toBe('admin')
     expect(manager.profile.value).toBeNull()
   })
 
   it('logs out and clears local state', async () => {
     const manager = useManager()
-    manager.user.value = { id: 1, username: 'admin', role: 'admin', enabled: true }
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     manager.models.value = [model()]
     manager.runtimes.value = { m1: [{ instance_id: 'i', model_id: 'm1', state: 'READY' }] }
     mocks.request.mockResolvedValue(undefined)
@@ -125,7 +123,7 @@ describe('useManager', () => {
     await manager.refresh()
     expect(mocks.request).not.toHaveBeenCalled()
 
-    manager.user.value = { id: 2, username: 'reader', role: 'readonly', enabled: true }
+    manager.user.value = { id: 2, username: 'reader', enabled: true }
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/models') return [model({ model_id: 'm', name: 'Model', gguf_path: 'm.gguf', autoload_enabled: false, priority: 'low' })]
       if (path.includes('/runtime')) throw new Error('runtime unavailable')
@@ -136,8 +134,6 @@ describe('useManager', () => {
     expect(manager.models.value).toHaveLength(1)
     expect(manager.runtimes.value.m1).toEqual([])
     expect(manager.profile.value).toBeNull()
-    expect(manager.canOperate.value).toBe(false)
-    expect(manager.isAdmin.value).toBe(false)
   })
 
   it('selects aggregate model state by priority', () => {
