@@ -1,5 +1,6 @@
 export default defineNuxtConfig({
   devtools: { enabled: true },
+  modules: ['@nuxt/ui'],
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || ''
@@ -15,5 +16,9 @@ export default defineNuxtConfig({
     }
   },
   css: ['~/assets/css/main.css'],
+  colorMode: {
+    preference: 'dark',
+    fallback: 'dark'
+  },
   typescript: { strict: true }
 })

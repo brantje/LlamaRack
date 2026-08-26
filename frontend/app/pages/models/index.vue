@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import type { Model, Runtime } from '~/composables/useManager'
 
+type BadgeColor = 'success' | 'error' | 'warning' | 'neutral'
+
+const statusColors: Record<string, BadgeColor> = {
+  READY: 'success',
+  FAILED: 'error',
+  STARTING: 'warning',
+  LOADING: 'warning',
+  UNLOADED: 'neutral'
+}
+
 const manager = useManager()
 const { models, canOperate } = manager
 const message = ref('')
@@ -13,6 +23,7 @@ const liveSources = new Map<string, EventSource>()
 function errorMessage(error: any, fallback: string) {
   return error?.data?.error || error?.message || fallback
 }
+
 
 function runtimeFor(model: Model): Runtime[] {
   return manager.runtimes.value[model.id] || []
@@ -124,84 +135,111 @@ async function remove(id: string) {
 </script>
 
 <template>
-  <div>
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">MODEL REGISTRY</p>
-        <h1>Models</h1>
-        <p class="muted">Configure local GGUF models and control model workers.</p>
-      </div>
-      <div class="row-actions">
-        <button class="ghost" @click="manager.refresh">Refresh</button>
-        <NuxtLink v-if="canOperate" to="/models/new" class="primary">Add model</NuxtLink>
-      </div>
-    </header>
+  <div class="grid gap-6">
+    <UPageHeader headline="MODEL REGISTRY" title="Models" description="Configure local GGUF models and control model workers.">
+      <template #links>
+        <UButton label="Refresh" color="neutral" variant="outline" @click="manager.refresh" />
+        <UButton v-if="canOperate" label="Add model" to="/models/new" />
+      </template>
+    </UPageHeader>
 
-    <p v-if="message" class="alert error">{{ message }}</p>
+    <UAlert v-if="message" color="error" variant="subtle" :description="message" />
 
-    <section class="panel grow-panel">
-      <div class="panel-header">
+    <UCard>
+      <template #header>
         <div>
-          <p class="eyebrow">CONFIGURED</p>
-          <h2>Model fleet</h2>
+          <p class="text-[11px] font-extrabold tracking-[0.18em] text-muted">CONFIGURED</p>
+          <h2 class="mt-1 text-xl font-bold text-highlighted">Model fleet</h2>
         </div>
+      </template>
+
+      <div v-if="!models.length" class="grid justify-items-center gap-4 py-6 text-center">
+        <UEmpty title="No models configured" description="Add a GGUF model to get started." />
+        <UButton v-if="canOperate" label="Add model" to="/models/new" size="sm" />
       </div>
 
-      <div v-if="!models.length" class="empty-state">
-        <strong>No models configured</strong>
-        <p>Add a GGUF model to get started.</p>
-        <NuxtLink v-if="canOperate" to="/models/new" class="primary small">Add model</NuxtLink>
-      </div>
-
-      <article v-for="model in models" :key="model.id" class="model-card">
-        <div class="model-row">
-          <div class="model-main">
-            <div class="model-title">
-              <strong>{{ model.model_id }}</strong>
-              <span class="status" :data-state="manager.modelState(model)">{{ manager.modelState(model) }}</span>
+      <div v-else class="divide-y divide-default">
+        <article v-for="model in models" :key="model.id" class="py-5 first:pt-0 last:pb-0">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <strong class="text-highlighted">{{ model.model_id }}</strong>
+                <UBadge
+                  :label="manager.modelState(model)"
+                  :color="statusColors[manager.modelState(model)]"
+                  variant="subtle"
+                  size="sm"
+                />
+              </div>
+              <p class="mt-1 text-sm text-toned">{{ model.name }}</p>
+              <p class="mt-1 break-all text-xs text-muted">{{ model.gguf_path }}{{ model.quantization ? ` · ${model.quantization}` : '' }}</p>
+              <p class="mt-1 text-xs text-dimmed">{{ model.priority }} · {{ model.routing_policy }} · {{ model.always_on ? 'always on' : model.autoload_enabled ? 'autoload' : 'manual' }}</p>
             </div>
-            <p>{{ model.name }}</p>
-            <small>{{ model.gguf_path }}{{ model.quantization ? ` · ${model.quantization}` : '' }}</small>
-            <small>{{ model.priority }} · {{ model.routing_policy }} · {{ model.always_on ? 'always on' : model.autoload_enabled ? 'autoload' : 'manual' }}</small>
+
+            <UFieldGroup v-if="canOperate" class="flex flex-wrap justify-start lg:justify-end">
+              <UButton
+                :label="pending[model.id] === 'start' ? 'Starting…' : 'Start'"
+                color="neutral"
+                variant="outline"
+                size="sm"
+                :disabled="!!pending[model.id] || ['READY', 'STARTING', 'LOADING'].includes(manager.modelState(model))"
+                @click="action(model.id, 'start')"
+              />
+              <UButton
+                :label="pending[model.id] === 'stop' ? 'Stopping…' : 'Stop'"
+                color="neutral"
+                variant="outline"
+                size="sm"
+                :disabled="!!pending[model.id] || manager.modelState(model) === 'UNLOADED'"
+                @click="action(model.id, 'stop')"
+              />
+              <UButton
+                :label="pending[model.id] === 'test' ? 'Testing…' : 'Test'"
+                size="sm"
+                :disabled="!!pending[model.id]"
+                @click="testModel(model)"
+              />
+              <UButton
+                :label="pending[model.id] === 'logs' ? 'Opening…' : liveLogModels[model.id] ? 'Logs · Live' : 'Logs'"
+                color="neutral"
+                variant="outline"
+                size="sm"
+                :disabled="!!pending[model.id]"
+                @click="loadLogs(model.id)"
+              />
+              <UButton
+                label="Delete"
+                color="error"
+                variant="subtle"
+                size="sm"
+                :disabled="!!pending[model.id]"
+                @click="remove(model.id)"
+              />
+            </UFieldGroup>
           </div>
 
-          <div v-if="canOperate" class="row-actions">
-            <button
-              class="ghost small"
-              :disabled="!!pending[model.id] || ['READY', 'STARTING', 'LOADING'].includes(manager.modelState(model))"
-              @click="action(model.id, 'start')"
-            >
-              {{ pending[model.id] === 'start' ? 'Starting…' : 'Start' }}
-            </button>
-            <button
-              class="ghost small"
-              :disabled="!!pending[model.id] || manager.modelState(model) === 'UNLOADED'"
-              @click="action(model.id, 'stop')"
-            >
-              {{ pending[model.id] === 'stop' ? 'Stopping…' : 'Stop' }}
-            </button>
-            <button class="primary small" :disabled="!!pending[model.id]" @click="testModel(model)">
-              {{ pending[model.id] === 'test' ? 'Testing…' : 'Test' }}
-            </button>
-            <button class="ghost small" :disabled="!!pending[model.id]" @click="loadLogs(model.id)">
-              {{ pending[model.id] === 'logs' ? 'Opening…' : liveLogModels[model.id] ? 'Logs · Live' : 'Logs' }}
-            </button>
-            <button class="danger small" :disabled="!!pending[model.id]" @click="remove(model.id)">Delete</button>
-          </div>
-        </div>
+          <UAlert
+            v-if="testResults[model.id]"
+            class="mt-4"
+            :color="testResults[model.id].startsWith('PASS') ? 'success' : 'error'"
+            variant="subtle"
+            :description="testResults[model.id]"
+          />
 
-        <p v-if="testResults[model.id]" class="test-result" :data-pass="testResults[model.id].startsWith('PASS')">
-          {{ testResults[model.id] }}
-        </p>
-        <div v-if="workerLogs[model.id] !== undefined" class="worker-log">
-          <div class="worker-log-header">
-            <strong>Worker logs</strong>
-            <small>{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</small>
-          </div>
-          <pre v-if="workerLogs[model.id]?.length">{{ workerLogs[model.id]?.join('\n') }}</pre>
-          <p v-else class="muted">Waiting for worker output…</p>
-        </div>
-      </article>
-    </section>
+          <UCard v-if="workerLogs[model.id] !== undefined" class="mt-4 bg-default/80">
+            <template #header>
+              <div class="flex items-center justify-between gap-3">
+                <strong class="text-sm text-highlighted">Worker logs</strong>
+                <span class="text-xs text-dimmed">{{ liveLogModels[model.id] ? 'LIVE · ' : '' }}{{ workerLogs[model.id]?.length || 0 }} lines</span>
+              </div>
+            </template>
+            <UScrollArea v-if="workerLogs[model.id]?.length" class="max-h-80">
+              <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-toned">{{ workerLogs[model.id]?.join('\n') }}</pre>
+            </UScrollArea>
+            <p v-else class="text-sm text-muted">Waiting for worker output…</p>
+          </UCard>
+        </article>
+      </div>
+    </UCard>
   </div>
 </template>

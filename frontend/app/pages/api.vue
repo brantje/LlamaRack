@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import type { APIKey } from '~/composables/useManager'
 
 const manager = useManager()
@@ -8,6 +9,13 @@ const name = ref('default')
 const secret = ref('')
 const error = ref('')
 const pending = reactive<Record<string, 'toggle' | 'revoke' | undefined>>({})
+
+const columns: TableColumn<APIKey>[] = [
+  { accessorKey: 'name', header: 'Name' },
+  { accessorKey: 'prefix', header: 'Prefix' },
+  { accessorKey: 'enabled', header: 'Status' },
+  { id: 'actions', header: '' }
+]
 
 async function load() {
   if (!isAdmin.value) return
@@ -64,69 +72,101 @@ onMounted(load)
 </script>
 
 <template>
-  <div>
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">OPENAI COMPATIBILITY</p>
-        <h1>API</h1>
-        <p class="muted">Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint.</p>
-      </div>
-    </header>
+  <div class="space-y-4">
+    <UPageHeader
+      headline="OPENAI COMPATIBILITY"
+      title="API"
+      description="Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint."
+      class="mb-7"
+    />
 
-    <section class="panel">
-      <p class="eyebrow">BASE URL</p>
-      <h2>Unified endpoint</h2>
-      <div class="endpoint">{{ apiBase }}/v1</div>
-      <p class="muted">Supported initial routes: models, chat completions, completions, Responses and embeddings.</p>
-    </section>
-
-    <section v-if="isAdmin" class="panel">
-      <div class="panel-header">
+    <UCard>
+      <template #header>
         <div>
-          <p class="eyebrow">CREDENTIALS</p>
-          <h2>Inference API keys</h2>
+          <p class="mb-2 text-[11px] font-extrabold tracking-[0.18em] text-muted">BASE URL</p>
+          <h2 class="text-xl font-bold text-highlighted">Unified endpoint</h2>
         </div>
-        <div class="inline-create">
-          <input v-model="name" placeholder="Key name">
-          <button class="primary small" @click="createKey">Create key</button>
+      </template>
+      <code class="block rounded-lg border border-default bg-muted px-4 py-3.5 text-sm text-primary [overflow-wrap:anywhere]">{{ apiBase }}/v1</code>
+      <p class="mt-4 text-sm leading-6 text-muted">Supported initial routes: models, chat completions, completions, Responses and embeddings.</p>
+    </UCard>
+
+    <UCard v-if="isAdmin">
+      <template #header>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="mb-2 text-[11px] font-extrabold tracking-[0.18em] text-muted">CREDENTIALS</p>
+            <h2 class="text-xl font-bold text-highlighted">Inference API keys</h2>
+          </div>
+          <UFieldGroup class="w-full sm:w-auto">
+            <UInput v-model="name" placeholder="Key name" class="min-w-0 flex-1 sm:w-48" />
+            <UButton size="sm" @click="createKey">Create key</UButton>
+          </UFieldGroup>
         </div>
-      </div>
+      </template>
 
-      <p class="muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
-      <p v-if="error" class="alert error">{{ error }}</p>
-      <div v-if="secret" class="secret-box">
-        <strong>Copy this key now. It will not be shown again.</strong>
-        <code>{{ secret }}</code>
-        <button class="ghost small" @click="copySecret">Copy</button>
-      </div>
+      <p class="mb-4 text-sm leading-6 text-muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
+      <UAlert v-if="error" color="error" variant="subtle" icon="i-lucide-circle-alert" :description="error" class="mb-4" />
 
-      <div class="table-wrap">
-        <table v-if="keys.length">
-          <thead>
-            <tr><th>Name</th><th>Prefix</th><th>Status</th><th></th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="key in keys" :key="key.id">
-              <td>{{ key.name }}</td>
-              <td class="mono">{{ key.prefix }}…</td>
-              <td>{{ key.enabled ? 'Enabled' : 'Disabled' }}</td>
-              <td>
-                <div class="row-actions">
-                  <button class="ghost small" :disabled="!!pending[key.id]" @click="setEnabled(key)">
-                    {{ pending[key.id] === 'toggle' ? 'Saving…' : key.enabled ? 'Disable' : 'Enable' }}
-                  </button>
-                  <button class="danger small" :disabled="!!pending[key.id]" @click="revoke(key)">
-                    {{ pending[key.id] === 'revoke' ? 'Revoking…' : 'Revoke' }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="empty-state">No API keys created yet.</div>
-      </div>
-    </section>
+      <UCard v-if="secret" variant="subtle" class="mb-4 bg-primary/5">
+        <div class="grid gap-3">
+          <strong class="text-sm text-highlighted">Copy this key now. It will not be shown again.</strong>
+          <code class="text-sm text-primary [overflow-wrap:anywhere]">{{ secret }}</code>
+          <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-copy" class="w-fit" @click="copySecret">Copy</UButton>
+        </div>
+      </UCard>
 
-    <section v-else class="panel"><p class="muted">Only administrators can manage inference API keys.</p></section>
+      <UTable v-if="keys.length" :data="keys" :columns="columns">
+        <template #prefix-cell="{ row }">
+          <code class="font-mono text-xs">{{ row.original.prefix }}…</code>
+        </template>
+        <template #enabled-cell="{ row }">
+          <UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">
+            {{ row.original.enabled ? 'Enabled' : 'Disabled' }}
+          </UBadge>
+        </template>
+        <template #actions-cell="{ row }">
+          <div class="flex justify-end">
+            <UFieldGroup>
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="sm"
+                :loading="pending[row.original.id] === 'toggle'"
+                :disabled="!!pending[row.original.id]"
+                @click="setEnabled(row.original)"
+              >
+                {{ pending[row.original.id] === 'toggle' ? 'Saving…' : row.original.enabled ? 'Disable' : 'Enable' }}
+              </UButton>
+              <UButton
+                color="error"
+                variant="subtle"
+                size="sm"
+                :loading="pending[row.original.id] === 'revoke'"
+                :disabled="!!pending[row.original.id]"
+                @click="revoke(row.original)"
+              >
+                {{ pending[row.original.id] === 'revoke' ? 'Revoking…' : 'Revoke' }}
+              </UButton>
+            </UFieldGroup>
+          </div>
+        </template>
+      </UTable>
+      <UEmpty
+        v-else
+        icon="i-lucide-key-round"
+        title="No API keys created yet."
+        description="Create a key to authenticate OpenAI-compatible inference clients."
+      />
+    </UCard>
+
+    <UAlert
+      v-else
+      color="neutral"
+      variant="subtle"
+      icon="i-lucide-shield"
+      title="API key management unavailable"
+      description="Only administrators can manage inference API keys."
+    />
   </div>
 </template>

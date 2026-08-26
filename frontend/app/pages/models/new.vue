@@ -24,6 +24,25 @@ const form = reactive({
   always_on: false
 })
 
+const ggufItems = computed(() => availableGGUFs.value.map(file => ({
+  label: `${file.path}${file.quantization ? ` · ${file.quantization}` : ''}`,
+  value: file.path
+})))
+const priorityItems = [
+  { label: 'Low', value: 'low' },
+  { label: 'Normal', value: 'normal' },
+  { label: 'High', value: 'high' }
+]
+const routingItems = [
+  { label: 'Least active', value: 'least_active' },
+  { label: 'Round robin', value: 'round_robin' }
+]
+const ggufPlaceholder = computed(() => scanning.value
+  ? 'Scanning model folder…'
+  : availableGGUFs.value.length
+    ? 'Select GGUF'
+    : 'No unregistered GGUF files found')
+
 function slugifyModelID(value: string) {
   return value
     .normalize('NFKD')
@@ -80,72 +99,104 @@ async function createModel() {
 </script>
 
 <template>
-  <div>
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">MODEL REGISTRY</p>
-        <h1>Add model</h1>
-        <p class="muted">Select an unregistered GGUF file and configure its model in one step.</p>
-      </div>
-      <NuxtLink to="/models" class="ghost">Back to models</NuxtLink>
-    </header>
+  <div class="grid gap-6">
+    <UPageHeader headline="MODEL REGISTRY" title="Add model" description="Select an unregistered GGUF file and configure its model in one step.">
+      <template #links>
+        <UButton label="Back to models" to="/models" color="neutral" variant="outline" />
+      </template>
+    </UPageHeader>
 
-    <section v-if="canOperate" class="panel" style="max-width: 720px">
-      <p v-if="error" class="alert error">{{ error }}</p>
-      <form @submit.prevent="createModel">
-        <label>
-          GGUF file
-          <select v-model="form.gguf_path" required :disabled="scanning || !availableGGUFs.length">
-            <option value="" disabled>{{ scanning ? 'Scanning model folder…' : availableGGUFs.length ? 'Select GGUF' : 'No unregistered GGUF files found' }}</option>
-            <option v-for="file in availableGGUFs" :key="file.path" :value="file.path">
-              {{ file.path }}{{ file.quantization ? ` · ${file.quantization}` : '' }}
-            </option>
-          </select>
-          <small class="muted">The model folder is scanned recursively. Already-added GGUF files are hidden.</small>
-        </label>
+    <UCard v-if="canOperate" class="max-w-3xl">
+      <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
 
-        <label>
-          Model name
-          <input v-model="form.name" placeholder="Qwen Coder" required>
-        </label>
+      <UForm :state="form" class="grid gap-5" @submit="createModel">
+        <UFormField
+          label="GGUF file"
+          name="gguf_path"
+          description="The model folder is scanned recursively. Already-added GGUF files are hidden."
+          required
+        >
+          <USelect
+            v-model="form.gguf_path"
+            :items="ggufItems"
+            label-key="label"
+            value-key="value"
+            :placeholder="ggufPlaceholder"
+            :disabled="scanning || !availableGGUFs.length"
+            required
+            class="w-full"
+            data-testid="gguf-select"
+          />
+        </UFormField>
 
-        <label>
-          Public model ID
-          <input v-model="form.model_id" placeholder="qwen-coder" required @input="markPublicIdEdited">
-          <small class="muted">Auto-filled from the model name. You can override it.</small>
-        </label>
+        <UFormField label="Model name" name="name" required>
+          <UInput v-model="form.name" placeholder="Qwen Coder" required class="w-full" data-testid="model-name" />
+        </UFormField>
 
-        <div class="field-row">
-          <label>
-            Priority
-            <select v-model="form.priority">
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <label>
-            Routing
-            <select v-model="form.routing_policy">
-              <option value="least_active">Least active</option>
-              <option value="round_robin">Round robin</option>
-            </select>
-          </label>
+        <UFormField
+          label="Public model ID"
+          name="model_id"
+          description="Auto-filled from the model name. You can override it."
+          required
+        >
+          <UInput
+            v-model="form.model_id"
+            placeholder="qwen-coder"
+            required
+            class="w-full"
+            data-testid="model-id"
+            @input="markPublicIdEdited"
+          />
+        </UFormField>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <UFormField label="Priority" name="priority">
+            <USelect
+              v-model="form.priority"
+              :items="priorityItems"
+              label-key="label"
+              value-key="value"
+              class="w-full"
+              data-testid="priority-select"
+            />
+          </UFormField>
+          <UFormField label="Routing" name="routing_policy">
+            <USelect
+              v-model="form.routing_policy"
+              :items="routingItems"
+              label-key="label"
+              value-key="value"
+              class="w-full"
+              data-testid="routing-select"
+            />
+          </UFormField>
         </div>
 
-        <label class="check"><input v-model="form.autoload_enabled" type="checkbox"> Autoload on request</label>
-        <label class="check"><input v-model="form.always_on" type="checkbox"> Always on</label>
-
-        <div class="row-actions">
-          <button type="button" class="ghost" :disabled="scanning" @click="scanGGUFs">{{ scanning ? 'Scanning…' : 'Rescan' }}</button>
-          <NuxtLink to="/models" class="ghost">Cancel</NuxtLink>
-          <button class="primary" :disabled="busy || scanning || !form.gguf_path">{{ busy ? 'Creating…' : 'Create model' }}</button>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <UCheckbox v-model="form.autoload_enabled" label="Autoload on request" data-testid="autoload-checkbox" />
+          <UCheckbox v-model="form.always_on" label="Always on" data-testid="always-on-checkbox" />
         </div>
-      </form>
-    </section>
 
-    <section v-else class="panel">
-      <p class="muted">Your role cannot create models.</p>
-    </section>
+        <div class="flex flex-wrap justify-end gap-2 pt-2">
+          <UButton
+            type="button"
+            :label="scanning ? 'Scanning…' : 'Rescan'"
+            color="neutral"
+            variant="outline"
+            :loading="scanning"
+            @click="scanGGUFs"
+          />
+          <UButton label="Cancel" to="/models" color="neutral" variant="ghost" />
+          <UButton
+            type="submit"
+            :label="busy ? 'Creating…' : 'Create model'"
+            :loading="busy"
+            :disabled="busy || scanning || !form.gguf_path"
+          />
+        </div>
+      </UForm>
+    </UCard>
+
+    <UAlert v-else color="warning" variant="subtle" description="Your role cannot create models." />
   </div>
 </template>
