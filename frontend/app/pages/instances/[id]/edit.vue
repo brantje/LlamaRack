@@ -17,7 +17,7 @@ const priorityItems = ['low', 'normal', 'high'].map(value => ({ label: value[0]!
 const gpuItems = [{ label: 'Automatic', value: 'auto' }, { label: 'Manual', value: 'manual' }]
 
 function slugify(value: string) {
-  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
+  return value.toLowerCase().trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/-+/g, '-').replace(/^[-._]+|[-._]+$/g, '')
 }
 function parseOptions(value: string) {
   const out: Record<string, string> = {}
@@ -56,7 +56,7 @@ async function submit() {
 
   busy.value = true
   try {
-    const updated = await manager.request<{ id: string }>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`, {
+    await manager.request<{ id: string }>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`, {
       method: 'PUT',
       body: {
         model_id: form.model_id, name: form.name, enabled: form.enabled,
