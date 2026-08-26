@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -43,30 +44,49 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 	if !m.Autoload {
 		return "", errors.New("model unloaded and autoload disabled")
 	}
+	slog.Info("autoload requested", "model_id", m.ID, "public_id", m.PublicID)
 	return s.startSingleFlight(ctx, m)
 }
 
 func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
+	slog.Info("model start requested", "model_id", id)
 	m, err := s.models.GetByID(ctx, id)
 	if err != nil {
+		slog.Error("model start failed", "model_id", id, "error", err)
+		return "", err
+	}
+	if !m.Enabled {
+		err := errors.New("model disabled")
+		slog.Warn("model start rejected", "model_id", id, "public_id", m.PublicID, "error", err)
 		return "", err
 	}
 	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
+		slog.Info("model already ready", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
 		return endpoint, nil
 	}
-	return s.startSingleFlight(ctx, m)
+	endpoint, err := s.startSingleFlight(ctx, m)
+	if err != nil {
+		slog.Error("model start failed", "model_id", id, "public_id", m.PublicID, "error", err)
+		return "", err
+	}
+	slog.Info("model start completed", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
+	return endpoint, nil
 }
 
 func (s *Service) StopModel(ctx context.Context, id string) error {
+	slog.Info("model stop requested", "model_id", id)
 	instances, err := s.models.Instances(ctx, id)
 	if err != nil {
+		slog.Error("model stop failed", "model_id", id, "error", err)
 		return err
 	}
 	for _, x := range instances {
 		if err := s.sup.Stop(ctx, x.ID); err != nil {
+			slog.Error("model stop failed", "model_id", id, "instance_id", x.ID, "error", err)
 			return err
 		}
 	}
+	slog.Info("model stop completed", "model_id", id, "instances", len(instances))
 	return nil
 }
 
@@ -167,6 +187,7 @@ func (s *Service) startOne(ctx context.Context, m models.Model) (string, error) 
 	if selected.TensorSplit != "" {
 		args = append(args, "--tensor-split", selected.TensorSplit)
 	}
+	slog.Info("starting model instance", "model_id", m.ID, "public_id", m.PublicID, "instance_id", selected.ID, "model_path", path)
 	_, err = s.sup.Start(ctx, selected.ID, m.ID, path, args)
 	if err != nil {
 		return "", err
