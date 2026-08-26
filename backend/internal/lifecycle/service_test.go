@@ -63,15 +63,6 @@ func TestLifecycleHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-type lifecycleFixture struct {
-	service *Service
-	models  *models.Service
-	dbPath  string
-	db      interface {
-		ExecContext(context.Context, string, ...any) (any, error)
-	}
-}
-
 func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Service, models.Model, *supervisor.Supervisor, func(string, ...any)) {
 	t.Helper()
 	ctx := context.Background()
@@ -90,12 +81,8 @@ func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Se
 	if err := os.WriteFile(modelPath, []byte("gguf"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a, err := ms.RegisterArtifact(ctx, modelPath, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
 	m, err := ms.Create(ctx, models.CreateModelInput{
-		PublicID: "test-model", ArtifactID: a.ID, Autoload: &autoload, AlwaysOn: alwaysOn,
+		PublicID: "test-model", Name: "Test model", GGUFPath: modelPath, Autoload: &autoload, AlwaysOn: alwaysOn,
 		Options: map[string]string{"ctx-size": "2048", "flash-attn": "true", "disabled": "false", "empty": ""},
 	})
 	if err != nil {
