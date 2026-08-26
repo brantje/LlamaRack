@@ -1,0 +1,22 @@
+# Go
+/bin/
+*.test
+coverage.out
+
+# Nuxt
+web/node_modules/
+web/.nuxt/
+web/.output/
+web/dist/
+
+# Runtime data
+/config/
+/models/
+*.db
+*.db-shm
+*.db-wal
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
