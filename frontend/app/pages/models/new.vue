@@ -1,6 +1,5 @@
 <script setup lang="ts">
 type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string }
-
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
 
 const manager = useManager()
@@ -15,6 +14,7 @@ const form = reactive({
   gguf_path: '',
   name: '',
   context_length: 0,
+  options: {} as Record<string, string>,
   first_instance: {
     name: '',
     slug: '',
@@ -40,11 +40,9 @@ function slugify(value: string) {
 watch(() => form.name, (name) => {
   if (createFirstInstance.value) form.first_instance.name = name
 })
-
 watch(createFirstInstance, (enabled) => {
   if (enabled) form.first_instance.name = form.name
 })
-
 watch(() => form.first_instance.name, (name) => {
   if (!firstInstanceSlugEdited.value) form.first_instance.slug = slugify(name)
 })
@@ -78,6 +76,7 @@ async function createModel() {
       gguf_path: form.gguf_path,
       name: form.name,
       context_length: form.context_length,
+      options: form.options,
       first_instance: createFirstInstance.value ? form.first_instance : undefined
     }
     const result = await manager.request<CreateResponse>('/api/v1/models', { method: 'POST', body })
@@ -98,33 +97,28 @@ async function createModel() {
 <template>
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
-      <UPageHeader
-        class="min-w-0 flex-1"
-        headline="MODEL REGISTRY"
-        title="Add model"
-        description="Register a GGUF model and optionally bootstrap its first addressable Instance."
-      />
+      <UPageHeader class="min-w-0 flex-1" headline="MODEL REGISTRY" title="Add model" description="Register a GGUF model and optionally bootstrap its first addressable Instance." />
       <UButton to="/models" color="neutral" variant="soft">Back to models</UButton>
     </div>
 
-    <UCard class="max-w-3xl">
+    <UCard class="max-w-4xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <UForm :state="form" class="space-y-6" @submit="createModel">
         <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files are hidden." required>
           <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
-
         <UFormField label="Model name" name="name" required>
           <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
         </UFormField>
-
         <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact/configuration. Use 0 when unknown.">
           <UInputNumber v-model="form.context_length" class="w-full" :min="0" :step="1" />
         </UFormField>
 
+        <USeparator label="Model llama.cpp defaults" />
+        <LlamaCppOptionsEditor v-model="form.options" scope="model" />
+
         <USeparator label="First Instance" />
         <UCheckbox v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
-
         <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
           <UFormField label="Instance name" name="first_instance.name" description="Defaults from the Model name while first-Instance creation is enabled." required>
             <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
