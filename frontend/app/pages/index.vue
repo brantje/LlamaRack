@@ -1,34 +1,37 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+import type { Model } from '~/composables/useManager'
+
 const manager = useManager()
 const { models, runtimes, profile, canOperate } = manager
 const readyWorkers = computed(() => Object.values(runtimes.value).flat().filter(x => x.state === 'READY').length)
 const failedWorkers = computed(() => Object.values(runtimes.value).flat().filter(x => x.state === 'FAILED').length)
 
-const tableRows = computed(() => models.value.map(model => ({
-  id: model.id,
-  model: model.model_id,
-  name: model.name,
-  status: manager.modelState(model),
-  loading: model.always_on ? 'Always on' : model.autoload_enabled ? 'Autoload' : 'Manual',
-  priority: model.priority,
-  gguf: model.gguf_path
+type FleetRow = Model & { state: string; loading: string }
+type BadgeColor = 'success' | 'error' | 'warning' | 'secondary' | 'neutral'
+
+const statusColors: Record<string, BadgeColor> = {
+  READY: 'success',
+  FAILED: 'error',
+  STARTING: 'warning',
+  LOADING: 'warning',
+  STOPPING: 'secondary',
+  UNLOADED: 'neutral'
+}
+
+const fleetRows = computed<FleetRow[]>(() => models.value.map(model => ({
+  ...model,
+  state: manager.modelState(model),
+  loading: model.always_on ? 'Always on' : model.autoload_enabled ? 'Autoload' : 'Manual'
 })))
 
-const tableColumns = [
-  { accessorKey: 'model', header: 'Model' },
-  { accessorKey: 'status', header: 'Status' },
+const columns: TableColumn<FleetRow>[] = [
+  { accessorKey: 'model_id', header: 'Model' },
+  { accessorKey: 'state', header: 'Status' },
   { accessorKey: 'loading', header: 'Loading' },
   { accessorKey: 'priority', header: 'Priority' },
-  { accessorKey: 'gguf', header: 'GGUF' }
+  { accessorKey: 'gguf_path', header: 'GGUF' }
 ]
-
-function statusColor(state: string): 'primary' | 'error' | 'warning' | 'secondary' | 'neutral' {
-  if (state === 'READY') return 'primary'
-  if (state === 'FAILED') return 'error'
-  if (state === 'STARTING' || state === 'LOADING') return 'warning'
-  if (state === 'STOPPING') return 'secondary'
-  return 'neutral'
-}
 </script>
 
 <template>
@@ -83,20 +86,20 @@ function statusColor(state: string): 'primary' | 'error' | 'warning' | 'secondar
         description="Add a local GGUF model to start serving requests."
       />
 
-      <UTable v-else :data="tableRows" :columns="tableColumns">
-        <template #model-cell="{ row }">
+      <UTable v-else :data="fleetRows" :columns="columns">
+        <template #model_id-cell="{ row }">
           <div>
-            <strong>{{ row.original.model }}</strong>
+            <strong>{{ row.original.model_id }}</strong>
             <span class="mt-1 block text-xs text-muted">{{ row.original.name }}</span>
           </div>
         </template>
-        <template #status-cell="{ row }">
-          <UBadge :color="statusColor(row.original.status)" variant="subtle" size="sm">
-            {{ row.original.status }}
+        <template #state-cell="{ row }">
+          <UBadge :color="statusColors[row.original.state] || 'neutral'" variant="subtle" size="sm">
+            {{ row.original.state }}
           </UBadge>
         </template>
-        <template #gguf-cell="{ row }">
-          <span class="font-mono text-xs">{{ row.original.gguf }}</span>
+        <template #gguf_path-cell="{ row }">
+          <span class="font-mono text-xs">{{ row.original.gguf_path }}</span>
         </template>
       </UTable>
     </UCard>

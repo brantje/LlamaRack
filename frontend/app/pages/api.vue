@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import type { APIKey } from '~/composables/useManager'
 
 const manager = useManager()
@@ -9,21 +10,12 @@ const secret = ref('')
 const error = ref('')
 const pending = reactive<Record<string, 'toggle' | 'revoke' | undefined>>({})
 
-const keyRows = computed(() => keys.value.map(key => ({
-  ...key,
-  displayPrefix: `${key.prefix}…`,
-  status: key.enabled ? 'Enabled' : 'Disabled'
-})))
-const keyColumns = [
+const columns: TableColumn<APIKey>[] = [
   { accessorKey: 'name', header: 'Name' },
-  { accessorKey: 'displayPrefix', header: 'Prefix' },
-  { accessorKey: 'status', header: 'Status' },
+  { accessorKey: 'prefix', header: 'Prefix' },
+  { accessorKey: 'enabled', header: 'Status' },
   { id: 'actions', header: '' }
 ]
-
-function keyFromRow(row: any): APIKey {
-  return row.original as APIKey
-}
 
 async function load() {
   if (!isAdmin.value) return
@@ -101,10 +93,10 @@ onMounted(load)
             <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">CREDENTIALS</p>
             <h2 class="text-xl font-bold">Inference API keys</h2>
           </div>
-          <div class="flex w-full gap-2 md:w-auto">
+          <UFieldGroup class="w-full md:w-auto">
             <UInput v-model="name" data-testid="key-name" class="min-w-0 flex-1 md:w-48" placeholder="Key name" />
             <UButton data-testid="create-key" size="sm" @click="createKey">Create key</UButton>
-          </div>
+          </UFieldGroup>
         </div>
       </template>
 
@@ -119,37 +111,39 @@ onMounted(load)
         </div>
       </UCard>
 
-      <UTable v-if="keys.length" :data="keyRows" :columns="keyColumns">
-        <template #displayPrefix-cell="{ row }">
-          <span class="font-mono text-xs">{{ row.original.displayPrefix }}</span>
+      <UTable v-if="keys.length" :data="keys" :columns="columns">
+        <template #prefix-cell="{ row }">
+          <span class="font-mono text-xs">{{ row.original.prefix }}…</span>
         </template>
-        <template #status-cell="{ row }">
-          <UBadge :color="row.original.enabled ? 'primary' : 'neutral'" variant="subtle" size="sm">
-            {{ row.original.status }}
+        <template #enabled-cell="{ row }">
+          <UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">
+            {{ row.original.enabled ? 'Enabled' : 'Disabled' }}
           </UBadge>
         </template>
         <template #actions-cell="{ row }">
-          <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
-              variant="soft"
-              size="sm"
-              :loading="pending[row.original.id] === 'toggle'"
-              :disabled="!!pending[row.original.id]"
-              @click="setEnabled(keyFromRow(row))"
-            >
-              {{ row.original.enabled ? 'Disable' : 'Enable' }}
-            </UButton>
-            <UButton
-              color="error"
-              variant="soft"
-              size="sm"
-              :loading="pending[row.original.id] === 'revoke'"
-              :disabled="!!pending[row.original.id]"
-              @click="revoke(keyFromRow(row))"
-            >
-              Revoke
-            </UButton>
+          <div class="flex justify-end">
+            <UFieldGroup>
+              <UButton
+                color="neutral"
+                variant="soft"
+                size="sm"
+                :loading="pending[row.original.id] === 'toggle'"
+                :disabled="!!pending[row.original.id]"
+                @click="setEnabled(row.original)"
+              >
+                {{ row.original.enabled ? 'Disable' : 'Enable' }}
+              </UButton>
+              <UButton
+                color="error"
+                variant="soft"
+                size="sm"
+                :loading="pending[row.original.id] === 'revoke'"
+                :disabled="!!pending[row.original.id]"
+                @click="revoke(row.original)"
+              >
+                Revoke
+              </UButton>
+            </UFieldGroup>
           </div>
         </template>
       </UTable>

@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import type { NavigationMenuItem } from '@nuxt/ui'
+
 const manager = useManager()
 const { user, initialized, bootstrapRequired, backendError, apiBase } = manager
 const credentials = reactive({ username: '', password: '' })
 const authError = ref('')
 const authenticating = ref(false)
 
-const navigation = [
+const navigation: NavigationMenuItem[] = [
   { label: 'Overview', to: '/' },
   { label: 'Models', to: '/models' },
   { label: 'API', to: '/api' },
@@ -62,10 +64,10 @@ async function submitAuth() {
       <UAlert v-if="authError" class="mt-5" color="error" variant="subtle" :description="authError" />
 
       <UForm :state="credentials" class="mt-6 space-y-4" @submit="submitAuth">
-        <UFormField label="Username" required>
+        <UFormField label="Username" name="username" required>
           <UInput v-model="credentials.username" class="w-full" autocomplete="username" required />
         </UFormField>
-        <UFormField label="Password" required>
+        <UFormField label="Password" name="password" required>
           <UInput
             v-model="credentials.password"
             class="w-full"

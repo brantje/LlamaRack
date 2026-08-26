@@ -34,6 +34,12 @@ const routingItems = [
   { label: 'Least active', value: 'least_active' },
   { label: 'Round robin', value: 'round_robin' }
 ]
+const ggufPlaceholder = computed(() => scanning.value
+  ? 'Scanning model folder…'
+  : availableGGUFs.value.length
+    ? 'Select GGUF'
+    : 'No unregistered GGUF files found')
+
 const priorityItems = [
   { label: 'Low', value: 'low' },
   { label: 'Normal', value: 'normal' },
@@ -111,23 +117,25 @@ async function createModel() {
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
 
       <UForm :state="form" class="space-y-6" @submit="createModel">
-        <UFormField label="GGUF file" description="The model folder is scanned recursively. Already-added GGUF files are hidden." required>
+        <UFormField label="GGUF file" name="gguf_path" description="The model folder is scanned recursively. Already-added GGUF files are hidden." required>
           <USelect
             v-model="form.gguf_path"
             data-testid="gguf-select"
             class="w-full"
             :items="ggufItems"
-            :placeholder="scanning ? 'Scanning model folder…' : availableGGUFs.length ? 'Select GGUF' : 'No unregistered GGUF files found'"
+            label-key="label"
+            value-key="value"
+            :placeholder="ggufPlaceholder"
             :disabled="scanning || !availableGGUFs.length"
             required
           />
         </UFormField>
 
-        <UFormField label="Model name" required>
+        <UFormField label="Model name" name="name" required>
           <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder" required />
         </UFormField>
 
-        <UFormField label="Public model ID" description="Auto-filled from the model name. You can override it." required>
+        <UFormField label="Public model ID" name="model_id" description="Auto-filled from the model name. You can override it." required>
           <UInput
             v-model="form.model_id"
             data-testid="model-id"
@@ -138,18 +146,18 @@ async function createModel() {
           />
         </UFormField>
 
-        <UFormField label="Routing">
-          <USelect v-model="form.routing_policy" data-testid="routing-select" class="w-full" :items="routingItems" />
+        <UFormField label="Routing" name="routing_policy">
+          <USelect v-model="form.routing_policy" data-testid="routing-select" class="w-full" :items="routingItems" label-key="label" value-key="value" />
         </UFormField>
 
         <USeparator label="Eviction" />
         <p class="-mt-3 text-sm leading-6 text-muted">Controls idle unloading now and resource-pressure eviction when Phase 7 hardware scheduling is enabled.</p>
 
         <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="Priority" description="Lower-priority models are preferred eviction candidates.">
-            <USelect v-model="form.priority" data-testid="priority-select" class="w-full" :items="priorityItems" />
+          <UFormField label="Priority" name="priority" description="Lower-priority models are preferred eviction candidates.">
+            <USelect v-model="form.priority" data-testid="priority-select" class="w-full" :items="priorityItems" label-key="label" value-key="value" />
           </UFormField>
-          <UFormField label="Idle unload timeout (seconds)" description="0 inherits the global LCM_IDLE_UNLOAD_SECONDS setting.">
+          <UFormField label="Idle unload timeout (seconds)" name="idle_unload_seconds" description="0 inherits the global LCM_IDLE_UNLOAD_SECONDS setting.">
             <UInputNumber
               v-model="form.idle_unload_seconds"
               data-testid="idle-timeout"
