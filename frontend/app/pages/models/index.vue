@@ -273,7 +273,6 @@ async function remove(id: string) {
               variant="soft"
               size="sm"
               :loading="pending[model.id] === 'logs'"
-              :disabled="!!pending[model.id]"
               @click="openLogs(model)"
             >
               Logs
