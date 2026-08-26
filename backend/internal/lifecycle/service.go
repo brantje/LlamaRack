@@ -14,10 +14,11 @@ import (
 )
 
 type Service struct {
-	models *models.Service
-	sup    *supervisor.Supervisor
-	mu     sync.Mutex
-	loads  map[string]*loadCall
+	models          *models.Service
+	sup             *supervisor.Supervisor
+	mu              sync.Mutex
+	loads           map[string]*loadCall
+	manuallyStopped map[string]bool
 }
 
 type loadCall struct {
@@ -27,7 +28,12 @@ type loadCall struct {
 }
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
-	return &Service{models: modelsService, sup: sup, loads: map[string]*loadCall{}}
+	return &Service{
+		models:          modelsService,
+		sup:             sup,
+		loads:           map[string]*loadCall{},
+		manuallyStopped: map[string]bool{},
+	}
 }
 
 func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, error) {
@@ -41,6 +47,9 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
 		return endpoint, nil
 	}
+	if s.isManuallyStopped(m.ID) {
+		return "", errors.New("model manually stopped until manager restart")
+	}
 	if !m.Autoload {
 		return "", errors.New("model unloaded and autoload disabled")
 	}
@@ -49,6 +58,10 @@ func (s *Service) EnsureReady(ctx context.Context, publicID string) (string, err
 }
 
 func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
+	return s.startModel(ctx, id, true)
+}
+
+func (s *Service) startModel(ctx context.Context, id string, explicit bool) (string, error) {
 	slog.Info("model start requested", "model_id", id)
 	m, err := s.models.GetByID(ctx, id)
 	if err != nil {
@@ -59,6 +72,11 @@ func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
 		err := errors.New("model disabled")
 		slog.Warn("model start rejected", "model_id", id, "public_id", m.PublicID, "error", err)
 		return "", err
+	}
+	if explicit {
+		s.clearManualStop(id)
+	} else if s.isManuallyStopped(id) {
+		return "", errors.New("model manually stopped until manager restart")
 	}
 	if endpoint, ok := s.readyEndpoint(ctx, m); ok {
 		slog.Info("model already ready", "model_id", id, "public_id", m.PublicID, "endpoint", endpoint)
@@ -75,13 +93,25 @@ func (s *Service) StartModel(ctx context.Context, id string) (string, error) {
 
 func (s *Service) StopModel(ctx context.Context, id string) error {
 	slog.Info("model stop requested", "model_id", id)
+	m, err := s.models.GetByID(ctx, id)
+	if err != nil {
+		slog.Error("model stop failed", "model_id", id, "error", err)
+		return err
+	}
 	instances, err := s.models.Instances(ctx, id)
 	if err != nil {
 		slog.Error("model stop failed", "model_id", id, "error", err)
 		return err
 	}
+	if m.AlwaysOn {
+		s.markManualStop(id)
+		slog.Info("always-on model manually suppressed until manager restart", "model_id", id, "public_id", m.PublicID)
+	}
 	for _, x := range instances {
 		if err := s.sup.Stop(ctx, x.ID); err != nil {
+			if m.AlwaysOn {
+				s.clearManualStop(id)
+			}
 			slog.Error("model stop failed", "model_id", id, "instance_id", x.ID, "error", err)
 			return err
 		}
@@ -114,13 +144,13 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 		return
 	}
 	for _, m := range items {
-		if !m.Enabled || !m.AlwaysOn {
+		if !m.Enabled || !m.AlwaysOn || s.isManuallyStopped(m.ID) {
 			continue
 		}
 		if _, ok := s.readyEndpoint(ctx, m); ok {
 			continue
 		}
-		go func(id string) { _, _ = s.StartModel(context.Background(), id) }(m.ID)
+		go func(id string) { _, _ = s.startModel(context.Background(), id, false) }(m.ID)
 	}
 }
 
@@ -140,6 +170,24 @@ func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
 			s.ReconcileAlwaysOn(ctx)
 		}
 	}
+}
+
+func (s *Service) markManualStop(id string) {
+	s.mu.Lock()
+	s.manuallyStopped[id] = true
+	s.mu.Unlock()
+}
+
+func (s *Service) clearManualStop(id string) {
+	s.mu.Lock()
+	delete(s.manuallyStopped, id)
+	s.mu.Unlock()
+}
+
+func (s *Service) isManuallyStopped(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.manuallyStopped[id]
 }
 
 func (s *Service) startSingleFlight(ctx context.Context, m models.Model) (string, error) {
