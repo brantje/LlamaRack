@@ -25,6 +25,21 @@ beforeEach(() => {
   manager.profile.value = null
 })
 
+function selectComponents(wrapper: any) {
+  const components = wrapper.findAllComponents({ name: 'Select' })
+  return components.length ? components : wrapper.findAllComponents({ name: 'USelect' })
+}
+
+function checkboxComponents(wrapper: any) {
+  const components = wrapper.findAllComponents({ name: 'Checkbox' })
+  return components.length ? components : wrapper.findAllComponents({ name: 'UCheckbox' })
+}
+
+function inputNumberComponents(wrapper: any) {
+  const components = wrapper.findAllComponents({ name: 'InputNumber' })
+  return components.length ? components : wrapper.findAllComponents({ name: 'UInputNumber' })
+}
+
 describe('model creation form', () => {
   it('lists relative GGUF paths and exposes lifecycle and eviction settings', async () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
@@ -35,34 +50,44 @@ describe('model creation form', () => {
     expect(wrapper.text()).toContain('Idle unload timeout')
     expect(wrapper.text()).toContain('Allow resource-pressure eviction')
 
-    const selects = wrapper.findAll('select')
-    expect(selects[0]!.text()).toContain('Qwen/coder/qwen-Q4_K_M.gguf')
-    expect(selects[0]!.text()).not.toContain('/models/')
-    await selects[0]!.setValue('Qwen/coder/qwen-Q4_K_M.gguf')
-
-    const inputs = wrapper.findAll('input')
-    await inputs[0]!.setValue('Qwén Coder / 32B!')
+    const selects = selectComponents(wrapper)
+    expect(selects).toHaveLength(3)
+    expect(selects[0]!.props('items')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Qwen/coder/qwen-Q4_K_M.gguf · Q4_K_M', value: 'Qwen/coder/qwen-Q4_K_M.gguf' })
+    ]))
+    expect(JSON.stringify(selects[0]!.props('items'))).not.toContain('/models/')
+    selects[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
     await flushPromises()
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('qwen-coder-32b')
 
-    await inputs[1]!.setValue('custom-id')
-    await inputs[0]!.setValue('Changed name')
+    const nameInput = wrapper.get('[data-testid="model-name"]')
+    const idInput = wrapper.get('[data-testid="model-id"]')
+    await nameInput.setValue('Qwén Coder / 32B!')
     await flushPromises()
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('custom-id')
+    expect((idInput.element as HTMLInputElement).value).toBe('qwen-coder-32b')
 
-    await selects[1]!.setValue('round_robin')
-    await selects[2]!.setValue('high')
-    await inputs[2]!.setValue('120')
-    const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    await checkboxes[0]!.setValue(false)
-    await checkboxes[1]!.setValue(false)
-    await checkboxes[2]!.setValue(true)
-    expect((selects[1]!.element as HTMLSelectElement).value).toBe('round_robin')
-    expect((selects[2]!.element as HTMLSelectElement).value).toBe('high')
-    expect((inputs[2]!.element as HTMLInputElement).value).toBe('120')
-    expect((checkboxes[0]!.element as HTMLInputElement).checked).toBe(false)
-    expect((checkboxes[1]!.element as HTMLInputElement).checked).toBe(false)
-    expect((checkboxes[2]!.element as HTMLInputElement).checked).toBe(true)
+    await idInput.setValue('custom-id')
+    await nameInput.setValue('Changed name')
+    await flushPromises()
+    expect((idInput.element as HTMLInputElement).value).toBe('custom-id')
+
+    selects[1]!.vm.$emit('update:modelValue', 'round_robin')
+    selects[2]!.vm.$emit('update:modelValue', 'high')
+    const numberInputs = inputNumberComponents(wrapper)
+    expect(numberInputs).toHaveLength(1)
+    numberInputs[0]!.vm.$emit('update:modelValue', 120)
+    const checkboxes = checkboxComponents(wrapper)
+    expect(checkboxes).toHaveLength(3)
+    checkboxes[0]!.vm.$emit('update:modelValue', false)
+    checkboxes[1]!.vm.$emit('update:modelValue', false)
+    checkboxes[2]!.vm.$emit('update:modelValue', true)
+    await flushPromises()
+
+    expect(selects[1]!.props('modelValue')).toBe('round_robin')
+    expect(selects[2]!.props('modelValue')).toBe('high')
+    expect(numberInputs[0]!.props('modelValue')).toBe(120)
+    expect(checkboxes[0]!.props('modelValue')).toBe(false)
+    expect(checkboxes[1]!.props('modelValue')).toBe(false)
+    expect(checkboxes[2]!.props('modelValue')).toBe(true)
   })
 
   it('creates a model with eviction options and the selected relative GGUF path', async () => {
@@ -76,14 +101,13 @@ describe('model creation form', () => {
     })
     let wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    const selects = wrapper.findAll('select')
-    await selects[0]!.setValue('Qwen/coder/qwen-Q4_K_M.gguf')
-    await selects[2]!.setValue('low')
-    const inputs = wrapper.findAll('input')
-    await inputs[0]!.setValue('Qwen Coder')
-    await inputs[2]!.setValue('45')
-    const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    await checkboxes[0]!.setValue(false)
+    const selects = selectComponents(wrapper)
+    selects[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
+    selects[2]!.vm.$emit('update:modelValue', 'low')
+    inputNumberComponents(wrapper)[0]!.vm.$emit('update:modelValue', 45)
+    checkboxComponents(wrapper)[0]!.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder')
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -108,10 +132,9 @@ describe('model creation form', () => {
     })
     wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    const errorSelects = wrapper.findAll('select')
-    await errorSelects[0]!.setValue('deep/other.gguf')
-    const errorInputs = wrapper.findAll('input')
-    await errorInputs[0]!.setValue('Missing')
+    selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'deep/other.gguf')
+    await flushPromises()
+    await wrapper.get('[data-testid="model-name"]').setValue('Missing')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('GGUF missing')
@@ -125,9 +148,9 @@ describe('model creation form', () => {
     expect(wrapper.text()).toContain('No unregistered GGUF files found')
 
     mocks.request.mockResolvedValueOnce(discovered)
-    await wrapper.findAll('button').find(button => button.text() === 'Rescan')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('select')[0]!.text()).toContain('deep/other.gguf')
+    expect(JSON.stringify(selectComponents(wrapper)[0]!.props('items'))).toContain('deep/other.gguf')
   })
 
   it('hides creation controls from readonly users', async () => {

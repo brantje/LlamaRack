@@ -56,7 +56,25 @@ beforeEach(() => {
 })
 
 describe('model diagnostics', () => {
-  it('tests a model to READY and live streams worker logs', async () => {
+  it('renders configured models as sibling cards with the future edit affordance', async () => {
+    const manager = seedModel()
+    manager.models.value.push({
+      id: 'm2', model_id: 'chat', name: 'Chat', gguf_path: 'chat.gguf', total_bytes: 8,
+      enabled: true, autoload_enabled: false, always_on: true, priority: 'high', routing_policy: 'round_robin'
+    })
+
+    const wrapper = await mountSuspended(ModelsPage, { route: false })
+    const cards = wrapper.findAll('[data-testid="model-card"]')
+    expect(cards).toHaveLength(2)
+    expect(wrapper.text()).toContain('Model fleet')
+    expect(wrapper.text()).toContain('Round robin')
+
+    const editButtons = wrapper.findAll('button[aria-label="Edit model (coming soon)"]')
+    expect(editButtons).toHaveLength(2)
+    expect(editButtons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
+  })
+
+  it('tests a model to READY and shows live worker logs in a flat timestamped terminal modal', async () => {
     const manager = seedModel()
     let started = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
@@ -76,19 +94,33 @@ describe('model diagnostics', () => {
     const source = FakeEventSource.instances[0]!
     expect(source.url).toBe('http://manager.test:8888/api/v1/instances/instance-12345678/logs/stream')
     expect(source.withCredentials).toBe(true)
+
+    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('worker://coder')
+    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
+
     source.emit('[stderr] model loaded')
     source.emit('[stdout] server ready')
+    source.emit('scheduler tick')
     await flushPromises()
 
     expect(wrapper.text()).toContain('PASS · READY · PID 4242 · port 31000')
-    expect(wrapper.text()).toContain('LIVE · 2 lines')
-    expect(wrapper.text()).toContain('model loaded')
+    expect(document.body.textContent).toContain('LIVE · 3 lines')
+    expect(document.body.textContent).toContain('model loaded')
+    expect(document.body.querySelector('[data-stream="stderr"]')?.textContent).toContain('model loaded')
+    expect(document.body.querySelector('[data-stream="stdout"]')?.textContent).toContain('server ready')
+    expect(document.body.querySelector('[data-stream="log"]')?.textContent).toContain('scheduler tick')
+    const logTimes = [...document.body.querySelectorAll('[data-log-time]')].map(node => node.textContent || '')
+    expect(logTimes).toHaveLength(3)
+    expect(logTimes.every(value => /^\d{2}:\d{2}:\d{2}$/.test(value))).toBe(true)
+    expect(document.body.querySelector('[data-testid="log-terminal"]')?.textContent).not.toContain('$')
     expect(wrapper.findAll('button').find(button => button.text() === 'Start')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
     expect(source.closed).toBe(true)
   })
 
-  it('shows test failures and reuses the existing live stream', async () => {
+  it('shows test failures and reuses the existing live stream when logs open', async () => {
     const manager = seedModel()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/m1/start' && options?.method === 'POST') throw { data: { error: 'worker exploded' } }
@@ -102,9 +134,10 @@ describe('model diagnostics', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('FAIL · worker exploded')
     expect(FakeEventSource.instances).toHaveLength(1)
-    await wrapper.findAll('button').find(button => button.text().startsWith('Logs'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
     expect(FakeEventSource.instances).toHaveLength(1)
+    expect(document.body.textContent).toContain('worker://coder')
   })
 
   it('runs direct start and stop actions while keeping logs live', async () => {
@@ -140,7 +173,9 @@ describe('model diagnostics', () => {
     const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Waiting for worker output…')
+    expect(document.body.textContent).toContain('WAITING · 0 lines')
+    expect(document.body.textContent).toContain('Waiting for worker output…')
+    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
     returnRuntime = true
     FakeEventSource.throwOnCreate = true
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
