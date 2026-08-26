@@ -190,6 +190,9 @@ describe('models page', () => {
       return []
     })
     const wrapper = await mountSuspended(ModelsPage, { route: false })
+    await wrapper.find('header button').trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models')
     const forms = wrapper.findAll('form')
     await forms[0]!.find('input').setValue('/models/coder.gguf')
     await forms[0]!.trigger('submit')
