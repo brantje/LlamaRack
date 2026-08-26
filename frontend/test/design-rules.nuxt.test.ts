@@ -84,8 +84,11 @@ describe('frontend design rules', () => {
     expect(source).not.toMatch(/<UCard>[\s\S]*data-testid="model-card"/)
     expect(source).toContain('<UModal')
 
-    const logsButton = source.match(/<UButton\b[\s\S]*?@click="openLogs\(model\)"[\s\S]*?<\/UButton>/)?.[0]
-    expect(logsButton).toBeDefined()
+    const logsClick = source.indexOf('@click="openLogs(model)"')
+    expect(logsClick).toBeGreaterThan(-1)
+    const logsButtonStart = source.lastIndexOf('<UButton', logsClick)
+    const logsButtonEnd = source.indexOf('</UButton>', logsClick)
+    const logsButton = source.slice(logsButtonStart, logsButtonEnd)
     expect(logsButton).not.toContain(':disabled=')
     expect(logsButton).not.toMatch(/\sdisabled(?:\s|>|=)/)
   })
