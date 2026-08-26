@@ -14,12 +14,8 @@ function seed() {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = [{ id: 'm1', name: 'Coder model', gguf_path: 'coder.gguf', total_bytes: 4, quantization: 'Q4_K_M', context_length: 8192 }]
-  manager.instances.value = [{
-    id: 'coder-primary', model_id: 'm1', name: 'Coder Primary', enabled: true,
-    autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true,
-    idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: []
-  }]
-  manager.runtimes.value = { 'coder-primary': [{ instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }] }
+  manager.instances.value = [{ id: 'coder-primary', model_id: 'm1', name: 'Coder Primary', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }]
+  manager.runtimes.value = { m1: [{ instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }] }
   return manager
 }
 
@@ -43,9 +39,13 @@ describe('instance control plane', () => {
 
   it('launches, stops, restarts, duplicates and kills the exact instance', async () => {
     const manager = seed()
-    mocks.request.mockImplementation(async (path: string) => {
+    let runtimeState = 'UNLOADED'
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/instances/coder-primary/start' && options?.method === 'POST') runtimeState = 'READY'
+      if (path === '/api/v1/instances/coder-primary/stop' && options?.method === 'POST') runtimeState = 'UNLOADED'
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: runtimeState }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
@@ -53,17 +53,16 @@ describe('instance control plane', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', { method: 'POST' })
-
-    manager.runtimes.value = { 'coder-primary': [{ instance_id: 'coder-primary', model_id: 'm1', state: 'READY' }] }
-    await wrapper.vm.$nextTick()
-    for (const label of ['Stop', 'Restart', 'Duplicate', 'Kill']) {
+    for (const label of ['Restart', 'Duplicate', 'Kill']) {
       await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
       await flushPromises()
     }
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/stop', { method: 'POST' })
+    const stop = wrapper.findAll('button').find(button => button.text() === 'Stop')
+    if (stop) { await stop.trigger('click'); await flushPromises() }
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/restart', { method: 'POST' })
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/duplicate', { method: 'POST' })
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/kill', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/stop', { method: 'POST' })
   })
 
   it('shows logs and deletes without deleting the registered model', async () => {
@@ -72,6 +71,7 @@ describe('instance control plane', () => {
       if (path.endsWith('/logs')) return { lines: ['worker ready', 'request complete'] }
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }
       return {}
     })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
