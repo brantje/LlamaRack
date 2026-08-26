@@ -5,7 +5,6 @@ const manager = useManager()
 const { instances, models } = manager
 const pending = ref('')
 const error = ref('')
-const copiedInstanceId = ref('')
 const logsOpen = ref(false)
 const logLines = ref<string[]>([])
 const logTitle = ref('')
@@ -13,17 +12,6 @@ const confirmation = ref<{ request: (options: Record<string, string>) => Promise
 
 function modelName(id: string) {
   return models.value.find(model => model.id === id)?.name || id
-}
-
-async function copyInstanceId(instance: Instance) {
-  error.value = ''
-  try {
-    await navigator.clipboard.writeText(instance.id)
-    copiedInstanceId.value = instance.id
-  } catch (value: any) {
-    copiedInstanceId.value = ''
-    error.value = value?.message || 'Unable to copy Instance ID'
-  }
 }
 
 async function action(instance: Instance, operation: 'start' | 'stop' | 'restart' | 'kill' | 'duplicate') {
@@ -108,15 +96,16 @@ async function showLogs(instance: Instance) {
               <h2 class="truncate text-lg font-bold text-highlighted">{{ instance.name }}</h2>
               <div class="mt-1 flex items-center gap-1">
                 <code class="break-all font-mono text-xs text-muted" data-testid="instance-id">{{ instance.id }}</code>
-                <UButton
-                  :icon="copiedInstanceId === instance.id ? 'i-lucide-check' : 'i-lucide-copy'"
+                <AppCopyButton
+                  :text="instance.id"
+                  icon-only
                   color="neutral"
                   variant="ghost"
                   size="xs"
-                  :aria-label="copiedInstanceId === instance.id ? `Copied ${instance.id}` : `Copy ${instance.id}`"
-                  :title="copiedInstanceId === instance.id ? 'Copied' : 'Copy model ID'"
+                  error-message="Unable to copy Instance ID. Select the ID and copy it manually."
                   data-testid="copy-instance-id"
-                  @click="copyInstanceId(instance)"
+                  @copied="error = ''"
+                  @error="message => error = message"
                 />
               </div>
               <p class="mt-1 text-sm text-muted">{{ modelName(instance.model_id) }}</p>
