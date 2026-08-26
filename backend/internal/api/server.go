@@ -82,30 +82,6 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 			return
 		}
 		writeJSON(w, 201, item)
-	case path == "/api/v1/artifacts" && r.Method == http.MethodGet:
-		items, err := s.models.ListArtifacts(r.Context())
-		if err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		writeJSON(w, 200, items)
-	case path == "/api/v1/artifacts/register" && r.Method == http.MethodPost:
-		if !requireOperate(w, user) {
-			return
-		}
-		var in struct {
-			Path        string `json:"path"`
-			DisplayName string `json:"display_name"`
-		}
-		if !decode(w, r, &in) {
-			return
-		}
-		item, err := s.models.RegisterArtifact(r.Context(), in.Path, in.DisplayName)
-		if err != nil {
-			writeErr(w, 400, err)
-			return
-		}
-		writeJSON(w, 201, item)
 	case path == "/api/v1/llamacpp/profile" && r.Method == http.MethodGet:
 		p, err := s.profile()
 		if err != nil {
