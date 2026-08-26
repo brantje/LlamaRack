@@ -8,7 +8,7 @@ Related issue: #1
 
 `llamacpp-manager` is a single-host web application that manages the complete lifecycle of llama.cpp model servers and exposes one stable OpenAI-compatible API to clients.
 
-The application must hide individual `llama-server` processes from clients. Users interact with a Nuxt web UI and a management REST API; inference clients interact only with the unified `/v1` gateway.
+The application must hide individual `llama-server` processes from clients. Users interact with a Nuxt web UI and a management API; management commands and resources use REST while observed runtime lifecycle state is pushed over an authenticated WebSocket. Inference clients interact only with the unified `/v1` gateway.
 
 ## 2. Product goals
 
@@ -30,6 +30,7 @@ The architecture must support:
 - OpenAI-compatible inference endpoints;
 - LiteLLM interoperability;
 - local management authentication and inference API keys;
+- live observed runtime lifecycle events;
 - Prometheus metrics and per-instance logs.
 
 ## 3. Non-goals for v1
@@ -49,7 +50,6 @@ The following are intentionally excluded:
 - OIDC;
 - multiple Hugging Face identities;
 - GraphQL;
-- management WebSockets;
 - OpenTelemetry;
 - centralized external log aggregation.
 
@@ -99,7 +99,7 @@ Workers must bind to loopback or another non-public interface controlled by the 
 Owns the external listener and dispatches requests into two API namespaces:
 
 - `/v1/*` — OpenAI-compatible inference API.
-- `/api/v1/*` — llamacpp-manager management API.
+- `/api/v1/*` — llamacpp-manager management API, including the authenticated runtime-event WebSocket.
 
 It also serves the compiled Nuxt application and `/metrics`.
 
@@ -144,7 +144,7 @@ Responsibilities:
 - probe readiness and health;
 - terminate or kill workers when required;
 - detect unexpected exits;
-- expose observed runtime state;
+- expose observed runtime state and ordered runtime transitions;
 - reconcile persisted configuration with actual processes after manager restart.
 
 Only the supervisor may directly spawn or terminate workers.
@@ -250,7 +250,7 @@ The frontend is a Nuxt/Vue application developed independently under `web/` but 
 
 The Go application serves the built frontend. A Node.js runtime is not required in the production container.
 
-The UI communicates only with `/api/v1/*`; it never talks directly to a worker.
+The UI communicates only with manager-owned `/api/v1/*` endpoints; it never talks directly to a worker. REST remains the command/configuration transport. `/api/v1/ws` is an authenticated WebSocket carrying supervisor-observed runtime state. The WebSocket is authoritative while connected; REST runtime reads are used for initial hydration and disconnected recovery.
 
 Primary UI areas:
 
@@ -284,7 +284,8 @@ Conceptual resource groups:
 - `/api/v1/users`;
 - `/api/v1/api-keys`;
 - `/api/v1/settings`;
-- `/api/v1/metrics`.
+- `/api/v1/metrics`;
+- `/api/v1/ws` — authenticated observed runtime lifecycle events.
 
 The exact endpoint contract will be refined during implementation without changing component ownership.
 
@@ -366,7 +367,7 @@ Durable state errors are considered manager-level failures. The application must
 - Inference API keys are stored only as hashes after creation.
 - Provider tokens are encrypted at rest and never returned in full after storage.
 - Logs and API responses must redact known secrets.
-- Management authentication is enforced server-side for every protected operation.
+- Management authentication is enforced server-side for every protected operation, including the runtime WebSocket handshake.
 - User-provided model IDs, filenames and provider metadata must not be trusted as filesystem paths.
 - Download destinations must remain under the configured model directory.
 
@@ -434,6 +435,7 @@ The following are hard invariants:
 9. A partially downloaded model is never treated as a usable completed artifact.
 10. New llama.cpp options should not require a manager release merely to become visible in Advanced configuration.
 11. V1 management access is authenticated but not role-differentiated.
+12. While connected, frontend runtime state is driven by supervisor-observed WebSocket events rather than optimistic lifecycle mutations.
 
 ## 16. Acceptance criteria
 
@@ -442,6 +444,7 @@ This architecture is considered correctly implemented when:
 - one manager process can supervise multiple independent llama.cpp workers;
 - the UI and clients use only manager-owned endpoints;
 - model lifecycle can recover from worker crashes and manager restarts;
+- observed lifecycle transitions are pushed to authenticated management clients without waiting for lifecycle command responses to finish;
 - model routing and scheduling are separate services with separate responsibilities;
 - Always-On and idle unload policies can operate without client awareness;
 - OpenAI-compatible streaming can pass through the gateway without full-response buffering;
