@@ -74,7 +74,7 @@ describe('model diagnostics', () => {
     expect(editButtons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
-  it('tests a model to READY and shows live worker logs in a modal', async () => {
+  it('tests a model to READY and shows live worker logs in a terminal modal', async () => {
     const manager = seedModel()
     let started = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
@@ -98,15 +98,19 @@ describe('model diagnostics', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('coder logs')
+    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
 
     source.emit('[stderr] model loaded')
     source.emit('[stdout] server ready')
+    source.emit('scheduler tick')
     await flushPromises()
 
     expect(wrapper.text()).toContain('PASS · READY · PID 4242 · port 31000')
-    expect(document.body.textContent).toContain('LIVE')
-    expect(document.body.textContent).toContain('2 lines')
+    expect(document.body.textContent).toContain('LIVE · 3 lines')
     expect(document.body.textContent).toContain('model loaded')
+    expect(document.body.querySelector('[data-stream="stderr"]')?.textContent).toContain('model loaded')
+    expect(document.body.querySelector('[data-stream="stdout"]')?.textContent).toContain('server ready')
+    expect(document.body.querySelector('[data-stream="log"]')?.textContent).toContain('scheduler tick')
     expect(wrapper.findAll('button').find(button => button.text() === 'Start')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
     expect(source.closed).toBe(true)
@@ -165,7 +169,9 @@ describe('model diagnostics', () => {
     const wrapper = await mountSuspended(ModelsPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('Waiting for worker output…')
+    expect(document.body.textContent).toContain('WAITING · 0 lines')
+    expect(document.body.textContent).toContain('waiting for worker output')
+    expect(document.body.querySelector('[data-testid="log-terminal"]')).not.toBeNull()
     returnRuntime = true
     FakeEventSource.throwOnCreate = true
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
