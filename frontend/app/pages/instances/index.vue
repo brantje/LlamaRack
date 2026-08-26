@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Instance } from '~/app/composables/useManager'
+import type { Instance } from '~/composables/useManager'
 
 const manager = useManager()
 const { instances, models } = manager
