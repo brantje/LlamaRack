@@ -237,7 +237,7 @@ async function remove(id: string) {
           </div>
           <div>
             <dt class="text-xs font-semibold uppercase tracking-wide text-dimmed">Lifecycle</dt>
-            <dd class="mt-1">{{ model.always_on ? 'Always on' : model.autoload_enabled ? 'Autoload on request' : 'Manual' }}</dd>
+            <dd class="mt-1">{{ model.always_on ? 'always on' : model.autoload_enabled ? 'Autoload on request' : 'Manual' }}</dd>
           </div>
         </dl>
 
