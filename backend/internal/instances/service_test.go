@@ -26,6 +26,7 @@ func TestSlugifyAndValidation(t *testing.T) {
 	for _, in := range []CreateInput{
 		{ModelID: "m1"},
 		{ModelID: "m1", Name: "---"},
+		{ModelID: "m1", Name: "One", Slug: "---"},
 		{Name: "One"},
 		{ModelID: "m1", Name: "One", Priority: "urgent"},
 		{ModelID: "m1", Name: "One", GPUMode: "magic"},
@@ -39,13 +40,13 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	ctx := context.Background()
 	s, _ := testService(t)
 	i, err := s.Create(ctx, CreateInput{
-		ModelID: "m1", Name: "Coder Primary", Enabled: boolp(false), Autoload: boolp(false), AlwaysOn: true,
+		ModelID: "m1", Name: "Coder Primary", Slug: "Coding API", Enabled: boolp(false), Autoload: boolp(false), AlwaysOn: true,
 		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90,
 		GPUMode: "manual", GPUDevices: []string{"0", " 1 ", "0", ""}, TensorSplit: "1,1",
 		Options: map[string]string{"ctx-size": "8192", " threads ": "8", "": "ignored"},
 	})
 	if err != nil { t.Fatal(err) }
-	if i.ID != "coder-primary" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || len(i.GPUDevices) != 2 { t.Fatalf("created=%+v", i) }
+	if i.ID != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || len(i.GPUDevices) != 2 { t.Fatalf("created=%+v", i) }
 	got, err := s.Get(ctx, i.ID)
 	if err != nil || got.TensorSplit != "1,1" || len(got.GPUDevices) != 2 { t.Fatalf("get=%+v err=%v", got, err) }
 	items, err := s.List(ctx)
@@ -55,9 +56,9 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	opts, err := s.Options(ctx, i.ID)
 	if err != nil || len(opts) != 2 || opts["threads"] != "8" { t.Fatalf("options=%+v err=%v", opts, err) }
 
-	updated, err := s.Update(ctx, i.ID, UpdateInput{Name: "Coder Renamed", Enabled: boolp(true), Autoload: boolp(true), Priority: "normal", EvictionEnabled: boolp(true), GPUMode: "auto", Options: map[string]string{"flash-attn": "true"}})
+	updated, err := s.Update(ctx, i.ID, UpdateInput{Name: "Coder Renamed", Slug: "Renamed API", Enabled: boolp(true), Autoload: boolp(true), Priority: "normal", EvictionEnabled: boolp(true), GPUMode: "auto", Options: map[string]string{"flash-attn": "true"}})
 	if err != nil { t.Fatal(err) }
-	if updated.ID != "coder-renamed" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload { t.Fatalf("updated=%+v", updated) }
+	if updated.ID != "renamed-api" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload { t.Fatalf("updated=%+v", updated) }
 	if _, err := s.Get(ctx, i.ID); err == nil { t.Fatal("old id should no longer resolve") }
 	opts, _ = s.Options(ctx, updated.ID)
 	if len(opts) != 1 || opts["flash-attn"] != "true" { t.Fatalf("renamed options=%+v", opts) }
@@ -78,7 +79,7 @@ func TestCreateAndUpdateErrors(t *testing.T) {
 	if _, err := s.Create(ctx, CreateInput{ModelID: "missing", Name: "Nope"}); err == nil { t.Fatal("missing model should fail") }
 	if _, err := s.Update(ctx, "missing", UpdateInput{Name: "Nope", ModelID: "m1"}); err == nil { t.Fatal("missing instance update should fail") }
 	if _, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "One"}); err != nil { t.Fatal(err) }
-	if _, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "One"}); err == nil { t.Fatal("duplicate slug should fail") }
+	if _, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Different Name", Slug: "One"}); err == nil { t.Fatal("duplicate slug should fail") }
 	if err := db.Close(); err != nil { t.Fatal(err) }
 	if _, err := s.List(ctx); err == nil { t.Fatal("closed db list should fail") }
 	if _, err := s.Options(ctx, "one"); err == nil { t.Fatal("closed db options should fail") }
