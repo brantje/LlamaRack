@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { parseLlamaCppOptions } from '~/utils/llamacppOptions'
-
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
@@ -8,16 +6,14 @@ const originalID = computed(() => String(route.params.id || ''))
 const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
-const originalName = ref('')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 const form = reactive({
   model_id: '', name: '', enabled: true, always_on: false, autoload_enabled: true,
   priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0,
-  gpu_mode: 'auto', gpu_devices: '', tensor_split: '', options: ''
+  gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '', options: {} as Record<string, string>
 })
 const modelItems = computed(() => manager.models.value.map(model => ({ label: model.name, value: model.id })))
 const priorityItems = ['low', 'normal', 'high'].map(value => ({ label: value[0]!.toUpperCase() + value.slice(1), value }))
-const gpuItems = [{ label: 'Automatic', value: 'auto' }, { label: 'Manual', value: 'manual' }]
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/-+/g, '-').replace(/^[-._]+|[-._]+$/g, '')
@@ -29,8 +25,7 @@ onMounted(async () => {
       manager.request<any>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`),
       manager.request<Record<string, string>>(`/api/v1/instances/${encodeURIComponent(originalID.value)}/options`)
     ])
-    originalName.value = instance.name
-    Object.assign(form, instance, { gpu_devices: (instance.gpu_devices || []).join(','), options: Object.entries(options || {}).map(([key, value]) => `${key}=${value}`).join('\n') })
+    Object.assign(form, instance, { gpu_devices: [...(instance.gpu_devices || [])], options: { ...(options || {}) } })
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Instance'
   } finally {
@@ -71,8 +66,8 @@ async function submit() {
         always_on: form.always_on, autoload_enabled: form.autoload_enabled,
         priority: form.priority, eviction_enabled: form.eviction_enabled,
         idle_unload_seconds: form.idle_unload_seconds, gpu_mode: form.gpu_mode,
-        gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices.split(',').map(x => x.trim()).filter(Boolean) : [],
-        tensor_split: form.tensor_split.trim(), options: parseLlamaCppOptions(form.options, manager.profile.value),
+        gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices : [],
+        tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '', options: form.options,
         restart_running: running, confirm_model_id_change: rename
       }
     })
@@ -89,7 +84,7 @@ async function submit() {
 <template>
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6"><UPageHeader class="min-w-0 flex-1" headline="CONTROL PLANE" title="Edit Instance" :description="`Reconfigure ${originalID}. Changes to a running Instance are applied by automatic restart.`" /><UButton to="/instances" color="neutral" variant="soft">Back to Instances</UButton></div>
-    <UCard class="max-w-4xl">
+    <UCard class="max-w-5xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <div v-if="loading" class="space-y-3"><USkeleton class="h-10 w-full" /><USkeleton class="h-40 w-full" /></div>
       <UForm v-else :state="form" class="space-y-6" @submit="submit">
@@ -98,10 +93,13 @@ async function submit() {
         <USeparator label="Lifecycle & scheduling" />
         <div class="grid gap-4 md:grid-cols-2"><UFormField label="Priority" name="priority"><USelectMenu v-model="form.priority" class="w-full" :items="priorityItems" label-key="label" value-key="value" /></UFormField><UFormField label="Idle unload timeout (seconds)" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField></div>
         <div class="space-y-3"><UCheckbox v-model="form.enabled" label="Enabled" /><UCheckbox v-model="form.always_on" label="Always On" /><UCheckbox v-model="form.autoload_enabled" label="Autoload on request" /><UCheckbox v-model="form.eviction_enabled" label="Allow resource-pressure eviction" /></div>
+
         <USeparator label="Placement" />
-        <div class="grid gap-4 md:grid-cols-2"><UFormField label="GPU placement" name="gpu_mode"><USelectMenu v-model="form.gpu_mode" class="w-full" :items="gpuItems" label-key="label" value-key="value" /></UFormField><UFormField v-if="form.gpu_mode === 'manual'" label="GPU devices" name="gpu_devices"><UInput v-model="form.gpu_devices" class="w-full" placeholder="0,1" /></UFormField><UFormField label="Tensor split" name="tensor_split"><UInput v-model="form.tensor_split" class="w-full" placeholder="1,1" /></UFormField></div>
+        <HardwarePlacementEditor v-model:gpu-mode="form.gpu_mode" v-model:gpu-devices="form.gpu_devices" v-model:tensor-split="form.tensor_split" />
+
         <USeparator label="llama.cpp overrides" />
-        <UFormField label="Instance overrides" name="options" description="One key=value pair per line. Validated against the detected llama-server; Instance values override Model defaults."><UTextarea v-model="form.options" class="w-full font-mono" :rows="7" /></UFormField>
+        <LlamaCppOptionsEditor v-model="form.options" scope="instance" :model-id="form.model_id" :instance-id="originalID" />
+
         <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy">Save & apply</UButton></div>
       </UForm>
     </UCard>
