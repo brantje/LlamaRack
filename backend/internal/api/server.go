@@ -138,6 +138,7 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 		models.CreateModelInput
 		FirstInstance *struct {
 			Name            string `json:"name"`
+			Slug            string `json:"slug,omitempty"`
 			AlwaysOn        bool   `json:"always_on"`
 			Autoload        *bool  `json:"autoload_enabled,omitempty"`
 			EvictionEnabled *bool  `json:"eviction_enabled,omitempty"`
@@ -157,7 +158,7 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	instance, err := s.lifecycle.Instances().Create(r.Context(), instances.CreateInput{
-		ModelID: model.ID, Name: in.FirstInstance.Name, AlwaysOn: in.FirstInstance.AlwaysOn,
+		ModelID: model.ID, Name: in.FirstInstance.Name, Slug: in.FirstInstance.Slug, AlwaysOn: in.FirstInstance.AlwaysOn,
 		Autoload: in.FirstInstance.Autoload, EvictionEnabled: in.FirstInstance.EvictionEnabled,
 	})
 	if err != nil {
@@ -522,7 +523,11 @@ func (s *Server) updateInstance(w http.ResponseWriter, r *http.Request, id strin
 		writeErr(w, 404, err)
 		return
 	}
-	newID := instances.Slugify(in.Name)
+	newIDSource := in.Slug
+	if strings.TrimSpace(newIDSource) == "" {
+		newIDSource = in.Name
+	}
+	newID := instances.Slugify(newIDSource)
 	if newID != current.ID && !in.ConfirmModelIDChange {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "renaming this Instance changes the OpenAI model ID; confirmation required"})
 		return
