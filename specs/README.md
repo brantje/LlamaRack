@@ -17,6 +17,12 @@ These design specifications define the initial architecture and product contract
 
 The recommended review order is the numeric order above. Architecture, data model and lifecycle establish the invariants used by routing and scheduling. API/options/providers/auth/UI build on those contracts.
 
+## Model configuration UI parity
+
+Any specification or implementation change that introduces or changes a **model-scoped configuration option** must update `/models/new` in the same change. The model creation workflow must expose the same model-level controls, defaults, allowed values, validation and authorization rules as the post-creation model configuration surfaces.
+
+This includes lifecycle, scheduler and routing settings such as Autoload, Always On, idle/startup timeout, priority and routing policy, as well as model-level llama.cpp overrides. A model configuration feature is incomplete if a user must create the model first and only then can configure that option.
+
 ## Implementation rule
 
 If implementation requires violating an invariant in these specs, update and review the relevant spec first rather than silently diverging from the documented architecture.
