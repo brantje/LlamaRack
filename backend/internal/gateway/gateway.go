@@ -19,12 +19,11 @@ import (
 
 type Gateway struct {
 	auth      *auth.Service
-	models    *models.Service
 	lifecycle *lifecycle.Service
 }
 
-func New(a *auth.Service, m *models.Service, l *lifecycle.Service) *Gateway {
-	return &Gateway{auth: a, models: m, lifecycle: l}
+func New(a *auth.Service, _ *models.Service, l *lifecycle.Service) *Gateway {
+	return &Gateway{auth: a, lifecycle: l}
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -45,20 +44,18 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request_error", "invalid_body", "Invalid request body")
 		return
 	}
-	var envelope struct {
-		Model string `json:"model"`
-	}
+	var envelope struct{ Model string `json:"model"` }
 	if err := json.Unmarshal(body, &envelope); err != nil || strings.TrimSpace(envelope.Model) == "" {
 		writeError(w, 400, "invalid_request_error", "model_required", "A model ID is required")
 		return
 	}
-	endpoint, release, err := g.lifecycle.Acquire(r.Context(), envelope.Model)
+	// Phase 5.5: model is exactly instance.id. Acquire never selects a sibling.
+	endpoint, release, err := g.lifecycle.Acquire(r.Context(), strings.TrimSpace(envelope.Model))
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}
 	defer release()
-
 	target, err := url.Parse(endpoint)
 	if err != nil {
 		writeError(w, 500, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
@@ -89,7 +86,7 @@ func (g *Gateway) authenticate(ctx context.Context, header string) error {
 }
 
 func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
-	items, err := g.models.List(r.Context())
+	items, err := g.lifecycle.Instances().List(r.Context())
 	if err != nil {
 		writeError(w, 500, "server_error", "database_error", "Unable to list models")
 		return
@@ -101,9 +98,9 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
 		OwnedBy string `json:"owned_by"`
 	}
 	out := make([]item, 0, len(items))
-	for _, m := range items {
-		if m.Enabled {
-			out = append(out, item{ID: m.PublicID, Object: "model", Created: time.Now().Unix(), OwnedBy: "llamacpp-manager"})
+	for _, instance := range items {
+		if instance.Enabled {
+			out = append(out, item{ID: instance.ID, Object: "model", Created: time.Now().Unix(), OwnedBy: "llamacpp-manager"})
 		}
 	}
 	writeJSON(w, 200, map[string]any{"object": "list", "data": out})
