@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -140,17 +141,8 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 			return
 		}
 		writeJSON(w, 201, map[string]any{"key": key, "secret": secret})
-	case strings.HasPrefix(path, "/api/v1/api-keys/") && strings.HasSuffix(path, "/revoke") && r.Method == http.MethodPost:
-		if !auth.IsAdmin(user.Role) {
-			writeForbidden(w)
-			return
-		}
-		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/api-keys/"), "/revoke")
-		if err := s.auth.RevokeAPIKey(r.Context(), id); err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-		w.WriteHeader(204)
+	case strings.HasPrefix(path, "/api/v1/api-keys/"):
+		s.apiKeyRoute(w, r, path, user)
 	case strings.HasPrefix(path, "/api/v1/models/"):
 		s.modelRoute(w, r, path, user)
 	case strings.HasPrefix(path, "/api/v1/instances/") && strings.HasSuffix(path, "/logs/stream") && r.Method == http.MethodGet:
@@ -162,6 +154,66 @@ func (s *Server) authenticated(w http.ResponseWriter, r *http.Request, path stri
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 	}
+}
+
+func (s *Server) apiKeyRoute(w http.ResponseWriter, r *http.Request, path string, user auth.User) {
+	if !auth.IsAdmin(user.Role) {
+		writeForbidden(w)
+		return
+	}
+	rest := strings.TrimPrefix(path, "/api/v1/api-keys/")
+	parts := strings.Split(rest, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "revoke" {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.auth.DeleteAPIKey(r.Context(), parts[0]); err != nil {
+			writeAPIKeyMutationError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if len(parts) != 1 || parts[0] == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	id := parts[0]
+	switch r.Method {
+	case http.MethodPatch:
+		var in struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Enabled == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled is required"})
+			return
+		}
+		if err := s.auth.SetAPIKeyEnabled(r.Context(), id, *in.Enabled); err != nil {
+			writeAPIKeyMutationError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := s.auth.DeleteAPIKey(r.Context(), id); err != nil {
+			writeAPIKeyMutationError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func writeAPIKeyMutationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "api key not found"})
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err)
 }
 
 func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request, id string) {
