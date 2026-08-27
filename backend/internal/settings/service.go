@@ -12,29 +12,28 @@ import (
 )
 
 const (
-	SessionLifetimeSeconds     = "session_lifetime_seconds"
-	LoginProtectionEnabled    = "login_protection_enabled"
-	LoginFailureThreshold     = "login_failure_threshold"
-	LoginLockoutSeconds       = "login_lockout_seconds"
-	TrustedProxies            = "trusted_proxies"
-	AllowedOrigins            = "allowed_origins"
-	ExternalURL               = "external_url"
-	StartupTimeoutSeconds     = "startup_timeout_seconds"
-	IdleUnloadSeconds         = "idle_unload_seconds"
-	AlwaysOnReconcileSeconds  = "always_on_reconcile_seconds"
+	SessionLifetimeSeconds    = "session_lifetime_seconds"
+	LoginProtectionEnabled   = "login_protection_enabled"
+	LoginFailureThreshold    = "login_failure_threshold"
+	LoginLockoutSeconds      = "login_lockout_seconds"
+	TrustedProxies           = "trusted_proxies"
+	AllowedOrigins           = "allowed_origins"
+	ExternalURL              = "external_url"
+	StartupTimeoutSeconds    = "startup_timeout_seconds"
+	IdleUnloadSeconds        = "idle_unload_seconds"
+	AlwaysOnReconcileSeconds = "always_on_reconcile_seconds"
 )
 
 type Defaults struct {
-	SessionLifetime          time.Duration
-	AllowedOrigins           string
-	StartupTimeout           time.Duration
-	IdleUnloadTimeout        time.Duration
-	AlwaysOnReconcile        time.Duration
-	DataDir                  string
-	ModelsDir                string
-	DatabasePath             string
-	ListenAddr               string
-	LlamaServerPath          string
+	SessionLifetime   time.Duration
+	AllowedOrigins    string
+	StartupTimeout    time.Duration
+	AlwaysOnReconcile time.Duration
+	DataDir           string
+	ModelsDir         string
+	DatabasePath      string
+	ListenAddr        string
+	LlamaServerPath   string
 }
 
 type Value struct {
@@ -52,17 +51,17 @@ type RuntimeInfo struct {
 }
 
 type General struct {
-	SessionLifetime         Value       `json:"session_lifetime_seconds"`
-	LoginProtection        Value       `json:"login_protection_enabled"`
-	LoginFailureThreshold  Value       `json:"login_failure_threshold"`
-	LoginLockout           Value       `json:"login_lockout_seconds"`
-	TrustedProxies         Value       `json:"trusted_proxies"`
-	AllowedOrigins         Value       `json:"allowed_origins"`
-	ExternalURL            Value       `json:"external_url"`
-	StartupTimeout         Value       `json:"startup_timeout_seconds"`
-	IdleUnloadTimeout      Value       `json:"idle_unload_seconds"`
-	AlwaysOnReconcile      Value       `json:"always_on_reconcile_seconds"`
-	Runtime                RuntimeInfo `json:"runtime"`
+	SessionLifetime        Value       `json:"session_lifetime_seconds"`
+	LoginProtection       Value       `json:"login_protection_enabled"`
+	LoginFailureThreshold Value       `json:"login_failure_threshold"`
+	LoginLockout          Value       `json:"login_lockout_seconds"`
+	TrustedProxies        Value       `json:"trusted_proxies"`
+	AllowedOrigins        Value       `json:"allowed_origins"`
+	ExternalURL           Value       `json:"external_url"`
+	StartupTimeout        Value       `json:"startup_timeout_seconds"`
+	IdleUnloadTimeout     Value       `json:"idle_unload_seconds"`
+	AlwaysOnReconcile     Value       `json:"always_on_reconcile_seconds"`
+	Runtime               RuntimeInfo `json:"runtime"`
 }
 
 type definition struct {
@@ -91,7 +90,7 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			AllowedOrigins:           {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string"},
 			ExternalURL:              {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
 			StartupTimeoutSeconds:    {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
-			IdleUnloadSeconds:        {env: "LCM_IDLE_UNLOAD_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.IdleUnloadTimeout/time.Second), 10), kind: "int", min: 0, max: 7 * 24 * 3600},
+			IdleUnloadSeconds:        {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
 			AlwaysOnReconcileSeconds: {env: "LCM_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
 		},
 		runtime: RuntimeInfo{DataDir: defaults.DataDir, ModelsDir: defaults.ModelsDir, DatabasePath: defaults.DatabasePath, ListenAddr: defaults.ListenAddr, LlamaServerPath: defaults.LlamaServerPath},
@@ -103,12 +102,14 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 	if !ok {
 		return Value{}, fmt.Errorf("unknown manager setting %q", key)
 	}
-	if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
-		parsed, err := parse(def, value)
-		if err != nil {
-			return Value{}, fmt.Errorf("invalid %s: %w", def.env, err)
+	if def.env != "" {
+		if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
+			parsed, err := parse(def, value)
+			if err != nil {
+				return Value{}, fmt.Errorf("invalid %s: %w", def.env, err)
+			}
+			return Value{Value: parsed, Source: "environment", Editable: false}, nil
 		}
-		return Value{Value: parsed, Source: "environment", Editable: false}, nil
 	}
 	var stored string
 	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
@@ -134,8 +135,10 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 	if !ok {
 		return Value{}, fmt.Errorf("unknown manager setting %q", key)
 	}
-	if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" {
-		return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
+	if def.env != "" {
+		if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" {
+			return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
+		}
 	}
 	serialized := fmt.Sprint(value)
 	parsed, err := parse(def, serialized)
