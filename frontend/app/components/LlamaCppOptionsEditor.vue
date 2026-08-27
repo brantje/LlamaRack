@@ -70,11 +70,17 @@ const inheritedSources = computed(() => {
 
 const allOptions = computed<OptionDefinition[]>(() => {
   const discovered = [...(config.value?.profile?.options || manager.profile.value?.options || [])]
+  const overriddenKeys = new Set(Object.keys(overrides.value))
   const known = new Set(discovered.map(option => option.key))
-  for (const key of Object.keys(overrides.value)) {
+  for (const key of overriddenKeys) {
     if (!known.has(key)) discovered.push({ key, description: 'Retained from an older llama-server schema.', kind: 'string', unsupported: true })
   }
-  return discovered.sort((a, b) => a.key.localeCompare(b.key))
+  return discovered.sort((a, b) => {
+    const aOverridden = overriddenKeys.has(a.key)
+    const bOverridden = overriddenKeys.has(b.key)
+    if (aOverridden !== bOverridden) return aOverridden ? -1 : 1
+    return a.key.localeCompare(b.key)
+  })
 })
 const visibleOptions = computed(() => {
   const term = search.value.trim().toLowerCase()
