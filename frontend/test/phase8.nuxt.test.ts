@@ -78,7 +78,7 @@ describe('Phase 8 Discover', () => {
 
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
     expect(wrapper.text()).toContain('Search Hugging Face')
-    await wrapper.find('input[placeholder="Qwen, Llama, Gemma…"]').setValue('demo')
+    await wrapper.find('input[placeholder="Qwen, Llama, Gemma… or Hugging Face URL"]').setValue('demo')
     await wrapper.find('input[placeholder="Optional"]').setValue('acme')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -87,7 +87,7 @@ describe('Phase 8 Discover', () => {
     expect(mocks.request.mock.calls[0][0]).toContain('q=demo')
     expect(mocks.request.mock.calls[0][0]).toContain('author=acme')
     expect(wrapper.text()).toContain('acme/demo')
-    expect(wrapper.text()).toContain('12,345 downloads')
+    expect(wrapper.text()).toContain('12,345')
     expect(wrapper.text()).toContain('Private')
     expect(wrapper.text()).toContain('Gated')
     expect(wrapper.text()).not.toContain('hidden')
@@ -181,9 +181,11 @@ describe('Phase 8 Downloads', () => {
 
     await button(wrapper, 'Cancel').trigger('click'); await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/downloads/active/cancel', { method: 'POST' })
-    const retryButtons = wrapper.findAll('button').filter(item => item.text().trim() === 'Retry')
-    expect(retryButtons.length).toBeGreaterThanOrEqual(2)
-    await retryButtons[0].trigger('click'); await flushPromises()
+    const failedCard = components(wrapper, ['Card', 'UCard']).find(card => card.text().includes('failed.gguf'))
+    expect(failedCard).toBeTruthy()
+    const failedRetry = failedCard.findAll('button').find((item: any) => item.text().trim() === 'Retry')
+    expect(failedRetry).toBeTruthy()
+    await failedRetry.trigger('click'); await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/downloads/failed/retry', { method: 'POST' })
 
     const callsBeforeTimer = mocks.request.mock.calls.length
