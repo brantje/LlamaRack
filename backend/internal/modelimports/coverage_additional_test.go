@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
 	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
@@ -130,7 +131,7 @@ func TestArtifactOptionsAndPathValidationBranches(t *testing.T) {
 }
 
 func TestEnsureModelFileAndLookupErrorBranches(t *testing.T) {
-	ctx, modelsDir, db, modelService, _, service := newImportFixture(t, http.NotFoundHandler())
+	ctx, modelsDir, db, _, _, service := newImportFixture(t, http.NotFoundHandler())
 	if err := os.Mkdir(filepath.Join(modelsDir, "directory.gguf"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +158,10 @@ func TestEnsureModelFileAndLookupErrorBranches(t *testing.T) {
 	if _, found, err := service.modelByPath(ctx, "does-not-exist.gguf"); err != nil || found {
 		t.Fatalf("unexpected lookup found=%v err=%v", found, err)
 	}
-	_ = modelService
 }
 
 func TestRepairOptionsInsertsMissingHelpersAndCleanupEmptyJob(t *testing.T) {
-	ctx, modelsDir, db, modelService, _, service := newImportFixture(t, http.NotFoundHandler())
+	ctx, modelsDir, _, modelService, _, service := newImportFixture(t, http.NotFoundHandler())
 	if err := os.WriteFile(filepath.Join(modelsDir, "base.gguf"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,6 @@ func TestRepairOptionsInsertsMissingHelpersAndCleanupEmptyJob(t *testing.T) {
 	if err := service.CleanupJobSafe(ctx, "no-imports"); err != nil {
 		t.Fatal(err)
 	}
-	_ = db
 }
 
 func TestModelLookupReturnsDatabaseError(t *testing.T) {
