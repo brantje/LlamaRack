@@ -127,11 +127,14 @@ func TestEvictionPlanUsesActivityAlwaysOnAndInstancePolicy(t *testing.T) {
 		plan, err := s.EvictionPlan(ctx, 1); release()
 		if err != nil || plan.Fits || len(plan.Evict) != 0 { t.Fatalf("active plan=%+v err=%v", plan, err) }
 	})
-	t.Run("always-on protected", func(t *testing.T) {
-		s, _, m, _, _ := setupLifecycle(t, true, true)
+	t.Run("always-on follows eviction policy", func(t *testing.T) {
+		s, _, m, _, exec := setupLifecycle(t, true, true)
 		if _, err := s.StartModel(ctx, m.ID); err != nil { t.Fatal(err) }
 		plan, err := s.EvictionPlan(ctx, 1)
-		if err != nil || plan.Fits || len(plan.Evict) != 0 { t.Fatalf("always-on plan=%+v err=%v", plan, err) }
+		if err != nil || !plan.Fits || len(plan.Evict) != 1 || !plan.Evict[0].AlwaysOn { t.Fatalf("evictable always-on plan=%+v err=%v", plan, err) }
+		exec("UPDATE instances SET eviction_enabled=0 WHERE model_id=?", m.ID)
+		plan, err = s.EvictionPlan(ctx, 1)
+		if err != nil || plan.Fits || len(plan.Evict) != 0 { t.Fatalf("protected always-on plan=%+v err=%v", plan, err) }
 	})
 }
 
