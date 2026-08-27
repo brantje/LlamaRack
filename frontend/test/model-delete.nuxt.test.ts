@@ -33,9 +33,13 @@ function resetState() {
 }
 
 function modalCheckbox() {
-  const input = document.body.querySelector<HTMLInputElement>('[data-testid="model-delete-files"] input, input[data-testid="model-delete-files"]')
-  if (!input) throw new Error('Missing model file deletion checkbox')
-  return input
+  const checkbox = document.body.querySelector<HTMLElement>('[data-testid="model-delete-files"] [role="checkbox"]')
+  if (!checkbox) throw new Error('Missing model file deletion checkbox')
+  return checkbox
+}
+
+function checkboxChecked() {
+  return modalCheckbox().getAttribute('aria-checked') === 'true'
 }
 
 async function clickModal(kind: 'confirm' | 'cancel') {
@@ -63,7 +67,7 @@ describe('model file deletion', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
     await flushPromises()
 
-    expect(modalCheckbox().checked).toBe(false)
+    expect(checkboxChecked()).toBe(false)
     expect(document.body.textContent).toContain('model file will be preserved')
     expect(document.body.querySelector('[data-testid="model-delete-warning"]')).toBeNull()
 
@@ -82,7 +86,7 @@ describe('model file deletion', () => {
     modalCheckbox().click()
     await flushPromises()
 
-    expect(modalCheckbox().checked).toBe(true)
+    expect(checkboxChecked()).toBe(true)
     expect(document.body.textContent).toContain('permanently removed from disk')
     expect(document.body.textContent).toContain('models/coder.gguf')
     expect(document.body.textContent).toContain('4 MiB')
@@ -94,7 +98,7 @@ describe('model file deletion', () => {
     await wrapper.vm.$nextTick()
     await deleteButton().trigger('click')
     await flushPromises()
-    expect(modalCheckbox().checked).toBe(false)
+    expect(checkboxChecked()).toBe(false)
     await clickModal('cancel')
   })
 })
