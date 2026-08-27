@@ -150,27 +150,43 @@ func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.
 	if len(samples) == 0 || len(snapshot.GPUs) == 0 {
 		return samples
 	}
-	var globalUtilization float64
-	var globalVRAM int64
+
+	byID := make(map[string]hardware.GPU, len(snapshot.GPUs))
 	for _, gpu := range snapshot.GPUs {
-		globalUtilization += gpu.UtilizationPct
-		globalVRAM += gpu.UsedBytes
+		byID[gpu.ID] = gpu
 	}
-	globalUtilization /= float64(len(snapshot.GPUs))
-	for index := range samples {
-		// If placement was attributed, keep the collector's process-scoped
-		// semantics. The fallback is only for the Docker/PID-namespace failure
-		// mode where no GPU process can be matched at all.
-		if len(samples[index].GPUDevices) != 0 {
-			continue
+	fallbackGPUs := func(sample telemetry.Sample) []hardware.GPU {
+		if len(sample.GPUDevices) == 0 {
+			return snapshot.GPUs
 		}
+		selected := make([]hardware.GPU, 0, len(sample.GPUDevices))
+		for _, deviceID := range sample.GPUDevices {
+			if gpu, ok := byID[deviceID]; ok {
+				selected = append(selected, gpu)
+			}
+		}
+		if len(selected) == 0 {
+			return snapshot.GPUs
+		}
+		return selected
+	}
+
+	for index := range samples {
+		gpus := fallbackGPUs(samples[index])
 		if samples[index].GPUUtilizationPct == nil {
-			value := globalUtilization
-			samples[index].GPUUtilizationPct = &value
+			var utilization float64
+			for _, gpu := range gpus {
+				utilization += gpu.UtilizationPct
+			}
+			utilization /= float64(len(gpus))
+			samples[index].GPUUtilizationPct = &utilization
 		}
 		if samples[index].VRAMUsedBytes == nil {
-			value := globalVRAM
-			samples[index].VRAMUsedBytes = &value
+			var used int64
+			for _, gpu := range gpus {
+				used += gpu.UsedBytes
+			}
+			samples[index].VRAMUsedBytes = &used
 		}
 	}
 	return samples

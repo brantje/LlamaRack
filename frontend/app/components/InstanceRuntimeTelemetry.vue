@@ -8,9 +8,10 @@ const props = defineProps<{
 
 const active = computed(() => ['STARTING', 'LOADING', 'READY', 'STOPPING'].includes(props.state))
 const gpuLabel = computed(() => props.telemetry?.gpu_devices?.length ? props.telemetry.gpu_devices.join(', ') : 'No GPU allocation detected')
-const hasAttributedGPU = computed(() => Boolean(props.telemetry?.gpu_devices?.length))
-const globalGPUFallback = computed(() => Boolean(props.telemetry && !hasAttributedGPU.value && props.telemetry.gpu_utilization_pct !== undefined))
-const globalVRAMFallback = computed(() => Boolean(props.telemetry && !hasAttributedGPU.value && props.telemetry.vram_used_bytes !== undefined))
+const hasProcessGPUUtilization = computed(() => Boolean(props.telemetry?.gpus?.some(gpu => gpu.utilization_pct !== undefined)))
+const hasProcessVRAM = computed(() => Boolean(props.telemetry?.gpus?.some(gpu => gpu.vram_used_bytes !== undefined)))
+const globalGPUFallback = computed(() => Boolean(props.telemetry?.gpu_utilization_pct !== undefined && !hasProcessGPUUtilization.value))
+const globalVRAMFallback = computed(() => Boolean(props.telemetry?.vram_used_bytes !== undefined && !hasProcessVRAM.value))
 const hasGlobalFallback = computed(() => globalGPUFallback.value || globalVRAMFallback.value)
 const gpuUsageLabel = computed(() => globalGPUFallback.value ? 'GPU usage (global fallback)' : 'Instance GPU usage')
 const vramLabel = computed(() => globalVRAMFallback.value ? 'VRAM (global fallback)' : 'VRAM')
@@ -50,7 +51,7 @@ function gpuDetail(device: RuntimeTelemetry['gpus'][number]) {
       <span v-else class="text-[11px] text-dimmed">Collecting…</span>
     </div>
     <p v-if="hasGlobalFallback" data-testid="instance-global-fallback" class="text-[11px] leading-4 text-warning">
-      Process-level GPU attribution is unavailable. Global fallback values are device-wide and may include other processes.
+      One or more process-level GPU metrics are unavailable. Values marked global fallback are device-wide and may include other processes.
     </p>
     <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
       <div>
