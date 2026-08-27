@@ -230,12 +230,11 @@ func sidecarAbsolutePath(root, localPath string) (string, bool) {
 }
 
 func localSidecarKind(filePath string) string {
-	name := strings.ToLower(strings.TrimSuffix(filepath.Base(filepath.FromSlash(filePath)), filepath.Ext(filePath)))
-	for _, prefix := range []string{"mmproj", "mmoproj", "projector"} {
-		if name == prefix || strings.HasPrefix(name, prefix+"-") || strings.HasPrefix(name, prefix+"_") || strings.HasPrefix(name, prefix+".") {
-			return "mmproj"
-		}
+	normalized := strings.ToLower(filepath.ToSlash(filePath))
+	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
+		return "mmproj"
 	}
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(filepath.FromSlash(filePath)), filepath.Ext(filePath)))
 	if name == "mtp" || strings.HasPrefix(name, "mtp-") || strings.HasPrefix(name, "mtp_") || strings.HasPrefix(name, "mtp.") {
 		return "mtp"
 	}
