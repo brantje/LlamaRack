@@ -48,11 +48,12 @@ defineExpose({ request })
           Delete registered Model “{{ dialog.name }}”? Its Instance definitions will also be deleted. The model file will be preserved unless you explicitly choose to remove it below.
         </p>
 
-        <UCheckbox
-          v-model="deleteFiles"
-          data-testid="model-delete-files"
-          label="Also delete model files from disk"
-        />
+        <div data-testid="model-delete-files">
+          <UCheckbox
+            v-model="deleteFiles"
+            label="Also delete model files from disk"
+          />
+        </div>
 
         <UAlert
           v-if="deleteFiles"
