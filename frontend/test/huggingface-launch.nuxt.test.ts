@@ -41,13 +41,12 @@ afterEach(() => {
 
 describe('Hugging Face launch import', () => {
   it('shows parameter count, last update, and Launch above Download', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-08-27T08:00:00Z'))
+    const lastModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/search?')) {
         return [{
           id: 'Qwen/Qwen3.8-Flash-Next', downloads: 2550, likes: 3770, parameter_count: 180_000_000_000,
-          last_modified: '2026-08-27T05:00:00Z', private: false, gated: false, tags: ['gguf']
+          last_modified: lastModified, private: false, gated: false, tags: ['gguf']
         }]
       }
       if (path.startsWith('/api/v1/huggingface/model?repo=')) {
@@ -57,7 +56,7 @@ describe('Hugging Face launch import', () => {
     })
 
     const wrapper = await mountSuspended(DiscoverPage, { route: '/discover' })
-    await vi.advanceTimersByTimeAsync(350)
+    await new Promise(resolve => setTimeout(resolve, 375))
     await flushPromises()
     expect(wrapper.text()).toContain('Model size 180B params')
     expect(wrapper.text()).toContain('Updated 3h ago')
