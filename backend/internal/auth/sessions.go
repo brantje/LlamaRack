@@ -66,11 +66,6 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	return err
 }
 
-func (s *Service) SessionUser(ctx context.Context, token string) (User, error) {
-	user, _, err := s.SessionUserWithSession(ctx, token)
-	return user, err
-}
-
 func (s *Service) SessionUserWithSession(ctx context.Context, token string) (User, Session, error) {
 	var user User
 	var session Session
