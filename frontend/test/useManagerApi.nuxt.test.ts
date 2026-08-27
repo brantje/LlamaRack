@@ -8,6 +8,7 @@ beforeEach(() => {
   const config = useRuntimeConfig()
   ;(config.public as any).apiBase = ''
   fetchMock.mockReset()
+  document.cookie = 'lcm_csrf=; Max-Age=0; path=/'
 })
 
 describe('useManagerApi', () => {
@@ -24,7 +25,7 @@ describe('useManagerApi', () => {
     expect(apiBase.value).toBe('https://manager.example.test')
   })
 
-  it('sends credentialed requests and preserves caller options', async () => {
+  it('sends credentialed requests and preserves caller headers in a Headers object', async () => {
     fetchMock.mockResolvedValue({ ok: true })
     const { apiBase, request } = useManagerApi(fetchMock as any)
     const result = await request('/api/v1/models', {
@@ -33,12 +34,28 @@ describe('useManagerApi', () => {
       headers: { 'X-Test': 'yes' }
     })
     expect(result).toEqual({ ok: true })
-    expect(fetchMock).toHaveBeenCalledWith(`${apiBase.value}/api/v1/models`, {
-      credentials: 'include',
-      method: 'POST',
-      body: { model_id: 'coder' },
-      headers: { 'X-Test': 'yes' }
-    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, options] = fetchMock.mock.calls[0]!
+    expect(url).toBe(`${apiBase.value}/api/v1/models`)
+    expect(options.credentials).toBe('include')
+    expect(options.method).toBe('POST')
+    expect(options.body).toEqual({ model_id: 'coder' })
+    expect(options.headers).toBeInstanceOf(Headers)
+    expect(options.headers.get('X-Test')).toBe('yes')
+  })
+
+  it('adds the CSRF cookie value to management mutations but not reads', async () => {
+    fetchMock.mockResolvedValue({ ok: true })
+    document.cookie = 'lcm_csrf=csrf%20token; path=/'
+    const { request } = useManagerApi(fetchMock as any)
+
+    await request('/api/v1/models', { method: 'POST' })
+    let options = fetchMock.mock.calls[0]![1]
+    expect(options.headers.get('X-CSRF-Token')).toBe('csrf token')
+
+    await request('/api/v1/models')
+    options = fetchMock.mock.calls[1]![1]
+    expect(options.headers.get('X-CSRF-Token')).toBeNull()
   })
 
   it('propagates request failures', async () => {
