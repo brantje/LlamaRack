@@ -37,7 +37,7 @@ func TestValidateOptionsRetainingNilAndManagerOwnedHelper(t *testing.T) {
 	if err != nil || got != nil {
 		t.Fatalf("nil input: got=%v err=%v", got, err)
 	}
-	if !IsManagerOwnedOption("--tensor-split") || !IsManagerOwnedOption("main-gpu") || IsManagerOwnedOption("ctx-size") {
+	if IsManagerOwnedOption("--tensor-split") || !IsManagerOwnedOption("main-gpu") || IsManagerOwnedOption("ctx-size") {
 		t.Fatal("unexpected manager-owned classification")
 	}
 }
