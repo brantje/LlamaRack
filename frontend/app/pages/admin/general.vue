@@ -81,7 +81,7 @@ function editable(key: keyof typeof form) { return settings.value?.[key]?.editab
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network and lifecycle defaults. Environment values override database values, which override built-in defaults." /><UButton :loading="busy" :disabled="!settings" @click="save">Save changes</UButton></div>
+    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network and lifecycle defaults. Environment values normally override database values; Allowed Origins is explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings" @click="save">Save changes</UButton></div>
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="saved" color="success" variant="subtle" description="Manager settings saved." />
 
@@ -100,7 +100,10 @@ function editable(key: keyof typeof form) { return settings.value?.[key]?.editab
         <template #header><div><h2 class="text-xl font-bold">Network and reverse proxy</h2><p class="text-sm text-muted">Forwarded headers are trusted only when the direct peer matches an explicitly configured proxy address or CIDR.</p></div></template>
         <div class="grid gap-5 md:grid-cols-2">
           <UFormField label="Trusted proxies" :hint="source('trusted_proxies')"><UInput v-model="form.trusted_proxies" class="w-full" :disabled="!editable('trusted_proxies')" placeholder="10.0.0.10, 172.16.0.0/12" /></UFormField>
-          <UFormField label="Allowed origins" :hint="source('allowed_origins')"><UInput v-model="form.allowed_origins" class="w-full" :disabled="!editable('allowed_origins')" placeholder="https://manager.example.com" /></UFormField>
+          <UFormField label="Allowed origins" :hint="source('allowed_origins')">
+            <UInput v-model="form.allowed_origins" class="w-full" :disabled="!editable('allowed_origins')" placeholder="https://manager.example.com" />
+            <template #help>A saved value here takes precedence over LCM_ALLOWED_ORIGIN.</template>
+          </UFormField>
           <UFormField label="External/public URL" :hint="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></UFormField>
         </div>
         <USeparator class="my-5" />
