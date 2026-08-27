@@ -76,17 +76,13 @@ function stateColor(state: string) {
   return 'primary'
 }
 
-function sortJobs(items: DownloadJob[]) {
-  return [...items].sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id))
-}
-
 function applyJob(job: DownloadJob) {
   const index = jobs.value.findIndex(item => item.id === job.id)
-  if (index === -1) jobs.value = sortJobs([...jobs.value, job])
+  if (index === -1) jobs.value = [job, ...jobs.value]
   else {
     const next = [...jobs.value]
     next[index] = job
-    jobs.value = sortJobs(next)
+    jobs.value = next
   }
 }
 
@@ -94,7 +90,7 @@ async function refresh(silent = false) {
   if (!silent) loading.value = true
   error.value = ''
   try {
-    jobs.value = sortJobs(await manager.request<DownloadJob[]>('/api/v1/downloads') || [])
+    jobs.value = await manager.request<DownloadJob[]>('/api/v1/downloads') || []
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load downloads'
   } finally {
@@ -122,7 +118,7 @@ function connectDownloadEvents() {
       return
     }
     if (message.type === 'download_snapshot' && Array.isArray(message.downloads)) {
-      jobs.value = sortJobs(message.downloads)
+      jobs.value = message.downloads
     } else if (message.type === 'download' && message.job) {
       applyJob(message.job)
     } else if (message.type === 'download_deleted' && message.id) {
