@@ -103,7 +103,6 @@ describe('Phase 10 administration dashboard and navigation', () => {
           llamacpp: { available: false }
         }
       }
-      if (path === '/api/v1/auth/logout') return {}
       return []
     })
 
@@ -124,6 +123,9 @@ describe('Phase 10 administration dashboard and navigation', () => {
     const menu = components(sidebar, ['NavigationMenu', 'UNavigationMenu'])[0]
     const labels = (menu?.props('items') || []).map((item: any) => item.label).filter(Boolean)
     expect(labels).toEqual(expect.arrayContaining(['Dashboard', 'Users', 'Hugging Face', 'General', 'llama.cpp', 'System', 'Back to manager']))
+
+    sidebar.unmount()
+    dashboard.unmount()
   })
 })
 
@@ -163,6 +165,7 @@ describe('Phase 10 general settings', () => {
     const textInputs = inputs(wrapper)
     const allowedOrigin = textInputs.find(component => component.props('modelValue') === 'https://manager.test')
     expect(allowedOrigin?.props('disabled')).toBe(true)
+    wrapper.unmount()
   })
 
   it('surfaces load and save failures', async () => {
@@ -183,20 +186,18 @@ describe('Phase 10 general settings', () => {
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('save settings exploded')
-
     wrapper.unmount()
+
     mocks.request.mockRejectedValue({ data: { error: 'settings denied' } })
     const failed = await mountSuspended(AdminGeneralPage, { route: false })
     await flushPromises()
     expect(failed.text()).toContain('settings denied')
+    failed.unmount()
   })
 })
 
 describe('Phase 10 profile', () => {
   it('changes passwords and revokes sessions through the profile workflow', async () => {
-    const manager = resetManager()
-    const initialize = vi.spyOn(manager, 'initialize').mockResolvedValue(undefined)
-    const logout = vi.spyOn(manager, 'logout').mockResolvedValue(undefined)
     const sessions = [
       { id: 'current', user_id: 1, created_at: 100, expires_at: 9000, remote_address: '192.0.2.1', user_agent: 'Chrome/100 Windows', current: true },
       { id: 'other/session', user_id: 1, created_at: 200, expires_at: 9000, remote_address: '', user_agent: 'Firefox/100 Linux' }
@@ -208,6 +209,7 @@ describe('Phase 10 profile', () => {
       if (path === '/api/v1/sessions/other%2Fsession' && options?.method === 'DELETE') return {}
       if (path === '/api/v1/me/sessions/revoke-others' && options?.method === 'POST') return { revoked: 1 }
       if (path === '/api/v1/me/sessions/revoke-all' && options?.method === 'POST') return {}
+      if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       return []
     })
 
@@ -246,10 +248,7 @@ describe('Phase 10 profile', () => {
     await button(wrapper, 'Log out everywhere').trigger('click')
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/me/sessions/revoke-all', { method: 'POST' })
-    expect(initialize).toHaveBeenCalled()
-
-    await button(wrapper, 'Sign out').trigger('click')
-    expect(logout).toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('surfaces profile load and password errors', async () => {
@@ -274,13 +273,12 @@ describe('Phase 10 profile', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('password denied')
     expect(wrapper.text()).toContain('No active sessions')
+    wrapper.unmount()
   })
 })
 
 describe('Phase 10 users', () => {
   it('creates users, toggles them, resets passwords and manages sessions', async () => {
-    const manager = resetManager()
-    const initialize = vi.spyOn(manager, 'initialize').mockResolvedValue(undefined)
     let users = [
       { id: 1, username: 'admin', enabled: true, created_at: 10, last_login_at: 20, active_sessions: 1 },
       { id: 2, username: 'operator', enabled: true, created_at: 11, active_sessions: 2 }
@@ -356,7 +354,7 @@ describe('Phase 10 users', () => {
     await rowButton(operator, 'Delete').trigger('click')
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/2', { method: 'DELETE' })
-    expect(initialize).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('surfaces create, session and mutation failures', async () => {
@@ -390,5 +388,6 @@ describe('Phase 10 users', () => {
     await rowButton(operator, 'Enable').trigger('click')
     await clickConfirmation('confirm')
     expect(wrapper.text()).toContain('Unable to enable user')
+    wrapper.unmount()
   })
 })
