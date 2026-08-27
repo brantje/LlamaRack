@@ -89,7 +89,7 @@ describe('model file deletion', () => {
     expect(checkboxChecked()).toBe(true)
     expect(document.body.textContent).toContain('permanently removed from disk')
     expect(document.body.textContent).toContain('models/coder.gguf')
-    expect(document.body.textContent).toContain('4 MiB')
+    expect(document.body.textContent).toContain('4.0 MiB')
 
     await clickModal('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1?delete_files=true', { method: 'DELETE' })
