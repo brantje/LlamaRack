@@ -5,7 +5,7 @@ import InstanceRuntimeTelemetry from '~/components/InstanceRuntimeTelemetry.vue'
 const gib = 1024 ** 3
 
 describe('Instance telemetry fallback labels', () => {
-  it('marks fully unattributed global GPU values instead of presenting them as Instance-scoped', async () => {
+  it('marks fully unattributed global GPU values without showing a fallback warning', async () => {
     const wrapper = await mountSuspended(InstanceRuntimeTelemetry, {
       route: false,
       props: {
@@ -26,13 +26,14 @@ describe('Instance telemetry fallback labels', () => {
 
     expect(wrapper.get('[data-testid="instance-gpu-placement"]').text()).toBe('No GPU allocation detected')
     expect(wrapper.get('[data-testid="instance-gpu-usage"]').text()).toBe('87%')
-    expect(wrapper.text()).toContain('GPU usage (global fallback)')
+    expect(wrapper.text()).toContain('Global GPU usage')
     expect(wrapper.text()).toContain('VRAM (global fallback)')
-    expect(wrapper.get('[data-testid="instance-global-fallback"]').text()).toContain('device-wide')
+    expect(wrapper.find('[data-testid="instance-global-fallback"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('One or more process-level GPU metrics are unavailable')
     expect(wrapper.text()).not.toContain('Instance GPU usage')
   })
 
-  it('falls back only GPU utilization when placement and VRAM are still process-attributed', async () => {
+  it('labels only global GPU utilization while placement and VRAM stay process-attributed', async () => {
     const wrapper = await mountSuspended(InstanceRuntimeTelemetry, {
       route: false,
       props: {
@@ -54,9 +55,10 @@ describe('Instance telemetry fallback labels', () => {
     expect(wrapper.get('[data-testid="instance-gpu-placement"]').text()).toBe('CUDA0')
     expect(wrapper.get('[data-testid="instance-gpu-usage"]').text()).toBe('97%')
     expect(wrapper.get('[data-testid="instance-vram"]').text()).toBe('14 GiB')
-    expect(wrapper.text()).toContain('GPU usage (global fallback)')
+    expect(wrapper.text()).toContain('Global GPU usage')
     expect(wrapper.text()).not.toContain('VRAM (global fallback)')
-    expect(wrapper.get('[data-testid="instance-global-fallback"]').text()).toContain('device-wide')
+    expect(wrapper.find('[data-testid="instance-global-fallback"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('One or more process-level GPU metrics are unavailable')
     expect(wrapper.get('[data-testid="instance-gpu-details"]').text()).toContain('CUDA0 · 14 GiB')
   })
 })
