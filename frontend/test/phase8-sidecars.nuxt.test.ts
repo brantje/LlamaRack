@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import DiscoverPage from '~/pages/discover.vue'
+import DiscoverPage from '~/components/ModelsDiscover.vue'
 import NewModelPage from '~/pages/models/new.vue'
 import { useManager } from '~/composables/useManager'
 
