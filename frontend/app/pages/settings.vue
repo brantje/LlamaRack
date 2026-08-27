@@ -6,6 +6,11 @@ const loadingOptions = ref(false)
 const savingOptions = ref(false)
 const optionError = ref('')
 const optionSaved = ref(false)
+const tokenStatus = ref<{ configured: boolean; prefix?: string }>({ configured: false })
+const tokenInput = ref('')
+const tokenBusy = ref(false)
+const tokenError = ref('')
+const tokenSaved = ref(false)
 
 async function loadGlobalOptions() {
   loadingOptions.value = true
@@ -17,6 +22,45 @@ async function loadGlobalOptions() {
     optionError.value = value?.data?.error || value?.message || 'Unable to load global llama.cpp defaults'
   } finally {
     loadingOptions.value = false
+  }
+}
+
+async function loadTokenStatus() {
+  tokenError.value = ''
+  try {
+    tokenStatus.value = await manager.request<{ configured: boolean; prefix?: string }>('/api/v1/huggingface/token')
+  } catch (value: any) {
+    tokenError.value = value?.data?.error || value?.message || 'Unable to load Hugging Face token status'
+  }
+}
+
+async function saveToken() {
+  tokenBusy.value = true
+  tokenError.value = ''
+  tokenSaved.value = false
+  try {
+    tokenStatus.value = await manager.request<{ configured: boolean; prefix?: string }>('/api/v1/huggingface/token', { method: 'PUT', body: { token: tokenInput.value } })
+    tokenInput.value = ''
+    tokenSaved.value = true
+  } catch (value: any) {
+    tokenError.value = value?.data?.error || value?.message || 'Unable to save Hugging Face token'
+  } finally {
+    tokenBusy.value = false
+  }
+}
+
+async function removeToken() {
+  tokenBusy.value = true
+  tokenError.value = ''
+  tokenSaved.value = false
+  try {
+    await manager.request('/api/v1/huggingface/token', { method: 'DELETE' })
+    tokenStatus.value = { configured: false }
+    tokenInput.value = ''
+  } catch (value: any) {
+    tokenError.value = value?.data?.error || value?.message || 'Unable to remove Hugging Face token'
+  } finally {
+    tokenBusy.value = false
   }
 }
 
@@ -35,10 +79,13 @@ async function saveGlobalOptions() {
 }
 
 async function refreshAll() {
-  await Promise.all([manager.refresh(), loadGlobalOptions()])
+  await Promise.all([manager.refresh(), loadGlobalOptions(), loadTokenStatus()])
 }
 
-onMounted(() => void loadGlobalOptions())
+onMounted(() => {
+  void loadGlobalOptions()
+  void loadTokenStatus()
+})
 </script>
 
 <template>
@@ -67,6 +114,25 @@ onMounted(() => void loadGlobalOptions())
         <div class="grid gap-1 py-3 sm:grid-cols-[170px_1fr] sm:gap-5"><dt class="text-muted">Discovered options</dt><dd class="font-semibold">{{ profile.options.length }}</dd></div>
       </dl>
       <UAlert v-else class="mt-4" color="warning" variant="subtle" description="llama-server could not be discovered. Management features still work, but model workers cannot start until the binary path is correct." />
+    </UCard>
+
+    <UCard class="max-w-3xl">
+      <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">HUGGING FACE</p>
+      <h2 class="text-xl font-bold">Provider authentication</h2>
+      <p class="mt-1 text-sm text-muted">Optional token for private or gated repositories your Hugging Face account is already authorized to access. The stored token is encrypted and is never returned by the API.</p>
+      <UAlert v-if="tokenError" class="mt-4" color="error" variant="subtle" :description="tokenError" />
+      <UAlert v-if="tokenSaved" class="mt-4" color="success" variant="subtle" description="Hugging Face token saved." />
+      <div class="mt-5 flex flex-wrap items-end gap-3">
+        <UFormField class="min-w-0 flex-1" :label="tokenStatus.configured ? `Replace token (${tokenStatus.prefix || 'configured'}…)` : 'Access token'" name="huggingface-token">
+          <UInput v-model="tokenInput" class="w-full" type="password" autocomplete="off" placeholder="hf_…" />
+        </UFormField>
+        <UButton :loading="tokenBusy" :disabled="!tokenInput.trim()" @click="saveToken">{{ tokenStatus.configured ? 'Replace' : 'Save token' }}</UButton>
+        <UButton v-if="tokenStatus.configured" color="error" variant="soft" :disabled="tokenBusy" @click="removeToken">Remove</UButton>
+      </div>
+      <div class="mt-3 flex items-center gap-2 text-sm text-muted">
+        <UBadge :color="tokenStatus.configured ? 'success' : 'neutral'" variant="subtle">{{ tokenStatus.configured ? 'Configured' : 'Not configured' }}</UBadge>
+        <span>Credentials are sent only to the configured Hugging Face host.</span>
+      </div>
     </UCard>
 
     <UCard class="max-w-5xl">
