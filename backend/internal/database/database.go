@@ -136,6 +136,21 @@ CREATE TABLE IF NOT EXISTS download_files (
  local_path TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(job_id,path)
 );
+CREATE TABLE IF NOT EXISTS provider_imports (
+ id TEXT PRIMARY KEY,
+ job_id TEXT NOT NULL REFERENCES download_jobs(id) ON DELETE CASCADE,
+ model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+ instance_id TEXT REFERENCES instances(id) ON DELETE SET NULL,
+ owns_model INTEGER NOT NULL DEFAULT 0,
+ start_when_ready INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL DEFAULT 'DOWNLOADING',
+ error TEXT NOT NULL DEFAULT '',
+ start_attempted INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS provider_imports_job_idx ON provider_imports(job_id);
+CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(instance_id);
 `
 	_, err := db.ExecContext(ctx, schema)
 	return err
