@@ -76,7 +76,7 @@ describe('GPU placement cards', () => {
     expect(wrapper.emitted('update:gpuDevices')?.some(args => JSON.stringify(args[0]) === JSON.stringify(['CUDA0']))).toBe(true)
   })
 
-  it('uses inherited context and shows memory, capability and offload guidance', async () => {
+  it('uses inherited context and shows a GPU-only fit with memory guidance', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
       if (isConfig(path)) return { effective: { values: { 'ctx-size': '8192' } } }
@@ -90,9 +90,12 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
 
+    const fit = wrapper.get('[data-testid="execution-fit"]')
     const panel = wrapper.get('[data-testid="hardware-recommendation"]')
     expect(wrapper.text()).toContain('inherited llama.cpp config')
     expect(wrapper.text()).toContain('Model capability: 262,144 tokens')
+    expect(fit.text()).toContain('GPU only')
+    expect(fit.text()).toContain('No CPU model split is needed')
     expect(panel.text()).toContain('Fits current resources')
     expect(panel.text()).toContain('high confidence')
     expect(panel.text()).toContain('8,192 tokens')
@@ -101,7 +104,7 @@ describe('GPU placement cards', () => {
     expect(panel.text()).toContain('Q4_K_M')
   })
 
-  it('recalculates when context changes and emits a persistent ctx-size override', async () => {
+  it('recalculates when context changes, persists ctx-size and shows a GPU + CPU split', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
       if (isConfig(path)) return { effective: { values: {} } }
@@ -123,7 +126,7 @@ describe('GPU placement cards', () => {
 
     const input = wrapper.findComponent('[data-testid="context-input"]')
     expect(input.exists()).toBe(true)
-    input.vm.$emit('update:modelValue', 65536)
+    await input.setValue(65536)
     await flushPromises()
 
     expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '65536')).toBe(true)
@@ -131,6 +134,7 @@ describe('GPU placement cards', () => {
       expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=65536')
     })
     await flushPromises()
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU + CPU split needed')
     expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('hybrid')
     expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('KV cache: system RAM')
   })
@@ -152,7 +156,7 @@ describe('GPU placement cards', () => {
     expect(wrapper.text()).toContain('Estimate: 32,768 tokens')
   })
 
-  it('renders installed-hardware, CPU and pressure recommendation states', async () => {
+  it('renders multi-GPU, partial, CPU and pressure fit states', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
       if (isConfig(path)) return { effective: { values: {} } }
@@ -178,6 +182,12 @@ describe('GPU placement cards', () => {
         cpu_fit: false,
         offload: { mode: 'cpu', kv_on_gpu: false, reason: 'Insufficient resources.' }
       })
+      if (path.includes('/model-5/')) return recommendation({
+        current_fit: true,
+        total_hardware_fit: true,
+        cpu_fit: true,
+        offload: { mode: 'partial', gpu_layers: 20, devices: ['CUDA1'], kv_on_gpu: true, reason: 'Partial offload.' }
+      })
       throw new Error(`unexpected request ${path}`)
     })
 
@@ -188,19 +198,27 @@ describe('GPU placement cards', () => {
     await flushPromises()
 
     let panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU only · multi-GPU')
     expect(panel.text()).toContain('Fits installed hardware after freeing resources')
     expect(panel.text()).toContain('Tensor split: 1,1')
     expect(panel.text()).toContain('Metadata fallback active')
     expect(panel.text()).toContain('GPU probe degraded')
 
+    await wrapper.setProps({ modelId: 'model-5' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU + CPU split needed')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('remaining weights in system RAM')
+
     await wrapper.setProps({ modelId: 'model-3' })
     await flushPromises()
     panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('CPU only')
     expect(panel.text()).toContain('CPU fallback fits current RAM')
 
     await wrapper.setProps({ modelId: 'model-4' })
     await flushPromises()
     panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('CPU only')
     expect(panel.text()).toContain('Resource pressure expected')
   })
 
@@ -235,12 +253,14 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="execution-fit"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('No NVIDIA or ROCm GPUs were detected')
 
     for (const id of Object.keys(invalid).slice(1)) {
       await wrapper.setProps({ modelId: id })
       await flushPromises()
       expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="execution-fit"]').exists()).toBe(false)
     }
 
     await wrapper.setProps({ modelId: 'request-error' })
