@@ -94,7 +94,7 @@ func (h *phase9ModelInspectHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	if !decode(w, r, &in) {
 		return
 	}
-	inspection, err := h.models.InspectGGUF(in.GGUFPath)
+	summary, err := h.models.GGUFSummary(r.Context(), in.GGUFPath)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"context_length": 0,
@@ -103,10 +103,10 @@ func (h *phase9ModelInspectHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"architecture":   inspection.Derived.Architecture,
-		"context_length": inspection.Derived.ContextLength,
-		"gguf_version":   inspection.Version,
-		"metadata_count": inspection.MetadataCount,
+		"architecture":   summary.Derived.Architecture,
+		"context_length": summary.Derived.ContextLength,
+		"gguf_version":   summary.Version,
+		"metadata_count": summary.MetadataCount,
 	})
 }
 

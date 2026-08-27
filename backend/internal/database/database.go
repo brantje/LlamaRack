@@ -92,6 +92,28 @@ CREATE TABLE IF NOT EXISTS models (
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS gguf_index (
+ path TEXT PRIMARY KEY,
+ size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+ mtime_ns INTEGER NOT NULL,
+ gguf_version INTEGER NOT NULL DEFAULT 0,
+ tensor_count INTEGER NOT NULL DEFAULT 0 CHECK(tensor_count >= 0),
+ metadata_count INTEGER NOT NULL DEFAULT 0 CHECK(metadata_count >= 0),
+ architecture TEXT NOT NULL DEFAULT '',
+ context_length INTEGER NOT NULL DEFAULT 0,
+ block_count INTEGER NOT NULL DEFAULT 0,
+ embedding_length INTEGER NOT NULL DEFAULT 0,
+ head_count INTEGER NOT NULL DEFAULT 0,
+ kv_head_count INTEGER NOT NULL DEFAULT 0,
+ key_length INTEGER NOT NULL DEFAULT 0,
+ value_length INTEGER NOT NULL DEFAULT 0,
+ nextn_predict_layers INTEGER NOT NULL DEFAULT 0,
+ has_mtp INTEGER NOT NULL DEFAULT 0,
+ mtp_only INTEGER NOT NULL DEFAULT 0,
+ projector INTEGER NOT NULL DEFAULT 0,
+ inspect_error TEXT NOT NULL DEFAULT '',
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 CREATE TABLE IF NOT EXISTS model_options (
  model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
  option_key TEXT NOT NULL,

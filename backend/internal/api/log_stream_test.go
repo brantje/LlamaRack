@@ -64,7 +64,12 @@ func TestWorkerLogStreamStreamsLiveWorkerOutput(t *testing.T) {
 	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instanceID+"/start", nil, nil)
 	if started.Code != http.StatusAccepted { cancel(); t.Fatalf("start status=%d body=%s", started.Code, started.Body.String()) }
 	deadline := time.Now().Add(time.Second)
-	for !strings.Contains(recorder.Body.String(), "fake api worker online") && time.Now().Before(deadline) { time.Sleep(10 * time.Millisecond) }
+	for time.Now().Before(deadline) {
+		if strings.Contains(strings.Join(sup.Logs(instanceID), "\n"), "fake api worker online") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	select { case <-done: case <-time.After(time.Second): t.Fatal("log stream did not close after request cancellation") }
 	if recorder.Code != http.StatusOK { t.Fatalf("stream status=%d body=%s", recorder.Code, recorder.Body.String()) }
