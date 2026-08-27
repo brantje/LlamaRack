@@ -132,9 +132,7 @@ watch(sort, () => {
   void search()
 })
 
-onMounted(() => {
-  void search()
-})
+onMounted(scheduleSearch)
 onBeforeUnmount(clearDebounce)
 </script>
 
