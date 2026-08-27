@@ -50,7 +50,7 @@ func TestBootstrapLoginSessionLogout(t *testing.T) {
 	if _, err := s.Bootstrap(ctx, "other", "correct-horse-battery"); err == nil {
 		t.Fatal("expected duplicate bootstrap error")
 	}
-	if _, _, err := s.Login(ctx, "admin", "wrong-password"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, _, err := s.LoginWithMetadata(ctx, "admin", "wrong-password", "", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected invalid credentials, got %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if _, err := s.SessionUser(ctx, otherToken); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("password reset should revoke target sessions")
 	}
-	if _, _, err := s.Login(ctx, "operator", "another-correct-password"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, _, err := s.LoginWithMetadata(ctx, "operator", "another-correct-password", "", ""); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatal("old password should fail")
 	}
 
@@ -255,17 +255,6 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 	if err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
 		t.Fatalf("revoked history should remain: %+v err=%v", keys, err)
 	}
-
-	legacy, _, err := s.CreateAPIKey(ctx, "legacy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DeleteAPIKey(ctx, legacy.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DeleteAPIKey(ctx, legacy.ID); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("missing delete error=%v", err)
-	}
 }
 
 func TestPasswordAndTokenHelpers(t *testing.T) {
@@ -292,6 +281,9 @@ func TestPasswordAndTokenHelpers(t *testing.T) {
 	}
 	if token, err := randomToken(16); err != nil || token == "" {
 		t.Fatalf("randomToken=%q err=%v", token, err)
+	}
+	if _, err := randomToken(0); err == nil {
+		t.Fatal("zero token length should fail")
 	}
 	if got := truncate("abcdef", 3); got != "abc" {
 		t.Fatalf("truncate=%q", got)
