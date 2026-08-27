@@ -191,6 +191,7 @@ onBeforeUnmount(() => {
           <div class="grid grid-cols-2 gap-2 text-xs text-muted">
             <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>
           </div>
+          <InstanceRuntimeTelemetry :state="instanceState(instance)" :telemetry="manager.telemetryForInstance(instance)" />
           <div class="flex flex-wrap gap-2">
             <UButton v-if="importBlocked(instance)" to="/downloads" color="primary" variant="soft" size="xs">View download</UButton>
             <template v-else>

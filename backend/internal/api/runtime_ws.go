@@ -4,12 +4,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
 
 type runtimeWebSocketHandler struct {
@@ -26,6 +28,11 @@ type runtimeEvent struct {
 type runtimeSnapshotEvent struct {
 	Type     string               `json:"type"`
 	Runtimes []supervisor.Runtime `json:"runtimes"`
+}
+
+type runtimeTelemetryEvent struct {
+	Type      string             `json:"type"`
+	Telemetry []telemetry.Sample `json:"telemetry"`
 }
 
 func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string) http.Handler {
@@ -65,6 +72,34 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	current := make(map[string]supervisor.Runtime, len(snapshot))
+	for _, runtime := range snapshot {
+		current[runtime.InstanceID] = runtime
+	}
+	collector := telemetry.New(h.lifecycle.HardwareSnapshot)
+	telemetryResults := make(chan []telemetry.Sample, 1)
+	telemetryTicker := time.NewTicker(time.Second)
+	defer telemetryTicker.Stop()
+	collecting := false
+	collectTelemetry := func() {
+		if collecting {
+			return
+		}
+		runtimes := runtimeValues(current)
+		if !hasRunningRuntime(runtimes) {
+			return
+		}
+		collecting = true
+		go func() {
+			samples := collector.Collect(r.Context(), runtimes)
+			select {
+			case telemetryResults <- samples:
+			case <-r.Context().Done():
+			}
+		}()
+	}
+	collectTelemetry()
+
 	disconnected := make(chan struct{})
 	go func() {
 		defer close(disconnected)
@@ -85,11 +120,39 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			if !open {
 				return
 			}
+			current[runtime.InstanceID] = runtime
 			if err := conn.WriteJSON(runtimeEvent{Type: "runtime", Runtime: runtime}); err != nil {
 				return
 			}
+		case samples := <-telemetryResults:
+			collecting = false
+			if len(samples) == 0 {
+				continue
+			}
+			if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: samples}); err != nil {
+				return
+			}
+		case <-telemetryTicker.C:
+			collectTelemetry()
 		}
 	}
+}
+
+func runtimeValues(current map[string]supervisor.Runtime) []supervisor.Runtime {
+	values := make([]supervisor.Runtime, 0, len(current))
+	for _, runtime := range current {
+		values = append(values, runtime)
+	}
+	return values
+}
+
+func hasRunningRuntime(runtimes []supervisor.Runtime) bool {
+	for _, runtime := range runtimes {
+		if runtime.PID > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func websocketOriginAllowed(r *http.Request, configured string) bool {
