@@ -20,38 +20,47 @@ function seedManager() {
   manager.profile.value = null
 }
 
+function detailsResponse() {
+  return {
+    model: { id: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 10, context_length: 4096 },
+    gguf_version: 3,
+    tensor_count: 1,
+    metadata_count: 1,
+    metadata_total: 1,
+    offset: 0,
+    limit: 100,
+    warnings: [],
+    metadata: [{ key: 'tokenizer.ggml.tokens', type: 'array<string>', value: '["alpha", … 199 more]', truncated: true, array_length: 200 }]
+  }
+}
+
+function modalButton(label: string) {
+  return [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+    .filter(button => button.textContent?.trim() === label)
+    .at(-1)
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   seedManager()
 })
 
 describe('Model metadata lazy expansion', () => {
-  it('loads a bounded metadata value page only after Expand is requested', async () => {
+  it('loads and pages a bounded metadata value only after Expand is requested', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/models/m1/details/value?')) {
+        const secondPage = path.includes('offset=100')
         return {
           key: 'tokenizer.ggml.tokens',
           type: 'array<string>',
-          items: ['"alpha"', '"beta"'],
-          offset: 0,
+          items: secondPage ? ['"omega"'] : ['"alpha"', '"beta"'],
+          offset: secondPage ? 100 : 0,
           limit: 100,
           total: 200,
-          has_more: true
+          has_more: !secondPage
         }
       }
-      if (path.startsWith('/api/v1/models/m1/details?')) {
-        return {
-          model: { id: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 10, context_length: 4096 },
-          gguf_version: 3,
-          tensor_count: 1,
-          metadata_count: 1,
-          metadata_total: 1,
-          offset: 0,
-          limit: 100,
-          warnings: [],
-          metadata: [{ key: 'tokenizer.ggml.tokens', type: 'array<string>', value: '["alpha", … 199 more]', truncated: true, array_length: 200 }]
-        }
-      }
+      if (path.startsWith('/api/v1/models/m1/details?')) return detailsResponse()
       return {}
     })
 
@@ -63,10 +72,41 @@ describe('Model metadata lazy expansion', () => {
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('/api/v1/models/m1/details/value?key=tokenizer.ggml.tokens&offset=0'))
-    const expanded = document.body.querySelector<HTMLElement>('[data-testid="metadata-expanded-items"]')
+    let expanded = document.body.querySelector<HTMLElement>('[data-testid="metadata-expanded-items"]')
     expect(expanded?.textContent).toContain('alpha')
     expect(expanded?.textContent).toContain('beta')
     expect(document.body.textContent).toContain('200')
+
+    const next = modalButton('Next')
+    expect(next?.disabled).toBe(false)
+    next?.click()
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('offset=100'))
+    expanded = document.body.querySelector<HTMLElement>('[data-testid="metadata-expanded-items"]')
+    expect(expanded?.textContent).toContain('omega')
+
+    const previous = modalButton('Previous')
+    expect(previous?.disabled).toBe(false)
+    previous?.click()
+    await flushPromises()
+    expect(mocks.request.mock.calls.filter(call => String(call[0]).includes('/details/value?') && String(call[0]).includes('offset=0')).length).toBeGreaterThanOrEqual(2)
+    wrapper.unmount()
+  })
+
+  it('shows a lazy expansion API error without breaking the metadata table', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/models/m1/details/value?')) throw { data: { error: 'value page unavailable' } }
+      if (path.startsWith('/api/v1/models/m1/details?')) return detailsResponse()
+      return {}
+    })
+
+    const wrapper = await mountSuspended(ModelDetailsPage, { route: '/models/m1/details' })
+    await flushPromises()
+    await wrapper.get('[data-testid="metadata-expand"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('value page unavailable')
+    expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('tokenizer.ggml.tokens')
     wrapper.unmount()
   })
 })
