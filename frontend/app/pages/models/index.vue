@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ModelDeleteModal from '~/components/ModelDeleteModal.vue'
+
 const manager = useManager()
 const { models } = manager
 const message = ref('')
