@@ -9,7 +9,7 @@ import (
 func TestLoadDefaults(t *testing.T) {
 	for _, key := range []string{
 		"LCM_DATA_DIR", "LCM_MODELS_DIR", "LCM_DATABASE_PATH", "LCM_LISTEN_ADDR",
-		"LCM_LLAMA_SERVER", "LCM_WORKER_HOST", "LCM_WORKER_PORT_START",
+		"LCM_LLAMA_SERVER", "LCM_HUGGINGFACE_BASE_URL", "LCM_WORKER_HOST", "LCM_WORKER_PORT_START",
 		"LCM_STARTUP_TIMEOUT_SECONDS", "LCM_ALLOWED_ORIGIN",
 	} {
 		t.Setenv(key, "")
@@ -23,6 +23,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.LlamaServerPath != "llama-server" || cfg.WorkerHost != "127.0.0.1" || cfg.WorkerPortStart != 10000 {
 		t.Fatalf("unexpected worker defaults: %+v", cfg)
+	}
+	if cfg.HuggingFaceBaseURL != "https://huggingface.co" {
+		t.Fatalf("Hugging Face URL = %q", cfg.HuggingFaceBaseURL)
 	}
 	if cfg.StartupTimeout != 180*time.Second || cfg.SessionLifetime != 24*time.Hour {
 		t.Fatalf("unexpected durations: %+v", cfg)
@@ -38,6 +41,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("LCM_DATABASE_PATH", "/tmp/custom.db")
 	t.Setenv("LCM_LISTEN_ADDR", ":9999")
 	t.Setenv("LCM_LLAMA_SERVER", "/bin/fake-llama")
+	t.Setenv("LCM_HUGGINGFACE_BASE_URL", "http://huggingface.test")
 	t.Setenv("LCM_WORKER_HOST", "0.0.0.0")
 	t.Setenv("LCM_WORKER_PORT_START", "12000")
 	t.Setenv("LCM_STARTUP_TIMEOUT_SECONDS", "7")
@@ -49,6 +53,9 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.ListenAddr != ":9999" || cfg.LlamaServerPath != "/bin/fake-llama" || cfg.WorkerHost != "0.0.0.0" {
 		t.Fatalf("unexpected runtime overrides: %+v", cfg)
+	}
+	if cfg.HuggingFaceBaseURL != "http://huggingface.test" {
+		t.Fatalf("Hugging Face URL = %q", cfg.HuggingFaceBaseURL)
 	}
 	if cfg.WorkerPortStart != 12000 || cfg.StartupTimeout != 7*time.Second {
 		t.Fatalf("unexpected numeric overrides: %+v", cfg)
