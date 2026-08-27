@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import DownloadsPage from '~/pages/downloads.vue'
 import ModelsPage from '~/pages/models/index.vue'
@@ -30,7 +30,7 @@ beforeEach(() => {
 })
 
 describe('model discovery navigation', () => {
-  it('uses /models/discover from Models and removes Discover from the sidebar', async () => {
+  it('uses only /models/discover and removes Discover from the sidebar', async () => {
     const manager = resetManager()
     manager.models.value = [{ id: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 1, context_length: 0 }]
     const wrapper = await mountSuspended(ModelsPage, { route: false })
@@ -40,9 +40,7 @@ describe('model discovery navigation', () => {
 
     const layout = readFileSync(resolve(process.cwd(), 'app/layouts/default.vue'), 'utf8')
     expect(layout).not.toContain("{ label: 'Discover'")
-
-    const legacyPage = readFileSync(resolve(process.cwd(), 'app/pages/discover.vue'), 'utf8')
-    expect(legacyPage).toContain("redirect: '/models/discover'")
+    expect(existsSync(resolve(process.cwd(), 'app/pages/discover.vue'))).toBe(false)
     expect(readFileSync(resolve(process.cwd(), 'app/pages/models/discover.vue'), 'utf8')).toContain('ModelsDiscover')
   })
 })
