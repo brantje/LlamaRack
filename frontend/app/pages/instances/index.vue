@@ -209,7 +209,11 @@ onBeforeUnmount(() => {
       </UCard>
     </div>
 
-    <UModal v-model:open="logsOpen" :title="logTitle"><template #body><pre class="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre></template></UModal>
+    <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }">
+      <template #body>
+        <pre data-testid="instance-logs-output" class="min-h-[55vh] max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre>
+      </template>
+    </UModal>
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>
