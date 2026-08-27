@@ -26,6 +26,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
+	"github.com/brantje/llamacpp-manager/backend/internal/modelimports"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
@@ -94,6 +95,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
 	}
 	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient)
+	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	if err := downloadManager.ResumePending(ctx); err != nil {
 		return fmt.Errorf("resume downloads: %w", err)
 	}
@@ -103,8 +105,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, cfg.AllowedOrigin))
 	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardware.New()))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
-	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager)
+	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", phase8)
+	managementAPI.Handle("/api/v1/imports", phase8)
 	managementAPI.Handle("/api/v1/downloads", phase8)
 	managementAPI.Handle("/api/v1/downloads/", phase8)
 	managementAPI.Handle("/", apiServer)
@@ -120,6 +123,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	serveErr := make(chan error, 1)
 	go lifecycleService.RunReconciler(ctx, cfg.AlwaysOnReconcileInterval)
 	go lifecycleService.RunIdleReconciler(ctx, cfg.IdleUnloadTimeout)
+	go importService.Run(ctx, 500*time.Millisecond)
 	go func() {
 		slog.Info("backend listening", "addr", cfg.ListenAddr)
 		err := server.ListenAndServe()
