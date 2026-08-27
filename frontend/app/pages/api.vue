@@ -2,16 +2,18 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { APIKey } from '~/composables/useManager'
 
+type ManagedAPIKey = APIKey & { revoked_at?: number; created_by_user_id?: number }
+
 const manager = useManager()
 const { apiBase } = manager
-const keys = ref<APIKey[]>([])
+const keys = ref<ManagedAPIKey[]>([])
 const name = ref('default')
 const secret = ref('')
 const error = ref('')
-const pending = reactive<Record<string, 'toggle' | 'revoke' | undefined>>({})
+const pending = reactive<Record<string, 'toggle' | 'revoke' | 'rotate' | undefined>>({})
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 
-const columns: TableColumn<APIKey>[] = [
+const columns: TableColumn<ManagedAPIKey>[] = [
   { accessorKey: 'name', header: 'Name' },
   { accessorKey: 'prefix', header: 'Prefix' },
   { accessorKey: 'enabled', header: 'Status' },
@@ -19,19 +21,22 @@ const columns: TableColumn<APIKey>[] = [
 ]
 
 async function load() {
+  if (!manager.user.value) return
   try {
-    keys.value = await manager.request<APIKey[]>('/api/v1/api-keys')
+    keys.value = (await manager.request<ManagedAPIKey[]>('/api/v1/api-keys')) || []
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || 'Unable to load API keys'
   }
 }
 
-onMounted(() => void load())
+watch(manager.user, user => {
+  if (user) void load()
+}, { immediate: true })
 
 async function createKey() {
   error.value = ''
   try {
-    const result = await manager.request<{ key: APIKey; secret: string }>('/api/v1/api-keys', { method: 'POST', body: { name: name.value } })
+    const result = await manager.request<{ key: ManagedAPIKey; secret: string }>('/api/v1/api-keys', { method: 'POST', body: { name: name.value } })
     secret.value = result.secret
     await load()
   } catch (e: any) {
@@ -39,7 +44,7 @@ async function createKey() {
   }
 }
 
-async function setEnabled(key: APIKey) {
+async function setEnabled(key: ManagedAPIKey) {
   pending[key.id] = 'toggle'
   error.value = ''
   try {
@@ -52,10 +57,10 @@ async function setEnabled(key: APIKey) {
   }
 }
 
-async function revoke(key: APIKey) {
+async function revoke(key: ManagedAPIKey) {
   const confirmed = await confirmation.value?.request({
     title: 'Revoke API key',
-    description: `Revoke API key “${key.name}”? It will be permanently removed.`,
+    description: `Revoke API key “${key.name}”? Existing clients using it will fail immediately. Revoked metadata is retained for history.`,
     confirmLabel: 'Revoke key',
     color: 'error'
   })
@@ -67,6 +72,27 @@ async function revoke(key: APIKey) {
     await load()
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || 'Unable to revoke API key'
+  } finally {
+    pending[key.id] = undefined
+  }
+}
+
+async function rotate(key: ManagedAPIKey) {
+  const confirmed = await confirmation.value?.request({
+    title: 'Rotate API key',
+    description: `Rotate “${key.name}”? The current secret will be revoked immediately and a replacement secret will be shown once.`,
+    confirmLabel: 'Rotate key',
+    color: 'warning'
+  })
+  if (!confirmed) return
+  pending[key.id] = 'rotate'
+  error.value = ''
+  try {
+    const result = await manager.request<{ key: ManagedAPIKey; secret: string }>(`/api/v1/api-keys/${key.id}/rotate`, { method: 'POST' })
+    secret.value = result.secret
+    await load()
+  } catch (e: any) {
+    error.value = e?.data?.error || e?.message || 'Unable to rotate API key'
   } finally {
     pending[key.id] = undefined
   }
@@ -98,7 +124,7 @@ async function revoke(key: APIKey) {
         </div>
       </template>
 
-      <p class="mb-4 text-sm text-muted">Disable keeps a key for later. Revoked keys are permanently removed.</p>
+      <p class="mb-4 text-sm text-muted">Disable keeps a key for later. Revoke invalidates it permanently while retaining safe metadata. Rotation returns replacement plaintext once.</p>
       <UAlert v-if="error" class="mb-4" color="error" variant="subtle" :description="error" />
 
       <section v-if="secret" class="mb-4 border-y border-default py-4">
@@ -121,12 +147,14 @@ async function revoke(key: APIKey) {
       <UTable v-if="keys.length" :data="keys" :columns="columns">
         <template #prefix-cell="{ row }"><span class="font-mono text-xs">{{ row.original.prefix }}…</span></template>
         <template #enabled-cell="{ row }">
-          <UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</UBadge>
+          <UBadge v-if="row.original.revoked_at" color="error" variant="subtle" size="sm">Revoked</UBadge>
+          <UBadge v-else :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</UBadge>
         </template>
         <template #actions-cell="{ row }">
           <div class="flex justify-end">
-            <UFieldGroup>
+            <UFieldGroup v-if="!row.original.revoked_at">
               <UButton color="neutral" variant="soft" size="sm" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</UButton>
+              <UButton color="warning" variant="soft" size="sm" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</UButton>
               <UButton color="error" variant="soft" size="sm" :loading="pending[row.original.id] === 'revoke'" :disabled="!!pending[row.original.id]" @click="revoke(row.original)">Revoke</UButton>
             </UFieldGroup>
           </div>

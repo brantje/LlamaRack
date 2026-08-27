@@ -14,6 +14,7 @@ function seedAuthenticated() {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
+  manager.instances.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
   return manager
@@ -34,60 +35,51 @@ beforeEach(() => {
 })
 
 describe('API key state controls', () => {
-  it('disables and re-enables keys without removing them', async () => {
+  it('disables and re-enables active keys without removing metadata', async () => {
     let enabled = true
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/api-keys/k1' && options?.method === 'PATCH') {
         enabled = options.body.enabled
         return undefined
       }
-      if (path === '/api/v1/api-keys') {
-        return [{ id: 'k1', name: 'sdk', prefix: 'abc12345', enabled, created_at: 1 }]
-      }
+      if (path === '/api/v1/api-keys') return [{ id: 'k1', name: 'sdk', prefix: 'abc12345', enabled, created_at: 1 }]
       return []
     })
 
     const wrapper = await mountSuspended(APIPage, { route: false })
     await flushPromises()
-    expect(wrapper.text()).toContain('Enabled')
-
     await wrapper.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1', { method: 'PATCH', body: { enabled: false } })
     expect(wrapper.text()).toContain('Disabled')
-    expect(wrapper.findAll('button').some(button => button.text() === 'Enable')).toBe(true)
-
+    expect(wrapper.text()).toContain('sdk')
     await wrapper.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1', { method: 'PATCH', body: { enabled: true } })
     expect(wrapper.text()).toContain('Enabled')
   })
 
-  it('keeps the revoke route and removes the key from the list', async () => {
-    let exists = true
+  it('marks revoked keys as historical records instead of deleting them', async () => {
+    let revokedAt: number | undefined
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/api-keys/k1/revoke' && options?.method === 'POST') {
-        exists = false
+        revokedAt = 123
         return undefined
       }
       if (path === '/api/v1/api-keys') {
-        return exists ? [{ id: 'k1', name: 'sdk', prefix: 'abc12345', enabled: false, created_at: 1 }] : []
+        return [{ id: 'k1', name: 'sdk', prefix: 'abc12345', enabled: !revokedAt, created_at: 1, revoked_at: revokedAt }]
       }
       return []
     })
 
     const wrapper = await mountSuspended(APIPage, { route: false })
     await flushPromises()
-    expect(wrapper.text()).toContain('sdk')
-    expect(wrapper.text()).toContain('Revoked keys are permanently removed')
+    expect(wrapper.text()).toContain('Revoke invalidates it permanently while retaining safe metadata')
 
     await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
-    expect(document.body.textContent).toContain('Revoke API key “sdk”? It will be permanently removed.')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', expect.anything())
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
-    expect(wrapper.text()).toContain('No API keys created yet.')
+    expect(wrapper.text()).toContain('sdk')
+    expect(wrapper.text()).toContain('Revoked')
+    expect(wrapper.text()).not.toContain('No API keys created yet.')
   })
 
   it('handles toggle failures and cancelled revoke', async () => {

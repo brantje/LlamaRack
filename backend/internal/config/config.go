@@ -20,7 +20,6 @@ type Config struct {
 	SessionLifetime           time.Duration
 	AllowedOrigin             string
 	AlwaysOnReconcileInterval time.Duration
-	IdleUnloadTimeout         time.Duration
 }
 
 func Load() Config {
@@ -30,10 +29,6 @@ func Load() Config {
 	alwaysOnSeconds, err := strconv.Atoi(env("LCM_ALWAYS_ON_RECONCILE_SECONDS", "15"))
 	if err != nil || alwaysOnSeconds < 0 {
 		alwaysOnSeconds = 15
-	}
-	idleSeconds, err := strconv.Atoi(env("LCM_IDLE_UNLOAD_SECONDS", "300"))
-	if err != nil || idleSeconds < 0 {
-		idleSeconds = 300
 	}
 	return Config{
 		ListenAddr:                env("LCM_LISTEN_ADDR", ":8000"),
@@ -48,7 +43,6 @@ func Load() Config {
 		SessionLifetime:           24 * time.Hour,
 		AllowedOrigin:             env("LCM_ALLOWED_ORIGIN", "http://localhost:3000"),
 		AlwaysOnReconcileInterval: time.Duration(alwaysOnSeconds) * time.Second,
-		IdleUnloadTimeout:         time.Duration(idleSeconds) * time.Second,
 	}
 }
 

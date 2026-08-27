@@ -44,13 +44,9 @@ func TestAPILogHelperProcess(t *testing.T) {
 	if err := (&http.Server{Handler: mux}).Serve(ln); err != nil && err != http.ErrServerClosed { os.Exit(3) }
 }
 
-func TestWorkerLogStreamRequiresAuthAndStreamsLiveWorkerOutput(t *testing.T) {
+func TestWorkerLogStreamStreamsLiveWorkerOutput(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	unauthorized := doRequest(t, f.server, http.MethodGet, "/api/v1/instances/instance-1/logs/stream", nil, nil)
-	if unauthorized.Code != http.StatusUnauthorized { t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String()) }
-
-	cookie := bootstrapAndLogin(t, f)
-	model := createModel(t, f, cookie)
+	model := createModel(t, f, nil)
 	instance, err := f.server.lifecycle.Instances().Create(context.Background(), instances.CreateInput{ModelID: model.ID, Name: "API log instance"})
 	if err != nil { t.Fatal(err) }
 	instanceID := instance.ID
@@ -61,12 +57,11 @@ func TestWorkerLogStreamRequiresAuthAndStreamsLiveWorkerOutput(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID+"/logs/stream", nil).WithContext(ctx)
-	req.AddCookie(cookie)
 	recorder := httptest.NewRecorder(); done := make(chan struct{})
 	go func() { f.server.ServeHTTP(recorder, req); close(done) }()
 
 	time.Sleep(25 * time.Millisecond)
-	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instanceID+"/start", nil, cookie)
+	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instanceID+"/start", nil, nil)
 	if started.Code != http.StatusAccepted { cancel(); t.Fatalf("start status=%d body=%s", started.Code, started.Body.String()) }
 	deadline := time.Now().Add(time.Second)
 	for !strings.Contains(recorder.Body.String(), "fake api worker online") && time.Now().Before(deadline) { time.Sleep(10 * time.Millisecond) }

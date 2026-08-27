@@ -3,7 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
 import HardwarePlacementEditor from '~/components/HardwarePlacementEditor.vue'
-import SettingsPage from '~/pages/settings.vue'
+import AdminLlamaCppPage from '~/pages/admin/llamacpp.vue'
 import { useManager, type Profile } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -261,28 +261,33 @@ describe('Phase 7 hardware placement editor', () => {
 
     const refresh = () => wrapper.findAll('button').find(button => button.text().includes('Refresh hardware'))!
     mocks.request.mockRejectedValueOnce({ data: { error: 'gpu denied' } })
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('gpu denied')
 
     mocks.request.mockRejectedValueOnce(new Error('gpu exploded'))
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('gpu exploded')
 
     mocks.request.mockRejectedValueOnce({})
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('Unable to read hardware state')
 
     mocks.request.mockResolvedValueOnce([])
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).not.toContain('gpu denied')
 
     mocks.request.mockResolvedValueOnce({ gpus: [] })
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('No NVIDIA or ROCm GPUs were detected')
   })
 })
 
-describe('Phase 7 global settings', () => {
+describe('Phase 7 global llama.cpp administration', () => {
   it('covers saving defaults plus load/save error fallbacks', async () => {
     const manager = resetManager()
     manager.profile.value = { ...editorProfile, version: undefined }
@@ -309,35 +314,42 @@ describe('Phase 7 global settings', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(SettingsPage, { route: false })
+    const wrapper = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('unknown')
 
     const save = () => wrapper.findAll('button').find(button => button.text().includes('Save defaults'))!
-    await save().trigger('click'); await flushPromises()
+    await save().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('Global llama.cpp defaults saved')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config', { method: 'PUT', body: { options: { 'ctx-size': '4096' } } })
 
     saveMode = 'data'
-    await save().trigger('click'); await flushPromises()
+    await save().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('save denied')
     saveMode = 'message'
-    await save().trigger('click'); await flushPromises()
+    await save().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('save exploded')
     saveMode = 'fallback'
-    await save().trigger('click'); await flushPromises()
-    expect(wrapper.text()).toContain('Unable to save global llama.cpp defaults')
+    await save().trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to save llama.cpp defaults')
 
     saveMode = 'ok'
     const refresh = () => wrapper.findAll('button').find(button => button.text() === 'Refresh')!
     loadMode = 'data'
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('load denied')
     loadMode = 'message'
-    await refresh().trigger('click'); await flushPromises()
+    await refresh().trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('load exploded')
     loadMode = 'fallback'
-    await refresh().trigger('click'); await flushPromises()
-    expect(wrapper.text()).toContain('Unable to load global llama.cpp defaults')
+    await refresh().trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to load llama.cpp configuration')
   })
 })

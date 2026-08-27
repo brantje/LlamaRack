@@ -1,9 +1,16 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/database"
+	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
+	"github.com/brantje/llamacpp-manager/backend/internal/settings"
 )
 
 func TestMuxRoutingDoesNotConflict(t *testing.T) {
@@ -39,71 +46,89 @@ func TestMuxRoutingDoesNotConflict(t *testing.T) {
 	}
 }
 
-func TestOriginAllowed(t *testing.T) {
-	cases := []struct {
-		name       string
-		origin     string
-		host       string
-		configured string
-		want       bool
-	}{
-		{"explicit", "https://ui.example.test", "api.example.test:8888", "http://localhost:3000, https://ui.example.test", true},
-		{"same LAN host", "http://192.168.60.5:3000", "192.168.60.5:8888", "http://localhost:3000", true},
-		{"same DNS host case insensitive", "https://MANAGER.local:3000", "manager.local:8888", "", true},
-		{"different host", "http://192.168.60.6:3000", "192.168.60.5:8888", "http://localhost:3000", false},
-		{"bad origin", "://bad", "localhost:8888", "", false},
-		{"unsupported scheme", "ftp://localhost:3000", "localhost:8888", "", false},
-		{"empty hostname", "http:///path", "localhost:8888", "", false},
-		{"bad request host", "http://localhost:3000", "[bad", "", false},
+func testCORSNetwork(t *testing.T) (*managersecurity.Network, *settings.Service) {
+	t.Helper()
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "cors.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := originAllowed(tc.origin, tc.host, tc.configured); got != tc.want {
-				t.Fatalf("originAllowed(%q,%q,%q)=%v want %v", tc.origin, tc.host, tc.configured, got, tc.want)
-			}
-		})
+	t.Cleanup(func() { _ = db.Close() })
+	store := settings.New(db, settings.Defaults{
+		SessionLifetime:   time.Hour,
+		AllowedOrigins:    "https://manager.example.com",
+		StartupTimeout:    time.Minute,
+		AlwaysOnReconcile: time.Second,
+	})
+	return managersecurity.NewNetwork(store), store
+}
+
+func TestDynamicCORSAllowsConfiguredAndSameOriginRequests(t *testing.T) {
+	network, _ := testCORSNetwork(t)
+	called := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called++
+		w.WriteHeader(http.StatusAccepted)
+	})
+	h := dynamicCORS(network, next)
+
+	for _, origin := range []string{"https://manager.example.com", "http://manager.local"} {
+		r := httptest.NewRequest(http.MethodPost, "http://manager.local/api/v1/test", nil)
+		r.Host = "manager.local"
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("origin %q status=%d", origin, w.Code)
+		}
+		if w.Header().Get("Access-Control-Allow-Origin") != origin {
+			t.Fatalf("origin %q allow-origin=%q", origin, w.Header().Get("Access-Control-Allow-Origin"))
+		}
+		if w.Header().Get("Access-Control-Allow-Credentials") != "true" || w.Header().Get("Vary") != "Origin" {
+			t.Fatalf("origin %q missing CORS response headers: %v", origin, w.Header())
+		}
+		if w.Header().Get("Access-Control-Allow-Headers") == "" || w.Header().Get("Access-Control-Allow-Methods") == "" {
+			t.Fatalf("origin %q missing CORS capability headers", origin)
+		}
+	}
+	if called != 2 {
+		t.Fatalf("next calls=%d", called)
 	}
 }
 
-func TestCORSMiddleware(t *testing.T) {
-	nextCalled := false
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		nextCalled = true
-		w.WriteHeader(http.StatusCreated)
-	})
-	h := cors("http://localhost:3000", next)
+func TestDynamicCORSRejectsForeignOriginAndHandlesPreflight(t *testing.T) {
+	network, store := testCORSNetwork(t)
+	called := 0
+	h := dynamicCORS(network, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called++
+		w.WriteHeader(http.StatusAccepted)
+	}))
 
-	r := httptest.NewRequest(http.MethodGet, "http://192.168.60.5:8888/health", nil)
-	r.Host = "192.168.60.5:8888"
-	r.Header.Set("Origin", "http://192.168.60.5:3000")
+	foreign := httptest.NewRequest(http.MethodGet, "http://manager.local/api", nil)
+	foreign.Header.Set("Origin", "https://evil.example")
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if !nextCalled || w.Code != http.StatusCreated {
-		t.Fatalf("request status=%d called=%v", w.Code, nextCalled)
-	}
-	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://192.168.60.5:3000" {
-		t.Fatalf("allow origin=%q", got)
-	}
-	if w.Header().Get("Access-Control-Allow-Credentials") != "true" || w.Header().Get("Vary") != "Origin" {
-		t.Fatalf("cors headers=%v", w.Header())
+	h.ServeHTTP(w, foreign)
+	if w.Code != http.StatusAccepted || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("foreign origin status=%d headers=%v", w.Code, w.Header())
 	}
 
-	nextCalled = false
-	r = httptest.NewRequest(http.MethodOptions, "http://192.168.60.5:8888/api/v1/me", nil)
-	r.Host = "192.168.60.5:8888"
-	r.Header.Set("Origin", "http://192.168.60.5:3000")
+	preflight := httptest.NewRequest(http.MethodOptions, "http://manager.local/api", nil)
+	preflight.Header.Set("Origin", "https://manager.example.com")
 	w = httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if w.Code != http.StatusNoContent || nextCalled {
-		t.Fatalf("preflight status=%d called=%v", w.Code, nextCalled)
+	h.ServeHTTP(w, preflight)
+	if w.Code != http.StatusNoContent || w.Header().Get("Access-Control-Allow-Origin") != "https://manager.example.com" {
+		t.Fatalf("preflight status=%d headers=%v", w.Code, w.Header())
+	}
+	if called != 1 {
+		t.Fatalf("OPTIONS should not reach next; calls=%d", called)
 	}
 
-	r = httptest.NewRequest(http.MethodGet, "http://192.168.60.5:8888/health", nil)
-	r.Host = "192.168.60.5:8888"
-	r.Header.Set("Origin", "http://evil.example:3000")
+	if _, err := store.Set(context.Background(), settings.AllowedOrigins, ""); err != nil {
+		t.Fatal(err)
+	}
+	withoutOrigin := httptest.NewRequest(http.MethodGet, "http://manager.local/api", nil)
 	w = httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if w.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("unexpected origin header: %v", w.Header())
+	h.ServeHTTP(w, withoutOrigin)
+	if w.Code != http.StatusAccepted || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("origin-less request status=%d headers=%v", w.Code, w.Header())
 	}
 }

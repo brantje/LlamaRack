@@ -14,6 +14,7 @@ function resetAuthenticated() {
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = []
+  manager.instances.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
   return manager
@@ -35,20 +36,25 @@ beforeEach(() => {
 })
 
 describe('API key controls', () => {
-  it('disables, enables, and permanently revokes a key', async () => {
+  it('disables, enables, rotates and retains revoked key history', async () => {
     let enabled = true
-    let exists = true
+    let revokedAt: number | undefined
+    let replacement: any
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/api-keys' && !options?.method) {
-        return exists ? [{ id: 'k1', name: 'LiteLLM', prefix: 'abc12345', enabled, created_at: 1 }] : []
+        return [
+          { id: 'k1', name: 'LiteLLM', prefix: 'abc12345', enabled: revokedAt ? false : enabled, created_at: 1, revoked_at: revokedAt },
+          ...(replacement ? [replacement] : [])
+        ]
       }
       if (path === '/api/v1/api-keys/k1' && options?.method === 'PATCH') {
         enabled = options.body.enabled
         return undefined
       }
-      if (path === '/api/v1/api-keys/k1/revoke' && options?.method === 'POST') {
-        exists = false
-        return undefined
+      if (path === '/api/v1/api-keys/k1/rotate' && options?.method === 'POST') {
+        revokedAt = 10
+        replacement = { id: 'k2', name: 'LiteLLM', prefix: 'new12345', enabled: true, created_at: 2 }
+        return { key: replacement, secret: 'replacement-secret' }
       }
       return []
     })
@@ -65,28 +71,30 @@ describe('API key controls', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1', { method: 'PATCH', body: { enabled: true } })
-    expect(wrapper.text()).toContain('Enabled')
 
-    await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
-    expect(document.body.textContent).toContain('Revoke API key “LiteLLM”? It will be permanently removed.')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', expect.anything())
+    await wrapper.findAll('button').find(button => button.text() === 'Rotate')!.trigger('click')
+    expect(document.body.textContent).toContain('The current secret will be revoked immediately')
     await clickConfirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
-    expect(wrapper.text()).toContain('No API keys created yet.')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/rotate', { method: 'POST' })
+    expect(wrapper.text()).toContain('replacement-secret')
+    expect(wrapper.text()).toContain('Revoked')
+    expect(wrapper.text()).toContain('new12345')
   })
 
-  it('keeps keys on cancelled revoke and surfaces mutation errors', async () => {
-    let mode: 'toggle-error' | 'revoke-error' = 'toggle-error'
+  it('retains metadata after revoke and surfaces mutation errors', async () => {
+    let revokedAt: number | undefined
+    let mode: 'toggle-error' | 'revoke-error' | 'ok' = 'toggle-error'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/api-keys' && !options?.method) {
-        return [{ id: 'k1', name: 'SDK', prefix: 'abc12345', enabled: true, created_at: 1 }]
+        return [{ id: 'k1', name: 'SDK', prefix: 'abc12345', enabled: !revokedAt, created_at: 1, revoked_at: revokedAt }]
       }
       if (path === '/api/v1/api-keys/k1' && options?.method === 'PATCH' && mode === 'toggle-error') {
         throw { data: { error: 'toggle failed' } }
       }
-      if (path === '/api/v1/api-keys/k1/revoke' && options?.method === 'POST' && mode === 'revoke-error') {
-        throw new Error('revoke failed')
+      if (path === '/api/v1/api-keys/k1/revoke' && options?.method === 'POST') {
+        if (mode === 'revoke-error') throw new Error('revoke failed')
+        revokedAt = 20
+        return undefined
       }
       return undefined
     })
@@ -105,5 +113,13 @@ describe('API key controls', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
     await clickConfirmation('confirm')
     expect(wrapper.text()).toContain('revoke failed')
+
+    mode = 'ok'
+    await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
+    expect(document.body.textContent).toContain('Revoked metadata is retained for history')
+    await clickConfirmation('confirm')
+    expect(wrapper.text()).toContain('SDK')
+    expect(wrapper.text()).toContain('Revoked')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Revoke')).toBe(false)
   })
 })
