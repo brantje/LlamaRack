@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
 	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
@@ -17,6 +19,11 @@ type phase8Handler struct {
 	hf        *huggingface.Client
 	secrets   *huggingface.SecretStore
 	downloads *downloads.Manager
+}
+
+type downloadSnapshotEvent struct {
+	Type      string          `json:"type"`
+	Downloads []downloads.Job `json:"downloads"`
 }
 
 func NewPhase8Handler(a *auth.Service, hf *huggingface.Client, secrets *huggingface.SecretStore, downloadManager *downloads.Manager) http.Handler {
@@ -35,6 +42,8 @@ func (h *phase8Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.detail(w, r)
 	case path == "/api/v1/huggingface/token":
 		h.token(w, r)
+	case path == "/api/v1/downloads/ws":
+		h.downloadEvents(w, r)
 	case path == "/api/v1/downloads":
 		h.downloadCollection(w, r)
 	case strings.HasPrefix(path, "/api/v1/downloads/"):
@@ -116,6 +125,57 @@ func (h *phase8Handler) token(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *phase8Handler) downloadEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	snapshot, events, cancel, err := h.downloads.Subscribe(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer cancel()
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(request *http.Request) bool {
+		return websocketOriginAllowed(request, "")
+	}}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(downloadSnapshotEvent{Type: "download_snapshot", Downloads: snapshot}); err != nil {
+		return
+	}
+
+	disconnected := make(chan struct{})
+	go func() {
+		defer close(disconnected)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-disconnected:
+			return
+		case event, open := <-events:
+			if !open {
+				return
+			}
+			if err := conn.WriteJSON(event); err != nil {
+				return
+			}
+		}
+	}
+}
+
 func (h *phase8Handler) downloadCollection(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -163,20 +223,31 @@ func (h *phase8Handler) downloadCollection(w http.ResponseWriter, r *http.Reques
 func (h *phase8Handler) downloadItem(w http.ResponseWriter, r *http.Request, rest string) {
 	parts := strings.Split(rest, "/")
 	if len(parts) == 1 && parts[0] != "" {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		job, err := h.downloads.Get(r.Context(), parts[0])
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
+		switch r.Method {
+		case http.MethodGet:
+			job, err := h.downloads.Get(r.Context(), parts[0])
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, err)
 				return
 			}
-			writeErr(w, http.StatusInternalServerError, err)
-			return
+			writeJSON(w, http.StatusOK, job)
+		case http.MethodDelete:
+			if err := h.downloads.Remove(r.Context(), parts[0]); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
+					return
+				}
+				writeErr(w, http.StatusBadRequest, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		writeJSON(w, http.StatusOK, job)
 		return
 	}
 	if len(parts) != 2 || parts[0] == "" || r.Method != http.MethodPost {
