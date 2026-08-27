@@ -51,7 +51,7 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	if _, err := h.auth.SessionUser(r.Context(), cookie.Value); err != nil {
+	if _, _, err := h.auth.SessionUserWithSession(r.Context(), cookie.Value); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
