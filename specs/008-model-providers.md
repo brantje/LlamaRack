@@ -127,10 +127,10 @@ Filename parsing is heuristic. Do not treat an unrecognized filename as invalid 
 
 Some llama.cpp model repositories contain GGUF files that support a primary model but are not themselves selectable main models. Phase 8 recognizes separate companion files for:
 
-- multimodal projectors whose basename starts with `mmproj`, `mmoproj` or `projector`;
+- multimodal projectors whose repository path/name contains the established `mmproj`, `mmoproj` or `projector` marker;
 - separate MTP draft models whose basename starts with `mtp`.
 
-Classification must be conservative. A helper marker is recognized only as a basename prefix followed by a conventional separator (`-`, `_`, `.`), or as the complete basename. Do not classify a normal model merely because `projector`, `mmproj` or `mtp` occurs somewhere later in its filename. This avoids hiding valid main models and avoids confusing a main model that advertises embedded MTP capability with a separate MTP sidecar.
+Projector detection intentionally preserves the existing broad project rule: names such as `model-mmproj-*.gguf`, `asda-projector.gguf` and files stored below a projector/mmproj directory are helper artifacts and must not appear as selectable main models. MTP detection is deliberately more conservative: `mtp` must be the basename prefix (followed by a conventional separator such as `-`, `_`, `.`, or be the complete basename). A normal main model containing `MTP` later in its filename may describe embedded MTP capability and must not be hidden as a separate draft sidecar solely from that substring.
 
 For each complete selectable main artifact:
 
@@ -148,7 +148,7 @@ After that Hugging Face download completes, registering its main GGUF should aut
 
 These are normal model-level defaults: the user may review or override them, and the launcher still filters persisted options against the currently detected llama-server option schema before starting a process.
 
-Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Phase 8 must not invent a separate file relationship from a non-prefix filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
+Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Phase 8 must not invent a separate file relationship from a non-prefix MTP filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
 
 ## 9. Split GGUF grouping
 
@@ -469,7 +469,7 @@ Downloads must support:
 9. Download cancellation is idempotent.
 10. Model definition deletion does not silently delete multi-gigabyte artifacts.
 11. Recognized projector and separate MTP sidecars remain dependencies of a main artifact rather than standalone Model choices.
-12. Companion filename detection is prefix-based and must not hide normal models that merely contain helper words later in the basename.
+12. Existing broad projector-marker filtering is preserved, while MTP sidecar detection stays prefix-based so embedded-MTP main filenames are not hidden accidentally.
 
 ## 31. Acceptance criteria
 
@@ -481,7 +481,8 @@ Before v1, tests must demonstrate:
 - a main GGUF with matching projector/MTP sidecars exposes those helpers, includes them in the same download job and reflects their bytes in the total;
 - projector/MTP helper files do not appear as independent Model choices after download;
 - registering a downloaded main GGUF preconfigures `mmproj` and separate-MTP llama.cpp model defaults from that exact completed download job;
-- a normal filename that contains `projector` or `MTP` away from the basename prefix is not misclassified as a helper;
+- existing projector marker forms such as `model-mmproj-*`, `asda-projector.gguf` and projector directories remain filtered as helpers;
+- a normal main filename that contains `MTP` away from the basename prefix is not misclassified as a separate MTP helper;
 - hardware fit/recommendation can rank candidate quantizations without hiding alternatives;
 - global Hugging Face token enables authorized private/gated metadata/download access and is never returned through the API;
 - direct URL download supports a normal single GGUF;
