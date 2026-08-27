@@ -18,8 +18,10 @@ type HardwareSnapshot = {
 }
 type Recommendation = {
   context_length: number
+  context_capability?: number
   context_assumed: boolean
   confidence: 'low' | 'medium' | 'high' | string
+  metadata?: { context_length?: number }
   metadata_warning?: string
   hardware_warning?: string
   quantization: { name?: string; summary: string; tradeoff: string }
@@ -33,7 +35,10 @@ type Recommendation = {
   current_fit: boolean
   total_hardware_fit: boolean
   cpu_fit: boolean
-  offload: { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; reason: string }
+  offload: { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu?: boolean; reason: string }
+}
+type ConfigResponse = {
+  effective?: { values?: Record<string, string> }
 }
 
 const props = defineProps<{
@@ -41,25 +46,35 @@ const props = defineProps<{
   gpuDevices: string[]
   tensorSplit: string
   modelId?: string
+  llamaOptions?: Record<string, string>
 }>()
 const emit = defineEmits<{
   'update:gpuMode': [value: string]
   'update:gpuDevices': [value: string[]]
   'update:tensorSplit': [value: string]
+  'update:contextSize': [value: string]
 }>()
 
+const defaultContext = 4096
+const minimumContext = 512
 const manager = useManager()
 const snapshot = ref<HardwareSnapshot | null>(null)
 const recommendation = ref<Recommendation | null>(null)
+const contextSize = ref(defaultContext)
+const contextSource = ref('estimate default')
 const loading = ref(false)
 const recommendationLoading = ref(false)
 const error = ref('')
 const recommendationError = ref('')
+let recommendationTimer: ReturnType<typeof setTimeout> | undefined
+
 const modeItems = [{ label: 'Automatic · single GPU first', value: 'auto' }, { label: 'Manual', value: 'manual' }]
 const gpus = computed(() => snapshot.value?.gpus || [])
 const deviceItems = computed(() => gpus.value.map(gpu => ({
   label: `${gpu.id} · ${gpu.name} · ${formatBytes(gpu.free_bytes)} free`, value: gpu.id
 })))
+const contextCapability = computed(() => Math.max(0, recommendation.value?.context_capability || recommendation.value?.metadata?.context_length || 0))
+const contextMaximum = computed(() => Math.max(contextSize.value, contextCapability.value || 32768, defaultContext))
 const recommendationTone = computed<'success' | 'warning' | 'neutral'>(() => recommendation.value?.current_fit ? 'success' : recommendation.value?.total_hardware_fit ? 'warning' : 'neutral')
 const recommendationTitle = computed(() => {
   const item = recommendation.value
@@ -81,6 +96,11 @@ function isRecommendation(value: unknown): value is Recommendation {
     && Boolean(item.offload && typeof item.offload.mode === 'string' && typeof item.offload.reason === 'string')
 }
 
+function parseContext(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+}
+
 async function refreshHardware() {
   loading.value = true
   error.value = ''
@@ -95,13 +115,38 @@ async function refreshHardware() {
   }
 }
 
+async function loadContext() {
+  const local = parseContext(props.llamaOptions?.['ctx-size'])
+  if (local) {
+    contextSize.value = local
+    contextSource.value = 'Instance override'
+    return
+  }
+  contextSize.value = defaultContext
+  contextSource.value = 'estimate default'
+  if (!props.modelId) return
+
+  try {
+    const params = new URLSearchParams({ model_id: props.modelId })
+    const result = await manager.request<ConfigResponse>(`/api/v1/llamacpp/config?${params.toString()}`)
+    const inherited = parseContext(result?.effective?.values?.['ctx-size'])
+    if (inherited) {
+      contextSize.value = inherited
+      contextSource.value = 'inherited llama.cpp config'
+    }
+  } catch {
+    // Recommendation remains useful with the documented 4K estimate default.
+  }
+}
+
 async function refreshRecommendation() {
   recommendation.value = null
   recommendationError.value = ''
   if (!props.modelId) return
   recommendationLoading.value = true
   try {
-    const result = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation`)
+    const query = new URLSearchParams({ context_length: String(contextSize.value) })
+    const result = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation?${query.toString()}`)
     recommendation.value = isRecommendation(result) ? result : null
   } catch (value: any) {
     recommendationError.value = value?.data?.error || value?.message || 'Unable to estimate model resources'
@@ -111,7 +156,24 @@ async function refreshRecommendation() {
 }
 
 async function refresh() {
-  await Promise.all([refreshHardware(), refreshRecommendation()])
+  await Promise.all([refreshHardware(), loadContext()])
+  await refreshRecommendation()
+}
+
+function scheduleRecommendation() {
+  if (recommendationTimer) clearTimeout(recommendationTimer)
+  recommendationTimer = setTimeout(() => void refreshRecommendation(), 180)
+}
+
+function updateContext(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = parseContext(raw)
+  if (!parsed) return
+  const next = Math.min(Math.max(parsed, minimumContext), contextMaximum.value)
+  contextSize.value = next
+  contextSource.value = 'Instance override'
+  emit('update:contextSize', String(next))
+  scheduleRecommendation()
 }
 
 function formatBytes(value: number) {
@@ -146,8 +208,19 @@ watch(() => props.gpuMode, (mode) => {
     emit('update:tensorSplit', '')
   }
 })
-watch(() => props.modelId, () => void refreshRecommendation())
+watch(() => props.modelId, async () => {
+  await loadContext()
+  await refreshRecommendation()
+})
+watch(() => props.llamaOptions?.['ctx-size'], async (value, oldValue) => {
+  if (value === oldValue) return
+  await loadContext()
+  scheduleRecommendation()
+})
 onMounted(() => void refresh())
+onBeforeUnmount(() => {
+  if (recommendationTimer) clearTimeout(recommendationTimer)
+})
 </script>
 
 <template>
@@ -162,7 +235,39 @@ onMounted(() => void refresh())
 
     <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
     <UAlert v-if="recommendationError" color="warning" variant="subtle" :description="recommendationError" />
-    <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 rounded-lg border border-default p-4">
+
+    <UFormField
+      v-if="modelId"
+      label="Context size"
+      name="ctx-size"
+      :description="`KV-cache memory scales with context. ${contextSource}. Changing this control sets this Instance's --ctx-size override.`"
+    >
+      <div class="grid gap-3 md:grid-cols-[1fr_11rem] md:items-center">
+        <USlider
+          data-testid="context-slider"
+          :model-value="contextSize"
+          :min="minimumContext"
+          :max="contextMaximum"
+          :step="512"
+          @update:model-value="updateContext"
+        />
+        <UInputNumber
+          data-testid="context-input"
+          :model-value="contextSize"
+          :min="minimumContext"
+          :max="contextMaximum"
+          :step="512"
+          class="w-full"
+          @update:model-value="updateContext"
+        />
+      </div>
+      <div class="mt-2 flex flex-wrap justify-between gap-2 text-xs text-muted">
+        <span>Estimate: <strong>{{ contextSize.toLocaleString() }}</strong> tokens</span>
+        <span v-if="contextCapability">Model capability: <strong>{{ contextCapability.toLocaleString() }}</strong> tokens</span>
+      </div>
+    </UFormField>
+
+    <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 border-t border-default pt-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div class="flex flex-wrap items-center gap-2">
@@ -172,18 +277,19 @@ onMounted(() => void refresh())
           </div>
           <p class="mt-1 text-xs text-muted">{{ recommendation.offload.reason }}</p>
         </div>
-        <UBadge color="primary" variant="subtle">{{ recommendation.offload.mode.replace('_', ' ') }}</UBadge>
+        <UBadge color="primary" variant="subtle">{{ recommendation.offload.mode.replaceAll('_', ' ') }}</UBadge>
       </div>
       <dl class="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
         <div><dt class="text-dimmed">Full-offload VRAM</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.full_offload_vram_bytes) }}</dd></div>
         <div><dt class="text-dimmed">CPU-only RAM</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.cpu_only_ram_bytes) }}</dd></div>
         <div><dt class="text-dimmed">KV cache estimate</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.kv_cache_bytes) }}</dd></div>
-        <div><dt class="text-dimmed">Context assumption</dt><dd class="font-semibold">{{ recommendation.context_length.toLocaleString() }} tokens<span v-if="recommendation.context_assumed"> assumed</span></dd></div>
+        <div><dt class="text-dimmed">Selected context</dt><dd class="font-semibold">{{ recommendation.context_length.toLocaleString() }} tokens</dd></div>
       </dl>
-      <div v-if="recommendation.offload.devices?.length || recommendation.offload.gpu_layers" class="flex flex-wrap gap-2 text-xs">
+      <div class="flex flex-wrap gap-2 text-xs">
         <UBadge v-for="device in recommendation.offload.devices" :key="device" color="neutral" variant="soft">{{ device }}</UBadge>
         <span v-if="recommendation.offload.gpu_layers" class="text-muted">Recommended GPU layers: <strong>{{ recommendation.offload.gpu_layers }}</strong></span>
         <span v-if="recommendation.offload.tensor_split" class="text-muted">Tensor split: <strong class="font-mono">{{ recommendation.offload.tensor_split }}</strong></span>
+        <span v-if="recommendation.offload.mode !== 'cpu'" class="text-muted">KV cache: <strong>{{ recommendation.offload.kv_on_gpu === false ? 'system RAM' : 'GPU' }}</strong></span>
       </div>
       <p class="text-xs text-muted"><strong>{{ recommendation.quantization.summary }}</strong> {{ recommendation.quantization.tradeoff }}</p>
       <UAlert v-if="recommendation.metadata_warning" color="neutral" variant="subtle" title="Metadata estimate fallback" :description="recommendation.metadata_warning" />
