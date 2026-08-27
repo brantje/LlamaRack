@@ -46,7 +46,7 @@ const basicKeys = new Set([
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
 const overrides = computed(() => props.modelValue || {})
 const overrideCount = computed(() => Object.keys(overrides.value).length)
-const editorTitle = computed(() => props.scope === 'global' ? 'Global llama.cpp defaults' : `${scopeLabel.value} llama.cpp overrides`)
+const editorTitle = computed(() => `${scopeLabel.value} llama.cpp configuration`)
 const editorSummary = computed(() => {
   const count = overrideCount.value
   if (props.scope === 'global') return count === 1 ? '1 default configured' : `${count} defaults configured`
