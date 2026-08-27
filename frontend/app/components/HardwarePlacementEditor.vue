@@ -68,6 +68,16 @@ function updateDevices(value: unknown) {
   emit('update:gpuDevices', Array.isArray(value) ? value.map(String) : [])
 }
 
+function selectGpu(gpuID: string) {
+  emit('update:gpuMode', 'manual')
+  emit('update:gpuDevices', [gpuID])
+  emit('update:tensorSplit', '')
+}
+
+function isSelected(gpuID: string) {
+  return props.gpuMode === 'manual' && props.gpuDevices.length === 1 && props.gpuDevices[0] === gpuID
+}
+
 watch(() => props.gpuMode, (mode) => {
   if (mode === 'auto') {
     emit('update:gpuDevices', [])
@@ -89,10 +99,26 @@ onMounted(() => void refresh())
 
     <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
     <div v-if="snapshot" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <UCard v-for="gpu in gpus" :key="gpu.id" :ui="{ body: 'p-4 sm:p-4' }">
+      <UCard
+        v-for="gpu in gpus"
+        :key="gpu.id"
+        :data-testid="`gpu-card-${gpu.id}`"
+        :aria-pressed="isSelected(gpu.id)"
+        role="button"
+        tabindex="0"
+        class="cursor-pointer transition-shadow hover:ring-1 hover:ring-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        :class="isSelected(gpu.id) ? 'ring-2 ring-primary' : ''"
+        :ui="{ body: 'p-4 sm:p-4' }"
+        @click="selectGpu(gpu.id)"
+        @keydown.enter.prevent="selectGpu(gpu.id)"
+        @keydown.space.prevent="selectGpu(gpu.id)"
+      >
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0"><p class="font-mono text-sm font-bold">{{ gpu.id }}</p><p class="truncate text-xs text-muted">{{ gpu.name }}</p></div>
-          <UBadge size="sm" color="neutral" variant="subtle">{{ gpu.backend.toUpperCase() }}</UBadge>
+          <div class="flex items-center gap-1">
+            <UBadge v-if="isSelected(gpu.id)" size="sm" color="primary" variant="subtle">Selected</UBadge>
+            <UBadge size="sm" color="neutral" variant="subtle">{{ gpu.backend.toUpperCase() }}</UBadge>
+          </div>
         </div>
         <dl class="mt-3 grid grid-cols-2 gap-2 text-xs">
           <div><dt class="text-dimmed">VRAM free</dt><dd class="font-semibold">{{ formatBytes(gpu.free_bytes) }}</dd></div>
