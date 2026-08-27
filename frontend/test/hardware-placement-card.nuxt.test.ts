@@ -7,14 +7,16 @@ import { useManager } from '~/composables/useManager'
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
+const hardware = {
+  gpus: [
+    { id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU zero', total_bytes: 16, used_bytes: 4, free_bytes: 12, utilization_pct: 10 },
+    { id: 'CUDA1', backend: 'cuda', index: 1, name: 'GPU one', total_bytes: 16, used_bytes: 2, free_bytes: 14, utilization_pct: 5 }
+  ]
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
-  mocks.request.mockResolvedValue({
-    gpus: [
-      { id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU zero', total_bytes: 16, used_bytes: 4, free_bytes: 12, utilization_pct: 10 },
-      { id: 'CUDA1', backend: 'cuda', index: 1, name: 'GPU one', total_bytes: 16, used_bytes: 2, free_bytes: 14, utilization_pct: 5 }
-    ]
-  })
+  mocks.request.mockResolvedValue(hardware)
 
   const manager = useManager()
   manager.disconnectRuntimeEvents()
@@ -51,5 +53,36 @@ describe('GPU placement cards', () => {
     await wrapper.get('[data-testid="gpu-card-CUDA0"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(wrapper.emitted('update:gpuDevices')?.some(args => JSON.stringify(args[0]) === JSON.stringify(['CUDA0']))).toBe(true)
+  })
+
+  it('shows memory, context and offload guidance for the selected model', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path === '/api/v1/models/model-1/recommendation') return {
+        context_length: 8192,
+        context_assumed: false,
+        confidence: 'high',
+        quantization: { name: 'Q4_K_M', summary: 'Balanced quantization.', tradeoff: 'Good general-purpose choice.' },
+        memory: { weights_bytes: 4, kv_cache_bytes: 2, runtime_overhead_bytes: 1, cpu_only_ram_bytes: 7, full_offload_vram_bytes: 7 },
+        current_fit: true,
+        total_hardware_fit: true,
+        cpu_fit: true,
+        offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], reason: 'Fits one GPU.' }
+      }
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1' }
+    })
+    await flushPromises()
+
+    const recommendation = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(recommendation.text()).toContain('Fits current resources')
+    expect(recommendation.text()).toContain('high confidence')
+    expect(recommendation.text()).toContain('8,192 tokens')
+    expect(recommendation.text()).toContain('Recommended GPU layers: 32')
+    expect(recommendation.text()).toContain('Q4_K_M')
   })
 })
