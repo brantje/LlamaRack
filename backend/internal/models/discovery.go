@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
 
 type GGUFFile struct {
@@ -75,7 +77,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 			return err
 		}
 		rel = filepath.Clean(rel)
-		if isProjectorGGUF(rel) || isMTPGGUF(rel) {
+		if isProjectorGGUF(path) || isMTPGGUF(path) {
 			return nil
 		}
 		info, err := entry.Info()
@@ -161,6 +163,12 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 
 func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath string) (map[string]string, error) {
 	mainPath = filepath.ToSlash(filepath.Clean(mainPath))
+	options := map[string]string{}
+	mainAbsolute := filepath.Join(root, filepath.FromSlash(mainPath))
+	if features, err := ggufmeta.DetectFeatures(mainAbsolute); err == nil && features.HasMTP && !features.MTPOnly {
+		applyMTPDefaults(options)
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT df.local_path
 FROM download_files df
@@ -178,21 +186,16 @@ ORDER BY df.ordinal, df.path`, mainPath)
 	}
 	defer rows.Close()
 
-	options := map[string]string{}
 	for rows.Next() {
 		var localPath string
 		if err := rows.Scan(&localPath); err != nil {
 			return nil, err
 		}
-		kind := localSidecarKind(localPath)
-		if kind == "" {
-			continue
-		}
 		absolute, ok := sidecarAbsolutePath(root, localPath)
 		if !ok {
 			continue
 		}
-		switch kind {
+		switch localSidecarKind(absolute) {
 		case "mmproj":
 			if _, exists := options["mmproj"]; !exists {
 				options["mmproj"] = absolute
@@ -200,7 +203,7 @@ ORDER BY df.ordinal, df.path`, mainPath)
 		case "mtp":
 			if _, exists := options["spec-draft-model"]; !exists {
 				options["spec-draft-model"] = absolute
-				options["spec-type"] = "draft-mtp"
+				applyMTPDefaults(options)
 			}
 		}
 	}
@@ -211,6 +214,18 @@ ORDER BY df.ordinal, df.path`, mainPath)
 		return nil, nil
 	}
 	return options, nil
+}
+
+func applyMTPDefaults(options map[string]string) {
+	if _, exists := options["spec-type"]; !exists {
+		options["spec-type"] = "draft-mtp"
+	}
+	if _, exists := options["spec-draft-n-max"]; !exists {
+		options["spec-draft-n-max"] = "16"
+	}
+	if _, exists := options["spec-draft-p-min"]; !exists {
+		options["spec-draft-p-min"] = "0.8"
+	}
 }
 
 func sidecarAbsolutePath(root, localPath string) (string, bool) {
@@ -230,12 +245,14 @@ func sidecarAbsolutePath(root, localPath string) (string, bool) {
 }
 
 func localSidecarKind(filePath string) string {
-	normalized := strings.ToLower(filepath.ToSlash(filePath))
-	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
+	features, err := ggufmeta.DetectFeatures(filePath)
+	if err != nil {
+		return ""
+	}
+	if features.Projector {
 		return "mmproj"
 	}
-	name := strings.ToLower(strings.TrimSuffix(filepath.Base(filepath.FromSlash(filePath)), filepath.Ext(filePath)))
-	if name == "mtp" || strings.HasPrefix(name, "mtp-") || strings.HasPrefix(name, "mtp_") || strings.HasPrefix(name, "mtp.") {
+	if features.MTPOnly {
 		return "mtp"
 	}
 	return ""

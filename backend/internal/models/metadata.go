@@ -3,9 +3,11 @@ package models
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
 )
 
 // InspectGGUF validates a path through the normal Model path rules and reads
@@ -16,6 +18,51 @@ func (s *Service) InspectGGUF(path string) (ggufmeta.Inspection, error) {
 		return ggufmeta.Inspection{}, err
 	}
 	return ggufmeta.Inspect(filepath.Join(s.modelsDir, filepath.FromSlash(rel)))
+}
+
+func (s *Service) DetectGGUFFeatures(path string) (ggufmeta.Features, error) {
+	rel, _, err := s.resolveGGUF(path)
+	if err != nil {
+		return ggufmeta.Features{}, err
+	}
+	return ggufmeta.DetectFeatures(filepath.Join(s.modelsDir, filepath.FromSlash(rel)))
+}
+
+// DetectedLlamaDefaults returns conservative runtime defaults for GGUF features
+// the manager can prove from the file itself. Explicit global/model/instance
+// configuration remains authoritative because llamaconfig applies these first.
+func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (map[string]string, error) {
+	model, err := s.GetByID(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
+	features, err := s.DetectGGUFFeatures(model.GGUFPath)
+	if err != nil {
+		// Pending provider downloads and malformed/unreadable GGUFs simply have no
+		// detected defaults. Normal model loading will surface its own error.
+		return nil, nil
+	}
+	mtp := features.HasMTP && !features.MTPOnly
+	if !mtp {
+		options, optionErr := s.Options(ctx, modelID)
+		if optionErr != nil {
+			return nil, optionErr
+		}
+		draftPath := strings.TrimSpace(options["spec-draft-model"])
+		if draftPath != "" {
+			if draftFeatures, inspectErr := ggufmeta.DetectFeatures(draftPath); inspectErr == nil && draftFeatures.MTPOnly {
+				mtp = true
+			}
+		}
+	}
+	if !mtp {
+		return nil, nil
+	}
+	return map[string]string{
+		"spec-type":        "draft-mtp",
+		"spec-draft-n-max": "16",
+		"spec-draft-p-min": "0.8",
+	}, nil
 }
 
 // DetectContext returns the architecture-specific context capability when it is
@@ -68,8 +115,11 @@ func (s *Service) RefreshUnknownContexts(ctx context.Context) error {
 
 // RunMetadataReconciler also covers Models created before a provider download
 // has finished. Once the GGUF becomes available, Context capability is filled
-// automatically without provider-specific parsing logic.
+// automatically without provider-specific parsing logic. It also registers the
+// header-derived llama.cpp defaults used synchronously by every later launch.
 func (s *Service) RunMetadataReconciler(ctx context.Context, interval time.Duration) {
+	unregister := llamaconfig.RegisterDetectedDefaultsProvider(s.db, s.DetectedLlamaDefaults)
+	defer unregister()
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}

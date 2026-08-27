@@ -87,11 +87,25 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 
 // LaunchOptions returns only flags that the currently discovered llama-server
 // actually supports. Persisted options that disappeared after a binary change
-// remain visible/configured but are not passed to the process.
+// remain visible/configured but are not passed to the process. Header-derived
+// defaults are injected only when no explicit effective value exists.
 func (s *Store) LaunchOptions(ctx context.Context, profile llamacpp.Profile, modelID, instanceID string) (map[string]string, Effective, error) {
 	effective, err := s.Effective(ctx, modelID, instanceID)
 	if err != nil {
 		return nil, Effective{}, err
+	}
+	if provider := detectedDefaultsProvider(s.db); provider != nil && strings.TrimSpace(modelID) != "" {
+		defaults, detectErr := provider(ctx, modelID)
+		if detectErr != nil {
+			return nil, Effective{}, detectErr
+		}
+		for key, value := range defaults {
+			if _, explicit := effective.Values[key]; explicit {
+				continue
+			}
+			effective.Values[key] = value
+			effective.Sources[key] = "detected"
+		}
 	}
 	if len(profile.Options) == 0 {
 		return map[string]string{}, effective, nil
