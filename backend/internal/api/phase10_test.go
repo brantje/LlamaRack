@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -276,5 +277,5 @@ func TestPhase10GeneralSettingsSummaryAndSystem(t *testing.T) {
 }
 
 func itoa(value int64) string {
-	return json.Number(string(rune(0))).String()
+	return strconv.FormatInt(value, 10)
 }
