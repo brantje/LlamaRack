@@ -13,6 +13,7 @@ type Config struct {
 	ModelsDir                 string
 	DatabasePath              string
 	LlamaServerPath           string
+	HuggingFaceBaseURL        string
 	WorkerHost                string
 	WorkerPortStart           int
 	StartupTimeout            time.Duration
@@ -40,6 +41,7 @@ func Load() Config {
 		ModelsDir:                 env("LCM_MODELS_DIR", "/models"),
 		DatabasePath:              env("LCM_DATABASE_PATH", filepath.Join(dataDir, "manager.db")),
 		LlamaServerPath:           env("LCM_LLAMA_SERVER", "llama-server"),
+		HuggingFaceBaseURL:        env("LCM_HUGGINGFACE_BASE_URL", "https://huggingface.co"),
 		WorkerHost:                env("LCM_WORKER_HOST", "127.0.0.1"),
 		WorkerPortStart:           workerPort,
 		StartupTimeout:            time.Duration(startupSeconds) * time.Second,
