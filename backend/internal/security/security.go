@@ -144,7 +144,7 @@ func forwardedFor(header string) []netip.Addr {
 			if !ok || !strings.EqualFold(key, "for") {
 				continue
 			}
-			value = strings.Trim(strings.TrimSpace(value), `"[]`)
+			value = strings.Trim(strings.TrimSpace(value), `"`)
 			if host, _, err := net.SplitHostPort(value); err == nil {
 				value = host
 			}
