@@ -51,31 +51,37 @@ type Offload struct {
 	GPULayers   int64    `json:"gpu_layers,omitempty"`
 	Devices     []string `json:"devices,omitempty"`
 	TensorSplit string   `json:"tensor_split,omitempty"`
+	KVOnGPU     bool     `json:"kv_on_gpu"`
 	Reason      string   `json:"reason"`
 }
 
 type Recommendation struct {
-	ModelID          string           `json:"model_id"`
-	ContextLength    int64            `json:"context_length"`
-	ContextAssumed   bool             `json:"context_assumed"`
-	Confidence       string           `json:"confidence"`
-	Metadata         Metadata         `json:"metadata"`
-	MetadataWarning  string           `json:"metadata_warning,omitempty"`
-	HardwareWarning  string           `json:"hardware_warning,omitempty"`
-	Quantization     QuantizationInfo `json:"quantization"`
-	Memory           MemoryEstimate   `json:"memory"`
-	CurrentFit       bool             `json:"current_fit"`
-	TotalHardwareFit bool             `json:"total_hardware_fit"`
-	CPUFit           bool             `json:"cpu_fit"`
-	Offload          Offload          `json:"offload"`
+	ModelID           string           `json:"model_id"`
+	ContextLength     int64            `json:"context_length"`
+	ContextCapability int64            `json:"context_capability"`
+	ContextAssumed    bool             `json:"context_assumed"`
+	Confidence        string           `json:"confidence"`
+	Metadata          Metadata         `json:"metadata"`
+	MetadataWarning   string           `json:"metadata_warning,omitempty"`
+	HardwareWarning   string           `json:"hardware_warning,omitempty"`
+	Quantization      QuantizationInfo `json:"quantization"`
+	Memory            MemoryEstimate   `json:"memory"`
+	CurrentFit        bool             `json:"current_fit"`
+	TotalHardwareFit  bool             `json:"total_hardware_fit"`
+	CPUFit            bool             `json:"cpu_fit"`
+	Offload           Offload          `json:"offload"`
 }
 
 func Analyze(model models.Model, path string, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error) Recommendation {
 	metadata, metadataErr := ReadMetadata(path)
-	contextLength, assumed := chooseContext(requestedContext, int64(model.ContextLength), metadata.ContextLength)
+	contextLength, assumed := chooseContext(requestedContext)
+	capability := int64(model.ContextLength)
+	if capability <= 0 {
+		capability = metadata.ContextLength
+	}
 	memory := estimateMemory(model.TotalBytes, contextLength, metadata)
 	result := Recommendation{
-		ModelID: model.ID, ContextLength: contextLength, ContextAssumed: assumed,
+		ModelID: model.ID, ContextLength: contextLength, ContextCapability: capability, ContextAssumed: assumed,
 		Metadata: metadata, Quantization: ExplainQuantization(model.Quantization), Memory: memory,
 	}
 	if metadataErr != nil {
@@ -85,17 +91,17 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 		result.HardwareWarning = hardwareErr.Error()
 	}
 	result.Confidence = confidence(metadata, metadataErr)
-	result.CPUFit = snapshot.RAMAvailableBytes > defaultRAMReserve && snapshot.RAMAvailableBytes-defaultRAMReserve >= memory.CPUOnlyRAMBytes
+	result.CPUFit = fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes)
 	result.CurrentFit, result.Offload = recommendOffload(snapshot, memory, metadata)
 	total := snapshot
+	total.RAMAvailableBytes = total.RAMTotalBytes
 	for i := range total.GPUs {
 		total.GPUs[i].FreeBytes = total.GPUs[i].TotalBytes
 	}
 	if len(total.GPUs) > 0 {
-		placement, _ := scheduler.PlanPlacement(total, scheduler.PlacementRequest{RequiredBytes: memory.FullOffloadVRAMBytes})
-		result.TotalHardwareFit = placement.Fits
+		result.TotalHardwareFit, _ = recommendOffload(total, memory, metadata)
 	} else {
-		result.TotalHardwareFit = snapshot.RAMTotalBytes > defaultRAMReserve && snapshot.RAMTotalBytes-defaultRAMReserve >= memory.CPUOnlyRAMBytes
+		result.TotalHardwareFit = fitsRAM(snapshot.RAMTotalBytes, memory.CPUOnlyRAMBytes)
 	}
 	if len(snapshot.GPUs) == 0 {
 		result.CurrentFit = result.CPUFit
@@ -108,15 +114,9 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 	return result
 }
 
-func chooseContext(requested, configured, metadata int64) (int64, bool) {
+func chooseContext(requested int64) (int64, bool) {
 	if requested > 0 {
 		return requested, false
-	}
-	if configured > 0 {
-		return configured, false
-	}
-	if metadata > 0 {
-		return metadata, false
 	}
 	return defaultContext, true
 }
@@ -171,8 +171,9 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 			mode = "multi_gpu"
 			reason = "No single GPU fits the full estimate, but the scheduler can place it across the minimum practical GPU set."
 		}
-		return true, Offload{Mode: mode, GPULayers: metadata.BlockCount, Devices: placement.Devices, TensorSplit: placement.TensorSplit, Reason: reason}
+		return true, Offload{Mode: mode, GPULayers: metadata.BlockCount, Devices: placement.Devices, TensorSplit: placement.TensorSplit, KVOnGPU: true, Reason: reason}
 	}
+
 	bestID := ""
 	var best int64
 	for _, gpu := range snapshot.GPUs {
@@ -181,24 +182,60 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 			best, bestID = usable, gpu.ID
 		}
 	}
-	fixed := memory.KVCacheBytes + memory.RuntimeOverheadBytes
-	if best > fixed && memory.WeightsBytes > 0 {
-		fraction := float64(best-fixed) / float64(memory.WeightsBytes)
-		if fraction > 1 {
-			fraction = 1
+	if best <= 0 || memory.WeightsBytes <= 0 {
+		if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
+			return true, Offload{Mode: "cpu", Reason: "GPU headroom is too small for useful offload, but the estimate fits in currently available system RAM."}
 		}
+		return false, Offload{Mode: "cpu", Reason: "Current GPU headroom is too small for useful offload and available system RAM is below the conservative estimate."}
+	}
+
+	fixedGPU := memory.KVCacheBytes + memory.RuntimeOverheadBytes
+	if best > fixedGPU {
+		fraction := math.Min(1, float64(best-fixedGPU)/float64(memory.WeightsBytes))
 		if fraction > 0 {
-			layers := int64(0)
-			if metadata.BlockCount > 0 {
-				layers = int64(math.Floor(float64(metadata.BlockCount) * fraction))
-				if layers < 1 {
-					layers = 1
-				}
+			offloadedWeights := int64(float64(memory.WeightsBytes) * fraction)
+			cpuNeeded := memory.WeightsBytes - offloadedWeights
+			if fitsRAM(snapshot.RAMAvailableBytes, cpuNeeded) {
+				layers := recommendedLayers(metadata.BlockCount, fraction)
+				return true, Offload{Mode: "partial", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: true, Reason: "Full offload does not fit currently; keep the KV cache on GPU and offload the largest useful share of model layers to the best single GPU."}
 			}
-			return false, Offload{Mode: "partial", GPULayers: layers, Devices: []string{bestID}, Reason: "Full offload does not fit currently; use the largest single-GPU partial offload that preserves KV/runtime headroom."}
 		}
 	}
-	return false, Offload{Mode: "cpu", Reason: "Current free VRAM is below the conservative KV/runtime requirement; prefer CPU loading or free VRAM first."}
+
+	if best > memory.RuntimeOverheadBytes {
+		fraction := math.Min(1, float64(best-memory.RuntimeOverheadBytes)/float64(memory.WeightsBytes))
+		if fraction > 0 {
+			offloadedWeights := int64(float64(memory.WeightsBytes) * fraction)
+			cpuNeeded := memory.KVCacheBytes + (memory.WeightsBytes - offloadedWeights)
+			if fitsRAM(snapshot.RAMAvailableBytes, cpuNeeded) {
+				layers := recommendedLayers(metadata.BlockCount, fraction)
+				return true, Offload{Mode: "hybrid", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: false, Reason: "The selected context makes an all-GPU KV cache too large. Keep KV in system RAM and use the available GPU for model-layer offload instead of falling back to CPU-only loading."}
+			}
+		}
+	}
+
+	if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
+		return true, Offload{Mode: "cpu", Reason: "The current GPU/RAM combination cannot satisfy a conservative offload plan, but CPU-only loading fits available system RAM."}
+	}
+	return false, Offload{Mode: "cpu", Reason: "Current free GPU and system memory are below the conservative estimate for this context size."}
+}
+
+func recommendedLayers(blockCount int64, fraction float64) int64 {
+	if blockCount <= 0 || fraction <= 0 {
+		return 0
+	}
+	layers := int64(math.Floor(float64(blockCount) * fraction))
+	if layers < 1 {
+		return 1
+	}
+	if layers > blockCount {
+		return blockCount
+	}
+	return layers
+}
+
+func fitsRAM(available, required int64) bool {
+	return available > defaultRAMReserve && available-defaultRAMReserve >= required
 }
 
 func confidence(m Metadata, err error) string {
