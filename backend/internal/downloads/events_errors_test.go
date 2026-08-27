@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSubscribeReturnsDatabaseError(t *testing.T) {
@@ -15,6 +16,28 @@ func TestSubscribeReturnsDatabaseError(t *testing.T) {
 	}
 	if _, _, _, err := manager.Subscribe(context.Background()); err == nil {
 		t.Fatal("expected closed database subscribe error")
+	}
+}
+
+func TestSubscribeToleratesTransientRefreshErrorsUntilCancelled(t *testing.T) {
+	manager, _, _ := newTestManager(t, http.NotFoundHandler())
+	_, events, cancel, err := manager.Subscribe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Let the subscription hit at least one refresh tick with the closed DB.
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	select {
+	case _, open := <-events:
+		if open {
+			t.Fatal("subscription remained open after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("subscription did not stop after cancellation")
 	}
 }
 
