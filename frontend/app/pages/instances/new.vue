@@ -18,6 +18,10 @@ function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
 }
 
+function setContextSize(value: string) {
+  form.options = { ...form.options, 'ctx-size': value }
+}
+
 watch(() => form.model_id, (modelID) => {
   const model = manager.models.value.find(item => item.id === modelID)
   if (!model) return
@@ -83,7 +87,14 @@ async function submit() {
         <div class="space-y-3"><UCheckbox v-model="form.enabled" label="Enabled" /><UCheckbox v-model="form.always_on" label="Always On" description="Keep this Instance running whenever resources permit." /><UCheckbox v-model="form.autoload_enabled" label="Autoload on request" /><UCheckbox v-model="form.eviction_enabled" label="Allow resource-pressure eviction" description="Allow the manager to stop this Instance when RAM/VRAM is needed for another Instance." /></div>
 
         <USeparator label="Placement" />
-        <HardwarePlacementEditor :model-id="form.model_id" v-model:gpu-mode="form.gpu_mode" v-model:gpu-devices="form.gpu_devices" v-model:tensor-split="form.tensor_split" />
+        <HardwarePlacementEditor
+          :model-id="form.model_id"
+          :llama-options="form.options"
+          v-model:gpu-mode="form.gpu_mode"
+          v-model:gpu-devices="form.gpu_devices"
+          v-model:tensor-split="form.tensor_split"
+          @update:context-size="setContextSize"
+        />
 
         <LlamaCppOptionsEditor v-model="form.options" scope="instance" :model-id="form.model_id" :default-open="false" />
 
