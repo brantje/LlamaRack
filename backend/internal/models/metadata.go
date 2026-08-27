@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
@@ -46,6 +47,43 @@ func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model,
 		return Model{}, err
 	}
 	return s.GetByID(ctx, id)
+}
+
+// RefreshUnknownContexts is deliberately tolerant: Models may point at pending
+// Hugging Face downloads or valid GGUFs without a context key. Those conditions
+// are retried later rather than treated as manager failures.
+func (s *Service) RefreshUnknownContexts(ctx context.Context) error {
+	items, err := s.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, model := range items {
+		if model.ContextLength > 0 {
+			continue
+		}
+		_, _ = s.RefreshDetectedContext(ctx, model.ID)
+	}
+	return nil
+}
+
+// RunMetadataReconciler also covers Models created before a provider download
+// has finished. Once the GGUF becomes available, Context capability is filled
+// automatically without provider-specific parsing logic.
+func (s *Service) RunMetadataReconciler(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	_ = s.RefreshUnknownContexts(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = s.RefreshUnknownContexts(ctx)
+		}
+	}
 }
 
 func safeContextInt(value int64) int {
