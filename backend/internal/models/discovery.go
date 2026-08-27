@@ -11,10 +11,11 @@ import (
 )
 
 type GGUFFile struct {
-	Path         string `json:"path"`
-	Name         string `json:"name"`
-	TotalBytes   int64  `json:"total_bytes"`
-	Quantization string `json:"quantization,omitempty"`
+	Path             string            `json:"path"`
+	Name             string            `json:"name"`
+	TotalBytes       int64             `json:"total_bytes"`
+	Quantization     string            `json:"quantization,omitempty"`
+	SuggestedOptions map[string]string `json:"suggested_options,omitempty"`
 }
 
 type discoveredGGUF struct {
@@ -74,7 +75,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 			return err
 		}
 		rel = filepath.Clean(rel)
-		if isProjectorGGUF(rel) {
+		if isProjectorGGUF(rel) || isMTPGGUF(rel) {
 			return nil
 		}
 		info, err := entry.Info()
@@ -115,7 +116,14 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if used[file.path] {
 			continue
 		}
-		files = append(files, GGUFFile{Path: filepath.ToSlash(file.path), Name: file.name, TotalBytes: file.size, Quantization: quantFromName(file.name)})
+		suggested, err := s.suggestedSidecarOptions(ctx, root, file.path)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, GGUFFile{
+			Path: filepath.ToSlash(file.path), Name: file.name, TotalBytes: file.size,
+			Quantization: quantFromName(file.name), SuggestedOptions: suggested,
+		})
 	}
 	for _, group := range splits {
 		if group.expected <= 0 || len(group.files) != group.expected {
@@ -138,15 +146,101 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if !complete {
 			continue
 		}
-		files = append(files, GGUFFile{Path: filepath.ToSlash(first.path), Name: first.name, TotalBytes: total, Quantization: quantFromName(first.name)})
+		suggested, err := s.suggestedSidecarOptions(ctx, root, first.path)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, GGUFFile{
+			Path: filepath.ToSlash(first.path), Name: first.name, TotalBytes: total,
+			Quantization: quantFromName(first.name), SuggestedOptions: suggested,
+		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
 }
 
-func isProjectorGGUF(path string) bool {
-	name := strings.ToLower(filepath.ToSlash(path))
-	return strings.Contains(name, "mmproj") ||
-		strings.Contains(name, "mmoproj") ||
-		strings.Contains(name, "projector")
+func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath string) (map[string]string, error) {
+	mainPath = filepath.ToSlash(filepath.Clean(mainPath))
+	rows, err := s.db.QueryContext(ctx, `
+SELECT df.local_path
+FROM download_files df
+WHERE df.job_id = (
+ SELECT f.job_id
+ FROM download_files f
+ JOIN download_jobs j ON j.id=f.job_id
+ WHERE f.local_path=? AND j.state='COMPLETED'
+ ORDER BY j.updated_at DESC, j.id DESC
+ LIMIT 1
+)
+ORDER BY df.ordinal, df.path`, mainPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	options := map[string]string{}
+	for rows.Next() {
+		var localPath string
+		if err := rows.Scan(&localPath); err != nil {
+			return nil, err
+		}
+		kind := localSidecarKind(localPath)
+		if kind == "" {
+			continue
+		}
+		absolute, ok := sidecarAbsolutePath(root, localPath)
+		if !ok {
+			continue
+		}
+		switch kind {
+		case "mmproj":
+			if _, exists := options["mmproj"]; !exists {
+				options["mmproj"] = absolute
+			}
+		case "mtp":
+			if _, exists := options["spec-draft-model"]; !exists {
+				options["spec-draft-model"] = absolute
+				options["spec-type"] = "draft-mtp"
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(options) == 0 {
+		return nil, nil
+	}
+	return options, nil
 }
+
+func sidecarAbsolutePath(root, localPath string) (string, bool) {
+	absolute, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(localPath)))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, absolute)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	info, err := os.Stat(absolute)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return absolute, true
+}
+
+func localSidecarKind(filePath string) string {
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(filepath.FromSlash(filePath)), filepath.Ext(filePath)))
+	for _, prefix := range []string{"mmproj", "mmoproj", "projector"} {
+		if name == prefix || strings.HasPrefix(name, prefix+"-") || strings.HasPrefix(name, prefix+"_") || strings.HasPrefix(name, prefix+".") {
+			return "mmproj"
+		}
+	}
+	if name == "mtp" || strings.HasPrefix(name, "mtp-") || strings.HasPrefix(name, "mtp_") || strings.HasPrefix(name, "mtp.") {
+		return "mtp"
+	}
+	return ""
+}
+
+func isProjectorGGUF(path string) bool { return localSidecarKind(path) == "mmproj" }
+func isMTPGGUF(path string) bool       { return localSidecarKind(path) == "mtp" }
