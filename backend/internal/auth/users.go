@@ -74,16 +74,25 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,username,enabled,created_at,last_login_at FROM users ORDER BY username COLLATE NOCASE")
+	rows, err := s.db.QueryContext(ctx, `SELECT u.id,u.username,u.enabled,u.created_at,u.last_login_at,
+		(SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id AND s.expires_at>?)
+		FROM users u ORDER BY u.username COLLATE NOCASE`, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	users := make([]User, 0)
 	for rows.Next() {
-		user, err := scanUser(rows.Scan)
-		if err != nil {
+		var user User
+		var enabled int
+		var lastLogin sql.NullInt64
+		if err := rows.Scan(&user.ID, &user.Username, &enabled, &user.CreatedAt, &lastLogin, &user.ActiveSessions); err != nil {
 			return nil, err
+		}
+		user.Enabled = enabled != 0
+		if lastLogin.Valid {
+			value := lastLogin.Int64
+			user.LastLoginAt = &value
 		}
 		users = append(users, user)
 	}
