@@ -40,6 +40,11 @@ type Recommendation = {
 type ConfigResponse = {
   effective?: { values?: Record<string, string> }
 }
+type ExecutionFit = {
+  title: string
+  description: string
+  color: 'success' | 'warning' | 'neutral'
+}
 
 const props = defineProps<{
   gpuMode: string
@@ -83,6 +88,46 @@ const recommendationTitle = computed(() => {
   if (item.total_hardware_fit) return 'Fits installed hardware after freeing resources'
   if (item.cpu_fit) return 'CPU fallback fits current RAM'
   return 'Resource pressure expected'
+})
+const executionFit = computed<ExecutionFit | null>(() => {
+  const item = recommendation.value
+  if (!item) return null
+  const devices = item.offload.devices || []
+  const deviceText = devices.length ? devices.join(', ') : 'the selected GPU device'
+  switch (item.offload.mode) {
+    case 'full':
+      return {
+        title: 'GPU only',
+        description: `At ${item.context_length.toLocaleString()} tokens, model weights, KV cache and runtime headroom fit entirely in VRAM on ${deviceText}. No CPU model split is needed.`,
+        color: 'success'
+      }
+    case 'multi_gpu':
+      return {
+        title: 'GPU only · multi-GPU',
+        description: `The complete estimate fits in VRAM across ${devices.length || 2} GPUs. CPU model offload is not required.`,
+        color: 'success'
+      }
+    case 'partial':
+      return {
+        title: 'GPU + CPU split needed',
+        description: `Use ${deviceText} for ${item.offload.gpu_layers || 'some'} model layers and keep the remaining weights in system RAM. The KV cache can remain on GPU.`,
+        color: 'warning'
+      }
+    case 'hybrid':
+      return {
+        title: 'GPU + CPU split needed',
+        description: `Use ${deviceText} for ${item.offload.gpu_layers || 'some'} model layers while the KV cache and remaining model data use system RAM.`,
+        color: 'warning'
+      }
+    default:
+      return {
+        title: 'CPU only',
+        description: item.current_fit
+          ? 'A useful GPU offload plan is not available for the selected context, but CPU-only loading fits current system RAM.'
+          : 'Current RAM/VRAM is below the conservative estimate for the selected context.',
+        color: 'neutral'
+      }
+  }
 })
 
 function isRecommendation(value: unknown): value is Recommendation {
@@ -266,6 +311,15 @@ onBeforeUnmount(() => {
         <span v-if="contextCapability">Model capability: <strong>{{ contextCapability.toLocaleString() }}</strong> tokens</span>
       </div>
     </UFormField>
+
+    <UAlert
+      v-if="executionFit"
+      data-testid="execution-fit"
+      :color="executionFit.color"
+      variant="subtle"
+      :title="executionFit.title"
+      :description="executionFit.description"
+    />
 
     <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 border-t border-default pt-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
