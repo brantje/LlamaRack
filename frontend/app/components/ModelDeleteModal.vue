@@ -51,7 +51,7 @@ defineExpose({ request })
         <div data-testid="model-delete-files">
           <UCheckbox
             v-model="deleteFiles"
-            label="Also delete model files from disk"
+            label="Also delete model files and folder from disk"
           />
         </div>
 
@@ -61,7 +61,7 @@ defineExpose({ request })
           color="error"
           variant="subtle"
           title="Permanent file deletion"
-          description="The registered Model and its Instance definitions will be deleted. The associated model file(s) will also be permanently removed from disk. This cannot be undone."
+          description="The registered Model and its Instance definitions will be deleted. Associated model files will be permanently removed. If the primary GGUF is stored in a nested model folder, that entire folder and all of its contents will also be removed. This cannot be undone."
         />
 
         <dl v-if="deleteFiles" class="grid gap-2 rounded-lg border border-error/30 bg-error/5 p-3 text-sm">
