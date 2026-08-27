@@ -3,6 +3,8 @@ package ggufmeta
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,13 +86,73 @@ func TestInspectRejectsMalformedInput(t *testing.T) {
 	if _, err := Inspect(hugeArray); err == nil || !strings.Contains(err.Error(), "array") { t.Fatalf("array=%v", err) }
 	unsupportedType := writeGGUF(t, 3, 0, []kv{{"bad", 99, func(*bytes.Buffer) {}}})
 	if _, err := Inspect(unsupportedType); err == nil || !strings.Contains(err.Error(), "unsupported") { t.Fatalf("type=%v", err) }
+
+	truncatedHeader := filepath.Join(dir, "header.gguf")
+	_ = os.WriteFile(truncatedHeader, []byte("GGUF\x03\x00\x00\x00"), 0o644)
+	if _, err := Inspect(truncatedHeader); err == nil { t.Fatal("truncated counts should fail") }
+
+	var key bytes.Buffer
+	key.WriteString("GGUF"); write(&key, uint32(3)); write(&key, uint64(0)); write(&key, uint64(1)); write(&key, maxKeyBytes+1)
+	keyPath := filepath.Join(dir, "key.gguf"); _ = os.WriteFile(keyPath, key.Bytes(), 0o644)
+	if _, err := Inspect(keyPath); err == nil || !strings.Contains(err.Error(), "key") { t.Fatalf("key=%v", err) }
+}
+
+func TestLowLevelSkipAndBounds(t *testing.T) {
+	for _, typeID := range []uint32{0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12} {
+		if _, ok := fixedSize(typeID); !ok { t.Fatalf("fixed type %d", typeID) }
+		if _, ok := typeName(typeID); !ok { t.Fatalf("named type %d", typeID) }
+	}
+	if _, ok := fixedSize(8); ok { t.Fatal("string fixed") }
+	if _, ok := typeName(99); ok { t.Fatal("unknown type") }
+
+	fixed := bytes.NewReader(make([]byte, 8))
+	if err := skipValue(fixed, 4); err != nil { t.Fatal(err) }
+	pos, _ := fixed.Seek(0, io.SeekCurrent)
+	if pos != 4 { t.Fatalf("fixed skip=%d", pos) }
+
+	var text bytes.Buffer
+	writeString(&text, "hello")
+	if err := skipValue(bytes.NewReader(text.Bytes()), 8); err != nil { t.Fatal(err) }
+	var huge bytes.Buffer
+	write(&huge, maxStringBytes+1)
+	if err := skipValue(bytes.NewReader(huge.Bytes()), 8); err == nil { t.Fatal("huge skip string") }
+	if err := skipValue(bytes.NewReader(nil), 99); err == nil { t.Fatal("unsupported skip") }
+
+	var manyStrings bytes.Buffer
+	write(&manyStrings, uint32(8)); write(&manyStrings, uint64(maxArrayPreview+2))
+	for i := uint64(0); i < maxArrayPreview+2; i++ { writeString(&manyStrings, "v") }
+	array, err := readArray(bytes.NewReader(manyStrings.Bytes()))
+	if err != nil || !array.truncated || array.arrayLength != maxArrayPreview+2 { t.Fatalf("strings=%+v err=%v", array, err) }
+
+	var unsupported bytes.Buffer
+	write(&unsupported, uint32(99)); write(&unsupported, uint64(0))
+	if _, err := readArray(bytes.NewReader(unsupported.Bytes())); err == nil { t.Fatal("unsupported element") }
+	if _, err := readArray(bytes.NewReader(nil)); err == nil { t.Fatal("missing element type") }
+
+	if _, err := scalarResult("x", uint64(0), errors.New("boom")); err == nil { t.Fatal("scalar error") }
+	if _, err := readUint(bytes.NewReader(nil), 4); err == nil { t.Fatal("truncated uint") }
+	if _, err := readUint(bytes.NewReader(make([]byte, 3)), 3); err == nil { t.Fatal("invalid uint width") }
+	if _, err := readInt(bytes.NewReader(make([]byte, 3)), 3); err == nil { t.Fatal("invalid int width") }
+
+	var hugeString bytes.Buffer
+	write(&hugeString, maxStringBytes+1)
+	if _, _, err := readString(bytes.NewReader(hugeString.Bytes())); err == nil { t.Fatal("huge string") }
+	var truncatedString bytes.Buffer
+	write(&truncatedString, uint64(5)); truncatedString.WriteString("ab")
+	if _, _, err := readString(bytes.NewReader(truncatedString.Bytes())); err == nil { t.Fatal("truncated string") }
+
+	var truncatedKey bytes.Buffer
+	write(&truncatedKey, uint64(5)); truncatedKey.WriteString("ab")
+	if _, err := readKey(bytes.NewReader(truncatedKey.Bytes())); err == nil { t.Fatal("truncated key") }
+
+	if _, err := readValue(bytes.NewReader(nil), 6); err == nil { t.Fatal("truncated float") }
+	if _, err := readValue(bytes.NewReader(nil), 12); err == nil { t.Fatal("truncated double") }
 }
 
 func TestExactIntAndHelpers(t *testing.T) {
 	if exactInt(map[string]string{"x": "9223372036854775807"}, "x") != math.MaxInt64 { t.Fatal("max int") }
 	if exactInt(map[string]string{"x": "18446744073709551615"}, "x") != 0 || exactInt(map[string]string{"x": "bad"}, "x") != 0 || exactInt(nil, "x") != 0 { t.Fatal("invalid ints") }
-	if _, ok := fixedSize(8); ok { t.Fatal("string fixed") }
-	if _, ok := typeName(99); ok { t.Fatal("unknown type") }
+	if derive(map[string]string{"general.architecture": ""}).ContextLength != 0 { t.Fatal("empty architecture") }
 }
 
 func writeGGUF(t *testing.T, version uint32, tensors uint64, items []kv) string {
