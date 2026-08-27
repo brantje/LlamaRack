@@ -70,7 +70,7 @@ describe('download branch coverage', () => {
 
     await button(wrapper, '1 file').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('512 B / 1 KB')
+    expect(wrapper.text()).toContain('512 B / 1.0 KB')
     expect(wrapper.text()).toContain('/models/part.gguf')
     wrapper.unmount()
   })
