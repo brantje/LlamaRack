@@ -14,7 +14,7 @@ const selected = ref<HFDetail | null>(null)
 const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
-const downloading = ref('')
+const downloading = ref<string[]>([])
 const downloadNotice = ref('')
 const sortOptions = [
   { label: 'Most downloaded', value: 'downloads' },
@@ -35,6 +35,9 @@ function dependencyLabel(kind: string) {
   if (kind === 'mtp') return 'MTP draft model'
   return kind
 }
+function isDownloading(artifactID: string) {
+  return downloading.value.includes(artifactID)
+}
 
 async function search() {
   loading.value = true; error.value = ''; selected.value = null
@@ -53,16 +56,18 @@ async function openModel(id: string) {
 }
 
 async function download(artifact: HFArtifact) {
-  if (!selected.value || !artifact.complete) return
-  downloading.value = artifact.id; error.value = ''; downloadNotice.value = ''
+  if (!selected.value || !artifact.complete || isDownloading(artifact.id)) return
+  downloading.value = [...downloading.value, artifact.id]; error.value = ''; downloadNotice.value = ''
   try {
     await manager.request('/api/v1/downloads', { method: 'POST', body: { repo_id: selected.value.id, artifact_id: artifact.id } })
     const helpers = artifact.dependencies?.length || 0
     downloadNotice.value = helpers
       ? `${artifact.name} and ${helpers} detected helper ${helpers === 1 ? 'artifact was' : 'artifacts were'} added to Downloads.`
       : `${artifact.name} was added to Downloads.`
-  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to start download' }
-  finally { downloading.value = '' }
+  } catch (value: any) {
+    downloading.value = downloading.value.filter(id => id !== artifact.id)
+    error.value = value?.data?.error || value?.message || 'Unable to start download'
+  }
 }
 </script>
 
@@ -119,7 +124,7 @@ async function download(artifact: HFArtifact) {
             </div>
             <div class="text-sm text-muted"><div>{{ formatBytes(artifact.total_bytes) }}</div><div v-if="artifact.dependencies?.length" class="text-xs text-dimmed">Model {{ formatBytes(artifact.model_bytes) }} + helpers</div></div>
             <div class="text-sm text-muted">{{ artifact.complete ? 'Ready to download' : `${artifact.shard_count}/${artifact.expected_shards} shards` }}</div>
-            <UButton :disabled="!artifact.complete" :loading="downloading === artifact.id" @click="download(artifact)">Download</UButton>
+            <UButton :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</UButton>
           </div>
         </div>
       </UCard>
