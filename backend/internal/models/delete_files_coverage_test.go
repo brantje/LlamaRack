@@ -85,7 +85,7 @@ func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
 	if err := s.DeleteFilesAndModel(ctx, model.ID, FileDeletePlan{modelID: "different"}); err == nil {
 		t.Fatal("expected mismatched deletion plan to fail")
 	}
-	if err := s.ensureArtifactNotShared(ctx, model.ID, nil); err != nil {
+	if err := s.ensureArtifactNotShared(ctx, model.ID, nil, nil); err != nil {
 		t.Fatalf("empty target set should not report sharing: %v", err)
 	}
 
