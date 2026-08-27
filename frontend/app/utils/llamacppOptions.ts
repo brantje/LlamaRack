@@ -1,6 +1,6 @@
 import type { Profile } from '~/composables/useManager'
 
-const managerOwnedOptions = new Set(['model', 'host', 'port', 'device', 'tensor-split'])
+const managerOwnedOptions = new Set(['model', 'host', 'port', 'device'])
 
 type ProfileOption = Profile['options'][number] & { kind?: string; choices?: string[] }
 
