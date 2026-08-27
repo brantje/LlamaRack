@@ -19,6 +19,10 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
+const resourcePressureReason = "resource_pressure"
+
+var errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
+
 type Activity struct {
 	ActiveRequests int       `json:"active_requests"`
 	LastUsed       time.Time `json:"last_used,omitempty"`
@@ -33,6 +37,8 @@ type Service struct {
 	mu              sync.Mutex
 	loads           map[string]*loadCall
 	manuallyStopped map[string]bool
+	resourceBlocked map[string]string
+	resourceStarts  int
 	activities      map[string]Activity
 	idleLocks       map[string]*sync.Mutex
 	operationGates  map[string]chan struct{}
@@ -48,7 +54,7 @@ type loadCall struct {
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	return &Service{
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
-		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{},
+		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, now: time.Now,
 	}
@@ -102,6 +108,10 @@ func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance)
 		s.clearManualStop(i.ID)
 		slog.Info("manual stop overridden by inference request", "instance_id", i.ID)
 	}
+	if s.resourceBlockReason(i.ID) != "" {
+		s.clearResourceBlock(i.ID)
+		slog.Info("resource-pressure block overridden by inference request", "instance_id", i.ID)
+	}
 	return s.startSingleFlight(ctx, i)
 }
 
@@ -119,6 +129,7 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 	}
 	if explicit {
 		s.clearManualStop(id)
+		s.clearResourceBlock(id)
 	} else if s.isManuallyStopped(id) {
 		return "", errors.New("instance manually stopped until manager restart")
 	}
@@ -140,6 +151,7 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 		return err
 	}
 	if i.AlwaysOn {
+		s.clearResourceBlock(id)
 		s.markManualStop(id)
 	}
 	if err := s.sup.Stop(ctx, id); err != nil {
@@ -159,6 +171,7 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	defer release()
 
 	s.clearManualStop(id)
+	s.clearResourceBlock(id)
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -182,6 +195,7 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 	if _, err := s.instances.Get(ctx, id); err != nil {
 		return err
 	}
+	s.clearResourceBlock(id)
 	s.markManualStop(id)
 	return s.sup.Kill(id)
 }
@@ -275,9 +289,6 @@ func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (schedu
 	}
 	candidates := make([]scheduler.Candidate, 0, len(items))
 	for _, i := range items {
-		if !i.EvictionEnabled {
-			continue
-		}
 		m, err := s.models.GetByID(ctx, i.ModelID)
 		if err != nil {
 			return scheduler.Plan{}, err
@@ -285,7 +296,7 @@ func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (schedu
 		activity := s.Activity(i.ID)
 		candidates = append(candidates, scheduler.Candidate{
 			ModelID: i.ModelID, InstanceID: i.ID, Priority: i.Priority, AlwaysOn: i.AlwaysOn,
-			ActiveRequests: activity.ActiveRequests, LastUsed: activity.LastUsed,
+			EvictionEnabled: i.EvictionEnabled, ActiveRequests: activity.ActiveRequests, LastUsed: activity.LastUsed,
 			EstimatedBytes: m.TotalBytes, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
 		})
 	}
@@ -307,10 +318,49 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 			continue
 		}
 		if _, ok := s.sup.Endpoint(i.ID); ok {
+			s.clearResourceBlock(i.ID)
+			continue
+		}
+		if s.resourceBlockReason(i.ID) != "" {
+			go s.reconcileResourceBlocked(i.ID)
 			continue
 		}
 		go func(id string) { _, _ = s.startInstance(context.Background(), id, false) }(i.ID)
 	}
+}
+
+func (s *Service) reconcileResourceBlocked(id string) {
+	if s.resourceStartActive() {
+		return
+	}
+	release, err := s.acquireOperation(context.Background(), id)
+	if err != nil {
+		return
+	}
+	defer release()
+	if s.resourceStartActive() || s.resourceBlockReason(id) == "" || s.isManuallyStopped(id) {
+		return
+	}
+	i, err := s.instances.Get(context.Background(), id)
+	if err != nil || !i.Enabled || !i.AlwaysOn {
+		s.clearResourceBlock(id)
+		return
+	}
+	if _, ok := s.sup.Endpoint(id); ok {
+		s.clearResourceBlock(id)
+		return
+	}
+	_, err = s.startOneWithEviction(context.Background(), i, false)
+	if err == nil {
+		s.clearResourceBlock(id)
+		return
+	}
+	if errors.Is(err, errResourcePressureBlocked) {
+		return
+	}
+	// Configuration/process failures are not resource-pressure blocks. Clear the
+	// reason so normal Always-On reconciliation can apply its ordinary retry path.
+	s.clearResourceBlock(id)
 }
 
 func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Duration) {
@@ -460,6 +510,38 @@ func (s *Service) isManuallyStopped(id string) bool {
 	defer s.mu.Unlock()
 	return s.manuallyStopped[id]
 }
+func (s *Service) markResourceBlock(id string) {
+	s.mu.Lock()
+	s.resourceBlocked[id] = resourcePressureReason
+	s.mu.Unlock()
+}
+func (s *Service) clearResourceBlock(id string) {
+	s.mu.Lock()
+	delete(s.resourceBlocked, id)
+	s.mu.Unlock()
+}
+func (s *Service) resourceBlockReason(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resourceBlocked[id]
+}
+func (s *Service) beginResourceStart() {
+	s.mu.Lock()
+	s.resourceStarts++
+	s.mu.Unlock()
+}
+func (s *Service) endResourceStart() {
+	s.mu.Lock()
+	if s.resourceStarts > 0 {
+		s.resourceStarts--
+	}
+	s.mu.Unlock()
+}
+func (s *Service) resourceStartActive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resourceStarts > 0
+}
 
 func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -523,6 +605,14 @@ func (s *Service) completeLoad(id string, c *loadCall, endpoint string, err erro
 }
 
 func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, error) {
+	return s.startOneWithEviction(ctx, i, true)
+}
+
+func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (string, error) {
+	if allowEviction {
+		s.beginResourceStart()
+		defer s.endResourceStart()
+	}
 	m, err := s.models.GetByID(ctx, i.ModelID)
 	if err != nil {
 		return "", err
@@ -549,7 +639,7 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
 
-	placement, placementErr := s.preparePlacement(ctx, i, m.TotalBytes)
+	placement, placementErr := s.preparePlacementWithEviction(ctx, i, m.TotalBytes, allowEviction)
 	if placementErr != nil {
 		return "", placementErr
 	}
@@ -580,6 +670,10 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 }
 
 func (s *Service) preparePlacement(ctx context.Context, i instances.Instance, requiredBytes int64) (scheduler.Placement, error) {
+	return s.preparePlacementWithEviction(ctx, i, requiredBytes, true)
+}
+
+func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.Instance, requiredBytes int64, allowEviction bool) (scheduler.Placement, error) {
 	snapshot, err := s.hardware.Snapshot(ctx)
 	if err != nil {
 		slog.Warn("hardware snapshot unavailable; preserving compatibility placement", "instance_id", i.ID, "error", err)
@@ -595,6 +689,9 @@ func (s *Service) preparePlacement(ctx context.Context, i instances.Instance, re
 	}
 	if placement.Fits {
 		return placement, nil
+	}
+	if !allowEviction {
+		return scheduler.Placement{}, fmt.Errorf("%w: need %d bytes, have %d", errResourcePressureBlocked, requiredBytes, placement.AvailableBytes)
 	}
 
 	shortfall := requiredBytes - placement.AvailableBytes
@@ -642,13 +739,20 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 		return err
 	}
 	activity := s.Activity(id)
-	if !i.EvictionEnabled || i.AlwaysOn || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
+	if !i.EvictionEnabled || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
 		return errors.New("instance is no longer eligible for resource-pressure eviction")
 	}
+	blocked := i.AlwaysOn
+	if blocked {
+		s.markResourceBlock(id)
+	}
 	if err := s.sup.Stop(ctx, id); err != nil {
+		if blocked {
+			s.clearResourceBlock(id)
+		}
 		return err
 	}
-	slog.Info("evicted instance for resource pressure", "instance_id", id)
+	slog.Info("evicted instance for resource pressure", "instance_id", id, "always_on", i.AlwaysOn)
 	return nil
 }
 
