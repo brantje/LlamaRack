@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS download_files (
 CREATE TABLE IF NOT EXISTS provider_imports (
  id TEXT PRIMARY KEY,
  job_id TEXT NOT NULL REFERENCES download_jobs(id) ON DELETE CASCADE,
- model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+ model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
  instance_id TEXT REFERENCES instances(id) ON DELETE SET NULL,
  owns_model INTEGER NOT NULL DEFAULT 0,
  start_when_ready INTEGER NOT NULL DEFAULT 0,
