@@ -20,7 +20,8 @@ const logLines = ref<string[]>([])
 const logTitle = ref('')
 const importStates = ref<Record<string, ImportStatus>>({})
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
-let importTimer: ReturnType<typeof setInterval> | undefined
+let importTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 
 function modelName(id: string) {
   return models.value.find(model => model.id === id)?.name || id
@@ -48,6 +49,18 @@ function importBlocked(instance: Instance) {
   return Boolean(imported && imported.state !== 'COMPLETED')
 }
 
+function scheduleImportRefresh(active: boolean) {
+  if (importTimer) {
+    clearTimeout(importTimer)
+    importTimer = undefined
+  }
+  if (!active || disposed) return
+  importTimer = setTimeout(() => {
+    importTimer = undefined
+    void refreshImportStates()
+  }, 1000)
+}
+
 async function refreshImportStates() {
   try {
     const previousActive = Object.values(importStates.value).some(item => item.state === 'DOWNLOADING')
@@ -55,8 +68,10 @@ async function refreshImportStates() {
     importStates.value = Object.fromEntries(items.filter(item => item.instance_id).map(item => [item.instance_id!, item]))
     const active = items.some(item => item.instance_id && item.state === 'DOWNLOADING')
     if (previousActive && !active) await manager.refresh()
+    scheduleImportRefresh(active)
   } catch {
     // Runtime controls still work normally if import status cannot be refreshed.
+    scheduleImportRefresh(false)
   }
 }
 
@@ -127,11 +142,11 @@ async function showLogs(instance: Instance) {
 
 onMounted(() => {
   void refreshImportStates()
-  importTimer = setInterval(() => void refreshImportStates(), 1000)
 })
 
 onBeforeUnmount(() => {
-  if (importTimer) clearInterval(importTimer)
+  disposed = true
+  if (importTimer) clearTimeout(importTimer)
 })
 </script>
 
