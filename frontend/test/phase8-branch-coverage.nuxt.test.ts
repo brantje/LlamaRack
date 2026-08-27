@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import DiscoverPage from '~/pages/discover.vue'
+import DiscoverPage from '~/components/ModelsDiscover.vue'
 import DownloadsPage from '~/pages/downloads.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -154,7 +154,8 @@ describe('Downloads live-event and formatting branches', () => {
     socket.message({ type: 'download_snapshot', downloads: [job('snap', 'VERIFYING')] }); await flushPromises()
     expect(wrapper.text()).toContain('snap.gguf')
     socket.message({ type: 'download', job: job('snap', 'COMPLETED', { downloaded_bytes: 100 }) }); await flushPromises()
-    expect(wrapper.text()).toContain('COMPLETED')
+    expect(wrapper.text()).not.toContain('snap.gguf')
+    expect(wrapper.text()).toContain('Show completed (1)')
     socket.message({ type: 'download', job: job('new', 'DOWNLOADING') }); await flushPromises()
     expect(wrapper.text()).toContain('new.gguf')
     socket.message({ type: 'download_deleted', id: 'snap' }); await flushPromises()
@@ -185,6 +186,8 @@ describe('Downloads live-event and formatting branches', () => {
       return {}
     })
     const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    await wrapper.get('[data-testid="toggle-completed-downloads"]').trigger('click')
     await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('5s remaining')
