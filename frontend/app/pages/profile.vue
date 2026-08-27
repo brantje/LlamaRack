@@ -15,6 +15,13 @@ function dateTime(value?: number) {
   return value ? new Date(value * 1000).toLocaleString() : 'Never'
 }
 
+function clientLabel(userAgent: string) {
+  const ua = userAgent || ''
+  const browser = /Firefox\//.test(ua) ? 'Firefox' : /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Unknown client'
+  const platform = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : ''
+  return platform && browser !== 'Unknown client' ? `${browser} on ${platform}` : browser
+}
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
@@ -24,7 +31,7 @@ async function load() {
       manager.request<Session[]>('/api/v1/me/sessions')
     ])
     profile.value = user
-    sessions.value = activeSessions
+    sessions.value = activeSessions || []
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load profile'
   }
@@ -66,22 +73,34 @@ async function revokeSession(session: Session) {
   }
   const confirmed = await confirmation.value?.request({ title: 'Revoke session', description: 'Sign this session out immediately?', confirmLabel: 'Revoke session', color: 'error' })
   if (!confirmed) return
-  await manager.request(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
-  await load()
+  try {
+    await manager.request(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
+    await load()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to revoke session'
+  }
 }
 
 async function revokeOthers() {
   const confirmed = await confirmation.value?.request({ title: 'Revoke other sessions', description: 'Sign out every session except this browser?', confirmLabel: 'Revoke others', color: 'error' })
   if (!confirmed) return
-  await manager.request('/api/v1/me/sessions/revoke-others', { method: 'POST' })
-  await load()
+  try {
+    await manager.request('/api/v1/me/sessions/revoke-others', { method: 'POST' })
+    await load()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to revoke other sessions'
+  }
 }
 
 async function revokeAll() {
   const confirmed = await confirmation.value?.request({ title: 'Log out everywhere', description: 'Revoke every session, including this browser?', confirmLabel: 'Log out everywhere', color: 'error' })
   if (!confirmed) return
-  await manager.request('/api/v1/me/sessions/revoke-all', { method: 'POST' })
-  await manager.initialize()
+  try {
+    await manager.request('/api/v1/me/sessions/revoke-all', { method: 'POST' })
+    await manager.initialize()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to log out all sessions'
+  }
 }
 </script>
 
@@ -120,7 +139,7 @@ async function revokeAll() {
       <div v-if="sessions.length" class="divide-y divide-default">
         <div v-for="session in sessions" :key="session.id" class="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
           <div class="min-w-0 text-sm">
-            <div class="flex items-center gap-2"><span class="font-semibold">{{ session.user_agent || 'Unknown client' }}</span><UBadge v-if="session.current" color="primary" variant="subtle">Current</UBadge></div>
+            <div class="flex items-center gap-2"><span class="font-semibold">{{ clientLabel(session.user_agent) }}</span><UBadge v-if="session.current" color="primary" variant="subtle">Current</UBadge></div>
             <p class="mt-1 text-muted">{{ session.remote_address || 'Unknown address' }} · Created {{ dateTime(session.created_at) }} · Expires {{ dateTime(session.expires_at) }}</p>
           </div>
           <UButton :color="session.current ? 'neutral' : 'error'" variant="soft" size="sm" @click="revokeSession(session)">{{ session.current ? 'Sign out' : 'Revoke' }}</UButton>
