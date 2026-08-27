@@ -12,7 +12,10 @@ import (
 	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
 )
 
-const csrfCookie = "lcm_csrf"
+const (
+	sessionCookie = "lcm_session"
+	csrfCookie    = "lcm_csrf"
+)
 
 type managementAuthContext struct {
 	User    auth.User
