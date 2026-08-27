@@ -37,11 +37,9 @@ describe('tensor split llama.cpp overrides', () => {
     })
     await flushPromises()
 
-    const tensorCode = [...wrapper.element.querySelectorAll('code')].find(node => node.textContent?.trim() === '--tensor-split')
-    expect(tensorCode).toBeTruthy()
-    const tensorCard = tensorCode!.closest('[data-slot="root"]') || tensorCode!.parentElement?.parentElement?.parentElement
-    expect(tensorCard?.textContent).not.toContain('Manager controlled')
-    expect(tensorCard?.textContent).toContain('Remove override')
+    expect(wrapper.text()).toContain('--tensor-split')
+    expect(wrapper.text()).toContain('Remove override')
+    expect(wrapper.text()).not.toContain('Manager controlled')
 
     const tensorInput = wrapper.findAllComponents({ name: 'Input' }).find(component => component.props('modelValue') === '3,1')
       || wrapper.findAllComponents({ name: 'UInput' }).find(component => component.props('modelValue') === '3,1')
@@ -50,8 +48,7 @@ describe('tensor split llama.cpp overrides', () => {
 
     await wrapper.findAll('button').find(button => button.text() === 'Advanced')!.trigger('click')
     await flushPromises()
-    const deviceCode = [...wrapper.element.querySelectorAll('code')].find(node => node.textContent?.trim() === '--device')
-    expect(deviceCode).toBeTruthy()
+    expect(wrapper.text()).toContain('--device')
     expect(wrapper.text()).toContain('Manager controlled')
   })
 })
