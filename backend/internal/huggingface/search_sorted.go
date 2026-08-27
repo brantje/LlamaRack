@@ -77,9 +77,6 @@ func parameterCount(values ...*parameterInfo) int64 {
 		if value == nil {
 			continue
 		}
-		if value.Total > 0 {
-			return value.Total
-		}
 		var total int64
 		for _, count := range value.Parameters {
 			if count > 0 {
@@ -88,6 +85,9 @@ func parameterCount(values ...*parameterInfo) int64 {
 		}
 		if total > 0 {
 			return total
+		}
+		if value.Total > 0 {
+			return value.Total
 		}
 	}
 	return 0
