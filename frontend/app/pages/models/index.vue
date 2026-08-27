@@ -79,7 +79,13 @@ async function remove(id: string) {
               <td class="whitespace-nowrap px-4 py-3">{{ formatBytes(model.total_bytes) }}</td>
               <td class="whitespace-nowrap px-4 py-3">{{ model.quantization || '—' }}</td>
               <td class="whitespace-nowrap px-4 py-3">{{ contextLabel(model.context_length) }}</td>
-              <td class="px-4 py-3"><div class="flex justify-end gap-2"><UButton :to="`/models/${model.id}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton><UButton color="error" variant="soft" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</UButton></div></td>
+              <td class="px-4 py-3">
+                <div class="flex justify-end gap-2">
+                  <UButton :to="`/models/${model.id}/details`" color="neutral" variant="soft" size="xs">Details</UButton>
+                  <UButton :to="`/models/${model.id}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton>
+                  <UButton color="error" variant="soft" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</UButton>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
