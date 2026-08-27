@@ -87,7 +87,7 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			LoginFailureThreshold:    {env: "LCM_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
 			LoginLockoutSeconds:      {env: "LCM_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
 			TrustedProxies:           {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
-			AllowedOrigins:           {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string"},
+			AllowedOrigins:           {defaultValue: defaults.AllowedOrigins, kind: "string"},
 			ExternalURL:              {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
 			StartupTimeoutSeconds:    {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
 			IdleUnloadSeconds:        {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
