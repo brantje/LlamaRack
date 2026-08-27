@@ -41,16 +41,19 @@ func TestAPIKeyLastUsedWriteIsCoalescedAcrossRestart(t *testing.T) {
 		t.Fatalf("last_used_at changed inside coalescing window after restart: first=%d second=%d", first, second)
 	}
 
-	if restarted.reserveAPIUseWrite(key.ID, time.Now()) {
-		t.Fatal("in-memory reservation should already suppress a concurrent write")
-	}
-	restarted.clearAPIUseWrite(key.ID)
 	now := time.Now()
 	if !restarted.reserveAPIUseWrite(key.ID, now) {
-		t.Fatal("expected reservation after clearing gate")
+		t.Fatal("expected first in-memory write reservation")
+	}
+	if restarted.reserveAPIUseWrite(key.ID, now.Add(time.Millisecond)) {
+		t.Fatal("concurrent write inside coalescing window should be suppressed")
 	}
 	restarted.releaseAPIUseWrite(key.ID, now)
-	if !restarted.reserveAPIUseWrite(key.ID, now.Add(time.Millisecond)) {
+	if !restarted.reserveAPIUseWrite(key.ID, now.Add(2*time.Millisecond)) {
 		t.Fatal("failed write release should allow immediate retry")
+	}
+	restarted.clearAPIUseWrite(key.ID)
+	if !restarted.reserveAPIUseWrite(key.ID, now.Add(3*time.Millisecond)) {
+		t.Fatal("cleared usage gate should allow a new reservation")
 	}
 }
