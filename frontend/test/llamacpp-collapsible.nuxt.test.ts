@@ -46,11 +46,11 @@ describe('collapsible llama.cpp overrides', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Instance llama.cpp overrides')
+    expect(wrapper.text()).toContain('Instance llama.cpp configuration')
     expect(wrapper.text()).toContain('1 override configured · remaining values inherited')
     expect(wrapper.text()).not.toContain('--ctx-size')
 
-    await wrapper.findAll('button').find(button => button.text().includes('Instance llama.cpp overrides'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('Instance llama.cpp configuration'))!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('--ctx-size')
 
@@ -65,7 +65,7 @@ describe('collapsible llama.cpp overrides', () => {
     const editor = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(editor.exists()).toBe(true)
     expect(editor.props('defaultOpen')).toBe(false)
-    expect(wrapper.text()).toContain('Instance llama.cpp overrides')
+    expect(wrapper.text()).toContain('Instance llama.cpp configuration')
     expect(wrapper.text()).not.toContain('--ctx-size')
   })
 })
