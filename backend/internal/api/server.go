@@ -344,15 +344,7 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 			}
 			writeJSON(w, 200, item)
 		case http.MethodDelete:
-			if err := s.lifecycle.StopModel(r.Context(), id); err != nil {
-				writeErr(w, 500, err)
-				return
-			}
-			if err := s.models.Delete(r.Context(), id); err != nil {
-				writeErr(w, 500, err)
-				return
-			}
-			w.WriteHeader(204)
+			s.deleteModel(w, r, id)
 		default:
 			w.WriteHeader(405)
 		}
