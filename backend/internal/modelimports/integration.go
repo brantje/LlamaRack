@@ -75,7 +75,10 @@ func (s *Service) RepairArtifactOptions(ctx context.Context, modelID, repoID str
 }
 
 // ListResolved reports the import lifecycle maintained by the reconciler rather
-// than merely mirroring the underlying download job state.
+// than merely mirroring the underlying download job state. Completed provider
+// imports also make one immediate shared-inspector attempt to fill Context
+// capability; if it cannot be detected, the completed status carries a visible
+// warning instead of silently swallowing the inspection failure.
 func (s *Service) ListResolved(ctx context.Context) ([]Status, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT pi.id,pi.job_id,COALESCE(pi.model_id,''),COALESCE(pi.instance_id,''),pi.state,
@@ -86,19 +89,62 @@ ORDER BY pi.created_at DESC,pi.id DESC`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := make([]Status, 0)
 	for rows.Next() {
 		var item Status
 		var start int
 		if err := rows.Scan(&item.ID, &item.JobID, &item.ModelID, &item.InstanceID, &item.State, &item.Error, &start); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		item.State = strings.ToUpper(strings.TrimSpace(item.State))
 		item.StartWhenReady = start != 0
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range out {
+		s.enrichContextDetectionStatus(ctx, &out[index])
+	}
+	return out, nil
+}
+
+func (s *Service) enrichContextDetectionStatus(ctx context.Context, item *Status) {
+	if item == nil || item.State != StateCompleted || item.ModelID == "" {
+		return
+	}
+	model, err := s.models.GetByID(ctx, item.ModelID)
+	if err != nil {
+		return
+	}
+	if model.ContextLength > 0 {
+		return
+	}
+	refreshed, err := s.models.RefreshDetectedContext(ctx, item.ModelID)
+	if err != nil {
+		item.Error = appendImportWarning(item.Error, "Context capability could not be detected automatically: "+err.Error())
+		return
+	}
+	if refreshed.ContextLength <= 0 {
+		item.Error = appendImportWarning(item.Error, "Context capability could not be detected automatically from GGUF metadata. Enter it manually on the Model edit page.")
+	}
+}
+
+func appendImportWarning(existing, warning string) string {
+	existing = strings.TrimSpace(existing)
+	warning = strings.TrimSpace(warning)
+	if existing == "" {
+		return warning
+	}
+	if warning == "" || strings.Contains(existing, warning) {
+		return existing
+	}
+	return existing + "; " + warning
 }
 
 // CleanupJobSafe removes Instances created by a pending provider import and

@@ -29,6 +29,16 @@ type ModelDetails = {
   limit: number
   warnings?: string[]
 }
+type MetadataValuePage = {
+  key: string
+  type: string
+  value?: string
+  items?: string[]
+  offset: number
+  limit: number
+  total: number
+  has_more: boolean
+}
 
 const manager = useManager()
 const route = useRoute()
@@ -40,6 +50,11 @@ const query = ref('')
 const appliedQuery = ref('')
 const offset = ref(0)
 const limit = 100
+const valueOpen = ref(false)
+const valueBusy = ref(false)
+const valueError = ref('')
+const selectedEntry = ref<MetadataEntry | null>(null)
+const valuePage = ref<MetadataValuePage | null>(null)
 
 const columns: TableColumn<MetadataEntry>[] = [
   { accessorKey: 'key', header: 'Key' },
@@ -50,6 +65,8 @@ const pageStart = computed(() => details.value?.metadata_total ? details.value.o
 const pageEnd = computed(() => details.value ? Math.min(details.value.offset + details.value.metadata.length, details.value.metadata_total) : 0)
 const canPrevious = computed(() => (details.value?.offset || 0) > 0)
 const canNext = computed(() => details.value ? details.value.offset + details.value.metadata.length < details.value.metadata_total : false)
+const valueCanPrevious = computed(() => (valuePage.value?.offset || 0) > 0)
+const valueCanNext = computed(() => Boolean(valuePage.value?.has_more))
 
 function formatBytes(value: number) {
   if (!value) return '—'
@@ -104,6 +121,38 @@ function nextPage() {
   if (!details.value) return
   offset.value += limit
   void load()
+}
+
+async function loadValuePage(nextOffset: number) {
+  if (!selectedEntry.value || !id.value) return
+  valueBusy.value = true
+  valueError.value = ''
+  try {
+    const params = new URLSearchParams({ key: selectedEntry.value.key, offset: String(Math.max(0, nextOffset)) })
+    valuePage.value = await manager.request<MetadataValuePage>(`/api/v1/models/${encodeURIComponent(id.value)}/details/value?${params.toString()}`)
+  } catch (e: any) {
+    valueError.value = e?.data?.error || e?.message || 'Unable to expand GGUF metadata value'
+  } finally {
+    valueBusy.value = false
+  }
+}
+
+function openValue(entry: MetadataEntry) {
+  selectedEntry.value = entry
+  valuePage.value = null
+  valueError.value = ''
+  valueOpen.value = true
+  void loadValuePage(0)
+}
+
+function previousValuePage() {
+  if (!valuePage.value) return
+  void loadValuePage(Math.max(0, valuePage.value.offset - valuePage.value.limit))
+}
+
+function nextValuePage() {
+  if (!valuePage.value?.has_more) return
+  void loadValuePage(valuePage.value.offset + valuePage.value.limit)
 }
 
 onMounted(() => void load())
@@ -171,7 +220,14 @@ onMounted(() => void load())
 
       <div v-if="busy && !details" class="p-6"><USkeleton class="h-40 w-full" /></div>
       <UEmpty v-else-if="details && !details.metadata.length" variant="naked" title="No matching GGUF metadata" description="Try a different metadata key filter." class="py-10" />
-      <UTable v-else :data="details?.metadata || []" :columns="columns" class="w-full" data-testid="metadata-table" />
+      <UTable v-else :data="details?.metadata || []" :columns="columns" class="w-full" data-testid="metadata-table">
+        <template #value-cell="{ row }">
+          <div class="flex min-w-0 items-start justify-between gap-3">
+            <span class="min-w-0 break-all font-mono text-xs">{{ row.original.value }}</span>
+            <UButton v-if="row.original.truncated" data-testid="metadata-expand" color="neutral" variant="soft" size="xs" @click="openValue(row.original)">Expand</UButton>
+          </div>
+        </template>
+      </UTable>
 
       <template #footer>
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -183,5 +239,31 @@ onMounted(() => void load())
         </div>
       </template>
     </UCard>
+
+    <UModal v-model:open="valueOpen" :title="selectedEntry?.key || 'Metadata value'" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-4xl' }">
+      <template #body>
+        <div class="space-y-4">
+          <UAlert v-if="valueError" color="error" variant="subtle" :description="valueError" />
+          <div v-if="valueBusy && !valuePage"><USkeleton class="h-40 w-full" /></div>
+          <template v-else-if="valuePage">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+              <span>{{ valuePage.type }}</span>
+              <span>{{ valuePage.offset.toLocaleString() }}–{{ Math.min(valuePage.offset + (valuePage.items?.length || valuePage.value?.length || 0), valuePage.total).toLocaleString() }} of {{ valuePage.total.toLocaleString() }}</span>
+            </div>
+            <pre v-if="valuePage.value !== undefined" data-testid="metadata-expanded-value" class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all rounded-md bg-elevated p-4 font-mono text-xs">{{ valuePage.value }}</pre>
+            <div v-else data-testid="metadata-expanded-items" class="max-h-[60vh] overflow-auto rounded-md bg-elevated p-2 font-mono text-xs">
+              <div v-for="(item, itemIndex) in valuePage.items || []" :key="`${valuePage.offset + itemIndex}:${item}`" class="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 border-b border-default px-2 py-1.5 last:border-b-0">
+                <span class="text-dimmed">{{ valuePage.offset + itemIndex }}</span>
+                <span class="break-all">{{ item }}</span>
+              </div>
+            </div>
+            <div class="flex justify-end gap-2">
+              <UButton color="neutral" variant="soft" size="sm" :disabled="!valueCanPrevious || valueBusy" @click="previousValuePage">Previous</UButton>
+              <UButton color="neutral" variant="soft" size="sm" :disabled="!valueCanNext || valueBusy" @click="nextValuePage">Next</UButton>
+            </div>
+          </template>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

@@ -59,6 +59,9 @@ func (h *phase9RecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	if refreshed, refreshErr := h.models.RefreshLogicalSize(r.Context(), model.ID); refreshErr == nil {
+		model = refreshed
+	}
 	contextLength := int64(0)
 	if raw := strings.TrimSpace(r.URL.Query().Get("context_length")); raw != "" {
 		contextLength, err = strconv.ParseInt(raw, 10, 64)
@@ -125,6 +128,9 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	if refreshed, refreshErr := h.models.RefreshLogicalSize(r.Context(), model.ID); refreshErr == nil {
+		model = refreshed
+	}
 	offset, limit, ok := metadataPage(r)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset and limit must be non-negative integers"})
@@ -143,6 +149,10 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		})
 		return
 	}
+	warnings := append([]string(nil), inspection.Warnings...)
+	if model.ContextLength <= 0 && inspection.Derived.ContextLength <= 0 {
+		warnings = append(warnings, "Context capability could not be detected automatically from GGUF metadata.")
+	}
 	page, total := ggufmeta.Filter(inspection.Metadata, query, offset, limit)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"model":                   model,
@@ -155,7 +165,7 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		"detected_context_length": inspection.Derived.ContextLength,
 		"offset":                  offset,
 		"limit":                   limit,
-		"warnings":                inspection.Warnings,
+		"warnings":                warnings,
 	})
 }
 

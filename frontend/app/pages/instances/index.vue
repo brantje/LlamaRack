@@ -141,9 +141,10 @@ async function showLogs(instance: Instance) {
 }
 
 onMounted(() => {
-  // Provider-import Instances are disabled until their GGUF is verified. Avoid a
-  // background status request for the normal all-enabled fleet.
-  if (instances.value.some(instance => !instance.enabled)) void refreshImportStates()
+  // Always perform one import-status read so completed Hugging Face metadata
+  // warnings remain visible after a page reload. Polling continues only while
+  // an import is actively downloading.
+  void refreshImportStates()
 })
 
 onBeforeUnmount(() => {
@@ -188,6 +189,7 @@ onBeforeUnmount(() => {
           </div>
           <UAlert v-if="importFor(instance)?.state === 'DOWNLOADING'" color="primary" variant="subtle" title="Model is downloading" :description="importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when the verified GGUF download completes.' : 'The Instance will become launchable when the verified GGUF download completes.'" />
           <UAlert v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" color="error" variant="subtle" :title="`Import ${importFor(instance)?.state.toLowerCase()}`" :description="importFor(instance)?.error || 'Open Downloads to retry or inspect this import.'" />
+          <UAlert v-else-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" color="warning" variant="subtle" title="Import warning" :description="importFor(instance)?.error" />
           <div class="grid grid-cols-2 gap-2 text-xs text-muted">
             <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>
           </div>

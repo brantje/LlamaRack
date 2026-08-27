@@ -104,14 +104,18 @@ func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model,
 }
 
 // RefreshUnknownContexts is deliberately tolerant: Models may point at pending
-// Hugging Face downloads or valid GGUFs without a context key. Those conditions
-// are retried later rather than treated as manager failures.
+// Hugging Face downloads or valid GGUFs without a context key. The same pass
+// also reconciles logical split-GGUF sizes so Models created before all shards
+// were available converge on the complete artifact size.
 func (s *Service) RefreshUnknownContexts(ctx context.Context) error {
 	items, err := s.List(ctx)
 	if err != nil {
 		return err
 	}
 	for _, model := range items {
+		if refreshed, sizeErr := s.RefreshLogicalSize(ctx, model.ID); sizeErr == nil {
+			model = refreshed
+		}
 		if model.ContextLength > 0 {
 			continue
 		}
@@ -120,9 +124,9 @@ func (s *Service) RefreshUnknownContexts(ctx context.Context) error {
 	return nil
 }
 
-// RunMetadataReconciler also covers Models created before a provider download
-// has finished. Once the GGUF becomes available, Context capability is filled
-// automatically without provider-specific parsing logic.
+// RunMetadataReconciler covers Models created before a provider download has
+// finished. Once the GGUF becomes available, logical size and Context capability
+// are filled automatically without provider-specific parsing logic.
 func (s *Service) RunMetadataReconciler(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 2 * time.Second
