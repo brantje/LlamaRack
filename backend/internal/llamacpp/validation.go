@@ -8,11 +8,12 @@ import (
 )
 
 var managerOwnedOptions = map[string]bool{
-	"model":        true,
-	"host":         true,
-	"port":         true,
-	"device":       true,
-	"tensor-split": true,
+	"model":      true,
+	"host":       true,
+	"port":       true,
+	"device":     true,
+	"split-mode": true,
+	"main-gpu":   true,
 }
 
 // ValidateOptions validates and canonicalizes free-form llama.cpp overrides

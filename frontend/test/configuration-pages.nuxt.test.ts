@@ -4,6 +4,8 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewInstancePage from '~/pages/instances/new.vue'
 import EditInstancePage from '~/pages/instances/[id]/edit.vue'
 import EditModelPage from '~/pages/models/[id]/edit.vue'
+import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
+import HardwarePlacementEditor from '~/components/HardwarePlacementEditor.vue'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -33,11 +35,34 @@ function resetManager() {
   manager.runtimes.value = {}
   manager.profile.value = {
     path: '/app/llama-server', version: 'test', fingerprint: 'abc', options: [
-      { key: 'ctx-size', value_hint: 'N', kind: 'integer' },
-      { key: 'threads', value_hint: 'N', kind: 'integer' }
+      { key: 'ctx-size', value_hint: 'N', kind: 'integer', description: 'Context size' },
+      { key: 'threads', value_hint: 'N', kind: 'integer', description: 'CPU threads' },
+      { key: 'flash-attn', kind: 'boolean', description: 'Flash attention' }
     ]
   }
   return manager
+}
+
+function phase7Response(path: string) {
+  if (path === '/api/v1/hardware') {
+    return {
+      ram_total_bytes: 64 * 1024 ** 3,
+      ram_available_bytes: 48 * 1024 ** 3,
+      collected_at: '2026-08-27T00:00:00Z',
+      gpus: [
+        { id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU 0', total_bytes: 24 * 1024 ** 3, used_bytes: 2 * 1024 ** 3, free_bytes: 22 * 1024 ** 3, utilization_pct: 10 },
+        { id: 'CUDA1', backend: 'cuda', index: 1, name: 'GPU 1', total_bytes: 24 * 1024 ** 3, used_bytes: 4 * 1024 ** 3, free_bytes: 20 * 1024 ** 3, utilization_pct: 20 }
+      ]
+    }
+  }
+  if (path.startsWith('/api/v1/llamacpp/config')) {
+    return {
+      profile: useManager().profile.value,
+      effective: { global: {}, model: {}, instance: {}, values: {}, sources: {} },
+      unsupported: []
+    }
+  }
+  return undefined
 }
 
 function components(wrapper: any, name: string, fallback: string) {
@@ -45,10 +70,23 @@ function components(wrapper: any, name: string, fallback: string) {
   return found.length ? found : wrapper.findAllComponents({ name: fallback })
 }
 function selects(wrapper: any) { return components(wrapper, 'SelectMenu', 'USelectMenu') }
-function inputs(wrapper: any) { return components(wrapper, 'Input', 'UInput') }
 function numbers(wrapper: any) { return components(wrapper, 'InputNumber', 'UInputNumber') }
-function textareas(wrapper: any) { return components(wrapper, 'Textarea', 'UTextarea') }
 function checkboxes(wrapper: any) { return components(wrapper, 'Checkbox', 'UCheckbox') }
+function checkbox(wrapper: any, label: string) {
+  const control = checkboxes(wrapper).find((item: any) => item.props('label') === label)
+  if (!control) throw new Error(`Missing checkbox: ${label}`)
+  return control
+}
+function selectWithValue(wrapper: any, value: string) {
+  const control = selects(wrapper).find((item: any) => Array.isArray(item.props('items')) && item.props('items').some((entry: any) => entry?.value === value))
+  if (!control) throw new Error(`Missing select containing value: ${value}`)
+  return control
+}
+function inputWithValue(wrapper: any, value: string) {
+  const control = components(wrapper, 'Input', 'UInput').find((item: any) => item.props('modelValue') === value)
+  if (!control) throw new Error(`Missing input containing value: ${value}`)
+  return control
+}
 
 async function clickConfirmation(kind: 'confirm' | 'cancel') {
   await flushPromises()
@@ -65,9 +103,11 @@ beforeEach(() => {
 })
 
 describe('Instance configuration pages', () => {
-  it('creates a fully configured Instance with an editable generated slug and launches the exact created ID', async () => {
+  it('creates a fully configured Instance with visual placement and structured llama.cpp overrides', async () => {
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
       if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'custom-coder' }
       if (path === '/api/v1/instances/custom-coder/start') return { state: 'READY' }
       if (path === '/api/v1/models') return manager.models.value
@@ -77,10 +117,8 @@ describe('Instance configuration pages', () => {
     })
 
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
-    const select = selects(wrapper)
-    select[0]!.vm.$emit('update:modelValue', 'm1')
-    select[1]!.vm.$emit('update:modelValue', 'high')
-    select[2]!.vm.$emit('update:modelValue', 'manual')
+    selectWithValue(wrapper, 'm1').vm.$emit('update:modelValue', 'm1')
+    selectWithValue(wrapper, 'high').vm.$emit('update:modelValue', 'high')
     await flushPromises()
 
     expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Coder Model')
@@ -90,25 +128,25 @@ describe('Instance configuration pages', () => {
     expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('primary-coder')
     await wrapper.get('[data-testid="instance-slug"]').setValue('custom-coder')
 
-    const input = inputs(wrapper)
-    input[2]!.vm.$emit('update:modelValue', '0, 1')
-    input[3]!.vm.$emit('update:modelValue', '1,1')
+    const placement = wrapper.findComponent(HardwarePlacementEditor)
+    placement.vm.$emit('update:gpuMode', 'manual')
+    placement.vm.$emit('update:gpuDevices', ['CUDA0', 'CUDA1'])
+    placement.vm.$emit('update:tensorSplit', '1,1')
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192', threads: '4' })
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 90)
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=8192\nthreads=4')
-    const checks = checkboxes(wrapper)
-    checks[1]!.vm.$emit('update:modelValue', true)
-    checks[4]!.vm.$emit('update:modelValue', true)
+    checkbox(wrapper, 'Always On').vm.$emit('update:modelValue', true)
+    checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
     await flushPromises()
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(document.body.textContent).toContain('Launching this Instance may stop other idle Instances')
+    expect(document.body.textContent).toContain('may stop other eligible idle Instances')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances', {
       method: 'POST',
       body: expect.objectContaining({
         model_id: 'm1', name: 'Primary Coder', slug: 'custom-coder', priority: 'high', always_on: true,
-        idle_unload_seconds: 90, gpu_mode: 'manual', gpu_devices: ['0', '1'], tensor_split: '1,1',
+        idle_unload_seconds: 90, gpu_mode: 'manual', gpu_devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1',
         options: { 'ctx-size': '8192', threads: '4' }
       })
     })
@@ -117,42 +155,46 @@ describe('Instance configuration pages', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/custom-coder/start', { method: 'POST' })
   })
 
-  it('reports invalid overrides and preserves a created Instance when launch confirmation is cancelled', async () => {
+  it('keeps a created Instance stopped when launch confirmation is cancelled and surfaces create errors', async () => {
     const manager = resetManager()
+    let failCreate = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'cancelled-launch' }
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
+      if (path === '/api/v1/instances' && options?.method === 'POST') {
+        if (failCreate) throw { data: { error: 'create failed' } }
+        return { id: 'cancelled-launch' }
+      }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return []
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
-    selects(wrapper)[0]!.vm.$emit('update:modelValue', 'm1')
+    selectWithValue(wrapper, 'm1').vm.$emit('update:modelValue', 'm1')
     await wrapper.get('[data-testid="instance-name"]').setValue('Cancelled Launch')
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'invalid-option')
+    checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('use key=value')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances', expect.objectContaining({ method: 'POST' }))
-
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=4096')
-    checkboxes(wrapper)[4]!.vm.$emit('update:modelValue', true)
-    await flushPromises()
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances', expect.objectContaining({ method: 'POST' }))
     expect(document.body.textContent).toContain('Keep stopped')
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/cancelled-launch/start', expect.anything())
+
+    failCreate = true
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('create failed')
   })
 
   it('loads and applies a confirmed running rename with restart semantics', async () => {
     const manager = resetManager()
-    const current = instance({ gpu_mode: 'manual', gpu_devices: ['0', '1'], tensor_split: '1,1' })
+    const current = instance({ gpu_mode: 'manual', gpu_devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1' })
     manager.instances.value = [current]
     manager.runtimes.value = { m1: [{ instance_id: current.id, model_id: 'm1', state: 'READY' }] }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
       if (path === '/api/v1/instances/primary-coder') {
         if (options?.method === 'PUT') return { id: 'renamed-coder' }
         return current
@@ -160,16 +202,15 @@ describe('Instance configuration pages', () => {
       if (path === '/api/v1/instances/primary-coder/options') return { 'ctx-size': '8192' }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return [instance({ id: 'renamed-coder', name: 'Renamed Coder' })]
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
 
     const wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     expect(wrapper.text()).toContain('Edit Instance')
-    expect(textareas(wrapper)[0]!.props('modelValue')).toBe('ctx-size=8192')
-    inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Renamed Coder')
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=16384\nthreads=6')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
+    inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
     await flushPromises()
     expect(wrapper.text()).toContain('API-breaking rename')
 
@@ -182,15 +223,15 @@ describe('Instance configuration pages', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/primary-coder', {
       method: 'PUT',
       body: expect.objectContaining({
-        name: 'Renamed Coder', gpu_mode: 'manual', gpu_devices: ['0', '1'], tensor_split: '1,1',
+        name: 'Renamed Coder', gpu_mode: 'manual', gpu_devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1',
         options: { 'ctx-size': '16384', threads: '6' }, restart_running: true, confirm_model_id_change: true
       })
     })
   })
 
-  it('handles edit load failures, cancelled renames and invalid overrides', async () => {
+  it('handles edit load failures, cancelled renames and save errors', async () => {
     resetManager()
-    mocks.request.mockRejectedValueOnce({ data: { error: 'instance load failed' } }).mockResolvedValueOnce({})
+    mocks.request.mockRejectedValueOnce({ data: { error: 'instance load failed' } }).mockResolvedValue({})
     let wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     expect(wrapper.text()).toContain('instance load failed')
@@ -198,7 +239,14 @@ describe('Instance configuration pages', () => {
 
     const manager = resetManager()
     const current = instance()
+    let failSave = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
+      if (path === '/api/v1/instances/primary-coder' && options?.method === 'PUT') {
+        if (failSave) throw { data: { error: 'save failed' } }
+        return current
+      }
       if (path === '/api/v1/instances/primary-coder' && !options?.method) return current
       if (path === '/api/v1/instances/primary-coder/options') return {}
       if (path === '/api/v1/models') return manager.models.value
@@ -207,18 +255,18 @@ describe('Instance configuration pages', () => {
     })
     wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
-    inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Breaking Rename')
+    inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Breaking Rename')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))
 
-    inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Primary Coder')
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'not-valid')
+    inputWithValue(wrapper, 'Breaking Rename').vm.$emit('update:modelValue', 'Primary Coder')
+    failSave = true
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('use key=value')
+    expect(wrapper.text()).toContain('save failed')
   })
 })
 
@@ -226,6 +274,8 @@ describe('Model edit page', () => {
   it('loads reusable defaults and saves edited metadata/options', async () => {
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
       if (path === '/api/v1/models/m1') {
         if (options?.method === 'PUT') return model({ name: 'Updated Model', context_length: 32768 })
         return model()
@@ -233,15 +283,14 @@ describe('Model edit page', () => {
       if (path === '/api/v1/models/m1/options') return { 'ctx-size': '8192', threads: '4' }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return []
-      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
     const wrapper = await mountSuspended(EditModelPage, { route: '/models/m1/edit' })
     await flushPromises()
-    expect(String(textareas(wrapper)[0]!.props('modelValue'))).toContain('ctx-size=8192')
-    inputs(wrapper)[0]!.vm.$emit('update:modelValue', 'Updated Model')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192', threads: '4' })
+    inputWithValue(wrapper, 'Coder Model').vm.$emit('update:modelValue', 'Updated Model')
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 32768)
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'ctx-size=32768\nthreads=8')
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '32768', threads: '8' })
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -251,21 +300,19 @@ describe('Model edit page', () => {
     })
   })
 
-  it('renders load, validation and save errors', async () => {
+  it('renders load and save errors', async () => {
     resetManager()
-    mocks.request.mockRejectedValueOnce(new Error('model load failed')).mockResolvedValueOnce({})
+    mocks.request.mockRejectedValueOnce(new Error('model load failed')).mockResolvedValue({})
     let wrapper = await mountSuspended(EditModelPage, { route: '/models/m1/edit' })
     await flushPromises()
     expect(wrapper.text()).toContain('model load failed')
     wrapper.unmount()
 
     const manager = resetManager()
-    let failSave = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/models/m1' && options?.method === 'PUT') {
-        if (failSave) throw { data: { error: 'save failed' } }
-        return {}
-      }
+      const phase7 = phase7Response(path)
+      if (phase7 !== undefined) return phase7
+      if (path === '/api/v1/models/m1' && options?.method === 'PUT') throw { data: { error: 'save failed' } }
       if (path === '/api/v1/models/m1') return model()
       if (path === '/api/v1/models/m1/options') return {}
       if (path === '/api/v1/models') return manager.models.value
@@ -274,14 +321,7 @@ describe('Model edit page', () => {
     })
     wrapper = await mountSuspended(EditModelPage, { route: '/models/m1/edit' })
     await flushPromises()
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'invalid')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    expect(wrapper.text()).toContain('use key=value')
-
-    textareas(wrapper)[0]!.vm.$emit('update:modelValue', 'threads=4')
-    failSave = true
-    await flushPromises()
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { threads: '4' })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('save failed')

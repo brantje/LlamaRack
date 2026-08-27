@@ -20,8 +20,10 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/config"
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
 	"github.com/brantje/llamacpp-manager/backend/internal/gateway"
+	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
@@ -79,10 +81,13 @@ func run(ctx context.Context, cfg config.Config) error {
 		defer profileMu.RUnlock()
 		return profile, profileErr
 	}
+	lifecycleService.SetProfileGetter(profileGetter)
 
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, cfg.AllowedOrigin))
+	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardware.New()))
+	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
 	managementAPI.Handle("/", apiServer)
 	openAI := gateway.New(authService, modelService, lifecycleService)
 	mux := newMux(managementAPI, openAI)

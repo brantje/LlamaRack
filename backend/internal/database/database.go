@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS api_keys (
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  last_used_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS global_options (
+ option_key TEXT PRIMARY KEY,
+ option_value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS models (
  id TEXT PRIMARY KEY,
  name TEXT NOT NULL,

@@ -12,18 +12,20 @@ const profile = {
     { key: 'flash-attn', kind: 'boolean' },
     { key: 'cache-type-k', value_hint: '<f16|q8_0>', kind: 'enum', choices: ['f16', 'q8_0'] },
     { key: 'chat-template', value_hint: 'STRING', kind: 'string' },
+    { key: 'tensor-split', value_hint: 'SPLIT', kind: 'string' },
     { key: 'prompt', kind: 'string' }
   ]
 } as Profile
 
 describe('llama.cpp option form validation', () => {
   it('canonicalizes supported options and validates discovered types', () => {
-    expect(parseLlamaCppOptions('\n--ctx-size=8192\ntemperature=0.7\nflash-attn=true\ncache-type-k=q8_0\nchat-template=chatml\n', profile)).toEqual({
+    expect(parseLlamaCppOptions('\n--ctx-size=8192\ntemperature=0.7\nflash-attn=true\ncache-type-k=q8_0\nchat-template=chatml\ntensor-split=3,1\n', profile)).toEqual({
       'ctx-size': '8192',
       temperature: '0.7',
       'flash-attn': 'true',
       'cache-type-k': 'q8_0',
-      'chat-template': 'chatml'
+      'chat-template': 'chatml',
+      'tensor-split': '3,1'
     })
     expect(parseLlamaCppOptions('flash-attn=false', profile)).toEqual({ 'flash-attn': 'false' })
     expect(parseLlamaCppOptions('', null)).toEqual({})

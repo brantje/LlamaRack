@@ -3,13 +3,17 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/instances"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
@@ -24,6 +28,8 @@ type Service struct {
 	models          *models.Service
 	instances       *instances.Service
 	sup             *supervisor.Supervisor
+	hardware        hardware.Snapshotter
+	profile         func() (llamacpp.Profile, error)
 	mu              sync.Mutex
 	loads           map[string]*loadCall
 	manuallyStopped map[string]bool
@@ -41,7 +47,7 @@ type loadCall struct {
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	return &Service{
-		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup,
+		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
 		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{},
 		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, now: time.Now,
@@ -49,6 +55,10 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 }
 
 func (s *Service) Instances() *instances.Service { return s.instances }
+func (s *Service) SetProfileGetter(getter func() (llamacpp.Profile, error)) { s.profile = getter }
+func (s *Service) HardwareSnapshot(ctx context.Context) (hardware.Snapshot, error) {
+	return s.hardware.Snapshot(ctx)
+}
 
 // Acquire resolves exactly one addressable Instance. The OpenAI model field is
 // the stored instance.id; sibling Instances are never selected as fallback.
@@ -521,24 +531,42 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	if err != nil {
 		return "", err
 	}
-	modelOptions, err := s.models.Options(ctx, m.ID)
+
+	store := llamaconfig.New(s.models.DB())
+	effective, err := store.Effective(ctx, m.ID, i.ID)
 	if err != nil {
 		return "", err
 	}
-	instanceOptions, err := s.instances.Options(ctx, i.ID)
-	if err != nil {
-		return "", err
+	launchOptions := effective.Values
+	if s.profile != nil {
+		if profile, profileErr := s.profile(); profileErr == nil {
+			launchOptions, _, err = store.LaunchOptions(ctx, profile, m.ID, i.ID)
+			if err != nil {
+				return "", err
+			}
+		}
 	}
-	for key, value := range instanceOptions {
-		modelOptions[key] = value
+	args := optionArgs(launchOptions)
+	_, hasTensorSplitOverride := launchOptions["tensor-split"]
+
+	placement, placementErr := s.preparePlacement(ctx, i, m.TotalBytes)
+	if placementErr != nil {
+		return "", placementErr
 	}
-	args := optionArgs(modelOptions)
-	if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
+	if len(placement.Devices) > 0 {
+		args = append(args, "--device", strings.Join(placement.Devices, ","))
+		if !hasTensorSplitOverride && placement.TensorSplit != "" && len(placement.Devices) > 1 {
+			args = append(args, "--tensor-split", placement.TensorSplit)
+		}
+	} else if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
+		// Preserve explicitly configured non-NVIDIA/ROCm backends when this Phase 7
+		// detector cannot observe them.
 		args = append(args, "--device", strings.Join(i.GPUDevices, ","))
+		if !hasTensorSplitOverride && i.TensorSplit != "" {
+			args = append(args, "--tensor-split", i.TensorSplit)
+		}
 	}
-	if i.TensorSplit != "" {
-		args = append(args, "--tensor-split", i.TensorSplit)
-	}
+
 	_, err = s.sup.Start(ctx, i.ID, m.ID, path, args)
 	if err != nil {
 		return "", err
@@ -549,6 +577,79 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	}
 	s.touch(i.ID)
 	return endpoint, nil
+}
+
+func (s *Service) preparePlacement(ctx context.Context, i instances.Instance, requiredBytes int64) (scheduler.Placement, error) {
+	snapshot, err := s.hardware.Snapshot(ctx)
+	if err != nil {
+		slog.Warn("hardware snapshot unavailable; preserving compatibility placement", "instance_id", i.ID, "error", err)
+		return scheduler.Placement{}, nil
+	}
+	if len(snapshot.GPUs) == 0 {
+		return scheduler.Placement{}, nil
+	}
+	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
+	placement, err := scheduler.PlanPlacement(snapshot, request)
+	if err != nil {
+		return scheduler.Placement{}, err
+	}
+	if placement.Fits {
+		return placement, nil
+	}
+
+	shortfall := requiredBytes - placement.AvailableBytes
+	if shortfall < 1 {
+		shortfall = requiredBytes
+	}
+	plan, err := s.EvictionPlan(ctx, shortfall)
+	if err != nil {
+		return scheduler.Placement{}, err
+	}
+	if !plan.Fits {
+		return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
+	}
+	for _, candidate := range plan.Evict {
+		if candidate.InstanceID == i.ID {
+			continue
+		}
+		if err := s.evictInstance(ctx, candidate.InstanceID); err != nil {
+			return scheduler.Placement{}, fmt.Errorf("evict %s: %w", candidate.InstanceID, err)
+		}
+	}
+
+	refreshed, err := s.hardware.Snapshot(ctx)
+	if err != nil {
+		return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
+	}
+	placement, err = scheduler.PlanPlacement(refreshed, request)
+	if err != nil {
+		return scheduler.Placement{}, err
+	}
+	if !placement.Fits {
+		return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM after eviction: need %d bytes, have %d", requiredBytes, placement.AvailableBytes)
+	}
+	return placement, nil
+}
+
+func (s *Service) evictInstance(ctx context.Context, id string) error {
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	i, err := s.instances.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	activity := s.Activity(id)
+	if !i.EvictionEnabled || i.AlwaysOn || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
+		return errors.New("instance is no longer eligible for resource-pressure eviction")
+	}
+	if err := s.sup.Stop(ctx, id); err != nil {
+		return err
+	}
+	slog.Info("evicted instance for resource pressure", "instance_id", id)
+	return nil
 }
 
 func optionArgs(options map[string]string) []string {
