@@ -10,14 +10,15 @@ import (
 // stopped to free resources for another model. Resource measurements are
 // intentionally generic here; Phase 7 will supply per-GPU VRAM snapshots.
 type Candidate struct {
-	ModelID        string
-	InstanceID     string
-	Priority       string
-	AlwaysOn       bool
-	ActiveRequests int
-	LastUsed       time.Time
-	EstimatedBytes int64
-	Ready          bool
+	ModelID         string
+	InstanceID      string
+	Priority        string
+	AlwaysOn        bool
+	EvictionEnabled bool
+	ActiveRequests  int
+	LastUsed        time.Time
+	EstimatedBytes  int64
+	Ready           bool
 }
 
 // Plan is a deterministic eviction decision for a requested amount of
@@ -31,10 +32,13 @@ type Plan struct {
 // RankEvictionCandidates returns only normally evictable instances ordered by
 // priority first (Low before Normal before High), then least-recently-used,
 // then largest estimated resource release, with stable ID tie-breakers.
+// Always On expresses desired lifecycle state and does not affect normal
+// resource-pressure eviction eligibility; EvictionEnabled is the source of
+// truth for that policy.
 func RankEvictionCandidates(candidates []Candidate) []Candidate {
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if !candidate.Ready || candidate.AlwaysOn || candidate.ActiveRequests > 0 {
+		if !candidate.Ready || !candidate.EvictionEnabled || candidate.ActiveRequests > 0 {
 			continue
 		}
 		out = append(out, candidate)
