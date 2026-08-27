@@ -67,6 +67,21 @@ func TestDatabaseErrors(t *testing.T) {
 	if _, _, err := s.SessionUserWithSession(ctx, "token"); err == nil {
 		t.Fatal("expected session failure")
 	}
+	if err := s.ValidateCSRF(ctx, "session", "csrf"); err == nil {
+		t.Fatal("expected csrf DB error")
+	}
+	if _, err := s.ListSessions(ctx, 1, "current"); err == nil {
+		t.Fatal("expected list sessions DB error")
+	}
+	if err := s.RevokeSession(ctx, "session-id"); err == nil {
+		t.Fatal("expected revoke session DB error")
+	}
+	if _, err := s.RevokeOtherSessions(ctx, 1, "current"); err == nil {
+		t.Fatal("expected revoke other sessions DB error")
+	}
+	if _, err := s.RevokeAllSessions(ctx, 1); err == nil {
+		t.Fatal("expected revoke all sessions DB error")
+	}
 	if _, _, err := s.CreateAPIKeyForUser(ctx, "key", 1); err == nil {
 		t.Fatal("expected create key DB error")
 	}
