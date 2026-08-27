@@ -63,9 +63,10 @@ describe('Model metadata lazy expansion', () => {
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('/api/v1/models/m1/details/value?key=tokenizer.ggml.tokens&offset=0'))
-    expect(wrapper.get('[data-testid="metadata-expanded-items"]').text()).toContain('alpha')
-    expect(wrapper.get('[data-testid="metadata-expanded-items"]').text()).toContain('beta')
-    expect(wrapper.text()).toContain('200')
+    const expanded = document.body.querySelector<HTMLElement>('[data-testid="metadata-expanded-items"]')
+    expect(expanded?.textContent).toContain('alpha')
+    expect(expanded?.textContent).toContain('beta')
+    expect(document.body.textContent).toContain('200')
     wrapper.unmount()
   })
 })

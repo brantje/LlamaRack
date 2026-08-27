@@ -122,6 +122,12 @@ describe('instance control plane', () => {
   it('keeps instances visible on action errors and supports cancelled destructive actions', async () => {
     mocks.request.mockRejectedValue({ data: { error: 'worker failed' } })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
+    await flushPromises()
+    // Mounting the control plane now performs one import-status read so a
+    // completed Hugging Face context-detection warning can survive reloads.
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/imports')
+    mocks.request.mockClear()
+
     await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
