@@ -1,20 +1,14 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import AppSidebar from '~/components/navigation/AppSidebar.vue'
+import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 
+const route = useRoute()
 const manager = useManager()
 const { user, initialized, bootstrapRequired, backendError, apiBase } = manager
 const credentials = reactive({ username: '', password: '' })
 const authError = ref('')
 const authenticating = ref(false)
-
-const navigation: NavigationMenuItem[] = [
-  { label: 'Overview', to: '/' },
-  { label: 'Models', to: '/models' },
-  { label: 'Instances', to: '/instances' },
-  { label: 'Downloads', to: '/downloads' },
-  { label: 'API', to: '/api' },
-  { label: 'Settings', to: '/settings' }
-]
+const isAdmin = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'))
 
 onMounted(() => {
   if (!initialized.value) manager.initialize()
@@ -35,14 +29,14 @@ async function submitAuth() {
 </script>
 
 <template>
-  <UMain v-if="!initialized" class="grid min-h-screen place-items-center px-6 py-10">
+  <UMain v-show="!initialized" class="fixed inset-0 z-50 grid min-h-screen place-items-center bg-default px-6 py-10">
     <div class="grid justify-items-center gap-4 text-muted">
       <USkeleton class="size-8 rounded-full" />
       <p>Connecting to manager…</p>
     </div>
   </UMain>
 
-  <UMain v-else-if="backendError" class="grid min-h-screen place-items-center px-6 py-10">
+  <UMain v-show="initialized && !!backendError" class="fixed inset-0 z-50 grid min-h-screen place-items-center bg-default px-6 py-10">
     <UCard class="w-full max-w-md bg-muted/90 shadow-2xl">
       <div class="space-y-5">
         <div class="text-4xl font-black text-primary">λ</div>
@@ -57,7 +51,7 @@ async function submitAuth() {
     </UCard>
   </UMain>
 
-  <UMain v-else-if="!user" class="grid min-h-screen place-items-center px-6 py-10">
+  <UMain v-show="initialized && !backendError && !user" class="fixed inset-0 z-40 grid min-h-screen place-items-center bg-default px-6 py-10">
     <UCard class="w-full max-w-md bg-muted/90 shadow-2xl">
       <div class="text-4xl font-black text-primary">λ</div>
       <p class="mt-5 mb-2 text-xs font-extrabold tracking-[0.18em] text-dimmed">LLAMA.CPP CONTROL PLANE</p>
@@ -87,35 +81,12 @@ async function submitAuth() {
   </UMain>
 
   <UDashboardGroup v-show="initialized && !backendError && !!user">
-    <UDashboardSidebar id="manager-sidebar" collapsible>
-      <template #header>
-        <UButton to="/" color="neutral" variant="link" class="h-auto justify-start gap-3 px-1 py-2">
-          <span class="text-3xl font-black text-primary">λ</span>
-          <span class="text-left text-sm font-extrabold leading-[1.05] text-highlighted">llamacpp<br>manager</span>
-        </UButton>
-      </template>
-
-      <UNavigationMenu :items="navigation" orientation="vertical" class="w-full" />
-
-      <template #footer>
-        <div class="flex w-full items-center justify-between gap-3">
-          <UUser :name="user?.username || ''" size="sm" />
-          <UButton
-            data-testid="sign-out"
-            color="neutral"
-            variant="link"
-            size="xs"
-            @click="manager.logout"
-          >
-            Sign out
-          </UButton>
-        </div>
-      </template>
-    </UDashboardSidebar>
+    <AdminSidebar v-if="isAdmin" />
+    <AppSidebar v-else />
 
     <UDashboardPanel id="manager-main">
       <template #header>
-        <UDashboardNavbar title="llamacpp-manager" class="lg:hidden">
+        <UDashboardNavbar :title="isAdmin ? 'Administration' : 'llamacpp-manager'" class="lg:hidden">
           <template #leading>
             <UDashboardSidebarToggle />
           </template>
