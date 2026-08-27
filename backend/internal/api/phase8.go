@@ -12,6 +12,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
 	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamacpp-manager/backend/internal/modelimports"
 )
 
 type phase8Handler struct {
@@ -19,6 +20,7 @@ type phase8Handler struct {
 	hf        *huggingface.Client
 	secrets   *huggingface.SecretStore
 	downloads *downloads.Manager
+	imports   *modelimports.Service
 }
 
 type downloadSnapshotEvent struct {
@@ -26,8 +28,12 @@ type downloadSnapshotEvent struct {
 	Downloads []downloads.Job `json:"downloads"`
 }
 
-func NewPhase8Handler(a *auth.Service, hf *huggingface.Client, secrets *huggingface.SecretStore, downloadManager *downloads.Manager) http.Handler {
-	return &phase8Handler{auth: a, hf: hf, secrets: secrets, downloads: downloadManager}
+func NewPhase8Handler(a *auth.Service, hf *huggingface.Client, secrets *huggingface.SecretStore, downloadManager *downloads.Manager, importServices ...*modelimports.Service) http.Handler {
+	var importService *modelimports.Service
+	if len(importServices) > 0 {
+		importService = importServices[0]
+	}
+	return &phase8Handler{auth: a, hf: hf, secrets: secrets, downloads: downloadManager, imports: importService}
 }
 
 func (h *phase8Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +48,10 @@ func (h *phase8Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.detail(w, r)
 	case path == "/api/v1/huggingface/token":
 		h.token(w, r)
+	case path == "/api/v1/huggingface/import":
+		h.prepareImport(w, r)
+	case path == "/api/v1/imports":
+		h.importStatuses(w, r)
 	case path == "/api/v1/downloads/ws":
 		h.downloadEvents(w, r)
 	case path == "/api/v1/downloads":
@@ -123,6 +133,69 @@ func (h *phase8Handler) token(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (h *phase8Handler) prepareImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if h.imports == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "provider import service is unavailable"})
+		return
+	}
+	var in struct {
+		RepoID         string                          `json:"repo_id"`
+		ArtifactID     string                          `json:"artifact_id"`
+		Name           string                          `json:"name"`
+		ContextLength  int                             `json:"context_length"`
+		Options        map[string]string               `json:"options"`
+		FirstInstance  modelimports.FirstInstanceInput `json:"first_instance"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	detail, err := h.hf.Detail(r.Context(), strings.TrimSpace(in.RepoID))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	var artifact *huggingface.Artifact
+	for index := range detail.Artifacts {
+		if detail.Artifacts[index].ID == in.ArtifactID {
+			artifact = &detail.Artifacts[index]
+			break
+		}
+	}
+	if artifact == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifact is not part of the current repository revision"})
+		return
+	}
+	result, err := h.imports.Prepare(r.Context(), detail, *artifact, modelimports.PrepareInput{
+		Name: in.Name, ContextLength: in.ContextLength, Options: in.Options, FirstInstance: in.FirstInstance,
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *phase8Handler) importStatuses(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if h.imports == nil {
+		writeJSON(w, http.StatusOK, []modelimports.Status{})
+		return
+	}
+	items, err := h.imports.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *phase8Handler) downloadEvents(w http.ResponseWriter, r *http.Request) {
@@ -236,6 +309,21 @@ func (h *phase8Handler) downloadItem(w http.ResponseWriter, r *http.Request, res
 			}
 			writeJSON(w, http.StatusOK, job)
 		case http.MethodDelete:
+			job, err := h.downloads.Get(r.Context(), parts[0])
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
+			if job.State == downloads.StateCancelled && h.imports != nil {
+				if err := h.imports.CleanupJob(r.Context(), parts[0]); err != nil {
+					writeErr(w, http.StatusInternalServerError, err)
+					return
+				}
+			}
 			if err := h.downloads.Remove(r.Context(), parts[0]); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
