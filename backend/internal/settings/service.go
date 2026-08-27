@@ -65,11 +65,12 @@ type General struct {
 }
 
 type definition struct {
-	env          string
-	defaultValue string
-	kind         string
-	min          int
-	max          int
+	env                  string
+	defaultValue         string
+	kind                 string
+	min                  int
+	max                  int
+	databaseOverridesEnv bool
 }
 
 type Service struct {
@@ -87,7 +88,7 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			LoginFailureThreshold:    {env: "LCM_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
 			LoginLockoutSeconds:      {env: "LCM_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
 			TrustedProxies:           {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
-			AllowedOrigins:           {defaultValue: defaults.AllowedOrigins, kind: "string"},
+			AllowedOrigins:           {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
 			ExternalURL:              {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
 			StartupTimeoutSeconds:    {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
 			IdleUnloadSeconds:        {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
@@ -101,6 +102,34 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 	def, ok := s.defs[key]
 	if !ok {
 		return Value{}, fmt.Errorf("unknown manager setting %q", key)
+	}
+	if def.databaseOverridesEnv {
+		var stored string
+		err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
+		if err == nil {
+			parsed, parseErr := parse(def, stored)
+			if parseErr != nil {
+				return Value{}, fmt.Errorf("invalid stored setting %s: %w", key, parseErr)
+			}
+			return Value{Value: parsed, Source: "database", Editable: true}, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Value{}, err
+		}
+		if def.env != "" {
+			if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
+				parsed, parseErr := parse(def, value)
+				if parseErr != nil {
+					return Value{}, fmt.Errorf("invalid %s: %w", def.env, parseErr)
+				}
+				return Value{Value: parsed, Source: "environment", Editable: true}, nil
+			}
+		}
+		parsed, parseErr := parse(def, def.defaultValue)
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
+		return Value{Value: parsed, Source: "default", Editable: true}, nil
 	}
 	if def.env != "" {
 		if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
@@ -135,7 +164,7 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 	if !ok {
 		return Value{}, fmt.Errorf("unknown manager setting %q", key)
 	}
-	if def.env != "" {
+	if def.env != "" && !def.databaseOverridesEnv {
 		if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" {
 			return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
 		}
