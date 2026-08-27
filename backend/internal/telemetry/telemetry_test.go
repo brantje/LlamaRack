@@ -80,6 +80,68 @@ func TestCollectNVIDIATelemetryIsAttributedByInstancePID(t *testing.T) {
 	}
 }
 
+func TestCollectMapsGPUHostPIDsIntoManagerNamespace(t *testing.T) {
+	const mib = int64(1024 * 1024)
+	collector := New(func(context.Context) (hardware.Snapshot, error) {
+		return hardware.Snapshot{Processes: []hardware.GPUProcess{
+			{PID: 2554129, DeviceID: "CUDA0", UsedBytes: 14260 * mib},
+			{PID: 2555000, DeviceID: "CUDA0", UsedBytes: 600 * mib},
+		}}, nil
+	})
+	collector.hostProcRoot = "/host/proc"
+	collector.run = func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		if name == "nvidia-smi" {
+			return []byte("# gpu pid type sm mem enc dec command\n0 2554129 C 97 1 - - llama-server\n0 2555000 C 3 1 - - llama-server\n"), nil
+		}
+		return nil, errors.New("not installed")
+	}
+	collector.readFile = func(path string) ([]byte, error) {
+		switch path {
+		case "/host/proc/2554129/status":
+			return []byte("Name:\tllama-server\nNSpid:\t2554129\t1652\n"), nil
+		case "/host/proc/2555000/status":
+			return []byte("Name:\tllama-server\nNSpid:\t2555000\t1777\n"), nil
+		default:
+			return nil, errors.New("missing")
+		}
+	}
+
+	samples := collector.Collect(context.Background(), []supervisor.Runtime{
+		{InstanceID: "gemma-4", ModelID: "m1", State: supervisor.Ready, PID: 1652},
+		{InstanceID: "other", ModelID: "m2", State: supervisor.Ready, PID: 1777},
+	})
+	if len(samples) != 2 {
+		t.Fatalf("samples=%+v", samples)
+	}
+	if samples[0].InstanceID != "gemma-4" || samples[0].PID != 1652 {
+		t.Fatalf("gemma identity=%+v", samples[0])
+	}
+	if strings.Join(samples[0].GPUDevices, ",") != "CUDA0" || samples[0].VRAMUsedBytes == nil || *samples[0].VRAMUsedBytes != 14260*mib {
+		t.Fatalf("gemma placement/vram=%+v", samples[0])
+	}
+	if samples[0].GPUUtilizationPct == nil || *samples[0].GPUUtilizationPct != 97 {
+		t.Fatalf("gemma process GPU utilization=%v", samples[0].GPUUtilizationPct)
+	}
+	if samples[1].InstanceID != "other" || samples[1].GPUUtilizationPct == nil || *samples[1].GPUUtilizationPct != 3 {
+		t.Fatalf("other attribution=%+v", samples[1])
+	}
+}
+
+func TestRuntimePIDResolverPrefersDirectActivePID(t *testing.T) {
+	collector := New(nil)
+	collector.hostProcRoot = "/host/proc"
+	collector.readFile = func(path string) ([]byte, error) {
+		if path == "/host/proc/42/status" {
+			return []byte("NSpid:\t42\t7\n"), nil
+		}
+		return nil, errors.New("missing")
+	}
+	resolve := collector.runtimePIDResolver(map[int]struct{}{42: {}, 7: {}})
+	if got := resolve(42); got != 42 {
+		t.Fatalf("direct active PID must win, got %d", got)
+	}
+}
+
 func TestCollectAMDUsesPerProcessMemoryAndEngineTimeWhenAvailable(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	amdCall := 0
@@ -170,6 +232,14 @@ func TestCollectorParsersAndFailureFallbacks(t *testing.T) {
 	}
 	if _, ok := parseRSSBytes("VmRSS: nope kB"); ok {
 		t.Fatal("invalid RSS accepted")
+	}
+	if pids, ok := parseNamespacePIDs("Name:\tx\nNSpid:\t2554129\t1652\n"); !ok || len(pids) != 2 || pids[0] != 2554129 || pids[1] != 1652 {
+		t.Fatalf("namespace pids=%v ok=%v", pids, ok)
+	}
+	for _, invalid := range []string{"Name: x", "NSpid:", "NSpid: 10 nope", "NSpid: 10 0"} {
+		if _, ok := parseNamespacePIDs(invalid); ok {
+			t.Fatalf("invalid NSpid accepted: %q", invalid)
+		}
 	}
 
 	cases := map[string]int64{

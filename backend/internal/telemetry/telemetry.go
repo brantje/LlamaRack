@@ -55,13 +55,14 @@ type amdProcess struct {
 }
 
 type Collector struct {
-	snapshot snapshotFunc
-	run      runner
-	readFile readFileFunc
-	now      func() time.Time
-	numCPU   int
-	cpuPrev  map[int]cpuPoint
-	amdPrev  map[string]amdPoint
+	snapshot     snapshotFunc
+	run          runner
+	readFile     readFileFunc
+	now          func() time.Time
+	numCPU       int
+	hostProcRoot string
+	cpuPrev      map[int]cpuPoint
+	amdPrev      map[string]amdPoint
 }
 
 func New(snapshot func(context.Context) (hardware.Snapshot, error)) *Collector {
@@ -70,11 +71,12 @@ func New(snapshot func(context.Context) (hardware.Snapshot, error)) *Collector {
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return exec.CommandContext(ctx, name, args...).Output()
 		},
-		readFile: os.ReadFile,
-		now:      time.Now,
-		numCPU:   runtime.NumCPU(),
-		cpuPrev:  map[int]cpuPoint{},
-		amdPrev:  map[string]amdPoint{},
+		readFile:     os.ReadFile,
+		now:          time.Now,
+		numCPU:       runtime.NumCPU(),
+		hostProcRoot: strings.TrimSpace(os.Getenv("LCM_HOST_PROC")),
+		cpuPrev:      map[int]cpuPoint{},
+		amdPrev:      map[string]amdPoint{},
 	}
 }
 
@@ -101,6 +103,7 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 	}
 	nvidiaUtil := c.nvidiaProcessUtilization(ctx)
 	amdProcesses := c.amdProcesses(ctx, collectedAt)
+	resolveReportedPID := c.runtimePIDResolver(activePIDs)
 
 	samples := make([]Sample, 0, len(active))
 	for _, item := range active {
@@ -118,21 +121,21 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 		}
 
 		for _, process := range snapshot.Processes {
-			if process.PID != item.PID || process.DeviceID == "" {
+			if resolveReportedPID(process.PID) != item.PID || process.DeviceID == "" {
 				continue
 			}
 			used := process.UsedBytes
 			ensureGPU(process.DeviceID).VRAMUsedBytes = &used
 		}
 		for key, utilization := range nvidiaUtil {
-			if key.pid != item.PID {
+			if resolveReportedPID(key.pid) != item.PID {
 				continue
 			}
 			value := utilization
 			ensureGPU(key.deviceID).UtilizationPct = &value
 		}
 		for _, process := range amdProcesses {
-			if process.pid != item.PID {
+			if resolveReportedPID(process.pid) != item.PID {
 				continue
 			}
 			usage := ensureGPU(process.deviceID)
@@ -185,6 +188,45 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].InstanceID < samples[j].InstanceID })
 	return samples
+}
+
+// runtimePIDResolver translates GPU-tool PIDs into the PID namespace used by
+// the manager. NVIDIA/AMD tools commonly report the host PID even when the
+// manager and llama-server run inside a container. When LCM_HOST_PROC points at
+// a read-only host /proc mount, NSpid gives the corresponding container PID.
+// Direct PID matches always win so native/non-container deployments are
+// unaffected.
+func (c *Collector) runtimePIDResolver(activePIDs map[int]struct{}) func(int) int {
+	cache := map[int]int{}
+	return func(reportedPID int) int {
+		if reportedPID <= 0 {
+			return reportedPID
+		}
+		if _, ok := activePIDs[reportedPID]; ok {
+			return reportedPID
+		}
+		if mapped, ok := cache[reportedPID]; ok {
+			return mapped
+		}
+		mapped := reportedPID
+		if c.hostProcRoot != "" {
+			root := strings.TrimRight(c.hostProcRoot, "/")
+			status, err := c.readFile(root + "/" + strconv.Itoa(reportedPID) + "/status")
+			if err == nil {
+				if namespacePIDs, ok := parseNamespacePIDs(string(status)); ok {
+					for index := len(namespacePIDs) - 1; index >= 0; index-- {
+						candidate := namespacePIDs[index]
+						if _, active := activePIDs[candidate]; active {
+							mapped = candidate
+							break
+						}
+					}
+				}
+			}
+		}
+		cache[reportedPID] = mapped
+		return mapped
+	}
 }
 
 type gpuProcessKey struct {
@@ -363,6 +405,25 @@ func parseRSSBytes(value string) (int64, bool) {
 		return kilobytes * 1024, true
 	}
 	return 0, false
+}
+
+func parseNamespacePIDs(value string) ([]int, bool) {
+	for _, line := range strings.Split(value, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || strings.TrimSuffix(fields[0], ":") != "NSpid" {
+			continue
+		}
+		pids := make([]int, 0, len(fields)-1)
+		for _, field := range fields[1:] {
+			pid, err := strconv.Atoi(field)
+			if err != nil || pid <= 0 {
+				return nil, false
+			}
+			pids = append(pids, pid)
+		}
+		return pids, len(pids) > 0
+	}
+	return nil, false
 }
 
 func parseNanoseconds(value string) (uint64, bool) {
