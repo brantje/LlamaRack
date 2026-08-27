@@ -33,8 +33,8 @@ type runtimeSnapshotEvent struct {
 }
 
 type runtimeTelemetryEvent struct {
-	Type      string             `json:"type"`
-	Telemetry []telemetry.Sample `json:"telemetry"`
+	Type      string                   `json:"type"`
+	Telemetry []runtimeTelemetrySample `json:"telemetry"`
 }
 
 func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string) http.Handler {
@@ -84,7 +84,7 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		latestHardware = value
 		return value, err
 	})
-	telemetryResults := make(chan []telemetry.Sample, 1)
+	telemetryResults := make(chan []runtimeTelemetrySample, 1)
 	telemetryTicker := time.NewTicker(time.Second)
 	defer telemetryTicker.Stop()
 	collecting := false
@@ -100,8 +100,9 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		go func() {
 			samples := collector.Collect(r.Context(), runtimes)
 			samples = applyGlobalTelemetryFallback(samples, latestHardware)
+			snapshots := attachLlamaMetrics(r.Context(), samples, runtimes, h.lifecycle.RuntimeEndpoint)
 			select {
-			case telemetryResults <- samples:
+			case telemetryResults <- snapshots:
 			case <-r.Context().Done():
 			}
 		}()

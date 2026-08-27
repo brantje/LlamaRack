@@ -24,10 +24,14 @@ func TestRuntimeTelemetryHelpersAndEventShape(t *testing.T) {
 
 	gpuUtil := 17.0
 	vram := int64(2048)
-	event := runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: []telemetry.Sample{{
-		InstanceID: "ready", PID: 42, GPUDevices: []string{"CUDA0"},
-		GPUs:          []telemetry.GPUUsage{{DeviceID: "CUDA0", VRAMUsedBytes: &vram, UtilizationPct: &gpuUtil}},
-		VRAMUsedBytes: &vram, GPUUtilizationPct: &gpuUtil, CollectedAt: time.Unix(1, 0).UTC(),
+	predicted := 52.9
+	event := runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: []runtimeTelemetrySample{{
+		Sample: telemetry.Sample{
+			InstanceID: "ready", PID: 42, GPUDevices: []string{"CUDA0"},
+			GPUs:          []telemetry.GPUUsage{{DeviceID: "CUDA0", VRAMUsedBytes: &vram, UtilizationPct: &gpuUtil}},
+			VRAMUsedBytes: &vram, GPUUtilizationPct: &gpuUtil, CollectedAt: time.Unix(1, 0).UTC(),
+		},
+		LlamaMetrics: &telemetry.LlamaMetrics{PredictedTokensPerSecond: &predicted},
 	}}}
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -42,6 +46,14 @@ func TestRuntimeTelemetryHelpersAndEventShape(t *testing.T) {
 	}
 	items, ok := decoded["telemetry"].([]any)
 	if !ok || len(items) != 1 {
+		t.Fatalf("event=%s", payload)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["instance_id"] != "ready" {
+		t.Fatalf("event=%s", payload)
+	}
+	metrics, ok := item["llama_metrics"].(map[string]any)
+	if !ok || metrics["predicted_tokens_per_second"] != predicted {
 		t.Fatalf("event=%s", payload)
 	}
 }

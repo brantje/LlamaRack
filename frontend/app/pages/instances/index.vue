@@ -70,6 +70,7 @@ async function refreshImportStates() {
     if (previousActive && !active) await manager.refresh()
     scheduleImportRefresh(active)
   } catch {
+    // Runtime controls still work normally if import status cannot be refreshed.
     scheduleImportRefresh(false)
   }
 }
@@ -77,11 +78,21 @@ async function refreshImportStates() {
 async function action(instance: Instance, operation: 'start' | 'stop' | 'restart' | 'kill' | 'duplicate') {
   if (importBlocked(instance)) return
   if (operation === 'start' && instance.eviction_enabled) {
-    const confirmed = await confirmation.value?.request({ title: 'Launch Instance', description: 'Launching this Instance may stop other idle Instances if resource-pressure eviction is required.', confirmLabel: 'Launch Instance', color: 'primary' })
+    const confirmed = await confirmation.value?.request({
+      title: 'Launch Instance',
+      description: 'Launching this Instance may stop other idle Instances if resource-pressure eviction is required.',
+      confirmLabel: 'Launch Instance',
+      color: 'primary'
+    })
     if (!confirmed) return
   }
   if (operation === 'kill') {
-    const confirmed = await confirmation.value?.request({ title: 'Kill Instance', description: 'Kill this Instance immediately? Active requests may fail.', confirmLabel: 'Kill Instance', color: 'error' })
+    const confirmed = await confirmation.value?.request({
+      title: 'Kill Instance',
+      description: 'Kill this Instance immediately? Active requests may fail.',
+      confirmLabel: 'Kill Instance',
+      color: 'error'
+    })
     if (!confirmed) return
   }
   pending.value = `${instance.id}:${operation}`
@@ -97,7 +108,12 @@ async function action(instance: Instance, operation: 'start' | 'stop' | 'restart
 }
 
 async function remove(instance: Instance) {
-  const confirmed = await confirmation.value?.request({ title: 'Delete Instance', description: `Delete Instance “${instance.name}”? The registered Model and GGUF file are kept.`, confirmLabel: 'Delete Instance', color: 'error' })
+  const confirmed = await confirmation.value?.request({
+    title: 'Delete Instance',
+    description: `Delete Instance “${instance.name}”? The registered Model and GGUF file are kept.`,
+    confirmLabel: 'Delete Instance',
+    color: 'error'
+  })
   if (!confirmed) return
   pending.value = `${instance.id}:delete`
   error.value = ''
@@ -125,6 +141,8 @@ async function showLogs(instance: Instance) {
 }
 
 onMounted(() => {
+  // Provider-import Instances are disabled until their GGUF is verified. Avoid a
+  // background status request for the normal all-enabled fleet.
   if (instances.value.some(instance => !instance.enabled)) void refreshImportStates()
 })
 
@@ -152,7 +170,17 @@ onBeforeUnmount(() => {
               <h2 class="truncate text-lg font-bold text-highlighted">{{ instance.name }}</h2>
               <div class="mt-1 flex items-center gap-1">
                 <code class="break-all font-mono text-xs text-muted" data-testid="instance-id">{{ instance.id }}</code>
-                <AppCopyButton :text="instance.id" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance ID. Select the ID and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
+                <AppCopyButton
+                  :text="instance.id"
+                  icon-only
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  error-message="Unable to copy Instance ID. Select the ID and copy it manually."
+                  data-testid="copy-instance-id"
+                  @copied="error = ''"
+                  @error="message => error = message"
+                />
               </div>
               <p class="mt-1 text-sm text-muted">{{ modelName(instance.model_id) }}</p>
             </div>
@@ -183,7 +211,9 @@ onBeforeUnmount(() => {
     </div>
 
     <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }">
-      <template #body><pre data-testid="instance-logs-output" class="min-h-[55vh] max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre></template>
+      <template #body>
+        <pre data-testid="instance-logs-output" class="min-h-[55vh] max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre>
+      </template>
     </UModal>
     <AppConfirmationModal ref="confirmation" />
   </div>
