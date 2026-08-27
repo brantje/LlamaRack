@@ -145,12 +145,12 @@ func (h *phase8Handler) prepareImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		RepoID         string                          `json:"repo_id"`
-		ArtifactID     string                          `json:"artifact_id"`
-		Name           string                          `json:"name"`
-		ContextLength  int                             `json:"context_length"`
-		Options        map[string]string               `json:"options"`
-		FirstInstance  modelimports.FirstInstanceInput `json:"first_instance"`
+		RepoID        string                          `json:"repo_id"`
+		ArtifactID    string                          `json:"artifact_id"`
+		Name          string                          `json:"name"`
+		ContextLength int                             `json:"context_length"`
+		Options       map[string]string               `json:"options"`
+		FirstInstance modelimports.FirstInstanceInput `json:"first_instance"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -178,6 +178,10 @@ func (h *phase8Handler) prepareImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := h.imports.RepairArtifactOptions(r.Context(), result.Model.ID, detail.ID, *artifact); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -190,7 +194,7 @@ func (h *phase8Handler) importStatuses(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []modelimports.Status{})
 		return
 	}
-	items, err := h.imports.List(r.Context())
+	items, err := h.imports.ListResolved(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -319,7 +323,7 @@ func (h *phase8Handler) downloadItem(w http.ResponseWriter, r *http.Request, res
 				return
 			}
 			if job.State == downloads.StateCancelled && h.imports != nil {
-				if err := h.imports.CleanupJob(r.Context(), parts[0]); err != nil {
+				if err := h.imports.CleanupJobSafe(r.Context(), parts[0]); err != nil {
 					writeErr(w, http.StatusInternalServerError, err)
 					return
 				}
