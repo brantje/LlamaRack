@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS global_options (
  option_key TEXT PRIMARY KEY,
  option_value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS provider_secrets (
+ name TEXT PRIMARY KEY,
+ ciphertext BLOB NOT NULL,
+ nonce BLOB NOT NULL,
+ prefix TEXT NOT NULL,
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 CREATE TABLE IF NOT EXISTS models (
  id TEXT PRIMARY KEY,
  name TEXT NOT NULL,
@@ -99,6 +106,51 @@ CREATE TABLE IF NOT EXISTS instance_options (
  option_value TEXT NOT NULL,
  PRIMARY KEY(instance_id, option_key)
 );
+CREATE TABLE IF NOT EXISTS download_jobs (
+ id TEXT PRIMARY KEY,
+ provider TEXT NOT NULL,
+ repo_id TEXT NOT NULL,
+ revision TEXT NOT NULL,
+ artifact_id TEXT NOT NULL,
+ name TEXT NOT NULL,
+ quantization TEXT NOT NULL DEFAULT '',
+ state TEXT NOT NULL,
+ total_bytes INTEGER NOT NULL DEFAULT 0 CHECK(total_bytes >= 0),
+ downloaded_bytes INTEGER NOT NULL DEFAULT 0 CHECK(downloaded_bytes >= 0),
+ speed_bps INTEGER NOT NULL DEFAULT 0 CHECK(speed_bps >= 0),
+ error TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS download_jobs_state_idx ON download_jobs(state);
+CREATE INDEX IF NOT EXISTS download_jobs_identity_idx ON download_jobs(provider,repo_id,revision,artifact_id);
+CREATE TABLE IF NOT EXISTS download_files (
+ job_id TEXT NOT NULL REFERENCES download_jobs(id) ON DELETE CASCADE,
+ path TEXT NOT NULL,
+ size INTEGER NOT NULL DEFAULT 0 CHECK(size >= 0),
+ oid TEXT NOT NULL DEFAULT '',
+ state TEXT NOT NULL,
+ downloaded_bytes INTEGER NOT NULL DEFAULT 0 CHECK(downloaded_bytes >= 0),
+ etag TEXT NOT NULL DEFAULT '',
+ ordinal INTEGER NOT NULL DEFAULT 0,
+ local_path TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(job_id,path)
+);
+CREATE TABLE IF NOT EXISTS provider_imports (
+ id TEXT PRIMARY KEY,
+ job_id TEXT NOT NULL REFERENCES download_jobs(id) ON DELETE CASCADE,
+ model_id TEXT REFERENCES models(id) ON DELETE SET NULL,
+ instance_id TEXT REFERENCES instances(id) ON DELETE SET NULL,
+ owns_model INTEGER NOT NULL DEFAULT 0,
+ start_when_ready INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL DEFAULT 'DOWNLOADING',
+ error TEXT NOT NULL DEFAULT '',
+ start_attempted INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS provider_imports_job_idx ON provider_imports(job_id);
+CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(instance_id);
 `
 	_, err := db.ExecContext(ctx, schema)
 	return err

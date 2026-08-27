@@ -49,6 +49,7 @@ async function remove(id: string) {
       <UPageHeader class="min-w-0 flex-1" headline="MODEL REGISTRY" title="Models" description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances." />
       <div class="flex flex-wrap justify-end gap-2">
         <UButton color="neutral" variant="soft" @click="manager.refresh">Refresh</UButton>
+        <UButton to="/models/discover" color="neutral" variant="soft" icon="i-lucide-search">Discover</UButton>
         <UButton to="/models/new">Add model</UButton>
       </div>
     </div>

@@ -40,7 +40,7 @@ const protectedKeys = new Set(['model', 'host', 'port', 'device', 'split-mode', 
 const basicKeys = new Set([
   'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
   'parallel', 'flash-attn', 'jinja', 'reasoning-format', 'reasoning-budget', 'embeddings', 'reranking',
-  'cache-type-k', 'cache-type-v', 'kv-unified', 'spec-type', 'draft-max', 'draft-min', 'tensor-split'
+  'cache-type-k', 'cache-type-v', 'kv-unified', 'spec-type', 'spec-draft-model', 'mmproj', 'draft-max', 'draft-min', 'tensor-split'
 ])
 
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
