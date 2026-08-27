@@ -28,16 +28,16 @@ func TestSearchSortedUsesDiscoveryOrdering(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"", "trending_score"},
-		{"trending_score", "trending_score"},
-		{"trending", "trending_score"},
+		{"", "trendingScore"},
+		{"trending_score", "trendingScore"},
+		{"trending", "trendingScore"},
 		{"likes", "likes"},
 		{"downloads", "downloads"},
-		{"created_at", "created_at"},
-		{"createdAt", "created_at"},
-		{"last_modified", "last_modified"},
-		{"lastModified", "last_modified"},
-		{"unexpected", "trending_score"},
+		{"created_at", "createdAt"},
+		{"createdAt", "createdAt"},
+		{"last_modified", "lastModified"},
+		{"lastModified", "lastModified"},
+		{"unexpected", "trendingScore"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
@@ -86,6 +86,9 @@ func TestSearchSortedDefaultsLimitSkipsEmptyIDsAndFallsBackToSafetensorsParamete
 	}
 	if seen.Get("limit") != "24" || seen.Has("search") || seen.Has("author") {
 		t.Fatalf("query = %v", seen)
+	}
+	if seen.Get("sort") != "trendingScore" {
+		t.Fatalf("default sort = %q", seen.Get("sort"))
 	}
 	if len(items) != 1 || items[0].ID != "acme/fallback" || items[0].Author != "acme" || items[0].ParameterCount != 30 {
 		t.Fatalf("items = %+v", items)
