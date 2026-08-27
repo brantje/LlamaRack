@@ -235,10 +235,23 @@ type gpuProcessKey struct {
 }
 
 func (c *Collector) nvidiaProcessUtilization(ctx context.Context) map[gpuProcessKey]float64 {
-	out, err := c.run(ctx, "nvidia-smi", "pmon", "-c", "1", "-s", "u")
-	if err != nil {
-		return nil
+	attempts := [][]string{
+		{"pmon", "-c", "1", "-s", "u"},
+		{"pmon", "-c", "1"},
 	}
+	for _, args := range attempts {
+		out, err := c.run(ctx, "nvidia-smi", args...)
+		if err != nil {
+			continue
+		}
+		if result := parseNVIDIAPMon(out); len(result) > 0 {
+			return result
+		}
+	}
+	return nil
+}
+
+func parseNVIDIAPMon(out []byte) map[gpuProcessKey]float64 {
 	result := map[gpuProcessKey]float64{}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
