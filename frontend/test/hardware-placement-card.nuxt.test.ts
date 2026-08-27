@@ -124,9 +124,12 @@ describe('GPU placement cards', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
 
-    const input = wrapper.findComponent('[data-testid="context-input"]')
-    expect(input.exists()).toBe(true)
-    await input.setValue(65536)
+    const input = [
+      ...wrapper.findAllComponents({ name: 'InputNumber' }),
+      ...wrapper.findAllComponents({ name: 'UInputNumber' })
+    ][0]
+    expect(input).toBeTruthy()
+    input!.vm.$emit('update:modelValue', 65536)
     await flushPromises()
 
     expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '65536')).toBe(true)
