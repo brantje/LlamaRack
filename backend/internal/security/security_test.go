@@ -18,7 +18,7 @@ func testSecuritySettings(t *testing.T) *settings.Service {
 	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "security.db"))
 	if err != nil { t.Fatal(err) }
 	t.Cleanup(func() { _ = db.Close() })
-	return settings.New(db, settings.Defaults{SessionLifetime: time.Hour, AllowedOrigins: "http://localhost:3000", StartupTimeout: time.Minute, IdleUnloadTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	return settings.New(db, settings.Defaults{SessionLifetime: time.Hour, AllowedOrigins: "http://localhost:3000", StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
 }
 
 func TestNetworkTrustsForwardingOnlyFromConfiguredProxy(t *testing.T) {
