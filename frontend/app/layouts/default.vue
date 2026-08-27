@@ -11,7 +11,6 @@ const navigation: NavigationMenuItem[] = [
   { label: 'Overview', to: '/' },
   { label: 'Models', to: '/models' },
   { label: 'Instances', to: '/instances' },
-  { label: 'Discover', to: '/discover' },
   { label: 'Downloads', to: '/downloads' },
   { label: 'API', to: '/api' },
   { label: 'Settings', to: '/settings' }

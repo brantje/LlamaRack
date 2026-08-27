@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import ModelsDiscover from '~/components/ModelsDiscover.vue'
-
-definePageMeta({ redirect: '/models/discover' })
 </script>
 
 <template>

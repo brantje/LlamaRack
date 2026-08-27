@@ -36,12 +36,15 @@ const loading = ref(false)
 const actionID = ref('')
 const error = ref('')
 const liveUpdates = ref(false)
+const showCompleted = ref(false)
 let fallbackTimer: ReturnType<typeof setInterval> | undefined
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let downloadSocket: WebSocket | null = null
 let disposed = false
 
 const activeStates = new Set(['QUEUED', 'RESOLVING', 'DOWNLOADING', 'VERIFYING'])
+const completedCount = computed(() => jobs.value.filter(job => job.state === 'COMPLETED').length)
+const visibleJobs = computed(() => showCompleted.value ? jobs.value : jobs.value.filter(job => job.state !== 'COMPLETED'))
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return '0 B'
@@ -198,8 +201,17 @@ onBeforeUnmount(() => {
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
       <UPageHeader class="min-w-0 flex-1" headline="MODEL STORAGE" title="Downloads" description="Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts." />
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
         <UBadge :color="liveUpdates ? 'success' : 'neutral'" variant="subtle">{{ liveUpdates ? 'Live updates' : 'Reconnecting' }}</UBadge>
+        <UButton
+          data-testid="toggle-completed-downloads"
+          color="neutral"
+          variant="soft"
+          :disabled="completedCount === 0"
+          @click="showCompleted = !showCompleted"
+        >
+          {{ showCompleted ? `Hide completed (${completedCount})` : `Show completed (${completedCount})` }}
+        </UButton>
         <UButton color="neutral" variant="soft" :loading="loading" @click="refresh()">Refresh</UButton>
       </div>
     </div>
@@ -211,11 +223,15 @@ onBeforeUnmount(() => {
     </div>
 
     <UEmpty v-else-if="!jobs.length" icon="i-lucide-download" title="No downloads yet" description="Choose a GGUF artifact from Discover to start a download.">
-      <template #actions><UButton to="/discover">Open Discover</UButton></template>
+      <template #actions><UButton to="/models/discover">Open Discover</UButton></template>
+    </UEmpty>
+
+    <UEmpty v-else-if="!visibleJobs.length" icon="i-lucide-circle-check" title="No active downloads" description="Completed downloads are hidden by default.">
+      <template #actions><UButton color="neutral" variant="soft" @click="showCompleted = true">Show completed ({{ completedCount }})</UButton></template>
     </UEmpty>
 
     <div v-else class="space-y-3">
-      <UCard v-for="job in jobs" :key="job.id">
+      <UCard v-for="job in visibleJobs" :key="job.id">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
