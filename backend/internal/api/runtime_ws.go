@@ -1,15 +1,19 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
 
 type runtimeWebSocketHandler struct {
@@ -26,6 +30,11 @@ type runtimeEvent struct {
 type runtimeSnapshotEvent struct {
 	Type     string               `json:"type"`
 	Runtimes []supervisor.Runtime `json:"runtimes"`
+}
+
+type runtimeTelemetryEvent struct {
+	Type      string                   `json:"type"`
+	Telemetry []runtimeTelemetrySample `json:"telemetry"`
 }
 
 func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string) http.Handler {
@@ -65,6 +74,41 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	current := make(map[string]supervisor.Runtime, len(snapshot))
+	for _, runtime := range snapshot {
+		current[runtime.InstanceID] = runtime
+	}
+	var latestHardware hardware.Snapshot
+	collector := telemetry.New(func(ctx context.Context) (hardware.Snapshot, error) {
+		value, err := h.lifecycle.HardwareSnapshot(ctx)
+		latestHardware = value
+		return value, err
+	})
+	telemetryResults := make(chan []runtimeTelemetrySample, 1)
+	telemetryTicker := time.NewTicker(time.Second)
+	defer telemetryTicker.Stop()
+	collecting := false
+	collectTelemetry := func() {
+		if collecting {
+			return
+		}
+		runtimes := runtimeValues(current)
+		if !hasRunningRuntime(runtimes) {
+			return
+		}
+		collecting = true
+		go func() {
+			samples := collector.Collect(r.Context(), runtimes)
+			samples = applyGlobalTelemetryFallback(samples, latestHardware)
+			snapshots := attachLlamaMetrics(r.Context(), samples, runtimes, h.lifecycle.RuntimeEndpoint)
+			select {
+			case telemetryResults <- snapshots:
+			case <-r.Context().Done():
+			}
+		}()
+	}
+	collectTelemetry()
+
 	disconnected := make(chan struct{})
 	go func() {
 		defer close(disconnected)
@@ -85,11 +129,85 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			if !open {
 				return
 			}
+			current[runtime.InstanceID] = runtime
 			if err := conn.WriteJSON(runtimeEvent{Type: "runtime", Runtime: runtime}); err != nil {
 				return
 			}
+		case samples := <-telemetryResults:
+			collecting = false
+			if len(samples) == 0 {
+				continue
+			}
+			if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: samples}); err != nil {
+				return
+			}
+		case <-telemetryTicker.C:
+			collectTelemetry()
 		}
 	}
+}
+
+func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.Snapshot) []telemetry.Sample {
+	if len(samples) == 0 || len(snapshot.GPUs) == 0 {
+		return samples
+	}
+
+	byID := make(map[string]hardware.GPU, len(snapshot.GPUs))
+	for _, gpu := range snapshot.GPUs {
+		byID[gpu.ID] = gpu
+	}
+	fallbackGPUs := func(sample telemetry.Sample) []hardware.GPU {
+		if len(sample.GPUDevices) == 0 {
+			return snapshot.GPUs
+		}
+		selected := make([]hardware.GPU, 0, len(sample.GPUDevices))
+		for _, deviceID := range sample.GPUDevices {
+			if gpu, ok := byID[deviceID]; ok {
+				selected = append(selected, gpu)
+			}
+		}
+		if len(selected) == 0 {
+			return snapshot.GPUs
+		}
+		return selected
+	}
+
+	for index := range samples {
+		gpus := fallbackGPUs(samples[index])
+		if samples[index].GPUUtilizationPct == nil {
+			var utilization float64
+			for _, gpu := range gpus {
+				utilization += gpu.UtilizationPct
+			}
+			utilization /= float64(len(gpus))
+			samples[index].GPUUtilizationPct = &utilization
+		}
+		if samples[index].VRAMUsedBytes == nil {
+			var used int64
+			for _, gpu := range gpus {
+				used += gpu.UsedBytes
+			}
+			samples[index].VRAMUsedBytes = &used
+		}
+	}
+	return samples
+}
+
+func runtimeValues(current map[string]supervisor.Runtime) []supervisor.Runtime {
+	values := make([]supervisor.Runtime, 0, len(current))
+	for _, runtime := range current {
+		values = append(values, runtime)
+	}
+	return values
+}
+
+func hasRunningRuntime(runtimes []supervisor.Runtime) bool {
+	for _, runtime := range runtimes {
+		if runtime.PID > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func websocketOriginAllowed(r *http.Request, configured string) bool {

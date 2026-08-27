@@ -56,6 +56,8 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	authService := auth.New(db, cfg.SessionLifetime)
 	modelService := models.New(db, cfg.ModelsDir)
+	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
+	defer unregisterDetectedDefaults()
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -102,8 +104,14 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
+	hardwareDetector := hardware.New()
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, cfg.AllowedOrigin))
-	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardware.New()))
+	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardwareDetector))
+	managementAPI.Handle("POST /api/v1/models", api.NewPhase9ModelCreateHandler(apiServer, modelService))
+	managementAPI.Handle("POST /api/v1/models/inspect", api.NewPhase9ModelInspectHandler(authService, modelService))
+	managementAPI.Handle("GET /api/v1/models/{id}/details/value", api.NewPhase9ModelMetadataValueHandler(authService, modelService))
+	managementAPI.Handle("GET /api/v1/models/{id}/details", api.NewPhase9ModelDetailsHandler(authService, modelService))
+	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewPhase9RecommendationHandler(authService, modelService, hardwareDetector))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
 	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", phase8)
@@ -123,6 +131,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	serveErr := make(chan error, 1)
 	go lifecycleService.RunReconciler(ctx, cfg.AlwaysOnReconcileInterval)
 	go lifecycleService.RunIdleReconciler(ctx, cfg.IdleUnloadTimeout)
+	go modelService.RunMetadataReconciler(ctx, 2*time.Second)
 	go importService.Run(ctx, 500*time.Millisecond)
 	go func() {
 		slog.Info("backend listening", "addr", cfg.ListenAddr)

@@ -31,6 +31,18 @@ export type Instance = {
   tensor_split?: string
 }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
+export type RuntimeGPUUsage = { device_id: string; vram_used_bytes?: number; utilization_pct?: number }
+export type RuntimeTelemetry = {
+  instance_id: string
+  pid: number
+  gpu_devices: string[]
+  gpus: RuntimeGPUUsage[]
+  vram_used_bytes?: number
+  gpu_utilization_pct?: number
+  cpu_percent?: number
+  memory_used_bytes?: number
+  collected_at: string
+}
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = {
   path: string
@@ -39,10 +51,11 @@ export type Profile = {
   options: Array<{ key: string; value_hint?: string; description?: string; kind?: string; choices?: string[] }>
 }
 
-type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[] }
+type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[]; telemetry?: RuntimeTelemetry[] }
 
 let runtimeSocket: WebSocket | null = null
 let runtimeReconnectTimer: ReturnType<typeof setTimeout> | undefined
+const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'STOPPING'])
 
 export function useManager() {
   const { request, apiBase } = useManagerApi()
@@ -52,9 +65,17 @@ export function useManager() {
   const models = useState<Model[]>('manager-models', () => [])
   const instances = useState<Instance[]>('manager-instances', () => [])
   const runtimes = useState<Record<string, Runtime[]>>('manager-runtimes', () => ({}))
+  const runtimeTelemetry = useState<Record<string, RuntimeTelemetry>>('manager-runtime-telemetry', () => ({}))
   const profile = useState<Profile | null>('manager-profile', () => null)
   const backendError = useState('manager-backend-error', () => '')
   const runtimeEventsConnected = useState('manager-runtime-events-connected', () => false)
+
+  function clearRuntimeTelemetry(instanceID: string) {
+    if (!runtimeTelemetry.value[instanceID]) return
+    const next = { ...runtimeTelemetry.value }
+    delete next[instanceID]
+    runtimeTelemetry.value = next
+  }
 
   function applyRuntime(runtime: Runtime) {
     if (!runtime.model_id || !runtime.instance_id) return
@@ -63,6 +84,7 @@ export function useManager() {
     if (index === -1) items.push(runtime)
     else items[index] = runtime
     runtimes.value = { ...runtimes.value, [runtime.model_id]: items }
+    if (!activeRuntimeStates.has(runtime.state) || !runtime.pid) clearRuntimeTelemetry(runtime.instance_id)
   }
 
   function applyRuntimeSnapshot(snapshot: Runtime[]) {
@@ -72,6 +94,20 @@ export function useManager() {
       ;(grouped[runtime.model_id] ||= []).push(runtime)
     }
     runtimes.value = Object.fromEntries(models.value.map(model => [model.id, grouped[model.id] || []]))
+    runtimeTelemetry.value = {}
+  }
+
+  function applyRuntimeTelemetry(samples: RuntimeTelemetry[]) {
+    const next = { ...runtimeTelemetry.value }
+    for (const sample of samples) {
+      if (!sample?.instance_id || !Number.isFinite(sample.pid) || sample.pid <= 0) continue
+      const instance = instances.value.find(item => item.id === sample.instance_id)
+      if (!instance) continue
+      const runtime = (runtimes.value[instance.model_id] || []).find(item => item.instance_id === instance.id)
+      if (!runtime || !activeRuntimeStates.has(runtime.state) || runtime.pid !== sample.pid) continue
+      next[sample.instance_id] = sample
+    }
+    runtimeTelemetry.value = next
   }
 
   function disconnectRuntimeEvents() {
@@ -80,6 +116,7 @@ export function useManager() {
       runtimeReconnectTimer = undefined
     }
     runtimeEventsConnected.value = false
+    runtimeTelemetry.value = {}
     const socket = runtimeSocket
     runtimeSocket = null
     socket?.close()
@@ -110,11 +147,13 @@ export function useManager() {
       }
       if (message.type === 'runtime_snapshot' && Array.isArray(message.runtimes)) applyRuntimeSnapshot(message.runtimes)
       else if (message.type === 'runtime' && message.runtime) applyRuntime(message.runtime)
+      else if (message.type === 'runtime_telemetry' && Array.isArray(message.telemetry)) applyRuntimeTelemetry(message.telemetry)
     }
     socket.onclose = () => {
       if (runtimeSocket !== socket) return
       runtimeSocket = null
       runtimeEventsConnected.value = false
+      runtimeTelemetry.value = {}
       if (!user.value) return
       runtimeReconnectTimer = setTimeout(() => {
         runtimeReconnectTimer = undefined
@@ -165,6 +204,7 @@ export function useManager() {
     models.value = []
     instances.value = []
     runtimes.value = {}
+    runtimeTelemetry.value = {}
   }
 
   async function refresh() {
@@ -209,6 +249,10 @@ export function useManager() {
       || { instance_id: instance.id, model_id: instance.model_id, state: 'UNLOADED' } as Runtime
   }
 
+  function telemetryForInstance(instance: Instance) {
+    return runtimeTelemetry.value[instance.id]
+  }
+
   function instanceState(instance: Instance) {
     return runtimeForInstance(instance).state
   }
@@ -221,6 +265,7 @@ export function useManager() {
     models,
     instances,
     runtimes,
+    runtimeTelemetry,
     profile,
     backendError,
     runtimeEventsConnected,
@@ -230,6 +275,7 @@ export function useManager() {
     refresh,
     modelState,
     runtimeForInstance,
+    telemetryForInstance,
     instanceState,
     connectRuntimeEvents,
     disconnectRuntimeEvents,

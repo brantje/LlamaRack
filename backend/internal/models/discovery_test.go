@@ -7,40 +7,29 @@ import (
 	"testing"
 )
 
-func TestIsProjectorGGUF(t *testing.T) {
-	for _, tc := range []struct {
-		path string
-		want bool
-	}{
-		{"mmproj-model-f16.gguf", true},
-		{"model-mmproj-Q5_K_M.gguf", true},
-		{"foo-MMOPROJ-Q8_0.GGUF", true},
-		{"asda-projector.gguf", true},
-		{"vision/projector/model.gguf", true},
-		{"vision/mmproj/model.gguf", true},
-		{"qwen-vision-Q4_K_M.gguf", false},
-		{"projection-model.gguf", false},
-		{"project-model.gguf", false},
-		{"model-proj.gguf", false},
-	} {
-		if got := isProjectorGGUF(tc.path); got != tc.want {
-			t.Errorf("isProjectorGGUF(%q)=%v want=%v", tc.path, got, tc.want)
-		}
+func TestIsProjectorGGUFUsesMetadata(t *testing.T) {
+	dir := t.TempDir()
+	projector := writeClassifiedGGUF(t, dir, "plain.gguf", "clip", 0, false)
+	main := writeClassifiedGGUF(t, dir, "mmproj-looking.gguf", "qwen2", 0, true)
+	if !isProjectorGGUF(projector) {
+		t.Fatal("clip GGUF should be projector")
+	}
+	if isProjectorGGUF(main) {
+		t.Fatal("filename must not classify a normal model as projector")
 	}
 }
 
-func TestAvailableGGUFsExcludesProjectorPaths(t *testing.T) {
+func TestAvailableGGUFsExcludesProjectorMetadata(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
-	writeGGUF(t, dir, "real-model-Q4_K_M.gguf")
-	writeGGUF(t, dir, "asda-projector.gguf")
-	writeGGUF(t, dir, "model-mmproj-Q8_0.gguf")
+	writeClassifiedGGUF(t, dir, "real-model-Q4_K_M.gguf", "llama", 0, true)
+	writeClassifiedGGUF(t, dir, "not-named-mmproj.gguf", "clip", 0, false)
 
 	projectorDir := filepath.Join(dir, "vision-projectors")
 	if err := os.MkdirAll(projectorDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeGGUF(t, projectorDir, "generic.gguf")
+	writeClassifiedGGUF(t, projectorDir, "ordinary-name.gguf", "clip", 0, false)
 
 	files, err := s.AvailableGGUFs(ctx)
 	if err != nil {

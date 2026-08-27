@@ -141,9 +141,10 @@ async function showLogs(instance: Instance) {
 }
 
 onMounted(() => {
-  // Provider-import Instances are disabled until their GGUF is verified. Avoid a
-  // background status request for the normal all-enabled fleet.
-  if (instances.value.some(instance => !instance.enabled)) void refreshImportStates()
+  // Always perform one import-status read so completed Hugging Face metadata
+  // warnings remain visible after a page reload. Polling continues only while
+  // an import is actively downloading.
+  void refreshImportStates()
 })
 
 onBeforeUnmount(() => {
@@ -188,9 +189,11 @@ onBeforeUnmount(() => {
           </div>
           <UAlert v-if="importFor(instance)?.state === 'DOWNLOADING'" color="primary" variant="subtle" title="Model is downloading" :description="importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when the verified GGUF download completes.' : 'The Instance will become launchable when the verified GGUF download completes.'" />
           <UAlert v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" color="error" variant="subtle" :title="`Import ${importFor(instance)?.state.toLowerCase()}`" :description="importFor(instance)?.error || 'Open Downloads to retry or inspect this import.'" />
+          <UAlert v-else-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" color="warning" variant="subtle" title="Import warning" :description="importFor(instance)?.error" />
           <div class="grid grid-cols-2 gap-2 text-xs text-muted">
             <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>
           </div>
+          <InstanceRuntimeTelemetry :state="instanceState(instance)" :telemetry="manager.telemetryForInstance(instance)" />
           <div class="flex flex-wrap gap-2">
             <UButton v-if="importBlocked(instance)" to="/downloads" color="primary" variant="soft" size="xs">View download</UButton>
             <template v-else>
@@ -200,6 +203,7 @@ onBeforeUnmount(() => {
               <UButton color="error" variant="soft" size="xs" :loading="pending === `${instance.id}:kill`" @click="action(instance, 'kill')">Kill</UButton>
               <UButton color="neutral" variant="soft" size="xs" :loading="pending === `${instance.id}:duplicate`" @click="action(instance, 'duplicate')">Duplicate</UButton>
             </template>
+            <UButton :to="`/instances/${encodeURIComponent(instance.id)}/detail`" color="neutral" variant="soft" size="xs">Details</UButton>
             <UButton :to="`/instances/${encodeURIComponent(instance.id)}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton>
             <UButton v-if="!importBlocked(instance)" color="neutral" variant="soft" size="xs" @click="showLogs(instance)">Logs</UButton>
             <UButton color="error" variant="ghost" size="xs" :loading="pending === `${instance.id}:delete`" @click="remove(instance)">Delete</UButton>
@@ -208,7 +212,11 @@ onBeforeUnmount(() => {
       </UCard>
     </div>
 
-    <UModal v-model:open="logsOpen" :title="logTitle"><template #body><pre class="max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre></template></UModal>
+    <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }">
+      <template #body>
+        <pre data-testid="instance-logs-output" class="min-h-[55vh] max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre>
+      </template>
+    </UModal>
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>

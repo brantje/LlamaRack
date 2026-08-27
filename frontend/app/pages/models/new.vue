@@ -1,6 +1,7 @@
 <script setup lang="ts">
 type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string; suggested_options?: Record<string, string> }
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
+type ModelInspection = { architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string }
 type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
@@ -11,8 +12,12 @@ const router = useRouter()
 const route = useRoute()
 const busy = ref(false)
 const scanning = ref(false)
+const inspectingMetadata = ref(false)
 const remoteLoading = ref(false)
 const error = ref('')
+const metadataWarning = ref('')
+const detectedArchitecture = ref('')
+const contextEdited = ref(false)
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
 const firstInstanceSlugEdited = ref(false)
@@ -111,10 +116,33 @@ watch(() => form.gguf_path, (path) => {
   }
   form.options = next
   autoSuggestedOptions.value = applied
+  void inspectSelectedGGUF(path)
 })
 
 function messageFor(value: any, fallback: string) {
   return value?.data?.error || value?.message || fallback
+}
+
+async function inspectSelectedGGUF(path: string) {
+  metadataWarning.value = ''
+  detectedArchitecture.value = ''
+  contextEdited.value = false
+  if (remoteMode.value || !path) return
+  inspectingMetadata.value = true
+  try {
+    const result = await manager.request<ModelInspection>('/api/v1/models/inspect', {
+      method: 'POST',
+      body: { gguf_path: path }
+    })
+    if (form.gguf_path !== path) return
+    metadataWarning.value = result.warning || ''
+    detectedArchitecture.value = result.architecture || ''
+    if (!contextEdited.value && Number(result.context_length) > 0) form.context_length = Number(result.context_length)
+  } catch (e: any) {
+    if (form.gguf_path === path) metadataWarning.value = messageFor(e, 'Unable to inspect GGUF metadata automatically')
+  } finally {
+    if (form.gguf_path === path) inspectingMetadata.value = false
+  }
 }
 
 async function scanGGUFs() {
@@ -241,9 +269,12 @@ async function createModel() {
         <UFormField label="Model name" name="name" required>
           <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
         </UFormField>
-        <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact/configuration. Use 0 when unknown.">
-          <UInputNumber v-model="form.context_length" class="w-full" :min="0" :step="1" />
+        <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact. GGUF metadata is used automatically when available; the value remains editable.">
+          <UInputNumber v-model="form.context_length" data-testid="context-capability" class="w-full" :min="0" :step="1" @update:model-value="contextEdited = true" />
+          <p v-if="inspectingMetadata" class="mt-1 text-xs text-muted">Reading GGUF metadata…</p>
+          <p v-else-if="detectedArchitecture && form.context_length > 0 && !metadataWarning" class="mt-1 text-xs text-muted">Detected from {{ detectedArchitecture }} GGUF metadata.</p>
         </UFormField>
+        <UAlert v-if="metadataWarning" data-testid="metadata-warning" color="warning" variant="subtle" title="GGUF metadata could not be detected" :description="metadataWarning" />
 
         <USeparator label="Model llama.cpp defaults" />
         <LlamaCppOptionsEditor v-model="form.options" scope="model" />

@@ -20,12 +20,12 @@ SQLite is the durable store for configuration that must survive manager restarts
 
 The project is still in active development.
 
-For Phase 5.5 and related schema restructuring:
+For Phase 5.5, Phase 9 metadata work and related schema restructuring:
 
 - change the current schema directly;
 - update fixtures/seeds/tests directly;
 - development databases may be recreated;
-- **do not create database migration files for this work**.
+- **do not create database migration files for this development work**.
 
 A production/release migration policy can be introduced before schema backward compatibility becomes a requirement.
 
@@ -40,6 +40,8 @@ A production/release migration policy can be introduced before schema backward c
 - Instance identity is human-friendly and directly usable by OpenAI-compatible clients.
 - High-frequency metrics are not permanently relational by default.
 - Secrets remain separate from normal settings.
+- Raw GGUF files remain the source of truth for embedded model metadata.
+- Arbitrary GGUF metadata must not require one relational column per metadata key.
 
 ## 4. Core entities
 
@@ -73,11 +75,26 @@ Fields include:
 - checksum if known;
 - provider/source metadata;
 - quantization;
-- architecture/parameter/context metadata where known;
+- architecture/parameter/context summary metadata where known and useful;
 - completion state;
 - timestamps.
 
 Split GGUFs remain one logical artifact with multiple Artifact File rows.
+
+Phase 9 adds a shared GGUF inspection/cache associated with the logical artifact. The raw GGUF remains authoritative; the cache is only a performance layer for metadata inspection and derived product values.
+
+The cache should conceptually include:
+
+- inspector schema/version;
+- artifact/shard fingerprint used to detect staleness;
+- GGUF format/version;
+- raw GGUF metadata entries preserving key, value type and value representation;
+- inspection warnings/status;
+- inspected timestamp.
+
+Do **not** create a relational column for every arbitrary GGUF metadata key. Frequently queried product fields such as Context capability or other values required by recommendation logic may be stored separately when useful, but the generic metadata view must not depend on a hard-coded database schema for each GGUF key.
+
+Large metadata arrays may use a bounded/lazy representation as long as every metadata key remains inspectable.
 
 ### 4.4 Model
 
@@ -96,7 +113,8 @@ Model-derived summary data may expose:
 - backing path;
 - size;
 - quantization;
-- context capability.
+- context capability;
+- basic GGUF inspection status.
 
 A Model does **not** contain runtime/lifecycle policy such as:
 
@@ -240,6 +258,8 @@ Direct Instance edits that change the desired fingerprint trigger the controlled
 
 Changes to inherited Model/global defaults may mark affected running Instances as needing restart until the relevant UI flow applies them.
 
+The GGUF metadata-cache fingerprint is separate from the Instance launch fingerprint. It only determines whether cached metadata still describes the current local artifact/shard set.
+
 ## 6. Derived views
 
 ### Model summary
@@ -251,9 +271,23 @@ For `/models`:
 - size;
 - quantization;
 - context capability;
-- Edit/Delete affordances.
+- Details/Edit/Delete affordances.
 
 Do not mix Instance runtime state into the Models table.
+
+### Model details
+
+For `/models/:id/details`:
+
+- a compact Model/GGUF summary;
+- GGUF version/count/status where available;
+- searchable access to the GGUF metadata entries as generic `key / type / value` data;
+- all metadata keys, including manager-unknown keys;
+- bounded/lazy expansion for large metadata values.
+
+This is intentionally generic. The data model does not require separate architecture/tokenizer/MoE/etc. detail structures merely to render this page.
+
+Instance lifecycle/runtime state does not move to Model details.
 
 ### Instance summary
 
@@ -279,14 +313,18 @@ The Model creation UI may collect only these Instance-specific settings:
 - Allow resource-pressure eviction;
 - whether to start immediately.
 
+Before Model save, Phase 9 may inspect the selected local GGUF and pre-fill Model fields such as Context capability. Detected user-facing values remain editable. Failure to inspect metadata does not by itself block Model creation and must not erase an explicitly entered Context capability.
+
 The backend must:
 
-1. create the Model;
-2. slugify Instance name to `instance.id`;
-3. validate uniqueness;
-4. create the Instance;
-5. apply the selected three policies;
-6. optionally request launch.
+1. validate/inspect the selected logical GGUF artifact where possible;
+2. create the Model;
+3. persist accepted Model metadata/cache information where configured;
+4. slugify Instance name to `instance.id` when first-Instance bootstrap was requested;
+5. validate uniqueness;
+6. create the Instance;
+7. apply the selected three policies;
+8. optionally request launch.
 
 If process startup fails, do not delete the successfully created Model or Instance.
 
@@ -298,6 +336,8 @@ If process startup fails, do not delete the successfully created Model or Instan
 
 Deleting a Model does not implicitly delete a multi-gigabyte artifact unless the user explicitly performs that action.
 
+Artifact metadata cache follows the artifact's lifecycle and must not retain stale orphaned cache records after artifact deletion.
+
 ## 9. Persistence and transactions
 
 Durable multi-row operations should be transactional where practical.
@@ -305,11 +345,14 @@ Durable multi-row operations should be transactional where practical.
 Examples:
 
 - creating a Model plus its optional first Instance definition;
+- persisting Model metadata/cache information alongside successful Model registration;
 - duplicating an Instance and its override rows;
 - updating an Instance name/ID plus related foreign-key references if the schema requires it;
 - marking download completion and artifact files.
 
 Worker process startup cannot be inside a SQLite transaction. Persist desired state first, then execute lifecycle actions.
+
+GGUF inspection/file I/O should not hold a long SQLite write transaction. Inspect/validate first, then transactionally persist the accepted result.
 
 ## 10. Rename semantics
 
@@ -339,6 +382,8 @@ V1 does not persist by default:
 - indefinite request traces;
 - indefinite high-frequency GPU telemetry.
 
+GGUF metadata cache, when used, contains artifact metadata only and must never contain tensor payload data.
+
 ## 13. Invariants
 
 1. A Model references a usable completed artifact.
@@ -352,7 +397,10 @@ V1 does not persist by default:
 9. Model and Instance llama.cpp overrides retain inheritance semantics.
 10. Instance GPU assignments cannot silently retarget another device.
 11. Model deletion and artifact deletion are separate.
-12. Phase 5.5 schema changes do not require migration files during development.
+12. Development schema changes do not require migration files during active development.
+13. The GGUF file/shard set is the source of truth; cached inspection must be invalidated/refreshed when its artifact fingerprint changes.
+14. Arbitrary GGUF metadata keys are not modeled as one schema column each.
+15. Model metadata/details never acquire Instance runtime lifecycle ownership.
 
 ## 14. Acceptance criteria
 
@@ -369,4 +417,8 @@ The data model is adequate when it can represent:
 - a failed first-Instance launch without deleting its Model;
 - stale PID/port state discarded after manager restart;
 - split GGUF artifacts and resumable downloads;
-- no development migration file for the Phase 5.5 schema rewrite.
+- a versioned GGUF metadata inspection/cache preserving generic key/type/value data;
+- manager-derived values such as Context capability without requiring a schema field for every GGUF metadata key;
+- cache invalidation when the local artifact/shard fingerprint changes;
+- `/models/:id/details` generic metadata data without adding Instance runtime state to the Model;
+- no development migration file for the active-development schema rewrite.
