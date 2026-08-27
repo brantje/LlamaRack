@@ -79,7 +79,7 @@ async function saveGlobalOptions() {
 }
 
 async function refreshAll() {
-  await Promise.all([manager.refresh(), loadGlobalOptions(), loadTokenStatus()])
+  await Promise.all([loadGlobalOptions(), loadTokenStatus(), manager.refresh()])
 }
 
 onMounted(() => {
