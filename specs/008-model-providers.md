@@ -23,6 +23,7 @@ The provider/download subsystem must:
 - present a useful Hugging Face model browser;
 - identify GGUF files and group quantizations;
 - identify split GGUF shards as one logical artifact;
+- identify supported companion GGUFs such as multimodal projectors and separate MTP draft models;
 - provide hardware-aware fit/recommendation information;
 - download large files reliably;
 - resume transfers where the source supports HTTP range requests;
@@ -103,6 +104,7 @@ Selecting a Hugging Face result should fetch enough repository information to sh
 - GGUF files grouped by quantization/logical artifact;
 - file sizes;
 - split shard count;
+- detected companion GGUFs and their additional download size;
 - gated/private/auth requirement state where detectable;
 - local download status if this exact artifact/revision is already known.
 
@@ -120,6 +122,33 @@ The manager should parse filenames and, when practical, GGUF metadata to identif
 - architecture/metadata after download or via remote metadata when possible.
 
 Filename parsing is heuristic. Do not treat an unrecognized filename as invalid solely because its quantization cannot be parsed.
+
+### 8.1 Companion GGUF sidecars
+
+Some llama.cpp model repositories contain GGUF files that support a primary model but are not themselves selectable main models. Phase 8 recognizes separate companion files for:
+
+- multimodal projectors whose basename starts with `mmproj`, `mmoproj` or `projector`;
+- separate MTP draft models whose basename starts with `mtp`.
+
+Classification must be conservative. A helper marker is recognized only as a basename prefix followed by a conventional separator (`-`, `_`, `.`), or as the complete basename. Do not classify a normal model merely because `projector`, `mmproj` or `mtp` occurs somewhere later in its filename. This avoids hiding valid main models and avoids confusing a main model that advertises embedded MTP capability with a separate MTP sidecar.
+
+For each complete selectable main artifact:
+
+- companion split shards are grouped and must themselves be complete before use;
+- an exact quantization match is preferred when a companion is offered in multiple quantizations;
+- if no exact match exists, selection is deterministic and uses a curated fallback preference appropriate to the helper type;
+- selected companions are shown in Discover before download;
+- selected companions are included in the same logical download job and in its total byte count;
+- companion GGUFs are not exposed as independent choices in the local Model registry picker.
+
+After that Hugging Face download completes, registering its main GGUF should automatically suggest the model-level llama.cpp options derived from that exact download job:
+
+- projector: `--mmproj <local companion path>`;
+- separate MTP: `--spec-draft-model <local companion path>` and `--spec-type draft-mtp`.
+
+These are normal model-level defaults: the user may review or override them, and the launcher still filters persisted options against the currently detected llama-server option schema before starting a process.
+
+Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Phase 8 must not invent a separate file relationship from a non-prefix filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
 
 ## 9. Split GGUF grouping
 
@@ -411,6 +440,7 @@ Discover must support:
 - recommended quantization;
 - model details;
 - one-click selection of a logical GGUF artifact;
+- detected projector/MTP companion files and combined download size;
 - gated/private error states;
 - current local/download state.
 
@@ -438,6 +468,8 @@ Downloads must support:
 8. Resume never appends to a changed/incompatible remote object.
 9. Download cancellation is idempotent.
 10. Model definition deletion does not silently delete multi-gigabyte artifacts.
+11. Recognized projector and separate MTP sidecars remain dependencies of a main artifact rather than standalone Model choices.
+12. Companion filename detection is prefix-based and must not hide normal models that merely contain helper words later in the basename.
 
 ## 31. Acceptance criteria
 
@@ -446,6 +478,10 @@ Before v1, tests must demonstrate:
 - Hugging Face search returns normalized results to the UI;
 - a repository with multiple GGUF quantizations is grouped sensibly;
 - a four-shard GGUF selection creates one logical artifact and downloads all four shards;
+- a main GGUF with matching projector/MTP sidecars exposes those helpers, includes them in the same download job and reflects their bytes in the total;
+- projector/MTP helper files do not appear as independent Model choices after download;
+- registering a downloaded main GGUF preconfigures `mmproj` and separate-MTP llama.cpp model defaults from that exact completed download job;
+- a normal filename that contains `projector` or `MTP` away from the basename prefix is not misclassified as a helper;
 - hardware fit/recommendation can rank candidate quantizations without hiding alternatives;
 - global Hugging Face token enables authorized private/gated metadata/download access and is never returned through the API;
 - direct URL download supports a normal single GGUF;
