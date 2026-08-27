@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Profile } from '~/composables/useManager'
+
 const manager = useManager()
 const { profile } = manager
 const globalOptions = ref<Record<string, string>>({})
@@ -11,9 +13,9 @@ async function load() {
   if (!manager.user.value) return
   loading.value = true; error.value = ''
   try {
-    const result = await manager.request<{ effective: { global: Record<string, string> } }>('/api/v1/llamacpp/config')
+    const result = await manager.request<{ profile?: Profile; effective: { global: Record<string, string> } }>('/api/v1/llamacpp/config')
     globalOptions.value = { ...(result.effective.global || {}) }
-    await manager.refresh()
+    if (result.profile?.path && Array.isArray(result.profile.options)) profile.value = result.profile
   } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load llama.cpp configuration' } finally { loading.value = false }
 }
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
