@@ -59,7 +59,7 @@ func (h *phase8Handler) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := h.hf.Search(r.Context(), huggingface.SearchOptions{
+	items, err := h.hf.SearchSorted(r.Context(), huggingface.SearchOptions{
 		Query: r.URL.Query().Get("q"), Author: r.URL.Query().Get("author"),
 		Sort: r.URL.Query().Get("sort"), Limit: limit,
 	})
