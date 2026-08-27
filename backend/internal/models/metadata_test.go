@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestInspectGGUFDetectsContextAndRefreshPreservesExplicitValue(t *testing.T) {
@@ -45,6 +46,63 @@ func TestInspectGGUFValidationAndMissingContext(t *testing.T) {
 	writeMetadataModel(t, path, "custom", 0)
 	if detected, err := s.DetectContext(path); err != nil || detected != 0 { t.Fatalf("detected=%d err=%v", detected, err) }
 	if safeContextInt(-1) != 0 || safeContextInt(0) != 0 || safeContextInt(4096) != 4096 { t.Fatal("safe context conversion") }
+}
+
+func TestRefreshUnknownContextsSkipsUnavailableAndRefreshesReadableModels(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	validPath := filepath.Join(dir, "valid.gguf")
+	writeMetadataModel(t, validPath, "llama", 65536)
+	valid, err := s.Create(ctx, CreateModelInput{Name: "Valid", GGUFPath: validPath})
+	if err != nil { t.Fatal(err) }
+	badPath := filepath.Join(dir, "bad.gguf")
+	if err := os.WriteFile(badPath, []byte("not gguf"), 0o644); err != nil { t.Fatal(err) }
+	bad, err := s.Create(ctx, CreateModelInput{Name: "Bad", GGUFPath: badPath})
+	if err != nil { t.Fatal(err) }
+
+	if err := s.RefreshUnknownContexts(ctx); err != nil { t.Fatal(err) }
+	valid, _ = s.GetByID(ctx, valid.ID)
+	bad, _ = s.GetByID(ctx, bad.ID)
+	if valid.ContextLength != 65536 { t.Fatalf("valid=%+v", valid) }
+	if bad.ContextLength != 0 { t.Fatalf("bad=%+v", bad) }
+}
+
+func TestRunMetadataReconcilerRefreshesFileWhenMetadataBecomesAvailable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s, dir := testModelService(t)
+	path := filepath.Join(dir, "pending.gguf")
+	if err := os.WriteFile(path, []byte("pending"), 0o644); err != nil { t.Fatal(err) }
+	model, err := s.Create(ctx, CreateModelInput{Name: "Pending", GGUFPath: path})
+	if err != nil { t.Fatal(err) }
+
+	done := make(chan struct{})
+	go func() { s.RunMetadataReconciler(ctx, time.Millisecond); close(done) }()
+	writeMetadataModel(t, path, "qwen2", 32768)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := s.GetByID(context.Background(), model.ID)
+		if getErr == nil && current.ContextLength == 32768 {
+			cancel()
+			select { case <-done: case <-time.After(time.Second): t.Fatal("reconciler did not stop") }
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("reconciler did not detect context")
+}
+
+func TestRunMetadataReconcilerAcceptsDefaultIntervalAndStopsOnCancelledContext(t *testing.T) {
+	s, _ := testModelService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.RunMetadataReconciler(ctx, 0)
+}
+
+func TestRefreshUnknownContextsReturnsListError(t *testing.T) {
+	s, _ := testModelService(t)
+	if err := s.DB().Close(); err != nil { t.Fatal(err) }
+	if err := s.RefreshUnknownContexts(context.Background()); err == nil { t.Fatal("closed database should fail list") }
 }
 
 func writeMetadataModel(t *testing.T, path, architecture string, contextLength int64) {
