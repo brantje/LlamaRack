@@ -3,7 +3,9 @@ const manager = useManager()
 const { models } = manager
 const message = ref('')
 const pending = ref<string | null>(null)
-const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
+const deleteModal = ref<{
+  request: (options: { name: string, path: string, sizeLabel?: string }) => Promise<{ confirmed: boolean, deleteFiles: boolean }>
+} | null>(null)
 
 function formatBytes(value: number) {
   if (!value) return '—'
@@ -23,17 +25,18 @@ function contextLabel(value: number) {
 
 async function remove(id: string) {
   const model = models.value.find(item => item.id === id)
-  const confirmed = await confirmation.value?.request({
-    title: 'Delete Model',
-    description: `Delete registered Model “${model?.name || id}”? Its Instance definitions will also be deleted. The GGUF file will not be removed.`,
-    confirmLabel: 'Delete Model',
-    color: 'error'
+  if (!model) return
+  const result = await deleteModal.value?.request({
+    name: model.name,
+    path: model.gguf_path,
+    sizeLabel: model.total_bytes > 0 ? formatBytes(model.total_bytes) : undefined
   })
-  if (!confirmed) return
+  if (!result?.confirmed) return
   pending.value = id
   message.value = ''
   try {
-    await manager.request(`/api/v1/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    const suffix = result.deleteFiles ? '?delete_files=true' : ''
+    await manager.request(`/api/v1/models/${encodeURIComponent(id)}${suffix}`, { method: 'DELETE' })
     await manager.refresh()
   } catch (error: any) {
     message.value = error?.data?.error || error?.message || 'Unable to delete model'
@@ -80,6 +83,6 @@ async function remove(id: string) {
         </table>
       </div>
     </UCard>
-    <AppConfirmationModal ref="confirmation" />
+    <ModelDeleteModal ref="deleteModal" />
   </div>
 </template>
