@@ -23,7 +23,7 @@ const columns: TableColumn<ManagedAPIKey>[] = [
 async function load() {
   if (!manager.user.value) return
   try {
-    keys.value = await manager.request<ManagedAPIKey[]>('/api/v1/api-keys')
+    keys.value = (await manager.request<ManagedAPIKey[]>('/api/v1/api-keys')) || []
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || 'Unable to load API keys'
   }
