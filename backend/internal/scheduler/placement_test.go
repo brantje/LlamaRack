@@ -116,7 +116,7 @@ func TestPlanPlacementSkipsDevicesConsumedByReserveAndSortsTies(t *testing.T) {
 		{ID: "CUDA1", FreeBytes: 2 * gib},
 		{ID: "CUDA0", FreeBytes: 2 * gib},
 	}}
-	placement, err := PlanPlacement(snapshot, PlacementRequest{RequiredBytes: 3 * gib})
+	placement, err := PlanPlacement(snapshot, PlacementRequest{RequiredBytes: 4 * gib})
 	if err != nil {
 		t.Fatal(err)
 	}
