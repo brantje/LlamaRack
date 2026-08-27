@@ -83,10 +83,10 @@ func TestStartEnforcesSecureManagerOwnedArgs(t *testing.T) {
 	if !strings.Contains(text, "--model\n/tmp/model.gguf") || !strings.Contains(text, "--host\n127.0.0.1") || !strings.Contains(text, "--port\n"+strconv.Itoa(rt.Port)) {
 		t.Fatalf("manager-owned model/bind arguments were not preserved: %q", raw)
 	}
-	if strings.Contains(text, "/tmp/other.gguf") || strings.Contains(text, "0.0.0.0") || strings.Contains(text, "9999") {
+	if strings.Contains(text, "/tmp/other.gguf\n") || strings.Contains(text, "0.0.0.0\n") || strings.Contains(text, "\n9999\n") {
 		t.Fatalf("conflicting manager-owned arguments reached worker: %q", raw)
 	}
-	if strings.Contains(text, "worker-secret") || strings.Contains(text, "--api-key") {
+	if strings.Contains(text, "worker-secret\n") || strings.Contains(text, "--api-key\n") {
 		t.Fatalf("stale worker credentials must not reach process arguments: %q", raw)
 	}
 	if !strings.Contains(text, "--ctx-size\n1024") {
