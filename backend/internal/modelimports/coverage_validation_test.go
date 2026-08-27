@@ -11,7 +11,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 )
 
-func TestPrepareValidationBranches(t *testing.T) {
+func TestPrepareAdditionalValidationBranches(t *testing.T) {
 	ctx, _, _, _, _, service := newImportFixture(t, http.NotFoundHandler())
 	complete := huggingface.Artifact{
 		ID: "artifact", Name: "model.gguf", ModelBytes: 1, TotalBytes: 1,
