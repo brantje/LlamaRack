@@ -60,7 +60,7 @@ func newPhase8Fixture(t *testing.T) phase8Fixture {
 	if _, err := authService.Bootstrap(ctx, "admin", "password1234"); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := authService.Login(ctx, "admin", "password1234")
+	token, _, _, err := authService.LoginWithMetadata(ctx, "admin", "password1234", "127.0.0.1", "phase8-test")
 	if err != nil {
 		t.Fatal(err)
 	}
