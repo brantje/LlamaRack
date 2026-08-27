@@ -77,7 +77,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 		return Runtime{}, err
 	}
 	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
-	workerArgs = append(workerArgs, sanitizeWorkerSecurityArgs(args)...)
+	workerArgs = append(workerArgs, sanitizeWorkerOwnedArgs(args)...)
 	// Managed workers are internal backend targets, not browser-facing APIs.
 	// The manager owns worker CORS/auth configuration and applies it exactly once.
 	workerArgs = append(workerArgs, "--cors-origins", "localhost")
@@ -335,7 +335,10 @@ func (s *Supervisor) setState(id string, state State, msg string) {
 	}
 }
 
-var workerSecurityValueOptions = map[string]bool{
+var workerOwnedValueOptions = map[string]bool{
+	"model":        true,
+	"host":         true,
+	"port":         true,
 	"cors-origins": true,
 	"cors-methods": true,
 	"cors-headers": true,
@@ -343,29 +346,29 @@ var workerSecurityValueOptions = map[string]bool{
 	"api-key-file": true,
 }
 
-var workerSecurityBooleanOptions = map[string]bool{
+var workerOwnedBooleanOptions = map[string]bool{
 	"cors-credentials":    true,
 	"no-cors-credentials": true,
 }
 
-func sanitizeWorkerSecurityArgs(args []string) []string {
+func sanitizeWorkerOwnedArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		raw := args[i]
 		key := strings.TrimLeft(raw, "-")
 		if at := strings.IndexByte(key, '='); at >= 0 {
 			base := key[:at]
-			if workerSecurityValueOptions[base] || workerSecurityBooleanOptions[base] {
+			if workerOwnedValueOptions[base] || workerOwnedBooleanOptions[base] {
 				continue
 			}
 		}
-		if workerSecurityValueOptions[key] {
+		if workerOwnedValueOptions[key] {
 			if i+1 < len(args) {
 				i++
 			}
 			continue
 		}
-		if workerSecurityBooleanOptions[key] {
+		if workerOwnedBooleanOptions[key] {
 			continue
 		}
 		out = append(out, raw)
