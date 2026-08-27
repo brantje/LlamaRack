@@ -28,6 +28,8 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
 	"github.com/brantje/llamacpp-manager/backend/internal/modelimports"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
+	"github.com/brantje/llamacpp-manager/backend/internal/settings"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
@@ -54,11 +56,35 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 	defer db.Close()
 
-	authService := auth.New(db, cfg.SessionLifetime)
+	managerSettings := settings.New(db, settings.Defaults{
+		SessionLifetime: cfg.SessionLifetime, AllowedOrigins: cfg.AllowedOrigin, StartupTimeout: cfg.StartupTimeout,
+		IdleUnloadTimeout: cfg.IdleUnloadTimeout, AlwaysOnReconcile: cfg.AlwaysOnReconcileInterval,
+		DataDir: cfg.DataDir, ModelsDir: cfg.ModelsDir, DatabasePath: cfg.DatabasePath, ListenAddr: cfg.ListenAddr, LlamaServerPath: cfg.LlamaServerPath,
+	})
+	sessionLifetime := cfg.SessionLifetime
+	if seconds, resolveErr := managerSettings.Int(ctx, settings.SessionLifetimeSeconds); resolveErr == nil {
+		sessionLifetime = time.Duration(seconds) * time.Second
+	}
+	startupTimeout := cfg.StartupTimeout
+	if seconds, resolveErr := managerSettings.Int(ctx, settings.StartupTimeoutSeconds); resolveErr == nil {
+		startupTimeout = time.Duration(seconds) * time.Second
+	}
+	idleUnloadTimeout := cfg.IdleUnloadTimeout
+	if seconds, resolveErr := managerSettings.Int(ctx, settings.IdleUnloadSeconds); resolveErr == nil {
+		idleUnloadTimeout = time.Duration(seconds) * time.Second
+	}
+	alwaysOnInterval := cfg.AlwaysOnReconcileInterval
+	if seconds, resolveErr := managerSettings.Int(ctx, settings.AlwaysOnReconcileSeconds); resolveErr == nil {
+		alwaysOnInterval = time.Duration(seconds) * time.Second
+	}
+
+	authService := auth.New(db, sessionLifetime)
+	network := managersecurity.NewNetwork(managerSettings)
+	loginProtector := managersecurity.NewLoginProtector(managerSettings)
 	modelService := models.New(db, cfg.ModelsDir)
 	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
 	defer unregisterDetectedDefaults()
-	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
+	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, startupTimeout)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -105,7 +131,8 @@ func run(ctx context.Context, cfg config.Config) error {
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
 	hardwareDetector := hardware.New()
-	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, cfg.AllowedOrigin))
+	allowedOrigins, _ := managerSettings.String(ctx, settings.AllowedOrigins)
+	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, allowedOrigins))
 	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardwareDetector))
 	managementAPI.Handle("POST /api/v1/models", api.NewPhase9ModelCreateHandler(apiServer, modelService))
 	managementAPI.Handle("POST /api/v1/models/inspect", api.NewPhase9ModelInspectHandler(authService, modelService))
@@ -118,19 +145,36 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/imports", phase8)
 	managementAPI.Handle("/api/v1/downloads", phase8)
 	managementAPI.Handle("/api/v1/downloads/", phase8)
+
+	phase10Auth := api.NewPhase10AuthHandler(authService, network, loginProtector)
+	managementAPI.Handle("/api/v1/auth/", phase10Auth)
+	phase10 := api.NewPhase10Handler(authService, managerSettings, providerSecrets, network, profileGetter)
+	managementAPI.Handle("GET /api/v1/me", phase10)
+	managementAPI.Handle("/api/v1/me/", phase10)
+	managementAPI.Handle("/api/v1/users", phase10)
+	managementAPI.Handle("/api/v1/users/", phase10)
+	managementAPI.Handle("/api/v1/sessions/", phase10)
+	managementAPI.Handle("/api/v1/settings/general", phase10)
+	managementAPI.Handle("/api/v1/system", phase10)
+	managementAPI.Handle("/api/v1/admin/summary", phase10)
+	apiKeys := api.NewPhase10APIKeysHandler(authService)
+	managementAPI.Handle("/api/v1/api-keys", apiKeys)
+	managementAPI.Handle("/api/v1/api-keys/", apiKeys)
 	managementAPI.Handle("/", apiServer)
+
+	securedManagement := api.ManagementSecurity(authService, network, managementAPI)
 	openAI := gateway.New(authService, modelService, lifecycleService)
-	mux := newMux(managementAPI, openAI)
+	mux := newMux(securedManagement, openAI)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           cors(cfg.AllowedOrigin, mux),
+		Handler:           managersecurity.Headers(network, dynamicCORS(network, mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
 	serveErr := make(chan error, 1)
-	go lifecycleService.RunReconciler(ctx, cfg.AlwaysOnReconcileInterval)
-	go lifecycleService.RunIdleReconciler(ctx, cfg.IdleUnloadTimeout)
+	go lifecycleService.RunReconciler(ctx, alwaysOnInterval)
+	go lifecycleService.RunIdleReconciler(ctx, idleUnloadTimeout)
 	go modelService.RunMetadataReconciler(ctx, 2*time.Second)
 	go importService.Run(ctx, 500*time.Millisecond)
 	go func() {
@@ -174,6 +218,26 @@ func newMux(apiServer, openAI http.Handler) *http.ServeMux {
 	return mux
 }
 
+func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && network.OriginAllowed(r, origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// cors and originAllowed remain for focused compatibility tests and callers that need a
+// fixed-origin wrapper. Runtime uses dynamicCORS so database settings take effect without restart.
 func cors(allowedOrigins string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -181,8 +245,8 @@ func cors(allowedOrigins string, next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
