@@ -77,6 +77,10 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	}
 	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
 	workerArgs = append(workerArgs, args...)
+	// Managed workers are internal backend targets, not browser-facing APIs. Keep
+	// CORS restrictive even if stale persisted arguments contain a conflicting
+	// value by appending the manager-owned policy last.
+	workerArgs = append(workerArgs, "--cors-origins", "localhost")
 	cmd := exec.Command(s.binary, workerArgs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
