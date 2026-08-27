@@ -25,7 +25,8 @@ const props = withDefaults(defineProps<{
   scope: 'global' | 'model' | 'instance'
   modelId?: string
   instanceId?: string
-}>(), { modelId: '', instanceId: '' })
+  defaultOpen?: boolean
+}>(), { modelId: '', instanceId: '', defaultOpen: true })
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, string>] }>()
 
 const manager = useManager()
@@ -44,6 +45,14 @@ const basicKeys = new Set([
 
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
 const overrides = computed(() => props.modelValue || {})
+const overrideCount = computed(() => Object.keys(overrides.value).length)
+const editorTitle = computed(() => props.scope === 'global' ? 'Global llama.cpp defaults' : `${scopeLabel.value} llama.cpp overrides`)
+const editorSummary = computed(() => {
+  const count = overrideCount.value
+  if (props.scope === 'global') return count === 1 ? '1 default configured' : `${count} defaults configured`
+  if (count === 0) return 'No overrides configured · inheriting all values'
+  return count === 1 ? '1 override configured · remaining values inherited' : `${count} overrides configured · remaining values inherited`
+})
 const inherited = computed(() => {
   const effective = config.value?.effective
   if (!effective || props.scope === 'global') return {} as Record<string, string>
@@ -149,67 +158,83 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
 </script>
 
 <template>
-  <div class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <p class="font-semibold">{{ scopeLabel }} llama.cpp configuration</p>
-        <p class="text-xs text-muted">Only overrides are stored at this layer; remove an override to inherit again.</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <UButton :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" @click="mode = 'basic'">Basic</UButton>
-        <UButton :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" @click="mode = 'advanced'">Advanced</UButton>
-      </div>
-    </div>
+  <UCollapsible :default-open="defaultOpen" class="space-y-4">
+    <template #default="{ open }">
+      <UButton type="button" color="neutral" variant="soft" class="w-full">
+        <span class="flex w-full items-center justify-between gap-3 text-left">
+          <span class="min-w-0">
+            <span class="block font-semibold">{{ editorTitle }}</span>
+            <span class="block text-xs font-normal text-muted">{{ editorSummary }}</span>
+          </span>
+          <span class="flex shrink-0 items-center gap-2">
+            <UBadge size="sm" color="neutral" variant="subtle">{{ overrideCount }}</UBadge>
+            <UIcon :name="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-4" />
+          </span>
+        </span>
+      </UButton>
+    </template>
 
-    <UAlert v-if="loadError" color="warning" variant="subtle" :description="loadError" />
-    <UInput v-if="mode === 'advanced'" v-model="search" class="w-full" icon="i-lucide-search" placeholder="Search all detected llama-server options" />
-    <div v-if="loading" class="space-y-2"><USkeleton v-for="n in 4" :key="n" class="h-20 w-full" /></div>
-
-    <div v-else class="space-y-2">
-      <UCard v-for="option in visibleOptions" :key="option.key" :ui="{ body: 'p-4 sm:p-4' }">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
-              <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option.key))">{{ effectiveSource(option.key) }}</UBadge>
-              <UBadge v-if="protectedKeys.has(option.key)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
-              <UBadge v-if="option.unsupported" size="sm" color="warning" variant="outline">Unsupported · retained</UBadge>
-            </div>
-            <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
-            <p v-if="!isOverridden(option.key) && effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>
-            <p v-else-if="!isOverridden(option.key)" class="mt-1 text-xs text-dimmed">Using llama.cpp upstream default.</p>
-          </div>
-
-          <div class="w-full space-y-2 lg:w-80">
-            <template v-if="isOverridden(option.key)">
-              <UCheckbox
-                v-if="kind(option) === 'boolean' && !option.unsupported"
-                :model-value="overrides[option.key] === 'true'"
-                :label="overrides[option.key] === 'true' ? 'Enabled' : 'Disabled'"
-                @update:model-value="updateValue(option.key, $event ? 'true' : 'false')"
-              />
-              <USelectMenu
-                v-else-if="kind(option) === 'enum' && !option.unsupported"
-                :model-value="overrides[option.key]"
-                class="w-full"
-                :items="choices(option)"
-                @update:model-value="updateValue(option.key, String($event || ''))"
-              />
-              <UInput
-                v-else
-                :model-value="overrides[option.key]"
-                class="w-full font-mono"
-                :disabled="option.unsupported"
-                :placeholder="option.value_hint || 'value'"
-                @update:model-value="updateValue(option.key, String($event || ''))"
-              />
-              <UButton size="xs" color="neutral" variant="ghost" @click="removeOverride(option.key)">Remove override</UButton>
-            </template>
-            <UButton v-else-if="!protectedKeys.has(option.key)" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
+    <template #content>
+      <div class="space-y-4 pt-1">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs text-muted">Only overrides are stored at this layer; remove an override to inherit again.</p>
+          <div class="flex items-center gap-2">
+            <UButton type="button" :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" @click="mode = 'basic'">Basic</UButton>
+            <UButton type="button" :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" @click="mode = 'advanced'">Advanced</UButton>
           </div>
         </div>
-      </UCard>
-      <UAlert v-if="!visibleOptions.length" color="neutral" variant="subtle" description="No options match this view. Switch to Advanced to see every detected option." />
-    </div>
-  </div>
+
+        <UAlert v-if="loadError" color="warning" variant="subtle" :description="loadError" />
+        <UInput v-if="mode === 'advanced'" v-model="search" class="w-full" icon="i-lucide-search" placeholder="Search all detected llama-server options" />
+        <div v-if="loading" class="space-y-2"><USkeleton v-for="n in 4" :key="n" class="h-20 w-full" /></div>
+
+        <div v-else class="space-y-2">
+          <UCard v-for="option in visibleOptions" :key="option.key" :ui="{ body: 'p-4 sm:p-4' }">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
+                  <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option.key))">{{ effectiveSource(option.key) }}</UBadge>
+                  <UBadge v-if="protectedKeys.has(option.key)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
+                  <UBadge v-if="option.unsupported" size="sm" color="warning" variant="outline">Unsupported · retained</UBadge>
+                </div>
+                <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
+                <p v-if="!isOverridden(option.key) && effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>
+                <p v-else-if="!isOverridden(option.key)" class="mt-1 text-xs text-dimmed">Using llama.cpp upstream default.</p>
+              </div>
+
+              <div class="w-full space-y-2 lg:w-80">
+                <template v-if="isOverridden(option.key)">
+                  <UCheckbox
+                    v-if="kind(option) === 'boolean' && !option.unsupported"
+                    :model-value="overrides[option.key] === 'true'"
+                    :label="overrides[option.key] === 'true' ? 'Enabled' : 'Disabled'"
+                    @update:model-value="updateValue(option.key, $event ? 'true' : 'false')"
+                  />
+                  <USelectMenu
+                    v-else-if="kind(option) === 'enum' && !option.unsupported"
+                    :model-value="overrides[option.key]"
+                    class="w-full"
+                    :items="choices(option)"
+                    @update:model-value="updateValue(option.key, String($event || ''))"
+                  />
+                  <UInput
+                    v-else
+                    :model-value="overrides[option.key]"
+                    class="w-full font-mono"
+                    :disabled="option.unsupported"
+                    :placeholder="option.value_hint || 'value'"
+                    @update:model-value="updateValue(option.key, String($event || ''))"
+                  />
+                  <UButton type="button" size="xs" color="neutral" variant="ghost" @click="removeOverride(option.key)">Remove override</UButton>
+                </template>
+                <UButton v-else-if="!protectedKeys.has(option.key)" type="button" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
+              </div>
+            </div>
+          </UCard>
+          <UAlert v-if="!visibleOptions.length" color="neutral" variant="subtle" description="No options match this view. Switch to Advanced to see every detected option." />
+        </div>
+      </div>
+    </template>
+  </UCollapsible>
 </template>
