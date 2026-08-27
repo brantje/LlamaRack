@@ -104,9 +104,12 @@ function editable(key: keyof typeof form) { return settings.value?.[key].editabl
       <UCard>
         <template #header><div><h2 class="text-xl font-bold">Resource defaults</h2><p class="text-sm text-muted">Persisted lifecycle defaults are applied when the manager starts.</p></div></template>
         <div class="grid gap-5 md:grid-cols-3">
-          <UFormField label="Worker startup timeout" :hint="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></UFormField>
-          <UFormField label="Global idle unload" :hint="source('idle_unload_seconds')"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" :disabled="!editable('idle_unload_seconds')" /></UFormField>
-          <UFormField label="Always-on reconcile" :hint="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></UFormField>
+          <UFormField label="Worker startup timeout (seconds)" :hint="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></UFormField>
+          <UFormField label="Global idle unload (seconds)" :hint="source('idle_unload_seconds')">
+            <UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" :disabled="!editable('idle_unload_seconds')" />
+            <template #help>Defaults to 300 seconds (5 minutes). Set to 0 to disable the global idle timeout.</template>
+          </UFormField>
+          <UFormField label="Always-on reconcile (seconds)" :hint="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></UFormField>
         </div>
       </UCard>
 
