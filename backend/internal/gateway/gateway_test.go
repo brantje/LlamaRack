@@ -72,7 +72,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	if err != nil { t.Fatal(err) }
 	t.Cleanup(func(){ _ = db.Close() })
 	a := auth.New(db, time.Hour)
-	_, secret, err := a.CreateAPIKey(ctx, "gateway")
+	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", 0)
 	if err != nil { t.Fatal(err) }
 	m := models.New(db, modelsDir)
 	path := filepath.Join(modelsDir, "gateway-Q4_K_M.gguf")
@@ -130,7 +130,7 @@ func TestListModelsDatabaseError(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	defer authDB.Close()
 	a := auth.New(authDB, time.Hour)
-	_, secret, err := a.CreateAPIKey(ctx, "gateway")
+	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", 0)
 	if err != nil { t.Fatal(err) }
 
 	modelDB, err := database.Open(ctx, filepath.Join(root, "models.db"))
