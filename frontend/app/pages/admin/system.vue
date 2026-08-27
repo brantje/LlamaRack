@@ -20,12 +20,20 @@ function settingValue(value: unknown, fallback = '') {
   return String(value)
 }
 
+function isSystemInfo(value: unknown): value is SystemInfo {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<SystemInfo>
+  return Boolean(candidate.manager && candidate.network && candidate.llamacpp)
+}
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    info.value = await manager.request<SystemInfo>('/api/v1/system')
+    const result = await manager.request<SystemInfo>('/api/v1/system')
+    info.value = isSystemInfo(result) ? result : null
   } catch (value: any) {
+    info.value = null
     error.value = value?.data?.error || value?.message || 'Unable to load system diagnostics'
   }
 }
