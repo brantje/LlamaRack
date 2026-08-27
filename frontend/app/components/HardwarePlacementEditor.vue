@@ -60,7 +60,7 @@ const gpus = computed(() => snapshot.value?.gpus || [])
 const deviceItems = computed(() => gpus.value.map(gpu => ({
   label: `${gpu.id} · ${gpu.name} · ${formatBytes(gpu.free_bytes)} free`, value: gpu.id
 })))
-const recommendationTone = computed(() => recommendation.value?.current_fit ? 'success' : recommendation.value?.total_hardware_fit ? 'warning' : 'neutral')
+const recommendationTone = computed<'success' | 'warning' | 'neutral'>(() => recommendation.value?.current_fit ? 'success' : recommendation.value?.total_hardware_fit ? 'warning' : 'neutral')
 const recommendationTitle = computed(() => {
   const item = recommendation.value
   if (!item) return ''
@@ -69,6 +69,17 @@ const recommendationTitle = computed(() => {
   if (item.cpu_fit) return 'CPU fallback fits current RAM'
   return 'Resource pressure expected'
 })
+
+function isRecommendation(value: unknown): value is Recommendation {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const item = value as Partial<Recommendation>
+  return typeof item.context_length === 'number'
+    && typeof item.confidence === 'string'
+    && typeof item.current_fit === 'boolean'
+    && Boolean(item.quantization && typeof item.quantization.summary === 'string' && typeof item.quantization.tradeoff === 'string')
+    && Boolean(item.memory && typeof item.memory.full_offload_vram_bytes === 'number' && typeof item.memory.cpu_only_ram_bytes === 'number' && typeof item.memory.kv_cache_bytes === 'number')
+    && Boolean(item.offload && typeof item.offload.mode === 'string' && typeof item.offload.reason === 'string')
+}
 
 async function refreshHardware() {
   loading.value = true
@@ -90,7 +101,8 @@ async function refreshRecommendation() {
   if (!props.modelId) return
   recommendationLoading.value = true
   try {
-    recommendation.value = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation`)
+    const result = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation`)
+    recommendation.value = isRecommendation(result) ? result : null
   } catch (value: any) {
     recommendationError.value = value?.data?.error || value?.message || 'Unable to estimate model resources'
   } finally {
