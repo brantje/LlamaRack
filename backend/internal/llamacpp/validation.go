@@ -8,12 +8,19 @@ import (
 )
 
 var managerOwnedOptions = map[string]bool{
-	"model":      true,
-	"host":       true,
-	"port":       true,
-	"device":     true,
-	"split-mode": true,
-	"main-gpu":   true,
+	"model":               true,
+	"host":                true,
+	"port":                true,
+	"device":              true,
+	"split-mode":          true,
+	"main-gpu":            true,
+	"cors-origins":        true,
+	"cors-methods":        true,
+	"cors-headers":        true,
+	"cors-credentials":    true,
+	"no-cors-credentials": true,
+	"api-key":             true,
+	"api-key-file":        true,
 }
 
 // ValidateOptions validates and canonicalizes free-form llama.cpp overrides
