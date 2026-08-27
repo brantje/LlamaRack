@@ -47,7 +47,6 @@ func newPhase10Fixture(t *testing.T) *phase10Fixture {
 		SessionLifetime: time.Hour,
 		AllowedOrigins: "http://manager.test",
 		StartupTimeout: 3 * time.Minute,
-		IdleUnloadTimeout: 5 * time.Minute,
 		AlwaysOnReconcile: 15 * time.Second,
 		DataDir: root,
 		ModelsDir: filepath.Join(root, "models"),
