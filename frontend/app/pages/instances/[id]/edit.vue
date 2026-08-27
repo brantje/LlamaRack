@@ -97,8 +97,7 @@ async function submit() {
         <USeparator label="Placement" />
         <HardwarePlacementEditor v-model:gpu-mode="form.gpu_mode" v-model:gpu-devices="form.gpu_devices" v-model:tensor-split="form.tensor_split" />
 
-        <USeparator label="llama.cpp overrides" />
-        <LlamaCppOptionsEditor v-model="form.options" scope="instance" :model-id="form.model_id" :instance-id="originalID" />
+        <LlamaCppOptionsEditor v-model="form.options" scope="instance" :model-id="form.model_id" :instance-id="originalID" :default-open="false" />
 
         <div class="flex justify-end gap-2"><UButton to="/instances" color="neutral" variant="soft">Cancel</UButton><UButton type="submit" :loading="busy">Save & apply</UButton></div>
       </UForm>
