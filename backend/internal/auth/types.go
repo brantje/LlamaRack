@@ -25,11 +25,12 @@ var (
 )
 
 type User struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	Enabled     bool   `json:"enabled"`
-	CreatedAt   int64  `json:"created_at"`
-	LastLoginAt *int64 `json:"last_login_at,omitempty"`
+	ID             int64  `json:"id"`
+	Username       string `json:"username"`
+	Enabled        bool   `json:"enabled"`
+	CreatedAt      int64  `json:"created_at"`
+	LastLoginAt    *int64 `json:"last_login_at,omitempty"`
+	ActiveSessions int    `json:"active_sessions,omitempty"`
 }
 
 type Session struct {
