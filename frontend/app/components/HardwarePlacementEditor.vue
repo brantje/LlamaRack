@@ -16,11 +16,31 @@ type HardwareSnapshot = {
   gpus?: GPU[]
   collected_at?: string
 }
+type Recommendation = {
+  context_length: number
+  context_assumed: boolean
+  confidence: 'low' | 'medium' | 'high' | string
+  metadata_warning?: string
+  hardware_warning?: string
+  quantization: { name?: string; summary: string; tradeoff: string }
+  memory: {
+    weights_bytes: number
+    kv_cache_bytes: number
+    runtime_overhead_bytes: number
+    cpu_only_ram_bytes: number
+    full_offload_vram_bytes: number
+  }
+  current_fit: boolean
+  total_hardware_fit: boolean
+  cpu_fit: boolean
+  offload: { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; reason: string }
+}
 
 const props = defineProps<{
   gpuMode: string
   gpuDevices: string[]
   tensorSplit: string
+  modelId?: string
 }>()
 const emit = defineEmits<{
   'update:gpuMode': [value: string]
@@ -30,15 +50,27 @@ const emit = defineEmits<{
 
 const manager = useManager()
 const snapshot = ref<HardwareSnapshot | null>(null)
+const recommendation = ref<Recommendation | null>(null)
 const loading = ref(false)
+const recommendationLoading = ref(false)
 const error = ref('')
+const recommendationError = ref('')
 const modeItems = [{ label: 'Automatic · single GPU first', value: 'auto' }, { label: 'Manual', value: 'manual' }]
 const gpus = computed(() => snapshot.value?.gpus || [])
 const deviceItems = computed(() => gpus.value.map(gpu => ({
   label: `${gpu.id} · ${gpu.name} · ${formatBytes(gpu.free_bytes)} free`, value: gpu.id
 })))
+const recommendationTone = computed(() => recommendation.value?.current_fit ? 'success' : recommendation.value?.total_hardware_fit ? 'warning' : 'neutral')
+const recommendationTitle = computed(() => {
+  const item = recommendation.value
+  if (!item) return ''
+  if (item.current_fit) return 'Fits current resources'
+  if (item.total_hardware_fit) return 'Fits installed hardware after freeing resources'
+  if (item.cpu_fit) return 'CPU fallback fits current RAM'
+  return 'Resource pressure expected'
+})
 
-async function refresh() {
+async function refreshHardware() {
   loading.value = true
   error.value = ''
   try {
@@ -50,6 +82,24 @@ async function refresh() {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshRecommendation() {
+  recommendation.value = null
+  recommendationError.value = ''
+  if (!props.modelId) return
+  recommendationLoading.value = true
+  try {
+    recommendation.value = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation`)
+  } catch (value: any) {
+    recommendationError.value = value?.data?.error || value?.message || 'Unable to estimate model resources'
+  } finally {
+    recommendationLoading.value = false
+  }
+}
+
+async function refresh() {
+  await Promise.all([refreshHardware(), refreshRecommendation()])
 }
 
 function formatBytes(value: number) {
@@ -84,6 +134,7 @@ watch(() => props.gpuMode, (mode) => {
     emit('update:tensorSplit', '')
   }
 })
+watch(() => props.modelId, () => void refreshRecommendation())
 onMounted(() => void refresh())
 </script>
 
@@ -94,10 +145,39 @@ onMounted(() => void refresh())
         <p class="font-semibold">GPU placement</p>
         <p class="text-xs text-muted">Automatic placement binds one GPU when the Instance safely fits and expands to multiple GPUs only when required.</p>
       </div>
-      <UButton size="xs" color="neutral" variant="soft" :loading="loading" @click="refresh">Refresh hardware</UButton>
+      <UButton size="xs" color="neutral" variant="soft" :loading="loading || recommendationLoading" @click="refresh">Refresh hardware</UButton>
     </div>
 
     <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
+    <UAlert v-if="recommendationError" color="warning" variant="subtle" :description="recommendationError" />
+    <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 rounded-lg border border-default p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-semibold">{{ recommendationTitle }}</p>
+            <UBadge :color="recommendationTone" variant="subtle">{{ recommendation.confidence }} confidence</UBadge>
+            <UBadge v-if="recommendation.quantization.name" color="neutral" variant="soft">{{ recommendation.quantization.name }}</UBadge>
+          </div>
+          <p class="mt-1 text-xs text-muted">{{ recommendation.offload.reason }}</p>
+        </div>
+        <UBadge color="primary" variant="subtle">{{ recommendation.offload.mode.replace('_', ' ') }}</UBadge>
+      </div>
+      <dl class="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div><dt class="text-dimmed">Full-offload VRAM</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.full_offload_vram_bytes) }}</dd></div>
+        <div><dt class="text-dimmed">CPU-only RAM</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.cpu_only_ram_bytes) }}</dd></div>
+        <div><dt class="text-dimmed">KV cache estimate</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.kv_cache_bytes) }}</dd></div>
+        <div><dt class="text-dimmed">Context assumption</dt><dd class="font-semibold">{{ recommendation.context_length.toLocaleString() }} tokens<span v-if="recommendation.context_assumed"> assumed</span></dd></div>
+      </dl>
+      <div v-if="recommendation.offload.devices?.length || recommendation.offload.gpu_layers" class="flex flex-wrap gap-2 text-xs">
+        <UBadge v-for="device in recommendation.offload.devices" :key="device" color="neutral" variant="soft">{{ device }}</UBadge>
+        <span v-if="recommendation.offload.gpu_layers" class="text-muted">Recommended GPU layers: <strong>{{ recommendation.offload.gpu_layers }}</strong></span>
+        <span v-if="recommendation.offload.tensor_split" class="text-muted">Tensor split: <strong class="font-mono">{{ recommendation.offload.tensor_split }}</strong></span>
+      </div>
+      <p class="text-xs text-muted"><strong>{{ recommendation.quantization.summary }}</strong> {{ recommendation.quantization.tradeoff }}</p>
+      <UAlert v-if="recommendation.metadata_warning" color="neutral" variant="subtle" title="Metadata estimate fallback" :description="recommendation.metadata_warning" />
+      <UAlert v-if="recommendation.hardware_warning" color="warning" variant="subtle" title="Hardware probe warning" :description="recommendation.hardware_warning" />
+    </div>
+
     <div v-if="snapshot" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <UCard
         v-for="gpu in gpus"
