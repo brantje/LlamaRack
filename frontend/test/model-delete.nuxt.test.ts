@@ -87,7 +87,7 @@ describe('model file deletion', () => {
     await flushPromises()
 
     expect(checkboxChecked()).toBe(true)
-    expect(document.body.textContent).toContain('permanently removed from disk')
+    expect(document.body.textContent).toContain('entire folder and all of its contents')
     expect(document.body.textContent).toContain('models/coder.gguf')
     expect(document.body.textContent).toContain('4.0 MiB')
 
