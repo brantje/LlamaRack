@@ -8,6 +8,12 @@ const props = defineProps<{
 
 const active = computed(() => ['STARTING', 'LOADING', 'READY', 'STOPPING'].includes(props.state))
 const gpuLabel = computed(() => props.telemetry?.gpu_devices?.length ? props.telemetry.gpu_devices.join(', ') : 'No GPU allocation detected')
+const hasAttributedGPU = computed(() => Boolean(props.telemetry?.gpu_devices?.length))
+const globalGPUFallback = computed(() => Boolean(props.telemetry && !hasAttributedGPU.value && props.telemetry.gpu_utilization_pct !== undefined))
+const globalVRAMFallback = computed(() => Boolean(props.telemetry && !hasAttributedGPU.value && props.telemetry.vram_used_bytes !== undefined))
+const hasGlobalFallback = computed(() => globalGPUFallback.value || globalVRAMFallback.value)
+const gpuUsageLabel = computed(() => globalGPUFallback.value ? 'GPU usage (global fallback)' : 'Instance GPU usage')
+const vramLabel = computed(() => globalVRAMFallback.value ? 'VRAM (global fallback)' : 'VRAM')
 
 function formatBytes(value?: number) {
   if (value === undefined || !Number.isFinite(value) || value < 0) return '—'
@@ -43,17 +49,20 @@ function gpuDetail(device: RuntimeTelemetry['gpus'][number]) {
       <span v-if="telemetry" class="font-mono text-[11px] text-dimmed">PID {{ telemetry.pid }}</span>
       <span v-else class="text-[11px] text-dimmed">Collecting…</span>
     </div>
+    <p v-if="hasGlobalFallback" data-testid="instance-global-fallback" class="text-[11px] leading-4 text-warning">
+      Process-level GPU attribution is unavailable. Global fallback values are device-wide and may include other processes.
+    </p>
     <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
       <div>
         <dt class="text-dimmed">Placed on</dt>
         <dd class="mt-0.5 font-semibold text-highlighted" data-testid="instance-gpu-placement">{{ telemetry ? gpuLabel : '—' }}</dd>
       </div>
       <div>
-        <dt class="text-dimmed">Instance GPU usage</dt>
+        <dt class="text-dimmed">{{ gpuUsageLabel }}</dt>
         <dd class="mt-0.5 font-semibold text-highlighted" data-testid="instance-gpu-usage">{{ formatPercent(telemetry?.gpu_utilization_pct) }}</dd>
       </div>
       <div>
-        <dt class="text-dimmed">VRAM</dt>
+        <dt class="text-dimmed">{{ vramLabel }}</dt>
         <dd class="mt-0.5 font-semibold text-highlighted" data-testid="instance-vram">{{ formatBytes(telemetry?.vram_used_bytes) }}</dd>
       </div>
       <div>

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
@@ -76,7 +78,12 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	for _, runtime := range snapshot {
 		current[runtime.InstanceID] = runtime
 	}
-	collector := telemetry.New(h.lifecycle.HardwareSnapshot)
+	var latestHardware hardware.Snapshot
+	collector := telemetry.New(func(ctx context.Context) (hardware.Snapshot, error) {
+		value, err := h.lifecycle.HardwareSnapshot(ctx)
+		latestHardware = value
+		return value, err
+	})
 	telemetryResults := make(chan []telemetry.Sample, 1)
 	telemetryTicker := time.NewTicker(time.Second)
 	defer telemetryTicker.Stop()
@@ -92,6 +99,7 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		collecting = true
 		go func() {
 			samples := collector.Collect(r.Context(), runtimes)
+			samples = applyGlobalTelemetryFallback(samples, latestHardware)
 			select {
 			case telemetryResults <- samples:
 			case <-r.Context().Done():
@@ -136,6 +144,36 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			collectTelemetry()
 		}
 	}
+}
+
+func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.Snapshot) []telemetry.Sample {
+	if len(samples) == 0 || len(snapshot.GPUs) == 0 {
+		return samples
+	}
+	var globalUtilization float64
+	var globalVRAM int64
+	for _, gpu := range snapshot.GPUs {
+		globalUtilization += gpu.UtilizationPct
+		globalVRAM += gpu.UsedBytes
+	}
+	globalUtilization /= float64(len(snapshot.GPUs))
+	for index := range samples {
+		// If placement was attributed, keep the collector's process-scoped
+		// semantics. The fallback is only for the Docker/PID-namespace failure
+		// mode where no GPU process can be matched at all.
+		if len(samples[index].GPUDevices) != 0 {
+			continue
+		}
+		if samples[index].GPUUtilizationPct == nil {
+			value := globalUtilization
+			samples[index].GPUUtilizationPct = &value
+		}
+		if samples[index].VRAMUsedBytes == nil {
+			value := globalVRAM
+			samples[index].VRAMUsedBytes = &value
+		}
+	}
+	return samples
 }
 
 func runtimeValues(current map[string]supervisor.Runtime) []supervisor.Runtime {
