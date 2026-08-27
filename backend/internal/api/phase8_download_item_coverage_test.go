@@ -16,7 +16,7 @@ func TestPhase8DownloadItemNotFoundBranches(t *testing.T) {
 		{"missing get", http.MethodGet, "/api/v1/downloads/missing", http.StatusNotFound},
 		{"missing delete", http.MethodDelete, "/api/v1/downloads/missing", http.StatusNotFound},
 		{"missing cancel", http.MethodPost, "/api/v1/downloads/missing/cancel", http.StatusNotFound},
-		{"missing retry", http.MethodPost, "/api/v1/downloads/missing/retry", http.StatusNotFound},
+		{"missing retry", http.MethodPost, "/api/v1/downloads/missing/retry", http.StatusBadRequest},
 		{"action requires post", http.MethodGet, "/api/v1/downloads/missing/cancel", http.StatusNotFound},
 		{"empty item", http.MethodGet, "/api/v1/downloads//", http.StatusNotFound},
 		{"too many segments", http.MethodPost, "/api/v1/downloads/a/b/c", http.StatusNotFound},
