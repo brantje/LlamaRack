@@ -259,9 +259,9 @@ async function createModel() {
             <UInput v-model="form.first_instance.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="firstInstanceSlugEdited = true" />
           </UFormField>
           <div class="space-y-3">
-            <UCheckbox v-model="form.first_instance.always_on" data-testid="always-on" label="Always on" />
+            <UCheckbox v-model="form.first_instance.always_on" data-testid="always-on" label="Always On" description="Keep this Instance running whenever resources permit." />
             <UCheckbox v-model="form.first_instance.autoload_enabled" data-testid="autoload-enabled" label="Autoload on request" />
-            <UCheckbox v-model="form.first_instance.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" />
+            <UCheckbox v-model="form.first_instance.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" description="Allow the manager to stop this Instance when RAM/VRAM is needed for another Instance." />
           </div>
           <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" :label="remoteMode ? 'Launch this Instance when the download completes' : 'Launch this Instance after creation'" />
           <p class="text-xs text-muted">Advanced Instance settings such as priority, GPU placement, tensor split, idle timeout and instance-level llama.cpp overrides are configured from Instances.</p>
