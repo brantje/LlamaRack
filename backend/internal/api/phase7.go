@@ -116,7 +116,7 @@ func phase7RequireUser(a *auth.Service, w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return false
 	}
-	if _, err := a.SessionUser(r.Context(), cookie.Value); err != nil {
+	if _, _, err := a.SessionUserWithSession(r.Context(), cookie.Value); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return false
 	}
