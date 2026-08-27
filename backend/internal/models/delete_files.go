@@ -2,7 +2,6 @@ package models
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +10,9 @@ import (
 )
 
 var (
-	ErrArtifactShared    = errors.New("model artifact is still referenced by another registered Model")
+	ErrArtifactShared     = errors.New("model artifact is still referenced by another registered Model")
 	ErrUnsafeArtifactPath = errors.New("unsafe model artifact path")
+	removeArtifactFile    = os.Remove
 )
 
 type FileDeletePlan struct {
@@ -77,7 +77,7 @@ func (s *Service) DeleteFilesAndModel(ctx context.Context, id string, plan FileD
 		return err
 	}
 	for _, file := range fresh.files {
-		if err := os.Remove(file.absolutePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := removeArtifactFile(file.absolutePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("delete model artifact file %q: %w", file.relativePath, err)
 		}
 	}
@@ -267,7 +267,3 @@ func withinRoot(root, candidate string) bool {
 	rel, err := filepath.Rel(root, candidate)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
-
-// Compile-time guard: sql remains intentionally imported here because callers
-// use sql.ErrNoRows as the stable not-found error returned by GetByID.
-var _ = sql.ErrNoRows
