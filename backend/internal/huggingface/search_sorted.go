@@ -100,12 +100,12 @@ func discoverySort(value string) string {
 	case "downloads":
 		return "downloads"
 	case "created_at", "createdAt":
-		return "created_at"
+		return "createdAt"
 	case "last_modified", "lastModified":
-		return "last_modified"
+		return "lastModified"
 	case "trending_score", "trending", "":
-		return "trending_score"
+		return "trendingScore"
 	default:
-		return "trending_score"
+		return "trendingScore"
 	}
 }
