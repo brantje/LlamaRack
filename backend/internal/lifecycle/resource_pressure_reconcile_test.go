@@ -153,4 +153,29 @@ func TestResourceBlockedReconcileClearsStaleReasons(t *testing.T) {
 	if reason := s.resourceBlockReason(instance.ID); reason != "" {
 		t.Fatalf("Always-On reconciliation retained ready resource block: %q", reason)
 	}
+
+	// A manual stop wins over a resource-pressure retry. The block remains for
+	// the caller that owns the manual-stop state to clear, and no start occurs.
+	s.markManualStop(instance.ID)
+	s.markResourceBlock(instance.ID)
+	s.reconcileResourceBlocked(instance.ID)
+	if reason := s.resourceBlockReason(instance.ID); reason != resourcePressureReason {
+		t.Fatalf("manual-stop-suppressed reconcile changed resource block: %q", reason)
+	}
+	s.clearManualStop(instance.ID)
+	s.clearResourceBlock(instance.ID)
+
+	// Configuration/process errors are not capacity problems. Once the running
+	// worker is stopped, an unsafe Model path forces a non-resource start error;
+	// reconciliation must clear the stale pressure reason so ordinary retry/error
+	// handling can take over.
+	if err := sup.Stop(ctx, instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	execDB("UPDATE models SET gguf_path='../outside.gguf' WHERE id=?", m.ID)
+	s.markResourceBlock(instance.ID)
+	s.reconcileResourceBlocked(instance.ID)
+	if reason := s.resourceBlockReason(instance.ID); reason != "" {
+		t.Fatalf("non-resource start error retained pressure block: %q", reason)
+	}
 }
