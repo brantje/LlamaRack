@@ -40,14 +40,19 @@ function components(wrapper: any, names: string[]) {
 }
 
 function inputs(wrapper: any) { return components(wrapper, ['Input', 'UInput']) }
-function inputByAutocomplete(wrapper: any, autocomplete: string, index = 0) {
-  const matches = inputs(wrapper).filter(component => component.props('autocomplete') === autocomplete)
-  if (!matches[index]) throw new Error(`Missing input autocomplete=${autocomplete} index=${index}`)
-  return matches[index]
-}
 function button(wrapper: any, text: string) {
   const found = wrapper.findAll('button').find((candidate: any) => candidate.text().trim() === text)
   if (!found) throw new Error(`Missing button: ${text}`)
+  return found
+}
+function tableRow(wrapper: any, text: string) {
+  const found = wrapper.findAll('tr').find((candidate: any) => candidate.text().includes(text))
+  if (!found) throw new Error(`Missing table row: ${text}`)
+  return found
+}
+function rowButton(row: any, text: string) {
+  const found = row.findAll('button').find((candidate: any) => candidate.text().trim() === text)
+  if (!found) throw new Error(`Missing row button: ${text}`)
   return found
 }
 
@@ -115,7 +120,6 @@ describe('Phase 10 administration dashboard and navigation', () => {
 
     const sidebar = await mountSuspended(AdminSidebar, { route: '/admin' })
     expect(sidebar.text()).toContain('administration')
-    expect(sidebar.text()).toContain('admin')
     expect(sidebar.text()).toContain('Sign out')
     const menu = components(sidebar, ['NavigationMenu', 'UNavigationMenu'])[0]
     const labels = (menu?.props('items') || []).map((item: any) => item.label).filter(Boolean)
@@ -291,7 +295,10 @@ describe('Phase 10 users', () => {
         return users.at(-1)
       }
       if (path === '/api/v1/users') return users
-      if (path === '/api/v1/users/2' && options?.method === 'PATCH') { users[1] = { ...users[1], enabled: options.body.enabled }; return {} }
+      if (path === '/api/v1/users/2' && options?.method === 'PATCH') {
+        users = users.map(user => user.id === 2 ? { ...user, enabled: options.body.enabled } : user)
+        return {}
+      }
       if (path === '/api/v1/users/2' && options?.method === 'DELETE') { users = users.filter(user => user.id !== 2); return {} }
       if (path === '/api/v1/users/2/password' && options?.method === 'POST') return {}
       if (path === '/api/v1/users/2/sessions') return sessionRows
@@ -317,13 +324,13 @@ describe('Phase 10 users', () => {
     expect(wrapper.text()).toContain('Management user created')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/users', expect.objectContaining({ method: 'POST' }))
 
-    const disableButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Disable')
-    expect(disableButtons.length).toBeGreaterThan(0)
-    await disableButtons.at(-1)!.trigger('click')
+    let operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Disable').trigger('click')
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/2', { method: 'PATCH', body: { enabled: false } })
 
-    await button(wrapper, 'Sessions').trigger('click')
+    operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Sessions').trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('Edge on Windows')
     expect(document.body.textContent).toContain('Safari on macOS')
@@ -332,8 +339,8 @@ describe('Phase 10 users', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/sessions/s1', { method: 'DELETE' })
 
-    const resetButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Reset password')
-    await resetButtons.at(-1)!.trigger('click')
+    operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Reset password').trigger('click')
     await flushPromises()
     const modalPassword = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)
     if (modalPassword) {
@@ -345,8 +352,8 @@ describe('Phase 10 users', () => {
     modalReset?.click()
     await flushPromises()
 
-    const deleteButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Delete')
-    await deleteButtons.at(-1)!.trigger('click')
+    operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Delete').trigger('click')
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/2', { method: 'DELETE' })
     expect(initialize).not.toHaveBeenCalled()
@@ -354,7 +361,6 @@ describe('Phase 10 users', () => {
 
   it('surfaces create, session and mutation failures', async () => {
     const row = { id: 2, username: 'operator', enabled: false, created_at: 11, active_sessions: 0 }
-    let mode = 'load'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/users' && !options) return [row]
       if (path === '/api/v1/users' && options?.method === 'POST') throw new Error('create exploded')
@@ -375,13 +381,14 @@ describe('Phase 10 users', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('create exploded')
 
-    await button(wrapper, 'Sessions').trigger('click')
+    let operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Sessions').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('sessions denied')
 
-    await button(wrapper, 'Enable').trigger('click')
+    operator = tableRow(wrapper, 'operator')
+    await rowButton(operator, 'Enable').trigger('click')
     await clickConfirmation('confirm')
     expect(wrapper.text()).toContain('Unable to enable user')
-    void mode
   })
 })
