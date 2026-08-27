@@ -71,13 +71,13 @@ func TestBootstrapLoginSessionLogout(t *testing.T) {
 	if err := s.ValidateCSRF(ctx, token, "wrong"); !errors.Is(err, ErrCSRFInvalid) {
 		t.Fatalf("expected invalid csrf, got %v", err)
 	}
-	if _, err := s.SessionUser(ctx, "bogus"); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := s.SessionUserWithSession(ctx, "bogus"); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("expected invalid session")
 	}
 	if err := s.Logout(ctx, token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SessionUser(ctx, token); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := s.SessionUserWithSession(ctx, token); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("session should be revoked")
 	}
 }
@@ -121,7 +121,7 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if err := s.SetUserEnabled(ctx, other.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SessionUser(ctx, otherToken); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := s.SessionUserWithSession(ctx, otherToken); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("disabled user sessions should be revoked")
 	}
 	if err := s.SetUserEnabled(ctx, other.ID, true); err != nil {
@@ -135,7 +135,7 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if err := s.ResetPassword(ctx, other.ID, "reset-password-long"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SessionUser(ctx, otherToken); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := s.SessionUserWithSession(ctx, otherToken); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("password reset should revoke target sessions")
 	}
 	if _, _, _, err := s.LoginWithMetadata(ctx, "operator", "another-correct-password", "", ""); !errors.Is(err, ErrInvalidCredentials) {
@@ -152,10 +152,10 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if err := s.ChangePassword(ctx, adminLoggedIn.ID, "correct-horse-battery", "new-correct-password", adminSession.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SessionUser(ctx, adminToken); err != nil {
+	if _, _, err := s.SessionUserWithSession(ctx, adminToken); err != nil {
 		t.Fatalf("current session should remain: %v", err)
 	}
-	if _, err := s.SessionUser(ctx, secondAdminToken); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := s.SessionUserWithSession(ctx, secondAdminToken); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatal("other session should be revoked")
 	}
 
@@ -239,8 +239,20 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 		t.Fatalf("replacement should authenticate: %v", err)
 	}
 	keys, err = s.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 2 || keys[1].RevokedAt == nil {
+	if err != nil || len(keys) != 2 {
 		t.Fatalf("rotation history=%+v err=%v", keys, err)
+	}
+	var originalEntry, replacementEntry *APIKey
+	for i := range keys {
+		switch keys[i].ID {
+		case key.ID:
+			originalEntry = &keys[i]
+		case replacement.ID:
+			replacementEntry = &keys[i]
+		}
+	}
+	if originalEntry == nil || originalEntry.RevokedAt == nil || originalEntry.Enabled || replacementEntry == nil || replacementEntry.RevokedAt != nil || !replacementEntry.Enabled {
+		t.Fatalf("rotation state=%+v", keys)
 	}
 	if err := s.SetAPIKeyEnabled(ctx, key.ID, true); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("revoked key cannot be enabled: %v", err)
@@ -252,8 +264,13 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 		t.Fatal("revoked replacement should fail")
 	}
 	keys, err = s.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 2 || keys[0].RevokedAt == nil {
+	if err != nil || len(keys) != 2 {
 		t.Fatalf("revoked history should remain: %+v err=%v", keys, err)
+	}
+	for _, item := range keys {
+		if item.RevokedAt == nil || item.Enabled {
+			t.Fatalf("all historical keys should be revoked: %+v", keys)
+		}
 	}
 }
 
