@@ -36,11 +36,11 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<ConfigResponse | null>(null)
 
-const protectedKeys = new Set(['model', 'host', 'port', 'device', 'tensor-split', 'split-mode', 'main-gpu'])
+const protectedKeys = new Set(['model', 'host', 'port', 'device', 'split-mode', 'main-gpu'])
 const basicKeys = new Set([
   'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
   'parallel', 'flash-attn', 'jinja', 'reasoning-format', 'reasoning-budget', 'embeddings', 'reranking',
-  'cache-type-k', 'cache-type-v', 'kv-unified', 'spec-type', 'draft-max', 'draft-min'
+  'cache-type-k', 'cache-type-v', 'kv-unified', 'spec-type', 'draft-max', 'draft-min', 'tensor-split'
 ])
 
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
