@@ -42,7 +42,8 @@ describe('Discover formatting and URL branches', () => {
       { id: 'acme/million', downloads: 1, likes: 1, parameter_count: 1_500_000, last_modified: new Date(now - 2 * 3600_000).toISOString(), private: false, gated: false },
       { id: 'acme/billion', downloads: 1, likes: 1, parameter_count: 2_000_000_000, last_modified: new Date(now - 2 * 86400_000).toISOString(), private: false, gated: false },
       { id: 'acme/trillion', downloads: 1, likes: 1, parameter_count: 1_500_000_000_000, last_modified: old.toISOString(), private: false, gated: false },
-      { id: 'acme/unknown', downloads: 1, likes: 1, parameter_count: 0, last_modified: 'not-a-date', private: false, gated: false }
+      { id: 'acme/unknown', downloads: 1, likes: 1, parameter_count: 0, last_modified: 'not-a-date', private: false, gated: false },
+      { id: 'acme/missing-meta', downloads: 1, likes: 1, private: false, gated: false }
     ]
     mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? results : [])
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
