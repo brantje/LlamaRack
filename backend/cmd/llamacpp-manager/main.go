@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -128,7 +126,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("resume downloads: %w", err)
 	}
 
-	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
+	apiServer := api.New(modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
 	hardwareDetector := hardware.New()
 	allowedOrigins, _ := managerSettings.String(ctx, settings.AllowedOrigins)
@@ -234,43 +232,6 @@ func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handl
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// cors and originAllowed remain for focused compatibility tests and callers that need a
-// fixed-origin wrapper. Runtime uses dynamicCORS so database settings take effect without restart.
-func cors(allowedOrigins string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" && originAllowed(origin, r.Host, allowedOrigins) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		}
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func originAllowed(origin, requestHost, configured string) bool {
-	for _, allowed := range strings.Split(configured, ",") {
-		if strings.TrimSpace(allowed) == origin {
-			return true
-		}
-	}
-	originURL, err := url.Parse(origin)
-	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
-		return false
-	}
-	requestURL, err := url.Parse("http://" + requestHost)
-	if err != nil || requestURL.Hostname() == "" {
-		return false
-	}
-	return strings.EqualFold(originURL.Hostname(), requestURL.Hostname())
 }
 
 func healthcheck() {
