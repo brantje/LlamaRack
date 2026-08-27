@@ -69,7 +69,7 @@ func TestReconcileQueuedImportAndUnclaimableCompletedDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,error,created_at,updated_at) VALUES('queued-job','huggingface','acme/demo','rev','a','pending.gguf',?,'old',unixepoch(),unixepoch())`, downloads.StateQueued)
+	_, err = db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,error,created_at,updated_at) VALUES('queued-job','huggingface','acme/demo','rev','a','pending.gguf',?,'',unixepoch(),unixepoch())`, downloads.StateQueued)
 	if err != nil {
 		t.Fatal(err)
 	}
