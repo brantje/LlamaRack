@@ -45,11 +45,12 @@ The scheduler must:
 - prefer one GPU when the Instance safely fits on one device;
 - support automatic/manual tensor split;
 - estimate memory conservatively;
-- protect Always-On Instances from normal eviction;
-- independently protect non-Always-On Instances when `eviction_enabled=false`;
+- treat Always On as desired lifecycle state rather than eviction protection;
+- use `eviction_enabled` as the source of truth for normal resource-pressure protection;
 - use Instance priority and LRU/resource benefit for eviction ordering;
 - avoid overcommitting resources during concurrent starts;
-- expose understandable scheduling decisions.
+- expose understandable scheduling decisions;
+- avoid eviction/restart oscillation when an eviction-enabled Always-On Instance is displaced.
 
 ## 4. Non-goals for v1
 
@@ -99,7 +100,8 @@ The scheduler must:
 - active/queued request counts;
 - last-used time;
 - lifecycle state;
-- pending reservations.
+- pending reservations;
+- resource-pressure-blocked desired state where applicable.
 
 ## 6. Resource estimation
 
@@ -176,6 +178,8 @@ Reservations:
 - convert to observed allocation after successful startup;
 - are reconstructed conservatively after manager restart rather than persisted as live truth.
 
+Resource-pressure-blocked Always-On reconciliation must also respect pending/committed starts. It must not reclaim capacity during the gap between victim stop and requester startup.
+
 ## 11. Explicit GPU assignment
 
 Manual placement must be honored exactly.
@@ -230,29 +234,31 @@ It does not imply per-request priority inside a running llama.cpp worker.
 
 ## 15. Always-On and eviction protection
 
-These are separate Instance properties.
+These are independent Instance properties.
 
 ### Always On
 
-`always_on=true` means that exact Instance is reconciled toward running/READY state, except during session-local manual-stop suppression.
+`always_on=true` means that exact Instance is reconciled toward running/READY state whenever resources permit, except during session-local manual-stop suppression.
 
-Normal resource-pressure eviction must not select an Always-On Instance.
+Always On does **not** make the Instance ineligible for normal resource-pressure eviction.
 
 ### Resource-pressure eviction
 
-`eviction_enabled=false` means that loaded Instance is protected from normal resource-pressure eviction.
+`eviction_enabled` is the source of truth for normal resource-pressure protection:
 
-Important supported combination:
+- `eviction_enabled=true` — the Instance may be selected when all ordinary victim rules are satisfied;
+- `eviction_enabled=false` — the loaded Instance is protected from normal resource-pressure eviction.
 
-```text
-Always On: false
-Autoload on request: true
-Allow resource-pressure eviction: false
-```
+Supported policy matrix:
 
-Meaning:
+| Always On | Allow resource-pressure eviction | Meaning |
+| --- | --- | --- |
+| false | true | Start manually/on demand; may be evicted when eligible. |
+| false | false | Start manually/on demand; protected from normal resource-pressure eviction while loaded. |
+| true | true | Keep desired-running whenever resources permit; may be temporarily evicted and then reconciled non-preemptively. |
+| true | false | Keep desired-running and protect from normal resource-pressure eviction. |
 
-> Start this Instance on demand, but once loaded, protect this exact Instance from normal RAM/VRAM-pressure eviction.
+Autoload remains independent from both properties.
 
 ## 16. Eviction eligibility
 
@@ -260,11 +266,12 @@ An Instance is normally eligible only when:
 
 - READY;
 - `eviction_enabled=true`;
-- not Always On;
 - no active inference requests;
 - not already DRAINING/STOPPING;
 - not pinned by another management operation;
-- stopping it does not violate another explicit constraint.
+- stopping it does not violate another explicit hard constraint.
+
+`always_on` is **not** an eviction-eligibility exclusion and does not alter ranking. If an Always-On Instance is otherwise eligible, it participates in the same priority/LRU/resource-benefit ordering as any other victim.
 
 V1 does not forcibly evict active generation for ordinary pressure.
 
@@ -280,6 +287,8 @@ Combine:
 Prefer one suitable victim over several equivalent smaller victims when practical.
 
 A deterministic greedy algorithm is acceptable in v1.
+
+Always On does not add a ranking bonus or penalty. Its effect is lifecycle reconciliation after eviction, not victim ordering.
 
 ## 18. Multiple victims
 
@@ -306,6 +315,8 @@ If two stopped Instances request start and only one fits:
 - equal priority can use FIFO/start-request time;
 - avoid canceling a committed expensive plan merely because another equal request appears.
 
+An Always-On victim that was evicted for a committed start must not immediately compete to reclaim the just-freed capacity. Its automatic recovery is temporarily non-preemptive.
+
 ## 21. Manual launch warning
 
 A user-initiated Launch that may require eviction must show a confirmation explaining that other idle Instances may be stopped automatically according to configured policy.
@@ -322,15 +333,20 @@ Scheduler returns a plan; lifecycle executes it.
 
 For Phase 7 `PLACE_AFTER_EVICTION`:
 
-1. scheduler reserves capacity and returns target placement + victims;
+1. scheduler reserves/commits capacity and returns target placement + victims;
 2. lifecycle revalidates victim eligibility;
-3. lifecycle drains/stops victims;
-4. hardware state is refreshed;
-5. scheduler confirms the target placement;
-6. supervisor starts the requested Instance using explicit placement;
-7. reservation converts/releases based on outcome.
+3. lifecycle marks any Always-On victim as desired-running but `resource_pressure`-blocked;
+4. lifecycle drains/stops victims;
+5. hardware state is refreshed;
+6. scheduler confirms the target placement;
+7. supervisor starts the requested Instance using explicit placement;
+8. reservation converts/releases based on outcome.
 
 If a victim becomes active before drain, re-plan.
+
+For an evicted Always-On victim, normal Always-On reconciliation must preserve desired state but use a no-eviction retry while `resource_pressure`-blocked. If current capacity is still insufficient, it remains unloaded and blocked. Once it fits without displacing another Instance, lifecycle starts it and clears the block.
+
+An explicit user Launch or targeted inference request may override this temporary non-preemptive block and use normal scheduling policy.
 
 ## 23. Startup failure
 
@@ -339,10 +355,12 @@ If requested Instance startup fails:
 - release reservation;
 - refresh hardware state;
 - keep the Instance configured;
-- do not automatically restart evicted Instances unless their own lifecycle policy requires it;
+- allow evicted Instances to follow their own lifecycle policy;
 - preserve failure reason for the requested Instance.
 
-A failed new start may therefore leave previously evicted idle Instances stopped.
+An evicted Always-On Instance may therefore return once capacity is genuinely available, but its automatic retry must not cause an immediate eviction/restart loop.
+
+A failed new start may leave ordinary evicted idle Instances stopped.
 
 ## 24. OOM handling
 
@@ -385,9 +403,15 @@ The Instance control plane should eventually expose:
 - selected GPU(s);
 - whether automatic placement chose one GPU or multi-GPU;
 - fit/cannot-fit reason;
-- eviction protection state;
+- Always-On desired-state policy;
+- resource-pressure eviction protection state;
 - possible eviction consequence for manual Launch;
 - observed resource usage where available.
+
+The configuration copy must make the independence explicit:
+
+- **Always On** — Keep this Instance running whenever resources permit.
+- **Allow resource-pressure eviction** — Allow the manager to stop this Instance when RAM/VRAM is needed for another Instance.
 
 Do not put these operational fields on the `/models` table.
 
@@ -400,7 +424,7 @@ Expose metrics such as:
 - eviction count by Instance priority/reason;
 - scheduling duration;
 - estimate vs observed error;
-- unsatisfied Always-On Instance count.
+- unsatisfied/resource-pressure-blocked Always-On Instance count.
 
 Avoid uncontrolled high-cardinality labels.
 
@@ -411,21 +435,30 @@ Avoid uncontrolled high-cardinality labels.
 3. Pending reservations reduce schedulable capacity.
 4. Manual GPU assignment is never silently rewritten.
 5. Automatic placement is single-GPU first.
-6. Always-On Instances are not normal eviction victims.
-7. `eviction_enabled=false` protects that exact Instance.
-8. Active requests protect an Instance from normal eviction.
-9. Eviction execution before target load is a Phase 7 responsibility.
-10. Model rows do not own scheduler/lifecycle policy.
+6. Always On is desired lifecycle state, not normal eviction protection.
+7. `eviction_enabled=false` protects that exact Instance regardless of Always On.
+8. `eviction_enabled=true` allows an otherwise eligible Always-On Instance to be selected and ranked normally.
+9. Active requests protect an Instance from normal eviction.
+10. An evicted Always-On Instance does not immediately preempt another Instance during automatic reconciliation.
+11. Eviction execution before target load is a Phase 7 responsibility.
+12. Model rows do not own scheduler/lifecycle policy.
 
 ## 30. Acceptance criteria
 
 Tests/spec behavior demonstrate:
 
 - two sibling Instances can have different priorities/eviction policies;
+- all four `always_on` × `eviction_enabled` combinations behave independently;
 - a non-Always-On protected Instance is not selected as a victim;
-- an Always-On Instance is not normally evicted;
+- an eviction-disabled Always-On Instance is not selected as a victim;
+- an eviction-enabled Always-On Instance can be selected as an idle victim;
+- Always On does not alter victim ranking;
 - active requests pin an Instance;
 - lower-priority idle Instances are preferred victims;
+- an evicted Always-On Instance remains desired-running but resource-pressure-blocked;
+- automatic reconciliation of a resource-pressure-blocked Always-On Instance does not evict the requester that displaced it;
+- the blocked Instance starts automatically when sufficient uncommitted capacity returns;
+- manual-stop suppression remains separate from resource-pressure blocking;
 - automatic placement chooses one GPU when one safely fits;
 - multi-GPU is considered only when needed or manually requested;
 - missing manually assigned GPUs fail safely;
