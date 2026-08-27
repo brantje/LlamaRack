@@ -50,15 +50,25 @@ type File struct {
 	OID  string `json:"oid,omitempty"`
 }
 
+type ArtifactDependency struct {
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	Quantization string `json:"quantization,omitempty"`
+	TotalBytes   int64  `json:"total_bytes"`
+	Files        []File `json:"files"`
+}
+
 type Artifact struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Quantization   string `json:"quantization,omitempty"`
-	TotalBytes     int64  `json:"total_bytes"`
-	ShardCount     int    `json:"shard_count"`
-	ExpectedShards int    `json:"expected_shards"`
-	Complete       bool   `json:"complete"`
-	Files          []File `json:"files"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Quantization   string               `json:"quantization,omitempty"`
+	ModelBytes     int64                `json:"model_bytes"`
+	TotalBytes     int64                `json:"total_bytes"`
+	ShardCount     int                  `json:"shard_count"`
+	ExpectedShards int                  `json:"expected_shards"`
+	Complete       bool                 `json:"complete"`
+	Files          []File               `json:"files"`
+	Dependencies   []ArtifactDependency `json:"dependencies,omitempty"`
 }
 
 type ModelDetail struct {
@@ -254,6 +264,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 
 func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 	type group struct {
+		key      string
 		name     string
 		expected int
 		files    []File
@@ -280,7 +291,7 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 		}
 		g := groups[key]
 		if g == nil {
-			g = &group{name: name, expected: expected}
+			g = &group{key: key, name: name, expected: expected}
 			groups[key] = g
 		}
 		if expected > g.expected {
@@ -288,28 +299,72 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 		}
 		g.files = append(g.files, file)
 	}
+
 	keys := make([]string, 0, len(groups))
 	for key := range groups {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	out := make([]Artifact, 0, len(keys))
+
+	sidecars := map[string][]ArtifactDependency{"mmproj": {}, "mtp": {}}
+	mainGroups := make([]*group, 0, len(keys))
 	for _, key := range keys {
 		g := groups[key]
 		sort.Slice(g.files, func(i, j int) bool { return g.files[i].Path < g.files[j].Path })
+		expected := g.expected
+		if expected <= 0 {
+			expected = len(g.files)
+		}
+		kind := sidecarKind(g.name)
+		if kind == "" {
+			mainGroups = append(mainGroups, g)
+			continue
+		}
+		if len(g.files) != expected {
+			continue
+		}
 		var total int64
 		for _, file := range g.files {
 			total += file.Size
+		}
+		sidecars[kind] = append(sidecars[kind], ArtifactDependency{
+			Kind: kind, Name: g.name, Quantization: detectQuantization(g.name), TotalBytes: total,
+			Files: append([]File(nil), g.files...),
+		})
+	}
+	for kind := range sidecars {
+		sort.Slice(sidecars[kind], func(i, j int) bool { return sidecars[kind][i].Name < sidecars[kind][j].Name })
+	}
+
+	out := make([]Artifact, 0, len(mainGroups))
+	for _, g := range mainGroups {
+		var modelBytes int64
+		for _, file := range g.files {
+			modelBytes += file.Size
 		}
 		expected := g.expected
 		if expected <= 0 {
 			expected = len(g.files)
 		}
-		out = append(out, Artifact{
-			ID: artifactID(repoID, revision, key), Name: g.name, Quantization: detectQuantization(g.name),
-			TotalBytes: total, ShardCount: len(g.files), ExpectedShards: expected,
+		artifact := Artifact{
+			ID: artifactID(repoID, revision, g.key), Name: g.name, Quantization: detectQuantization(g.name),
+			ModelBytes: modelBytes, TotalBytes: modelBytes, ShardCount: len(g.files), ExpectedShards: expected,
 			Complete: len(g.files) == expected, Files: append([]File(nil), g.files...),
-		})
+		}
+		if !artifact.Complete {
+			out = append(out, artifact)
+			continue
+		}
+		for _, kind := range []string{"mmproj", "mtp"} {
+			dependency, ok := selectDependency(kind, artifact.Quantization, sidecars[kind])
+			if !ok {
+				continue
+			}
+			artifact.Dependencies = append(artifact.Dependencies, dependency)
+			artifact.Files = append(artifact.Files, dependency.Files...)
+			artifact.TotalBytes += dependency.TotalBytes
+		}
+		out = append(out, artifact)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Quantization == out[j].Quantization {
@@ -318,6 +373,45 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 		return out[i].Quantization < out[j].Quantization
 	})
 	return out
+}
+
+func sidecarKind(name string) string {
+	base := strings.ToLower(strings.TrimSuffix(path.Base(name), path.Ext(name)))
+	for _, prefix := range []string{"mmproj", "mmoproj", "projector"} {
+		if base == prefix || strings.HasPrefix(base, prefix+"-") || strings.HasPrefix(base, prefix+"_") || strings.HasPrefix(base, prefix+".") {
+			return "mmproj"
+		}
+	}
+	if base == "mtp" || strings.HasPrefix(base, "mtp-") || strings.HasPrefix(base, "mtp_") || strings.HasPrefix(base, "mtp.") {
+		return "mtp"
+	}
+	return ""
+}
+
+func selectDependency(kind, targetQuant string, candidates []ArtifactDependency) (ArtifactDependency, bool) {
+	if len(candidates) == 0 {
+		return ArtifactDependency{}, false
+	}
+	targetQuant = strings.ToUpper(strings.TrimSpace(targetQuant))
+	if targetQuant != "" {
+		for _, candidate := range candidates {
+			if strings.EqualFold(candidate.Quantization, targetQuant) {
+				return candidate, true
+			}
+		}
+	}
+	preferences := []string{"F16", "BF16", "Q8_0", "Q4_K_M", "Q4_0"}
+	if kind == "mtp" {
+		preferences = []string{"Q4_0", "Q4_K_M", "Q8_0", "F16", "BF16"}
+	}
+	for _, preferred := range preferences {
+		for _, candidate := range candidates {
+			if strings.EqualFold(candidate.Quantization, preferred) {
+				return candidate, true
+			}
+		}
+	}
+	return candidates[0], true
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, dst any) error {
