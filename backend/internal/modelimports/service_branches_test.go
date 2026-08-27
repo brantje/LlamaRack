@@ -200,7 +200,7 @@ func TestHelperBranches(t *testing.T) {
 	if got := defaultModelName("single", "", "fallback.gguf"); got != "fallback" {
 		t.Fatalf("fallback model name=%q", got)
 	}
-	if got := defaultModelName("acme/demo", "", ""); got != "demo" {
+	if got := defaultModelName("acme/demo", "", "   "); got != "demo" {
 		t.Fatalf("repo fallback=%q", got)
 	}
 	if boolInt(false) != 0 || boolInt(true) != 1 || nullable("") != nil || nullable("x") != "x" {
