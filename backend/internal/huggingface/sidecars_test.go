@@ -48,8 +48,11 @@ func TestGroupArtifactsPrefersMatchingSidecarQuantization(t *testing.T) {
 	}
 }
 
-func TestSidecarClassificationIsPrefixBased(t *testing.T) {
-	for _, name := range []string{"mmproj-F16.gguf", "mmoproj_model.gguf", "projector.vision.gguf"} {
+func TestSidecarClassificationPreservesProjectorRulesAndConservativeMTP(t *testing.T) {
+	for _, name := range []string{
+		"mmproj-F16.gguf", "mmoproj_model.gguf", "projector.vision.gguf",
+		"asda-projector-Q4_K_M.gguf", "multimodal-mmproj-compatible.gguf", "vision/projector/model.gguf",
+	} {
 		if got := sidecarKind(name); got != "mmproj" {
 			t.Fatalf("sidecarKind(%q) = %q", name, got)
 		}
@@ -59,10 +62,8 @@ func TestSidecarClassificationIsPrefixBased(t *testing.T) {
 			t.Fatalf("sidecarKind(%q) = %q", name, got)
 		}
 	}
-	for _, name := range []string{"asda-projector-Q4_K_M.gguf", "model-MTP-Q4_K_M.gguf", "multimodal-mmproj-compatible.gguf"} {
-		if got := sidecarKind(name); got != "" {
-			t.Fatalf("normal model %q classified as %q", name, got)
-		}
+	if got := sidecarKind("model-MTP-Q4_K_M.gguf"); got != "" {
+		t.Fatalf("embedded-MTP main model classified as %q", got)
 	}
 }
 
