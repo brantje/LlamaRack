@@ -41,7 +41,7 @@ A production/release migration policy can be introduced before schema backward c
 - High-frequency metrics are not permanently relational by default.
 - Secrets remain separate from normal settings.
 - Raw GGUF files remain the source of truth for embedded model metadata.
-- Rich GGUF metadata must not require one relational column per GGUF key.
+- Arbitrary GGUF metadata must not require one relational column per metadata key.
 
 ## 4. Core entities
 
@@ -75,30 +75,26 @@ Fields include:
 - checksum if known;
 - provider/source metadata;
 - quantization;
-- architecture/parameter/context metadata where known;
+- architecture/parameter/context summary metadata where known and useful;
 - completion state;
 - timestamps.
 
 Split GGUFs remain one logical artifact with multiple Artifact File rows.
 
-Phase 9 adds a shared GGUF inspection result/cache associated with the logical artifact. The raw GGUF remains authoritative; the cache is a performance/normalization layer.
+Phase 9 adds a shared GGUF inspection/cache associated with the logical artifact. The raw GGUF remains authoritative; the cache is only a performance layer for metadata inspection and derived product values.
 
-The metadata cache should include conceptually:
+The cache should conceptually include:
 
 - inspector schema/version;
 - artifact/shard fingerprint used to detect staleness;
-- GGUF format/version summary;
-- normalized architecture/context/attention/RoPE/SWA/MoE/tokenizer/capability facts;
-- parameter count;
-- declared/detected quantization and tensor-type composition summary;
-- per-layer/non-layer encoded-size summary where available;
-- raw typed metadata representation or a versioned serialized form that permits every key to be exposed;
-- inspection warnings/confidence;
+- GGUF format/version;
+- raw GGUF metadata entries preserving key, value type and value representation;
+- inspection warnings/status;
 - inspected timestamp.
 
-Do **not** create a relational column for every arbitrary GGUF metadata key. Frequently queried product fields such as context capability, architecture, parameter count or quantization may be promoted to dedicated columns when useful, while the full raw metadata remains in a flexible versioned representation.
+Do **not** create a relational column for every arbitrary GGUF metadata key. Frequently queried product fields such as Context capability or other values required by recommendation logic may be stored separately when useful, but the generic metadata view must not depend on a hard-coded database schema for each GGUF key.
 
-Large metadata arrays such as tokenizer tokens/merges must not require eager in-memory/JSON materialization merely because they exist in the GGUF. The persisted/API representation may index or lazily expose these values as long as every key remains inspectable.
+Large metadata arrays may use a bounded/lazy representation as long as every metadata key remains inspectable.
 
 ### 4.4 Model
 
@@ -118,9 +114,7 @@ Model-derived summary data may expose:
 - size;
 - quantization;
 - context capability;
-- architecture;
-- parameter count;
-- metadata inspection status/confidence.
+- basic GGUF inspection status.
 
 A Model does **not** contain runtime/lifecycle policy such as:
 
@@ -264,7 +258,7 @@ Direct Instance edits that change the desired fingerprint trigger the controlled
 
 Changes to inherited Model/global defaults may mark affected running Instances as needing restart until the relevant UI flow applies them.
 
-The GGUF metadata-cache fingerprint is separate from the Instance launch fingerprint. It only determines whether cached artifact inspection still describes the current local shard set.
+The GGUF metadata-cache fingerprint is separate from the Instance launch fingerprint. It only determines whether cached metadata still describes the current local artifact/shard set.
 
 ## 6. Derived views
 
@@ -285,18 +279,15 @@ Do not mix Instance runtime state into the Models table.
 
 For `/models/:id/details`:
 
-- Model identity and artifact/shard summary;
-- normalized GGUF metadata;
-- architecture/context/attention/RoPE/SWA/MoE/tokenizer/capability facts;
-- parameter count and tensor-type composition;
-- hardware recommendation/estimate data;
-- searchable access to all raw GGUF metadata;
-- searchable/paginated tensor descriptors;
-- metadata warnings/confidence.
+- a compact Model/GGUF summary;
+- GGUF version/count/status where available;
+- searchable access to the GGUF metadata entries as generic `key / type / value` data;
+- all metadata keys, including manager-unknown keys;
+- bounded/lazy expansion for large metadata values.
 
-This remains a Model/artifact management view. Instance lifecycle/runtime state does not move here.
+This is intentionally generic. The data model does not require separate architecture/tokenizer/MoE/etc. detail structures merely to render this page.
 
-Large raw metadata arrays and tensor descriptor collections are exposed through bounded/lazy API views rather than one unbounded response.
+Instance lifecycle/runtime state does not move to Model details.
 
 ### Instance summary
 
@@ -322,13 +313,13 @@ The Model creation UI may collect only these Instance-specific settings:
 - Allow resource-pressure eviction;
 - whether to start immediately.
 
-Before Model save, Phase 9 may inspect the selected local GGUF and pre-fill Model/artifact fields such as Context capability. Detected user-facing values remain editable. Failure to inspect metadata does not by itself block Model creation and must not erase an explicitly entered Context capability.
+Before Model save, Phase 9 may inspect the selected local GGUF and pre-fill Model fields such as Context capability. Detected user-facing values remain editable. Failure to inspect metadata does not by itself block Model creation and must not erase an explicitly entered Context capability.
 
 The backend must:
 
 1. validate/inspect the selected logical GGUF artifact where possible;
 2. create the Model;
-3. persist accepted Model metadata/cache information;
+3. persist accepted Model metadata/cache information where configured;
 4. slugify Instance name to `instance.id` when first-Instance bootstrap was requested;
 5. validate uniqueness;
 6. create the Instance;
@@ -354,7 +345,7 @@ Durable multi-row operations should be transactional where practical.
 Examples:
 
 - creating a Model plus its optional first Instance definition;
-- persisting Model metadata summary/cache alongside successful Model registration;
+- persisting Model metadata/cache information alongside successful Model registration;
 - duplicating an Instance and its override rows;
 - updating an Instance name/ID plus related foreign-key references if the schema requires it;
 - marking download completion and artifact files.
@@ -391,7 +382,7 @@ V1 does not persist by default:
 - indefinite request traces;
 - indefinite high-frequency GPU telemetry.
 
-Rich GGUF metadata is an exception to the general preference against arbitrary blobs because it is deterministic artifact metadata used for model management/recommendations. It must remain versioned/bounded and must not include tensor payloads.
+GGUF metadata cache, when used, contains artifact metadata only and must never contain tensor payload data.
 
 ## 13. Invariants
 
@@ -426,8 +417,8 @@ The data model is adequate when it can represent:
 - a failed first-Instance launch without deleting its Model;
 - stale PID/port state discarded after manager restart;
 - split GGUF artifacts and resumable downloads;
-- a versioned GGUF inspection/cache containing normalized metadata plus access to all raw metadata keys;
-- parameter/tensor summaries aggregated across a complete split GGUF without storing tensor payloads;
+- a versioned GGUF metadata inspection/cache preserving generic key/type/value data;
+- manager-derived values such as Context capability without requiring a schema field for every GGUF metadata key;
 - cache invalidation when the local artifact/shard fingerprint changes;
-- `/models/:id/details` data without adding Instance runtime state to the Model;
+- `/models/:id/details` generic metadata data without adding Instance runtime state to the Model;
 - no development migration file for the active-development schema rewrite.
