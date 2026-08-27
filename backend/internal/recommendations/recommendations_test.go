@@ -13,12 +13,12 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 )
 
-func TestAnalyzeFullPartialCPUAndTotalFit(t *testing.T) {
+func TestAnalyzeFullPartialHybridCPUAndTotalFit(t *testing.T) {
 	gib := int64(1024 * 1024 * 1024)
-	model := models.Model{ID: "m1", TotalBytes: 4 * gib, Quantization: "Q4_K_M"}
+	model := models.Model{ID: "m1", TotalBytes: 4 * gib, Quantization: "Q4_K_M", ContextLength: 262144}
 	metaPath := writeGGUF(t, map[string]any{
 		"general.architecture": "llama",
-		"llama.context_length": int64(8192),
+		"llama.context_length": int64(262144),
 		"llama.block_count": int64(32),
 		"llama.embedding_length": int64(4096),
 		"llama.attention.head_count": int64(32),
@@ -26,7 +26,7 @@ func TestAnalyzeFullPartialCPUAndTotalFit(t *testing.T) {
 	})
 
 	full := Analyze(model, metaPath, hardware.Snapshot{RAMAvailableBytes: 16 * gib, RAMTotalBytes: 32 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib, TotalBytes: 8 * gib}}}, 4096, nil)
-	if !full.CurrentFit || full.Offload.Mode != "full" || full.Offload.GPULayers != 32 || full.Confidence != "high" || full.Memory.KVCacheBytes <= 0 || full.ContextAssumed {
+	if !full.CurrentFit || full.Offload.Mode != "full" || !full.Offload.KVOnGPU || full.Offload.GPULayers != 32 || full.Confidence != "high" || full.Memory.KVCacheBytes <= 0 || full.ContextAssumed || full.ContextCapability != 262144 {
 		t.Fatalf("unexpected full recommendation: %+v", full)
 	}
 	if !strings.Contains(full.Quantization.Summary, "Balanced") {
@@ -34,12 +34,17 @@ func TestAnalyzeFullPartialCPUAndTotalFit(t *testing.T) {
 	}
 
 	partial := Analyze(model, metaPath, hardware.Snapshot{RAMAvailableBytes: 16 * gib, RAMTotalBytes: 32 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * gib, TotalBytes: 8 * gib}}}, 4096, nil)
-	if partial.CurrentFit || partial.Offload.Mode != "partial" || partial.Offload.GPULayers <= 0 || !partial.TotalHardwareFit {
+	if !partial.CurrentFit || partial.Offload.Mode != "partial" || !partial.Offload.KVOnGPU || partial.Offload.GPULayers <= 0 || !partial.TotalHardwareFit {
 		t.Fatalf("unexpected partial recommendation: %+v", partial)
 	}
 
+	hybrid := Analyze(model, metaPath, hardware.Snapshot{RAMAvailableBytes: 16 * gib, RAMTotalBytes: 32 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib, TotalBytes: 8 * gib}}}, 65536, nil)
+	if !hybrid.CurrentFit || hybrid.Offload.Mode != "hybrid" || hybrid.Offload.KVOnGPU || hybrid.Offload.GPULayers != 32 || hybrid.Offload.Devices[0] != "CUDA0" {
+		t.Fatalf("unexpected hybrid recommendation: %+v", hybrid)
+	}
+
 	cpu := Analyze(model, metaPath, hardware.Snapshot{RAMAvailableBytes: 8 * gib, RAMTotalBytes: 16 * gib}, 0, errors.New("gpu probe failed"))
-	if !cpu.CurrentFit || !cpu.CPUFit || cpu.Offload.Mode != "cpu" || cpu.ContextLength != 8192 || cpu.HardwareWarning == "" {
+	if !cpu.CurrentFit || !cpu.CPUFit || cpu.Offload.Mode != "cpu" || cpu.ContextLength != defaultContext || !cpu.ContextAssumed || cpu.ContextCapability != 262144 || cpu.HardwareWarning == "" {
 		t.Fatalf("unexpected cpu recommendation: %+v", cpu)
 	}
 }
@@ -53,29 +58,47 @@ func TestRecommendationDecisionBranches(t *testing.T) {
 		{ID: "CUDA0", FreeBytes: 6 * gib, TotalBytes: 6 * gib},
 		{ID: "CUDA1", FreeBytes: 6 * gib, TotalBytes: 6 * gib},
 	}}, memory, m)
-	if !fit || multi.Mode != "multi_gpu" || len(multi.Devices) != 2 || multi.TensorSplit == "" {
+	if !fit || multi.Mode != "multi_gpu" || !multi.KVOnGPU || len(multi.Devices) != 2 || multi.TensorSplit == "" {
 		t.Fatalf("multi=%+v fit=%v", multi, fit)
 	}
 
-	_, partialUnknownLayers := recommendOffload(hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * gib, TotalBytes: 8 * gib}}}, estimateMemory(4*gib, 4096, Metadata{}), Metadata{})
-	if partialUnknownLayers.Mode != "partial" || partialUnknownLayers.GPULayers != 0 {
-		t.Fatalf("partial without block count=%+v", partialUnknownLayers)
+	fit, partialUnknownLayers := recommendOffload(hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * gib, TotalBytes: 8 * gib}}}, estimateMemory(4*gib, 4096, Metadata{}), Metadata{})
+	if !fit || partialUnknownLayers.Mode != "partial" || !partialUnknownLayers.KVOnGPU || partialUnknownLayers.GPULayers != 0 {
+		t.Fatalf("partial without block count=%+v fit=%v", partialUnknownLayers, fit)
+	}
+
+	largeContext := estimateMemory(4*gib, 65536, Metadata{BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8})
+	fit, hybrid := recommendOffload(hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib, TotalBytes: 8 * gib}}}, largeContext, Metadata{BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8})
+	if !fit || hybrid.Mode != "hybrid" || hybrid.KVOnGPU || hybrid.GPULayers != 32 {
+		t.Fatalf("hybrid=%+v fit=%v", hybrid, fit)
+	}
+
+	fit, tinyGPUCPU := recommendOffload(hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 128 * mib, TotalBytes: 8 * gib}}}, memory, m)
+	if !fit || tinyGPUCPU.Mode != "cpu" {
+		t.Fatalf("tiny gpu cpu fallback=%+v fit=%v", tinyGPUCPU, fit)
 	}
 
 	fit, noVRAM := recommendOffload(hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 128 * mib, TotalBytes: 8 * gib}}}, memory, m)
 	if fit || noVRAM.Mode != "cpu" {
 		t.Fatalf("no vram=%+v fit=%v", noVRAM, fit)
 	}
+
+	lowHeadroom := hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 600 * mib, TotalBytes: 8 * gib}}}
+	fit, cpuAfterGPUCheck := recommendOffload(lowHeadroom, estimateMemory(1*gib, 4096, Metadata{}), Metadata{})
+	if !fit || cpuAfterGPUCheck.Mode != "cpu" {
+		t.Fatalf("cpu after gpu check=%+v fit=%v", cpuAfterGPUCheck, fit)
+	}
+
 	if fit, empty := recommendOffload(hardware.Snapshot{}, memory, m); fit || empty.Mode != "" {
 		t.Fatalf("empty gpu recommendation=%+v fit=%v", empty, fit)
 	}
 }
 
 func TestContextMemoryKVAndConfidenceBranches(t *testing.T) {
-	if got, assumed := chooseContext(0, 16384, 8192); got != 16384 || assumed {
-		t.Fatalf("configured context=%d assumed=%v", got, assumed)
+	if got, assumed := chooseContext(16384); got != 16384 || assumed {
+		t.Fatalf("explicit context=%d assumed=%v", got, assumed)
 	}
-	if got, assumed := chooseContext(0, 0, 0); got != defaultContext || !assumed {
+	if got, assumed := chooseContext(0); got != defaultContext || !assumed {
 		t.Fatalf("default context=%d assumed=%v", got, assumed)
 	}
 	if got := estimateMemory(-1, 4096, Metadata{}); got.WeightsBytes != 0 || got.RuntimeOverheadBytes != 256*mib {
@@ -92,6 +115,21 @@ func TestContextMemoryKVAndConfidenceBranches(t *testing.T) {
 	}
 	if got := confidence(Metadata{Architecture: "llama"}, errors.New("partial")); got != "medium" {
 		t.Fatalf("medium confidence=%q", got)
+	}
+	if got := recommendedLayers(0, 0.5); got != 0 {
+		t.Fatalf("zero block layers=%d", got)
+	}
+	if got := recommendedLayers(32, 0); got != 0 {
+		t.Fatalf("zero fraction layers=%d", got)
+	}
+	if got := recommendedLayers(32, 0.001); got != 1 {
+		t.Fatalf("minimum layers=%d", got)
+	}
+	if got := recommendedLayers(32, 2); got != 32 {
+		t.Fatalf("capped layers=%d", got)
+	}
+	if fitsRAM(defaultRAMReserve, 0) || !fitsRAM(2*defaultRAMReserve, defaultRAMReserve) {
+		t.Fatal("unexpected RAM fit boundary")
 	}
 }
 
@@ -152,10 +190,10 @@ func TestReadMetadataRejectsBadInput(t *testing.T) {
 
 func TestReadValueCoversGGUFScalarStringArrayAndErrors(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		typeID uint32
-		data []byte
-		want any
+		data   []byte
+		want   any
 	}{
 		{"u8", 0, []byte{7}, int64(7)},
 		{"i8", 1, []byte{0xff}, int64(-1)},
