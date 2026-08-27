@@ -39,6 +39,11 @@ func TestResolveArtifactFileSafetyBranches(t *testing.T) {
 	if _, err := s.resolveArtifactFile(artifactReference{path: filepath.Join(linkedDir, filepath.Base(outsideFile))}); !errors.Is(err, ErrUnsafeArtifactPath) {
 		t.Fatalf("expected parent symlink escape rejection, got %v", err)
 	}
+
+	missingRoot := New(s.db, filepath.Join(dir, "missing-model-root"))
+	if _, err := missingRoot.resolveArtifactFile(artifactReference{path: "model.gguf"}); err == nil {
+		t.Fatal("expected missing models directory resolution to fail")
+	}
 }
 
 func TestExistingAncestorClimbsMissingDirectories(t *testing.T) {
@@ -58,6 +63,14 @@ func TestExistingAncestorClimbsMissingDirectories(t *testing.T) {
 	if real != rootReal {
 		t.Fatalf("real ancestor=%q want=%q", real, rootReal)
 	}
+
+	loop := filepath.Join(root, "loop")
+	if err := os.Symlink("loop", loop); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, _, err := existingAncestor(loop); err == nil {
+		t.Fatal("expected symlink loop resolution to fail")
+	}
 }
 
 func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
@@ -71,6 +84,9 @@ func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
 
 	if err := s.DeleteFilesAndModel(ctx, model.ID, FileDeletePlan{modelID: "different"}); err == nil {
 		t.Fatal("expected mismatched deletion plan to fail")
+	}
+	if err := s.ensureArtifactNotShared(ctx, model.ID, nil); err != nil {
+		t.Fatalf("empty target set should not report sharing: %v", err)
 	}
 
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES(?, 'mmproj', '')`, model.ID); err != nil {
