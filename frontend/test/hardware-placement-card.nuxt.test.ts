@@ -14,6 +14,21 @@ const hardware = {
   ]
 }
 
+function recommendation(overrides: Record<string, any> = {}) {
+  return {
+    context_length: 8192,
+    context_assumed: false,
+    confidence: 'high',
+    quantization: { name: 'Q4_K_M', summary: 'Balanced quantization.', tradeoff: 'Good general-purpose choice.' },
+    memory: { weights_bytes: 4, kv_cache_bytes: 2, runtime_overhead_bytes: 1, cpu_only_ram_bytes: 7, full_offload_vram_bytes: 7 },
+    current_fit: true,
+    total_hardware_fit: true,
+    cpu_fit: true,
+    offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], reason: 'Fits one GPU.' },
+    ...overrides
+  }
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockResolvedValue(hardware)
@@ -58,17 +73,7 @@ describe('GPU placement cards', () => {
   it('shows memory, context and offload guidance for the selected model', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
-      if (path === '/api/v1/models/model-1/recommendation') return {
-        context_length: 8192,
-        context_assumed: false,
-        confidence: 'high',
-        quantization: { name: 'Q4_K_M', summary: 'Balanced quantization.', tradeoff: 'Good general-purpose choice.' },
-        memory: { weights_bytes: 4, kv_cache_bytes: 2, runtime_overhead_bytes: 1, cpu_only_ram_bytes: 7, full_offload_vram_bytes: 7 },
-        current_fit: true,
-        total_hardware_fit: true,
-        cpu_fit: true,
-        offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], reason: 'Fits one GPU.' }
-      }
+      if (path === '/api/v1/models/model-1/recommendation') return recommendation()
       throw new Error(`unexpected request ${path}`)
     })
 
@@ -78,11 +83,121 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
 
-    const recommendation = wrapper.get('[data-testid="hardware-recommendation"]')
-    expect(recommendation.text()).toContain('Fits current resources')
-    expect(recommendation.text()).toContain('high confidence')
-    expect(recommendation.text()).toContain('8,192 tokens')
-    expect(recommendation.text()).toContain('Recommended GPU layers: 32')
-    expect(recommendation.text()).toContain('Q4_K_M')
+    const panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(panel.text()).toContain('Fits current resources')
+    expect(panel.text()).toContain('high confidence')
+    expect(panel.text()).toContain('8,192 tokens')
+    expect(panel.text()).toContain('Recommended GPU layers: 32')
+    expect(panel.text()).toContain('Q4_K_M')
+  })
+
+  it('renders installed-hardware, CPU and pressure recommendation states', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path.includes('/model-2/')) return recommendation({
+        context_assumed: true,
+        current_fit: false,
+        total_hardware_fit: true,
+        cpu_fit: false,
+        metadata_warning: 'Metadata fallback active',
+        hardware_warning: 'GPU probe degraded',
+        quantization: { summary: 'Unknown quantization.', tradeoff: 'Use actual file size.' },
+        offload: { mode: 'multi_gpu', gpu_layers: 40, devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1', reason: 'Needs both GPUs.' }
+      })
+      if (path.includes('/model-3/')) return recommendation({
+        current_fit: false,
+        total_hardware_fit: false,
+        cpu_fit: true,
+        offload: { mode: 'cpu', reason: 'CPU fallback.' }
+      })
+      if (path.includes('/model-4/')) return recommendation({
+        current_fit: false,
+        total_hardware_fit: false,
+        cpu_fit: false,
+        offload: { mode: 'cpu', reason: 'Insufficient resources.' }
+      })
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'manual', gpuDevices: ['CUDA0', 'CUDA1'], tensorSplit: '', modelId: 'model-2' }
+    })
+    await flushPromises()
+
+    let panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(panel.text()).toContain('Fits installed hardware after freeing resources')
+    expect(panel.text()).toContain('assumed')
+    expect(panel.text()).toContain('Tensor split: 1,1')
+    expect(panel.text()).toContain('Metadata fallback active')
+    expect(panel.text()).toContain('GPU probe degraded')
+
+    await wrapper.setProps({ modelId: 'model-3' })
+    await flushPromises()
+    panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(panel.text()).toContain('CPU fallback fits current RAM')
+
+    await wrapper.setProps({ modelId: 'model-4' })
+    await flushPromises()
+    panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(panel.text()).toContain('Resource pressure expected')
+  })
+
+  it('ignores malformed recommendation payloads and surfaces request failures', async () => {
+    const invalid: Record<string, any> = {
+      primitive: null,
+      context: {},
+      confidence: { context_length: 1 },
+      fit: { context_length: 1, confidence: 'low' },
+      quantization: { context_length: 1, confidence: 'low', current_fit: false },
+      quantSummary: { context_length: 1, confidence: 'low', current_fit: false, quantization: {} },
+      quantTradeoff: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x' } },
+      memory: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' } },
+      memoryVRAM: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: {} },
+      memoryRAM: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: { full_offload_vram_bytes: 1 } },
+      memoryKV: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: { full_offload_vram_bytes: 1, cpu_only_ram_bytes: 1 } },
+      offload: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: { full_offload_vram_bytes: 1, cpu_only_ram_bytes: 1, kv_cache_bytes: 1 } },
+      offloadMode: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: { full_offload_vram_bytes: 1, cpu_only_ram_bytes: 1, kv_cache_bytes: 1 }, offload: {} },
+      offloadReason: { context_length: 1, confidence: 'low', current_fit: false, quantization: { summary: 'x', tradeoff: 'y' }, memory: { full_offload_vram_bytes: 1, cpu_only_ram_bytes: 1, kv_cache_bytes: 1 }, offload: { mode: 'cpu' } }
+    }
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return { gpus: [] }
+      const id = path.split('/')[4]
+      if (id === 'request-error') throw new Error('recommendation unavailable')
+      return invalid[id!]
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'primitive' }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No NVIDIA or ROCm GPUs were detected')
+
+    for (const id of Object.keys(invalid).slice(1)) {
+      await wrapper.setProps({ modelId: id })
+      await flushPromises()
+      expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(false)
+    }
+
+    await wrapper.setProps({ modelId: 'request-error' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('recommendation unavailable')
+  })
+
+  it('surfaces hardware request failures without blocking a valid recommendation', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') throw { data: { error: 'hardware unavailable' } }
+      if (path.includes('/model-1/')) return recommendation()
+      throw new Error('unexpected request')
+    })
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1' }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('hardware unavailable')
+    expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(true)
   })
 })
