@@ -117,6 +117,64 @@ describe('Model GGUF metadata', () => {
     expect(wrapper.get('[data-testid="metadata-table"]').text()).not.toContain('general.architecture')
   })
 
+  it('covers metadata warnings, fallback values, pagination, empty searches, clearing, and API errors', async () => {
+    const sparseModel = { ...model, total_bytes: 512, quantization: '', context_length: 0 }
+    let fail = false
+    mocks.request.mockImplementation(async (path: string) => {
+      if (fail) throw { data: { error: 'metadata lookup failed' } }
+      const filtered = path.includes('q=missing')
+      const secondPage = path.includes('offset=100')
+      return {
+        model: sparseModel,
+        gguf_version: 0,
+        tensor_count: undefined,
+        metadata_count: undefined,
+        metadata_total: filtered ? 0 : 101,
+        offset: secondPage ? 100 : 0,
+        limit: 100,
+        architecture: '',
+        detected_context_length: 0,
+        warnings: ['partial metadata'],
+        metadata: filtered ? [] : [{ key: secondPage ? 'last.key' : 'first.key', type: 'string', value: 'value' }]
+      }
+    })
+
+    const wrapper = await mountSuspended(ModelDetailsPage, { route: '/models/m1/details' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="model-details-summary"]').text()).toContain('512 B')
+    expect(wrapper.get('[data-testid="model-details-summary"]').text()).toContain('Unknown')
+    expect(wrapper.text()).toContain('partial metadata')
+
+    const next = wrapper.findAll('button').find(button => button.text().trim() === 'Next')!
+    expect(next.attributes('disabled')).toBeUndefined()
+    await next.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('offset=100'))
+    expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('last.key')
+
+    const previous = wrapper.findAll('button').find(button => button.text().trim() === 'Previous')!
+    expect(previous.attributes('disabled')).toBeUndefined()
+    await previous.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('offset=0'))
+
+    await wrapper.get('[data-testid="metadata-search"]').setValue('missing')
+    await wrapper.get('[data-testid="metadata-search-button"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No matching GGUF metadata')
+
+    const clear = wrapper.findAll('button').find(button => button.text().trim() === 'Clear')!
+    await clear.trigger('click')
+    await flushPromises()
+    expect(mocks.request.mock.calls.at(-1)?.[0]).not.toContain('q=')
+    expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('first.key')
+
+    fail = true
+    await wrapper.get('[data-testid="metadata-search-button"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('metadata lookup failed')
+  })
+
   it('links registered Models to their read-only details page', async () => {
     const wrapper = await mountSuspended(ModelsPage, { route: '/models' })
     await flushPromises()
