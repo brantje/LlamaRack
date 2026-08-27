@@ -58,6 +58,27 @@ func TestDatabaseErrors(t *testing.T) {
 	if _, err := s.Bootstrap(ctx, "admin", "correct-horse-battery"); err == nil {
 		t.Fatal("expected bootstrap DB error")
 	}
+	if _, err := s.CreateUser(ctx, "operator", "correct-horse-battery"); err == nil {
+		t.Fatal("expected create user DB error")
+	}
+	if _, err := s.ListUsers(ctx); err == nil {
+		t.Fatal("expected list users DB error")
+	}
+	if _, err := s.UserByID(ctx, 1); err == nil {
+		t.Fatal("expected user lookup DB error")
+	}
+	if err := s.SetUserEnabled(ctx, 1, false); err == nil {
+		t.Fatal("expected user enabled DB error")
+	}
+	if err := s.DeleteUser(ctx, 1, 2); err == nil {
+		t.Fatal("expected delete user DB error")
+	}
+	if err := s.ResetPassword(ctx, 1, "replacement-password"); err == nil {
+		t.Fatal("expected reset password DB error")
+	}
+	if err := s.ChangePassword(ctx, 1, "current-password", "replacement-password", "session"); err == nil {
+		t.Fatal("expected change password DB error")
+	}
 	if _, _, _, err := s.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "", ""); err == nil {
 		t.Fatal("expected login failure")
 	}
@@ -88,8 +109,14 @@ func TestDatabaseErrors(t *testing.T) {
 	if _, err := s.ListAPIKeys(ctx); err == nil {
 		t.Fatal("expected list keys DB error")
 	}
+	if err := s.SetAPIKeyEnabled(ctx, "id", false); err == nil {
+		t.Fatal("expected set key enabled DB error")
+	}
 	if err := s.RevokeAPIKey(ctx, "id"); err == nil {
 		t.Fatal("expected revoke DB error")
+	}
+	if _, _, err := s.RotateAPIKey(ctx, "id", 1); err == nil {
+		t.Fatal("expected rotate DB error")
 	}
 	if err := s.AuthenticateAPIKey(ctx, "token"); err == nil {
 		t.Fatal("expected authenticate DB error")
