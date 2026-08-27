@@ -1,21 +1,36 @@
 <script setup lang="ts">
+type TokenStatus = { configured: boolean; prefix?: string }
+
 const manager = useManager()
-const tokenStatus = ref<{ configured: boolean; prefix?: string }>({ configured: false })
+const tokenStatus = ref<TokenStatus>({ configured: false })
 const tokenInput = ref('')
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
 
+function normalizeTokenStatus(value: any): TokenStatus {
+  if (!value || typeof value.configured !== 'boolean') return { configured: false }
+  return {
+    configured: value.configured,
+    prefix: typeof value.prefix === 'string' ? value.prefix : undefined
+  }
+}
+
 async function load() {
   if (!manager.user.value) return
-  try { tokenStatus.value = await manager.request('/api/v1/huggingface/token') } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load Hugging Face status' }
+  try {
+    tokenStatus.value = normalizeTokenStatus(await manager.request('/api/v1/huggingface/token'))
+  } catch (value: any) {
+    tokenStatus.value = { configured: false }
+    error.value = value?.data?.error || value?.message || 'Unable to load Hugging Face status'
+  }
 }
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
   busy.value = true; error.value = ''; saved.value = false
   try {
-    tokenStatus.value = await manager.request('/api/v1/huggingface/token', { method: 'PUT', body: { token: tokenInput.value } })
+    tokenStatus.value = normalizeTokenStatus(await manager.request('/api/v1/huggingface/token', { method: 'PUT', body: { token: tokenInput.value } }))
     tokenInput.value = ''; saved.value = true
   } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to save Hugging Face token' } finally { busy.value = false }
 }
