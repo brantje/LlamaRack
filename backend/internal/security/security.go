@@ -83,7 +83,30 @@ func (n *Network) OriginAllowed(r *http.Request, origin string) bool {
 	if err != nil || parsed.Host == "" {
 		return false
 	}
-	return strings.EqualFold(parsed.Scheme, n.EffectiveScheme(r)) && strings.EqualFold(parsed.Host, r.Host)
+	if !strings.EqualFold(parsed.Scheme, n.EffectiveScheme(r)) {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+
+	// The development/container UI intentionally talks to the management API on
+	// another port of the same host (UI :3000 -> API :8888). Treat that known
+	// manager UI origin as local without opening credentialed CORS to arbitrary
+	// ports or foreign hosts.
+	return parsed.Port() == "3000" && strings.EqualFold(parsed.Hostname(), requestHostname(r.Host))
+}
+
+func requestHostname(hostport string) string {
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if strings.HasPrefix(hostport, "[") {
+		if end := strings.Index(hostport, "]"); end > 0 {
+			return hostport[1:end]
+		}
+	}
+	return strings.Trim(hostport, "[]")
 }
 
 func (n *Network) IsSecure(r *http.Request) bool { return n.EffectiveScheme(r) == "https" }
