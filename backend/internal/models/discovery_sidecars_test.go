@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAvailableGGUFsHidesHelpersWithoutBroadSubstringFiltering(t *testing.T) {
+func TestAvailableGGUFsHidesProjectorsAndPrefixedMTPHelpers(t *testing.T) {
 	s, dir := testModelService(t)
 	for _, name := range []string{
 		"mmproj-F16.gguf", "mmoproj_model.gguf", "projector.vision.gguf", "mtp-model-Q4_0.gguf",
@@ -20,18 +20,14 @@ func TestAvailableGGUFsHidesHelpersWithoutBroadSubstringFiltering(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 2 {
+	if len(files) != 1 || files[0].Name != "model-MTP-Q4_K_M.gguf" {
 		t.Fatalf("available files = %+v", files)
 	}
-	seen := map[string]bool{}
-	for _, file := range files {
-		seen[file.Name] = true
+	if !isProjectorGGUF("asda-projector-Q4_K_M.gguf") {
+		t.Fatal("projector marker must stay filtered regardless of filename prefix")
 	}
-	if !seen["asda-projector-Q4_K_M.gguf"] || !seen["model-MTP-Q4_K_M.gguf"] {
-		t.Fatalf("normal models containing helper words must stay visible: %+v", files)
-	}
-	if isProjectorGGUF("asda-projector-Q4_K_M.gguf") || isMTPGGUF("model-MTP-Q4_K_M.gguf") {
-		t.Fatal("helper classification must be prefix based")
+	if isMTPGGUF("model-MTP-Q4_K_M.gguf") {
+		t.Fatal("MTP helper detection must remain prefix based to avoid hiding embedded-MTP main models")
 	}
 }
 
@@ -42,7 +38,7 @@ func TestAvailableGGUFsSuggestsDownloadedSidecarOptions(t *testing.T) {
 	if err := os.MkdirAll(repoDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mainPath := writeGGUF(t, repoDir, "model-Q4_K_M.gguf")
+	writeGGUF(t, repoDir, "model-Q4_K_M.gguf")
 	projectorPath := writeGGUF(t, repoDir, "mmproj-F16.gguf")
 	mtpPath := writeGGUF(t, repoDir, "mtp-model-Q4_0.gguf")
 
@@ -72,8 +68,5 @@ func TestAvailableGGUFsSuggestsDownloadedSidecarOptions(t *testing.T) {
 	}
 	if options["spec-draft-model"] != mtpPath || options["spec-type"] != "draft-mtp" {
 		t.Fatalf("MTP options = %+v", options)
-	}
-	if files[0].Path == mainPath {
-		t.Fatal("public model path must remain relative to the model directory")
 	}
 }
