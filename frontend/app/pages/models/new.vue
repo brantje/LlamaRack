@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string }
+type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string; suggested_options?: Record<string, string> }
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
 
 const manager = useManager()
@@ -10,6 +10,7 @@ const error = ref('')
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
 const firstInstanceSlugEdited = ref(false)
+const autoSuggestedOptions = ref<Record<string, string>>({})
 const form = reactive({
   gguf_path: '',
   name: '',
@@ -32,9 +33,20 @@ const ggufItems = computed(() => availableGGUFs.value.map(file => ({
 const ggufPlaceholder = computed(() => scanning.value
   ? 'Scanning model folder…'
   : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
+const selectedGGUF = computed(() => availableGGUFs.value.find(file => file.path === form.gguf_path) || null)
+const detectedHelpers = computed(() => {
+  const options = selectedGGUF.value?.suggested_options || {}
+  const helpers: string[] = []
+  if (options.mmproj) helpers.push(`Vision projector: ${filename(options.mmproj)}`)
+  if (options['spec-draft-model']) helpers.push(`MTP draft model: ${filename(options['spec-draft-model'])}`)
+  return helpers
+})
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
+}
+function filename(value: string) {
+  return value.split(/[\\/]/).pop() || value
 }
 
 watch(() => form.name, (name) => {
@@ -45,6 +57,23 @@ watch(createFirstInstance, (enabled) => {
 })
 watch(() => form.first_instance.name, (name) => {
   if (!firstInstanceSlugEdited.value) form.first_instance.slug = slugify(name)
+})
+watch(() => form.gguf_path, (path) => {
+  const next = { ...form.options }
+  for (const [key, value] of Object.entries(autoSuggestedOptions.value)) {
+    if (next[key] === value) delete next[key]
+  }
+
+  const suggested = availableGGUFs.value.find(file => file.path === path)?.suggested_options || {}
+  const applied: Record<string, string> = {}
+  for (const [key, value] of Object.entries(suggested)) {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      next[key] = value
+      applied[key] = value
+    }
+  }
+  form.options = next
+  autoSuggestedOptions.value = applied
 })
 
 function messageFor(value: any, fallback: string) {
@@ -104,9 +133,17 @@ async function createModel() {
     <UCard class="max-w-4xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <UForm :state="form" class="space-y-6" @submit="createModel">
-        <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files are hidden." required>
+        <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files and detected helper GGUFs are hidden." required>
           <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
+        <UAlert
+          v-if="detectedHelpers.length"
+          data-testid="detected-gguf-helpers"
+          color="success"
+          variant="subtle"
+          title="Detected llama.cpp helpers"
+          :description="`${detectedHelpers.join(' · ')}. Their model-level llama.cpp options were filled automatically.`"
+        />
         <UFormField label="Model name" name="name" required>
           <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
         </UFormField>
