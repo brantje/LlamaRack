@@ -150,7 +150,7 @@ onBeforeUnmount(clearDebounce)
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="downloadNotice" color="success" variant="subtle" :description="downloadNotice" />
     <div v-if="loading" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
-    <UEmpty v-else-if="!results.length && !selected" icon="i-lucide-search" title="No GGUF models found" description="Try another model name, author, organization or Hugging Face model URL." />
+    <UEmpty v-else-if="!results.length && !selected" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned. Results load automatically and update as you search." />
     <div v-else-if="!selected" class="grid gap-3 xl:grid-cols-2">
       <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="openModel(item.id)">
         <div class="flex items-start justify-between gap-4">
