@@ -142,12 +142,21 @@ describe('model creation form', () => {
   })
 
   it('shows scan failures and can rescan the model folder', async () => {
-    mocks.request.mockRejectedValueOnce(new Error('scan failed'))
+    let failAvailable = true
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/models/available') {
+        if (failAvailable) {
+          failAvailable = false
+          throw new Error('scan failed')
+        }
+        return discovered
+      }
+      return []
+    })
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     expect(wrapper.text()).toContain('scan failed')
     expect(selectComponents(wrapper)[0]!.props('items')).toEqual([])
-    mocks.request.mockResolvedValueOnce(discovered)
     await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()
     expect(JSON.stringify(selectComponents(wrapper)[0]!.props('items'))).toContain('deep/other.gguf')
