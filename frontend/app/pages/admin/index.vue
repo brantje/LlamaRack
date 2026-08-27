@@ -9,12 +9,20 @@ const manager = useManager()
 const summary = ref<Summary | null>(null)
 const error = ref('')
 
+function isSummary(value: unknown): value is Summary {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Summary>
+  return Boolean(candidate.users && candidate.huggingface && candidate.llamacpp)
+}
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    summary.value = await manager.request<Summary>('/api/v1/admin/summary')
+    const value = await manager.request<Summary>('/api/v1/admin/summary')
+    summary.value = isSummary(value) ? value : null
   } catch (value: any) {
+    summary.value = null
     error.value = value?.data?.error || value?.message || 'Unable to load administration summary'
   }
 }
