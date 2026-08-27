@@ -4,6 +4,9 @@ type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
 type HFDetail = HFModel & { description?: string; revision: string; artifacts: HFArtifact[] }
+type GPU = { id: string; name?: string; total_bytes: number; free_bytes: number }
+type HardwareSnapshot = { ram_available_bytes?: number; gpus?: GPU[] }
+type ArtifactFit = { label: string; detail: string; color: 'success' | 'warning' | 'neutral' }
 
 const manager = useManager()
 const query = ref('')
@@ -11,6 +14,7 @@ const author = ref('')
 const sort = ref('trending_score')
 const results = ref<HFModel[]>([])
 const selected = ref<HFDetail | null>(null)
+const hardware = ref<HardwareSnapshot | null>(null)
 const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
@@ -19,6 +23,7 @@ const downloadNotice = ref('')
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let searchVersion = 0
 
+const vramReserve = 512 * 1024 ** 2
 const sortOptions = [
   { label: 'Trending', value: 'trending_score' },
   { label: 'Most likes', value: 'likes' },
@@ -77,6 +82,49 @@ function launchTo(artifact: HFArtifact) {
     query: { repo: selected.value.id, artifact: artifact.id }
   }
 }
+function isHardwareSnapshot(value: unknown): value is HardwareSnapshot {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+function artifactModelBytes(artifact: HFArtifact) {
+  if (artifact.model_bytes > 0) return artifact.model_bytes
+  const shards = artifact.files.slice(0, artifact.shard_count).reduce((sum, file) => sum + Math.max(0, file.size || 0), 0)
+  return shards || artifact.total_bytes || 0
+}
+function artifactFit(artifact: HFArtifact): ArtifactFit {
+  const bytes = artifactModelBytes(artifact)
+  if (!hardware.value || bytes <= 0) {
+    return { label: 'Hardware fit unavailable', detail: 'Select Launch for the context-aware RAM/VRAM estimate.', color: 'neutral' }
+  }
+  const gpus = hardware.value.gpus || []
+  if (!gpus.length) {
+    return { label: 'CPU only', detail: 'No NVIDIA/ROCm GPU is currently detected.', color: 'neutral' }
+  }
+  const usable = gpus.map(gpu => ({ id: gpu.id, bytes: Math.max(0, gpu.free_bytes - vramReserve) }))
+  const single = [...usable].sort((a, b) => b.bytes - a.bytes)[0]
+  if (single && single.bytes >= bytes) {
+    return {
+      label: 'GPU-only weight fit',
+      detail: `Hugging Face reports ${formatBytes(bytes)} of model weights; they fit in current free VRAM on ${single.id}. Context/KV is checked at Launch.`,
+      color: 'success'
+    }
+  }
+  const total = usable.reduce((sum, gpu) => sum + gpu.bytes, 0)
+  if (total >= bytes) {
+    return {
+      label: 'GPU-only weights · multi-GPU',
+      detail: `The reported ${formatBytes(bytes)} of weights fit across current GPU VRAM. Context/KV may still require RAM.`,
+      color: 'success'
+    }
+  }
+  if (total > 0) {
+    return {
+      label: 'GPU + CPU split likely',
+      detail: `The reported ${formatBytes(bytes)} of weights exceed current usable VRAM. Launch computes the exact layer/KV split for the selected context.`,
+      color: 'warning'
+    }
+  }
+  return { label: 'CPU only', detail: 'No useful free GPU VRAM is currently available.', color: 'neutral' }
+}
 
 function huggingFaceRepo(value: string) {
   let raw = value.trim()
@@ -117,6 +165,7 @@ async function search() {
   loading.value = true
   error.value = ''
   selected.value = null
+  hardware.value = null
   const normalizedURL = huggingFaceRepo(query.value)
   const searchQuery = normalizedURL || query.value.trim()
   try {
@@ -132,8 +181,15 @@ async function search() {
 
 async function openModel(id: string) {
   detailLoading.value = true; error.value = ''; downloadNotice.value = ''
-  try { selected.value = await manager.request<HFDetail>(`/api/v1/huggingface/model?repo=${encodeURIComponent(id)}`) }
-  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load repository details' }
+  const summary = results.value.find(item => item.id === id)
+  try {
+    const [detail, snapshot] = await Promise.all([
+      manager.request<HFDetail>(`/api/v1/huggingface/model?repo=${encodeURIComponent(id)}`),
+      manager.request<HardwareSnapshot>('/api/v1/hardware').catch(() => null)
+    ])
+    selected.value = { ...detail, parameter_count: detail.parameter_count || summary?.parameter_count }
+    hardware.value = isHardwareSnapshot(snapshot) ? snapshot : null
+  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load repository details' }
   finally { detailLoading.value = false }
 }
 
@@ -207,19 +263,36 @@ onBeforeUnmount(clearDebounce)
       <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="selected = null">Back to results</UButton>
       <UCard>
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div><p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">REPOSITORY</p><h2 class="text-2xl font-bold">{{ selected.id }}</h2><p v-if="selected.description" class="mt-3 max-w-4xl whitespace-pre-line text-sm leading-6 text-muted">{{ selected.description }}</p></div>
+          <div>
+            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">REPOSITORY</p>
+            <h2 class="text-2xl font-bold">{{ selected.id }}</h2>
+            <div v-if="selected.parameter_count" class="mt-1 text-sm text-muted">Hugging Face GGUF metadata: {{ formatParameters(selected.parameter_count) }}</div>
+            <p v-if="selected.description" class="mt-3 max-w-4xl whitespace-pre-line text-sm leading-6 text-muted">{{ selected.description }}</p>
+          </div>
           <div class="flex gap-2"><UBadge v-if="selected.private" color="warning">Private</UBadge><UBadge v-if="selected.gated" color="warning">Gated</UBadge></div>
         </div>
       </UCard>
       <UAlert v-if="selected.gated" color="warning" variant="subtle" title="Access may require approval" description="A configured Hugging Face token is used only for Hugging Face requests. The manager does not accept licenses or request gated access on your behalf." />
       <UCard>
-        <div class="mb-4"><p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">GGUF ARTIFACTS</p><h2 class="text-xl font-bold">Available quantizations</h2><p class="mt-1 text-sm text-muted">Matching vision projectors and MTP draft GGUFs are detected automatically and included with the selected model.</p></div>
+        <div class="mb-4">
+          <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">GGUF ARTIFACTS</p>
+          <h2 class="text-xl font-bold">Available quantizations</h2>
+          <p class="mt-1 text-sm text-muted">Hugging Face GGUF file sizes provide a pre-download weight-fit check against current VRAM. Launch performs the final context/KV-aware GPU-only vs GPU + CPU split estimate.</p>
+          <p class="mt-1 text-sm text-muted">Matching vision projectors and MTP draft GGUFs are detected automatically and included with the selected model.</p>
+        </div>
         <div v-if="!selected.artifacts.length" class="flex items-center gap-3 py-8 text-muted"><UIcon name="i-lucide-file-x" class="size-5" /><span>No GGUF model files found</span></div>
         <div v-else class="divide-y divide-default">
           <div v-for="artifact in selected.artifacts" :key="artifact.id" class="grid gap-4 py-4 lg:grid-cols-[minmax(0,1fr)_170px_140px_auto] lg:items-center">
             <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2"><span class="truncate font-semibold">{{ artifact.name }}</span><UBadge v-if="artifact.quantization" color="primary" variant="subtle">{{ artifact.quantization }}</UBadge><UBadge v-if="artifact.shard_count > 1" color="neutral" variant="soft">{{ artifact.shard_count }} shards</UBadge><UBadge v-if="!artifact.complete" color="error" variant="subtle">Incomplete split</UBadge></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="truncate font-semibold">{{ artifact.name }}</span>
+                <UBadge v-if="artifact.quantization" color="primary" variant="subtle">{{ artifact.quantization }}</UBadge>
+                <UBadge v-if="artifact.shard_count > 1" color="neutral" variant="soft">{{ artifact.shard_count }} shards</UBadge>
+                <UBadge v-if="!artifact.complete" color="error" variant="subtle">Incomplete split</UBadge>
+                <UBadge :color="artifactFit(artifact).color" variant="subtle" data-testid="artifact-hardware-fit">{{ artifactFit(artifact).label }}</UBadge>
+              </div>
               <p class="mt-1 truncate font-mono text-xs text-dimmed">{{ artifact.files.slice(0, artifact.shard_count).map(file => file.path).join(', ') }}</p>
+              <p class="mt-1 text-xs text-muted">{{ artifactFit(artifact).detail }}</p>
               <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-2 space-y-1">
                 <div v-for="dependency in artifact.dependencies" :key="`${dependency.kind}-${dependency.name}`" class="flex flex-wrap items-center gap-2 text-xs text-muted">
                   <UBadge color="success" variant="subtle">{{ dependencyLabel(dependency.kind) }}</UBadge>
