@@ -85,3 +85,82 @@ func TestSnapshotWithoutGPUUtilitiesStillReturnsRAM(t *testing.T) {
 		t.Fatalf("unexpected CPU-only snapshot: %+v", snapshot)
 	}
 }
+
+func TestSnapshotReturnsProbeErrorsWhenNoGPUCanBeRead(t *testing.T) {
+	d := New()
+	d.readFile = func(string) ([]byte, error) { return nil, errors.New("meminfo missing") }
+	d.run = func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		return nil, errors.New(name + " failed")
+	}
+	snapshot, err := d.Snapshot(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "nvidia-smi failed") || !strings.Contains(err.Error(), "rocm-smi failed") {
+		t.Fatalf("expected joined probe errors, snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
+func TestGPUParsersSkipMalformedRowsAndUseFallbacks(t *testing.T) {
+	d := New()
+	d.run = func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		switch name {
+		case "nvidia-smi":
+			return []byte("\ninvalid\nx, GPU-x, Invalid index, 10, 1, 3\n0, GPU-zero, Tiny GPU, 1, 2, 4\n"), nil
+		case "rocm-smi":
+			return []byte(`{
+				"card7":{"Card model":" Radeon Test ","Unique ID (Hex)":" id-7 ","GPU use (%)":"12%","VRAM Total Memory (B)":"2000","VRAM Total Used Memory (B)":"500"},
+				"cardX":{"GPU use (%)":7.5,"VRAM Total Memory (B)":1000,"VRAM Total Used Memory (B)":250}
+			}`), nil
+		default:
+			return nil, errors.New("unexpected command")
+		}
+	}
+
+	nvidia, err := d.nvidiaGPUs(context.Background())
+	if err != nil || len(nvidia) != 1 || nvidia[0].ID != "CUDA0" || nvidia[0].FreeBytes != 0 {
+		t.Fatalf("unexpected NVIDIA parse: %+v err=%v", nvidia, err)
+	}
+	rocm, err := d.rocmGPUs(context.Background())
+	if err != nil || len(rocm) != 2 {
+		t.Fatalf("unexpected ROCm parse: %+v err=%v", rocm, err)
+	}
+	if rocm[0].ID != "ROCm7" || rocm[0].Name != "Radeon Test" || rocm[0].UUID != "id-7" || rocm[0].UtilizationPct != 12 {
+		t.Fatalf("unexpected named ROCm GPU: %+v", rocm[0])
+	}
+	if rocm[1].ID != "ROCm1" || rocm[1].Name != "AMD GPU 1" || rocm[1].UtilizationPct != 7.5 {
+		t.Fatalf("unexpected fallback ROCm GPU: %+v", rocm[1])
+	}
+
+	d.run = func(context.Context, string, ...string) ([]byte, error) { return []byte("not json"), nil }
+	if _, err := d.rocmGPUs(context.Background()); err == nil {
+		t.Fatal("expected malformed ROCm JSON to fail")
+	}
+}
+
+func TestNVIDIAProcessParserAndHelperFallbacks(t *testing.T) {
+	d := New()
+	if processes, err := d.nvidiaProcesses(context.Background(), []GPU{{ID: "ROCm0", Backend: "rocm", UUID: "amd"}}); err != nil || processes != nil {
+		t.Fatalf("non-CUDA process probe should be skipped: %+v err=%v", processes, err)
+	}
+	d.run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("bad\nx, GPU-a, 10\n1, GPU-missing, 10\n2, GPU-a, 10\n3, GPU-a, 20, worker\n"), nil
+	}
+	processes, err := d.nvidiaProcesses(context.Background(), []GPU{{ID: "CUDA0", Backend: "cuda", UUID: "GPU-a"}})
+	if err != nil || len(processes) != 2 {
+		t.Fatalf("unexpected processes: %+v err=%v", processes, err)
+	}
+	if processes[0].PID != 2 || processes[0].ProcessName != "" || processes[1].ProcessName != "worker" {
+		t.Fatalf("unexpected parsed process metadata: %+v", processes)
+	}
+
+	if got := trailingIndex("card999999999999999999999999", 6); got != 6 {
+		t.Fatalf("overflowing card index should use fallback, got %d", got)
+	}
+	if got := firstValue(map[string]any{" Other ": "x"}, "missing"); got != nil {
+		t.Fatalf("missing first value=%v", got)
+	}
+	if got := findValue(map[string]any{" GPU use (%) ": "9"}, "gpu use (%)"); got != "9" {
+		t.Fatalf("case-insensitive value lookup=%v", got)
+	}
+	if int64Value(nil) != 0 || float64Value(nil) != 0 || stringValue(42) != "" || stringValue(nil) != "" {
+		t.Fatal("unexpected scalar fallback conversion")
+	}
+}
