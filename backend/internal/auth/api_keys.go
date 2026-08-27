@@ -106,6 +106,7 @@ func (s *Service) RevokeAPIKey(ctx context.Context, id string) error {
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	s.clearAPIUseWrite(id)
 	return nil
 }
 
@@ -148,6 +149,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, id string, creatorUserID int
 	if err := tx.Commit(); err != nil {
 		return APIKey{}, "", err
 	}
+	s.clearAPIUseWrite(id)
 	return APIKey{ID: newID, Name: name, Prefix: prefix, Enabled: true, CreatedByUserID: creatorPtr, CreatedAt: now}, secret, nil
 }
 
@@ -156,20 +158,26 @@ func (s *Service) AuthenticateAPIKey(ctx context.Context, token string) error {
 		return errors.New("missing api key")
 	}
 	var id string
-	if err := s.db.QueryRowContext(ctx, "SELECT id FROM api_keys WHERE token_hash=? AND enabled=1 AND revoked_at IS NULL", tokenHash(token)).Scan(&id); err != nil {
+	var lastUsed sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, "SELECT id,last_used_at FROM api_keys WHERE token_hash=? AND enabled=1 AND revoked_at IS NULL", tokenHash(token)).Scan(&id, &lastUsed); err != nil {
 		return errors.New("invalid api key")
 	}
+
 	now := time.Now()
-	if !s.shouldPersistAPIUse(id, now) {
+	if lastUsed.Valid && now.Unix()-lastUsed.Int64 < int64(apiUseWriteEvery/time.Second) {
+		return nil
+	}
+	if !s.reserveAPIUseWrite(id, now) {
 		return nil
 	}
 	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=? AND enabled=1 AND revoked_at IS NULL", now.Unix(), id); err != nil {
+		s.releaseAPIUseWrite(id, now)
 		return err
 	}
 	return nil
 }
 
-func (s *Service) shouldPersistAPIUse(id string, now time.Time) bool {
+func (s *Service) reserveAPIUseWrite(id string, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if last, ok := s.lastAPIKeyWrite[id]; ok && now.Sub(last) < apiUseWriteEvery {
@@ -177,4 +185,18 @@ func (s *Service) shouldPersistAPIUse(id string, now time.Time) bool {
 	}
 	s.lastAPIKeyWrite[id] = now
 	return true
+}
+
+func (s *Service) releaseAPIUseWrite(id string, reserved time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := s.lastAPIKeyWrite[id]; ok && current.Equal(reserved) {
+		delete(s.lastAPIKeyWrite, id)
+	}
+}
+
+func (s *Service) clearAPIUseWrite(id string) {
+	s.mu.Lock()
+	delete(s.lastAPIKeyWrite, id)
+	s.mu.Unlock()
 }
