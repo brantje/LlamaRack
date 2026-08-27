@@ -1,16 +1,28 @@
 <script setup lang="ts">
 type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string; suggested_options?: Record<string, string> }
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
+type HFFile = { path: string; size: number; oid?: string }
+type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
+type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
+type HFDetail = { id: string; revision: string; artifacts: HFArtifact[] }
 
 const manager = useManager()
 const router = useRouter()
+const route = useRoute()
 const busy = ref(false)
 const scanning = ref(false)
+const remoteLoading = ref(false)
 const error = ref('')
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
 const firstInstanceSlugEdited = ref(false)
 const autoSuggestedOptions = ref<Record<string, string>>({})
+const remoteDetail = ref<HFDetail | null>(null)
+const remoteArtifact = ref<HFArtifact | null>(null)
+const remoteRepo = computed(() => typeof route.query.repo === 'string' ? route.query.repo.trim() : '')
+const remoteArtifactID = computed(() => typeof route.query.artifact === 'string' ? route.query.artifact.trim() : '')
+const remoteMode = computed(() => Boolean(remoteRepo.value && remoteArtifactID.value))
+
 const form = reactive({
   gguf_path: '',
   name: '',
@@ -35,11 +47,23 @@ const ggufPlaceholder = computed(() => scanning.value
   : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
 const selectedGGUF = computed(() => availableGGUFs.value.find(file => file.path === form.gguf_path) || null)
 const detectedHelpers = computed(() => {
+  if (remoteMode.value) {
+    return (remoteArtifact.value?.dependencies || []).map(dependency => {
+      const label = dependency.kind === 'mmproj' ? 'Vision projector' : dependency.kind === 'mtp' ? 'MTP draft model' : dependency.kind
+      return `${label}: ${dependency.name}`
+    })
+  }
   const options = selectedGGUF.value?.suggested_options || {}
   const helpers: string[] = []
   if (options.mmproj) helpers.push(`Vision projector: ${filename(options.mmproj)}`)
   if (options['spec-draft-model']) helpers.push(`MTP draft model: ${filename(options['spec-draft-model'])}`)
   return helpers
+})
+const submitDisabled = computed(() => {
+  if (busy.value || scanning.value || remoteLoading.value) return true
+  if (remoteMode.value ? !remoteArtifact.value : !form.gguf_path) return true
+  if (!form.name.trim()) return true
+  return createFirstInstance.value && (!form.first_instance.name.trim() || !form.first_instance.slug.trim())
 })
 
 function slugify(value: string) {
@@ -47,6 +71,18 @@ function slugify(value: string) {
 }
 function filename(value: string) {
   return value.split(/[\\/]/).pop() || value
+}
+function formatBytes(value: number) {
+  if (!value) return 'Unknown size'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let amount = value
+  let index = 0
+  while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++ }
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
+}
+function remoteDefaultName() {
+  const repoName = remoteRepo.value.split('/').pop() || remoteRepo.value
+  return remoteArtifact.value?.quantization ? `${repoName} ${remoteArtifact.value.quantization}` : repoName
 }
 
 watch(() => form.name, (name) => {
@@ -59,6 +95,7 @@ watch(() => form.first_instance.name, (name) => {
   if (!firstInstanceSlugEdited.value) form.first_instance.slug = slugify(name)
 })
 watch(() => form.gguf_path, (path) => {
+  if (remoteMode.value) return
   const next = { ...form.options }
   for (const [key, value] of Object.entries(autoSuggestedOptions.value)) {
     if (next[key] === value) delete next[key]
@@ -81,6 +118,7 @@ function messageFor(value: any, fallback: string) {
 }
 
 async function scanGGUFs() {
+  if (remoteMode.value) return
   scanning.value = true
   error.value = ''
   try {
@@ -95,12 +133,50 @@ async function scanGGUFs() {
   }
 }
 
-onMounted(() => void scanGGUFs())
+async function loadRemoteArtifact() {
+  remoteLoading.value = true
+  error.value = ''
+  try {
+    remoteDetail.value = await manager.request<HFDetail>(`/api/v1/huggingface/model?repo=${encodeURIComponent(remoteRepo.value)}`)
+    remoteArtifact.value = remoteDetail.value?.artifacts?.find(item => item.id === remoteArtifactID.value) || null
+    if (!remoteArtifact.value) throw new Error('Selected Hugging Face artifact is no longer available')
+    if (!remoteArtifact.value.complete) throw new Error('Selected Hugging Face split GGUF is incomplete')
+    createFirstInstance.value = true
+    if (!form.name) form.name = remoteDefaultName()
+  } catch (e: any) {
+    remoteArtifact.value = null
+    error.value = messageFor(e, 'Unable to load Hugging Face artifact')
+  } finally {
+    remoteLoading.value = false
+  }
+}
+
+onMounted(() => {
+  if (remoteMode.value) void loadRemoteArtifact()
+  else void scanGGUFs()
+})
 
 async function createModel() {
   busy.value = true
   error.value = ''
   try {
+    if (remoteMode.value) {
+      const result = await manager.request<CreateResponse>('/api/v1/huggingface/import', {
+        method: 'POST',
+        body: {
+          repo_id: remoteRepo.value,
+          artifact_id: remoteArtifactID.value,
+          name: form.name,
+          context_length: form.context_length,
+          options: form.options,
+          first_instance: form.first_instance
+        }
+      })
+      await manager.refresh()
+      await router.push('/instances')
+      return result
+    }
+
     const body = {
       gguf_path: form.gguf_path,
       name: form.name,
@@ -116,7 +192,7 @@ async function createModel() {
     }
     await router.push(createFirstInstance.value ? '/instances' : '/models')
   } catch (e: any) {
-    error.value = messageFor(e, 'Unable to create model')
+    error.value = messageFor(e, remoteMode.value ? 'Unable to create downloading Instance' : 'Unable to create model')
   } finally {
     busy.value = false
   }
@@ -126,23 +202,41 @@ async function createModel() {
 <template>
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
-      <UPageHeader class="min-w-0 flex-1" headline="MODEL REGISTRY" title="Add model" description="Register a GGUF model and optionally bootstrap its first addressable Instance." />
-      <UButton to="/models" color="neutral" variant="soft">Back to models</UButton>
+      <UPageHeader
+        class="min-w-0 flex-1"
+        headline="MODEL REGISTRY"
+        :title="remoteMode ? 'Launch Hugging Face model' : 'Add model'"
+        :description="remoteMode ? 'Configure the Model and its first Instance now. The Instance stays in Downloading state until the selected GGUF is ready.' : 'Register a GGUF model and optionally bootstrap its first addressable Instance.'"
+      />
+      <UButton :to="remoteMode ? '/discover' : '/models'" color="neutral" variant="soft">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</UButton>
     </div>
 
     <UCard class="max-w-4xl">
       <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
       <UForm :state="form" class="space-y-6" @submit="createModel">
-        <UFormField label="GGUF file" name="gguf_path" description="Already-registered GGUF files and detected helper GGUFs are hidden." required>
+        <template v-if="remoteMode">
+          <UFormField label="Hugging Face artifact">
+            <div class="rounded-lg border border-default p-4">
+              <div v-if="remoteLoading" class="space-y-2"><USkeleton class="h-5 w-2/3" /><USkeleton class="h-4 w-1/3" /></div>
+              <div v-else-if="remoteArtifact" class="space-y-1">
+                <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ remoteRepo }}</span><UBadge v-if="remoteArtifact.quantization" color="primary" variant="subtle">{{ remoteArtifact.quantization }}</UBadge></div>
+                <p class="font-mono text-xs text-muted">{{ remoteArtifact.name }}</p>
+                <p class="text-xs text-muted">{{ formatBytes(remoteArtifact.total_bytes) }} total<span v-if="remoteArtifact.dependencies?.length"> including detected helpers</span></p>
+              </div>
+            </div>
+          </UFormField>
+        </template>
+        <UFormField v-else label="GGUF file" name="gguf_path" description="Already-registered GGUF files and detected helper GGUFs are hidden." required>
           <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
+
         <UAlert
           v-if="detectedHelpers.length"
           data-testid="detected-gguf-helpers"
           color="success"
           variant="subtle"
           title="Detected llama.cpp helpers"
-          :description="`${detectedHelpers.join(' · ')}. Their model-level llama.cpp options were filled automatically.`"
+          :description="remoteMode ? `${detectedHelpers.join(' · ')}. These helpers will be downloaded and attached automatically.` : `${detectedHelpers.join(' · ')}. Their model-level llama.cpp options were filled automatically.`"
         />
         <UFormField label="Model name" name="name" required>
           <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
@@ -155,7 +249,8 @@ async function createModel() {
         <LlamaCppOptionsEditor v-model="form.options" scope="model" />
 
         <USeparator label="First Instance" />
-        <UCheckbox v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
+        <UAlert v-if="remoteMode" color="primary" variant="subtle" title="Instance is created immediately" description="It is kept disabled internally while downloading, shown as Downloading in Instances, then enabled as soon as the GGUF is complete." />
+        <UCheckbox v-else v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
         <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
           <UFormField label="Instance name" name="first_instance.name" description="Defaults from the Model name while first-Instance creation is enabled." required>
             <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
@@ -168,14 +263,14 @@ async function createModel() {
             <UCheckbox v-model="form.first_instance.autoload_enabled" data-testid="autoload-enabled" label="Autoload on request" />
             <UCheckbox v-model="form.first_instance.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" />
           </div>
-          <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" label="Launch this Instance after creation" />
+          <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" :label="remoteMode ? 'Launch this Instance when the download completes' : 'Launch this Instance after creation'" />
           <p class="text-xs text-muted">Advanced Instance settings such as priority, GPU placement, tensor split, idle timeout and instance-level llama.cpp overrides are configured from Instances.</p>
         </div>
 
         <div class="flex flex-wrap justify-end gap-2 pt-2">
-          <UButton type="button" color="neutral" variant="soft" :loading="scanning" @click="scanGGUFs">Rescan</UButton>
-          <UButton to="/models" color="neutral" variant="soft">Cancel</UButton>
-          <UButton type="submit" :loading="busy" :disabled="scanning || !form.gguf_path || (createFirstInstance && (!form.first_instance.name || !form.first_instance.slug))">Create model</UButton>
+          <UButton v-if="!remoteMode" type="button" color="neutral" variant="soft" :loading="scanning" @click="scanGGUFs">Rescan</UButton>
+          <UButton :to="remoteMode ? '/discover' : '/models'" color="neutral" variant="soft">Cancel</UButton>
+          <UButton type="submit" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</UButton>
         </div>
       </UForm>
     </UCard>
