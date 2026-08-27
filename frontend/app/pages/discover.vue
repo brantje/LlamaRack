@@ -8,7 +8,7 @@ type HFDetail = HFModel & { description?: string; revision: string; artifacts: H
 const manager = useManager()
 const query = ref('')
 const author = ref('')
-const sort = ref('downloads')
+const sort = ref('trending_score')
 const results = ref<HFModel[]>([])
 const selected = ref<HFDetail | null>(null)
 const loading = ref(false)
@@ -16,10 +16,15 @@ const detailLoading = ref(false)
 const error = ref('')
 const downloading = ref<string[]>([])
 const downloadNotice = ref('')
+let debounceTimer: ReturnType<typeof setTimeout> | undefined
+let searchVersion = 0
+
 const sortOptions = [
-  { label: 'Most downloaded', value: 'downloads' },
-  { label: 'Most liked', value: 'likes' },
-  { label: 'Recently updated', value: 'lastModified' }
+  { label: 'Trending', value: 'trending_score' },
+  { label: 'Most likes', value: 'likes' },
+  { label: 'Most downloads', value: 'downloads' },
+  { label: 'Recently created', value: 'created_at' },
+  { label: 'Recently updated', value: 'last_modified' }
 ]
 
 function formatBytes(value: number) {
@@ -39,13 +44,56 @@ function isDownloading(artifactID: string) {
   return downloading.value.includes(artifactID)
 }
 
-async function search() {
-  loading.value = true; error.value = ''; selected.value = null
+function huggingFaceRepo(value: string) {
+  let raw = value.trim()
+  if (!raw) return ''
+  if (/^(?:www\.)?huggingface\.co\//i.test(raw)) raw = `https://${raw}`
+  if (!/^https?:\/\//i.test(raw)) return ''
   try {
-    const params = new URLSearchParams({ q: query.value, author: author.value, sort: sort.value, limit: '30' })
-    results.value = await manager.request<HFModel[]>(`/api/v1/huggingface/search?${params.toString()}`) || []
-  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to search Hugging Face' }
-  finally { loading.value = false }
+    const url = new URL(raw)
+    const host = url.hostname.toLowerCase().replace(/^www\./, '')
+    if (host !== 'huggingface.co') return ''
+    let parts = url.pathname.split('/').filter(Boolean)
+    if (parts[0]?.toLowerCase() === 'models') parts = parts.slice(1)
+    if (parts.length < 2) return ''
+    if (['datasets', 'spaces'].includes(parts[0].toLowerCase())) return ''
+    return `${parts[0]}/${parts[1]}`
+  } catch {
+    return ''
+  }
+}
+
+function clearDebounce() {
+  if (!debounceTimer) return
+  clearTimeout(debounceTimer)
+  debounceTimer = undefined
+}
+
+function scheduleSearch() {
+  clearDebounce()
+  debounceTimer = setTimeout(() => {
+    debounceTimer = undefined
+    void search()
+  }, 350)
+}
+
+async function search() {
+  clearDebounce()
+  const version = ++searchVersion
+  loading.value = true
+  error.value = ''
+  selected.value = null
+  const normalizedURL = huggingFaceRepo(query.value)
+  const searchQuery = normalizedURL || query.value.trim()
+  try {
+    const params = new URLSearchParams({ q: searchQuery, author: author.value.trim(), sort: sort.value, limit: '30' })
+    const items = await manager.request<HFModel[]>(`/api/v1/huggingface/search?${params.toString()}`) || []
+    if (version === searchVersion) results.value = items
+  } catch (value: any) {
+    if (version === searchVersion) error.value = value?.data?.error || value?.message || 'Unable to search Hugging Face'
+  } finally {
+    if (version === searchVersion) loading.value = false
+  }
 }
 
 async function openModel(id: string) {
@@ -69,6 +117,25 @@ async function download(artifact: HFArtifact) {
     error.value = value?.data?.error || value?.message || 'Unable to start download'
   }
 }
+
+watch(query, (value) => {
+  const repo = huggingFaceRepo(value)
+  if (repo && repo !== value.trim()) {
+    query.value = repo
+    return
+  }
+  scheduleSearch()
+})
+watch(author, scheduleSearch)
+watch(sort, () => {
+  clearDebounce()
+  void search()
+})
+
+onMounted(() => {
+  void search()
+})
+onBeforeUnmount(clearDebounce)
 </script>
 
 <template>
@@ -76,7 +143,7 @@ async function download(artifact: HFArtifact) {
     <UPageHeader headline="HUGGING FACE" title="Discover" description="Search GGUF repositories, inspect quantizations and download complete artifacts into the local model directory." />
     <UCard>
       <UForm :state="{}" class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]" @submit="search">
-        <UFormField label="Search" name="search"><UInput v-model="query" class="w-full" placeholder="Qwen, Llama, Gemma…" icon="i-lucide-search" /></UFormField>
+        <UFormField label="Search" name="search"><UInput v-model="query" class="w-full" placeholder="Qwen, Llama, Gemma… or Hugging Face URL" icon="i-lucide-search" /></UFormField>
         <UFormField label="Author / organization" name="author"><UInput v-model="author" class="w-full" placeholder="Optional" /></UFormField>
         <UFormField label="Sort" name="sort"><USelect v-model="sort" class="w-full" :items="sortOptions" value-key="value" /></UFormField>
         <div class="flex items-end"><UButton class="w-full justify-center" type="submit" :loading="loading">Search</UButton></div>
@@ -85,7 +152,7 @@ async function download(artifact: HFArtifact) {
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="downloadNotice" color="success" variant="subtle" :description="downloadNotice" />
     <div v-if="loading" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
-    <UEmpty v-else-if="!results.length && !selected" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned." />
+    <UEmpty v-else-if="!results.length && !selected" icon="i-lucide-search" title="No GGUF models found" description="Try another model name, author, organization or Hugging Face model URL." />
     <div v-else-if="!selected" class="grid gap-3 xl:grid-cols-2">
       <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="openModel(item.id)">
         <div class="flex items-start justify-between gap-4">
