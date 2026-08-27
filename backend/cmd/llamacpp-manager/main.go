@@ -102,8 +102,10 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	apiServer := api.New(authService, modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
+	hardwareDetector := hardware.New()
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, cfg.AllowedOrigin))
-	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardware.New()))
+	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardwareDetector))
+	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewPhase9RecommendationHandler(authService, modelService, hardwareDetector))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
 	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", phase8)
