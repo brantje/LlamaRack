@@ -56,6 +56,8 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	authService := auth.New(db, cfg.SessionLifetime)
 	modelService := models.New(db, cfg.ModelsDir)
+	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
+	defer unregisterDetectedDefaults()
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, cfg.StartupTimeout)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -65,6 +65,13 @@ func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (ma
 	}, nil
 }
 
+// RegisterDetectedLlamaDefaults makes GGUF-derived defaults available to the
+// llama config store. Call this synchronously during backend initialization so
+// even resumed provider imports that autostart immediately receive the flags.
+func (s *Service) RegisterDetectedLlamaDefaults() func() {
+	return llamaconfig.RegisterDetectedDefaultsProvider(s.db, s.DetectedLlamaDefaults)
+}
+
 // DetectContext returns the architecture-specific context capability when it is
 // present in GGUF metadata. A zero result means the file was readable but did
 // not contain a usable context capability.
@@ -115,11 +122,8 @@ func (s *Service) RefreshUnknownContexts(ctx context.Context) error {
 
 // RunMetadataReconciler also covers Models created before a provider download
 // has finished. Once the GGUF becomes available, Context capability is filled
-// automatically without provider-specific parsing logic. It also registers the
-// header-derived llama.cpp defaults used synchronously by every later launch.
+// automatically without provider-specific parsing logic.
 func (s *Service) RunMetadataReconciler(ctx context.Context, interval time.Duration) {
-	unregister := llamaconfig.RegisterDetectedDefaultsProvider(s.db, s.DetectedLlamaDefaults)
-	defer unregister()
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
