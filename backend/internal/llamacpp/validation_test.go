@@ -12,6 +12,7 @@ func testProfile() Profile {
 		{Key: "flash-attn", Kind: "boolean"},
 		{Key: "cache-type-k", ValueHint: "<f16|q8_0>", Kind: "enum", Choices: []string{"f16", "q8_0"}},
 		{Key: "chat-template", ValueHint: "STRING", Kind: "string"},
+		{Key: "tensor-split", ValueHint: "SPLIT", Kind: "string"},
 		{Key: "port", ValueHint: "N", Kind: "integer"},
 	}}
 }
@@ -19,12 +20,12 @@ func testProfile() Profile {
 func TestValidateOptionsCanonicalizesAndValidatesTypes(t *testing.T) {
 	got, err := ValidateOptions(testProfile(), map[string]string{
 		"--ctx-size": " 8192 ", "temperature": "0.7", "flash-attn": "true",
-		"cache-type-k": "q8_0", "chat-template": "chatml",
+		"cache-type-k": "q8_0", "chat-template": "chatml", "tensor-split": "3,1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["ctx-size"] != "8192" || got["temperature"] != "0.7" || got["flash-attn"] != "true" || got["cache-type-k"] != "q8_0" {
+	if got["ctx-size"] != "8192" || got["temperature"] != "0.7" || got["flash-attn"] != "true" || got["cache-type-k"] != "q8_0" || got["tensor-split"] != "3,1" {
 		t.Fatalf("validated=%+v", got)
 	}
 }
