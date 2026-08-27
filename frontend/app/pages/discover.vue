@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type HFModel = { id: string; author?: string; downloads: number; likes: number; last_modified?: string; tags?: string[]; private: boolean; gated: boolean }
+type HFModel = { id: string; author?: string; downloads: number; likes: number; last_modified?: string; parameter_count?: number; tags?: string[]; private: boolean; gated: boolean }
 type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
@@ -35,6 +35,33 @@ function formatBytes(value: number) {
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++ }
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
 }
+function formatParameters(value?: number) {
+  if (!value || value <= 0) return ''
+  const units = [
+    { threshold: 1e12, suffix: 'T' },
+    { threshold: 1e9, suffix: 'B' },
+    { threshold: 1e6, suffix: 'M' },
+    { threshold: 1e3, suffix: 'K' }
+  ]
+  for (const unit of units) {
+    if (value < unit.threshold) continue
+    const amount = value / unit.threshold
+    const digits = amount >= 100 || Number.isInteger(amount) ? 0 : 1
+    return `${amount.toFixed(digits).replace(/\.0$/, '')}${unit.suffix} params`
+  }
+  return `${value.toLocaleString()} params`
+}
+function formatUpdated(value?: string) {
+  if (!value) return ''
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return ''
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return 'Updated just now'
+  if (seconds < 3600) return `Updated ${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `Updated ${Math.floor(seconds / 3600)}h ago`
+  if (seconds < 86400 * 30) return `Updated ${Math.floor(seconds / 86400)}d ago`
+  return `Updated ${new Date(timestamp).toLocaleDateString()}`
+}
 function dependencyLabel(kind: string) {
   if (kind === 'mmproj') return 'Vision projector'
   if (kind === 'mtp') return 'MTP draft model'
@@ -42,6 +69,13 @@ function dependencyLabel(kind: string) {
 }
 function isDownloading(artifactID: string) {
   return downloading.value.includes(artifactID)
+}
+function launchTo(artifact: HFArtifact) {
+  if (!selected.value) return '/models/new'
+  return {
+    path: '/models/new',
+    query: { repo: selected.value.id, artifact: artifact.id }
+  }
 }
 
 function huggingFaceRepo(value: string) {
@@ -154,7 +188,15 @@ onBeforeUnmount(clearDebounce)
     <div v-else-if="!selected" class="grid gap-3 xl:grid-cols-2">
       <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="openModel(item.id)">
         <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0"><h2 class="truncate text-base font-bold text-highlighted">{{ item.id }}</h2><p class="mt-1 text-sm text-muted">{{ item.downloads.toLocaleString() }} downloads · {{ item.likes.toLocaleString() }} likes</p></div>
+          <div class="min-w-0">
+            <h2 class="truncate text-base font-bold text-highlighted">{{ item.id }}</h2>
+            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+              <span v-if="item.parameter_count">Model size {{ formatParameters(item.parameter_count) }}</span>
+              <span v-if="formatUpdated(item.last_modified)">{{ formatUpdated(item.last_modified) }}</span>
+              <span>↓ {{ item.downloads.toLocaleString() }}</span>
+              <span>♡ {{ item.likes.toLocaleString() }}</span>
+            </div>
+          </div>
           <div class="flex gap-2"><UBadge v-if="item.private" color="warning" variant="subtle">Private</UBadge><UBadge v-if="item.gated" color="warning" variant="subtle">Gated</UBadge><UBadge color="primary" variant="subtle">GGUF</UBadge></div>
         </div>
         <div class="mt-4 flex flex-wrap gap-1.5"><UBadge v-for="tag in (item.tags || []).slice(0, 5)" :key="tag" color="neutral" variant="soft">{{ tag }}</UBadge></div>
@@ -189,7 +231,10 @@ onBeforeUnmount(clearDebounce)
             </div>
             <div class="text-sm text-muted"><div>{{ formatBytes(artifact.total_bytes) }}</div><div v-if="artifact.dependencies?.length" class="text-xs text-dimmed">Model {{ formatBytes(artifact.model_bytes) }} + helpers</div></div>
             <div class="text-sm text-muted">{{ artifact.complete ? 'Ready to download' : `${artifact.shard_count}/${artifact.expected_shards} shards` }}</div>
-            <UButton :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</UButton>
+            <div class="flex min-w-28 flex-col gap-2">
+              <UButton :to="launchTo(artifact)" :disabled="!artifact.complete" icon="i-lucide-play">Launch</UButton>
+              <UButton color="neutral" variant="soft" :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</UButton>
+            </div>
           </div>
         </div>
       </UCard>
