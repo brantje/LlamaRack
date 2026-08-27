@@ -13,9 +13,12 @@ type GeneralSettings = {
   always_on_reconcile_seconds: SettingValue<number>
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
 }
+type SystemNetwork = { network: { effective_scheme: string; secure_cookie: boolean } }
 
 const manager = useManager()
+const { apiBase } = manager
 const settings = ref<GeneralSettings | null>(null)
+const network = ref<SystemNetwork['network'] | null>(null)
 const form = reactive({ session_lifetime_seconds: 86400, login_protection_enabled: true, login_failure_threshold: 5, login_lockout_seconds: 900, trusted_proxies: '', allowed_origins: '', external_url: '', startup_timeout_seconds: 180, idle_unload_seconds: 300, always_on_reconcile_seconds: 15 })
 const error = ref('')
 const saved = ref(false)
@@ -24,21 +27,43 @@ const busy = ref(false)
 function syncForm(value: GeneralSettings) {
   for (const key of Object.keys(form) as Array<keyof typeof form>) (form[key] as any) = value[key].value
 }
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
-  try { const value = await manager.request<GeneralSettings>('/api/v1/settings/general'); settings.value = value; syncForm(value) }
-  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load manager settings' }
+  try {
+    const [value, system] = await Promise.all([
+      manager.request<GeneralSettings>('/api/v1/settings/general'),
+      manager.request<SystemNetwork>('/api/v1/system')
+    ])
+    settings.value = value
+    network.value = system.network
+    syncForm(value)
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to load manager settings'
+  }
 }
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
   if (!settings.value) return
-  busy.value = true; error.value = ''; saved.value = false
+  busy.value = true
+  error.value = ''
+  saved.value = false
   const body: Record<string, unknown> = {}
   for (const key of Object.keys(form) as Array<keyof typeof form>) if (settings.value[key].editable) body[key] = form[key]
-  try { const value = await manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body }); settings.value = value; syncForm(value); saved.value = true }
-  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to save manager settings' } finally { busy.value = false }
+  try {
+    const value = await manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body })
+    settings.value = value
+    syncForm(value)
+    const system = await manager.request<SystemNetwork>('/api/v1/system')
+    network.value = system.network
+    saved.value = true
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to save manager settings'
+  } finally {
+    busy.value = false
+  }
 }
 
 function source(key: keyof typeof form) { return settings.value?.[key].source || 'default' }
@@ -69,6 +94,11 @@ function editable(key: keyof typeof form) { return settings.value?.[key].editabl
           <UFormField label="Allowed origins" :hint="source('allowed_origins')"><UInput v-model="form.allowed_origins" class="w-full" :disabled="!editable('allowed_origins')" placeholder="https://manager.example.com" /></UFormField>
           <UFormField label="External/public URL" :hint="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></UFormField>
         </div>
+        <USeparator class="my-5" />
+        <dl class="grid gap-4 text-sm sm:grid-cols-2">
+          <div><dt class="text-muted">Effective external scheme</dt><dd class="mt-1 font-semibold">{{ network?.effective_scheme || 'unknown' }}</dd></div>
+          <div><dt class="text-muted">Secure session cookies</dt><dd class="mt-1"><UBadge :color="network?.secure_cookie ? 'success' : 'warning'" variant="subtle">{{ network?.secure_cookie ? 'Enabled' : 'Disabled' }}</UBadge></dd></div>
+        </dl>
       </UCard>
 
       <UCard>
@@ -82,7 +112,11 @@ function editable(key: keyof typeof form) { return settings.value?.[key].editabl
 
       <UCard>
         <template #header><h2 class="text-xl font-bold">Manager runtime</h2></template>
-        <dl class="divide-y divide-default text-sm"><div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono">{{ value }}</code></dd></div></dl>
+        <dl class="divide-y divide-default text-sm">
+          <div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono">{{ value }}</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Management API URL</dt><dd><code class="break-all font-mono">{{ apiBase }}/api/v1</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">OpenAI API URL</dt><dd><code class="break-all font-mono">{{ apiBase }}/v1</code></dd></div>
+        </dl>
       </UCard>
     </template>
   </div>
