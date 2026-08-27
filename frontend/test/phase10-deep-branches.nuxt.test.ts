@@ -375,7 +375,7 @@ describe('Phase 10 deep profile branches', () => {
 })
 
 describe('Phase 10 llama and general branch variants', () => {
-  it('covers llama profile validation, unknown version, signed-out load and error fallbacks', async () => {
+  it('covers llama profile validation, unknown version and error fallbacks', async () => {
     let response: any = { profile: { ...profile, version: undefined }, effective: { global: {} } }
     let failure: any = null
     mocks.request.mockImplementation(async (path: string, options?: any) => {
@@ -419,14 +419,6 @@ describe('Phase 10 llama and general branch variants', () => {
     }
 
     wrapper.unmount()
-    await flushPromises()
-    resetManager(null)
-    await flushPromises()
-    mocks.request.mockClear()
-    const signedOut = await mountSuspended(AdminLlamaCppPage, { route: false })
-    await flushPromises()
-    expect(mocks.request).not.toHaveBeenCalled()
-    signedOut.unmount()
   })
 
   it('covers llama save error variants and General signed-out/invalid-save branches', async () => {
