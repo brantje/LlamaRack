@@ -78,7 +78,7 @@ func (s *Service) RepairArtifactOptions(ctx context.Context, modelID, repoID str
 // than merely mirroring the underlying download job state.
 func (s *Service) ListResolved(ctx context.Context) ([]Status, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT pi.id,pi.job_id,pi.model_id,COALESCE(pi.instance_id,''),pi.state,
+SELECT pi.id,pi.job_id,COALESCE(pi.model_id,''),COALESCE(pi.instance_id,''),pi.state,
        CASE WHEN pi.error<>'' THEN pi.error ELSE dj.error END,pi.start_when_ready
 FROM provider_imports pi
 JOIN download_jobs dj ON dj.id=pi.job_id
@@ -101,31 +101,51 @@ ORDER BY pi.created_at DESC,pi.id DESC`)
 	return out, rows.Err()
 }
 
-// CleanupJobSafe removes the Instance created for a pending provider import even
-// when the selected artifact was already represented by a pre-existing Model.
+// CleanupJobSafe removes Instances created by a pending provider import and
+// removes Models only when that import created the Model. Existing Models are
+// preserved. Import rows can also survive a user's manual Model deletion as a
+// tombstone so a completed download is not immediately auto-registered again.
 func (s *Service) CleanupJobSafe(ctx context.Context, jobID string) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(instance_id,'') FROM provider_imports WHERE job_id=?`, jobID)
+	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(model_id,''),COALESCE(instance_id,''),owns_model FROM provider_imports WHERE job_id=?`, jobID)
 	if err != nil {
 		return err
 	}
-	var instanceIDs []string
+	type linked struct {
+		modelID, instanceID string
+		ownsModel           bool
+	}
+	var items []linked
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var item linked
+		var owns int
+		if err := rows.Scan(&item.modelID, &item.instanceID, &owns); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		if strings.TrimSpace(id) != "" {
-			instanceIDs = append(instanceIDs, id)
-		}
+		item.ownsModel = owns != 0
+		items = append(items, item)
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, id := range instanceIDs {
-		if err := s.instances.Delete(ctx, id); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	for _, item := range items {
+		if item.instanceID == "" {
+			continue
+		}
+		if err := s.instances.Delete(ctx, item.instanceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 	}
-	return s.CleanupJob(ctx, jobID)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM provider_imports WHERE job_id=?`, jobID); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if !item.ownsModel || item.modelID == "" {
+			continue
+		}
+		if err := s.models.Delete(ctx, item.modelID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }
