@@ -35,11 +35,38 @@ The Add Model form also exposes eviction policy. `eviction_enabled=false` remove
 
 The Instances page streams live CPU, RAM, GPU placement, GPU utilization and VRAM telemetry for each running `llama-server` process. NVIDIA/ROCm tooling can report a GPU process by its **host PID**, while the manager sees the same llama-server through Docker's PID namespace. Without a mapping, for example, the manager might see PID `1652` while `nvidia-smi`/NVML reports host PID `2554129`, so exact GPU attribution fails even though CPU and RAM telemetry still work.
 
-The provided `docker-compose.yml` handles this by mounting the host `/proc` read-only at `/host/proc` and setting `LCM_HOST_PROC=/host/proc`. The telemetry collector reads the host process `NSpid` chain and maps the GPU tool's host PID back to the manager's container PID. This keeps normal Docker PID isolation while allowing per-Instance GPU placement, utilization and VRAM attribution. Custom Docker deployments should provide the same read-only host `/proc` mount and set `LCM_HOST_PROC` to its mount point if exact process attribution is required.
+The provided `docker-compose.yml` mounts the host `/proc` read-only at `/host/proc` and sets `LCM_HOST_PROC=/host/proc`. The telemetry collector reads the host process `NSpid` chain and maps the GPU tool's host PID back to the manager's container PID. This keeps normal Docker PID isolation while allowing per-Instance GPU placement, utilization and VRAM attribution. Custom Docker deployments should provide the same read-only host `/proc` mount and set `LCM_HOST_PROC` to its mount point if exact process attribution is required.
+
+### NVIDIA containers
+
+`nvidia-smi` is a host-driver utility. The backend image does **not** install a distribution-specific NVIDIA driver package; instead, NVIDIA Container Toolkit should inject the host-compatible utility and NVML libraries into the container. The image and base Compose configuration request `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=compute,utility`, because the `utility` capability is what exposes `nvidia-smi`/NVML.
+
+On a host where the NVIDIA runtime is not already the Docker default, start the stack with the NVIDIA Compose override so Docker explicitly reserves the GPUs for the backend container:
+
+```bash
+LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda \
+  docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d --build
+```
+
+After changing NVIDIA runtime capabilities, the backend container must be **recreated**, not merely restarted. To force that:
+
+```bash
+LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda \
+  docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d --build --force-recreate backend
+```
+
+Verify the runtime from inside the same backend container:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml exec backend nvidia-smi
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml exec backend nvidia-smi pmon -c 1
+```
+
+If `docker compose exec backend nvidia-smi` reports `executable file not found`, process GPU telemetry cannot work yet and the NVIDIA Container Toolkit/runtime exposure must be fixed first. The manager's NVIDIA hardware snapshot also uses `nvidia-smi`, so a device-wide fallback cannot produce NVIDIA utilization when that utility is completely unavailable inside the backend container.
 
 For NVIDIA process utilization, the manager samples `nvidia-smi pmon`. It first requests the utilization-only form (`nvidia-smi pmon -c 1 -s u`) and, if that command fails or returns no usable process rows, retries with plain `nvidia-smi pmon -c 1`. This covers driver/tooling combinations where the default `pmon` output works but the filtered invocation does not.
 
-GPU telemetry falls back **per metric**. If placement and VRAM can be attributed to the `llama-server` PID but process-level GPU utilization is unavailable (for example when `nvidia-smi pmon` does not expose the containerized process), placement and VRAM remain per-Instance while GPU utilization falls back to the assigned GPU's device-wide utilization. The Instances UI labels only that metric as `GPU usage (global fallback)`. If no GPU placement can be attributed at all, the fallback uses all detected GPUs: utilization is averaged and VRAM usage is summed, and both values are labeled `global fallback`. Global fallback values may include other GPU workloads and must not be interpreted as process-only measurements. CPU and RAM remain process-scoped.
+GPU telemetry falls back **per metric**. If placement and VRAM can be attributed to the `llama-server` PID but process-level GPU utilization is unavailable, placement and VRAM remain per-Instance while GPU utilization falls back to the assigned GPU's device-wide utilization. The Instances UI labels only that metric as `GPU usage (global fallback)`. If no GPU placement can be attributed at all, the fallback uses all detected GPUs: utilization is averaged and VRAM usage is summed, and both values are labeled `global fallback`. Global fallback values may include other GPU workloads and must not be interpreted as process-only measurements. CPU and RAM remain process-scoped.
 
 `nvcc --version` reports the installed CUDA compiler toolkit, not whether runtime process-utilization counters are exposed by the active NVIDIA driver/container stack. When troubleshooting telemetry, `nvidia-smi` output from the same environment as the manager is the relevant runtime check.
 
