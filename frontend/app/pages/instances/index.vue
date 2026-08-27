@@ -141,7 +141,9 @@ async function showLogs(instance: Instance) {
 }
 
 onMounted(() => {
-  void refreshImportStates()
+  // Provider-import Instances are disabled until their GGUF is verified. Avoid a
+  // background status request for the normal all-enabled fleet.
+  if (instances.value.some(instance => !instance.enabled)) void refreshImportStates()
 })
 
 onBeforeUnmount(() => {
