@@ -419,7 +419,9 @@ describe('Phase 10 llama and general branch variants', () => {
     }
 
     wrapper.unmount()
+    await flushPromises()
     resetManager(null)
+    await flushPromises()
     mocks.request.mockClear()
     const signedOut = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
