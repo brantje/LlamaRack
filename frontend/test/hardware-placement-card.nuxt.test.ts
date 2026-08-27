@@ -17,16 +17,22 @@ const hardware = {
 function recommendation(overrides: Record<string, any> = {}) {
   return {
     context_length: 8192,
+    context_capability: 262144,
     context_assumed: false,
     confidence: 'high',
+    metadata: { context_length: 262144 },
     quantization: { name: 'Q4_K_M', summary: 'Balanced quantization.', tradeoff: 'Good general-purpose choice.' },
     memory: { weights_bytes: 4, kv_cache_bytes: 2, runtime_overhead_bytes: 1, cpu_only_ram_bytes: 7, full_offload_vram_bytes: 7 },
     current_fit: true,
     total_hardware_fit: true,
     cpu_fit: true,
-    offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], reason: 'Fits one GPU.' },
+    offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], kv_on_gpu: true, reason: 'Fits one GPU.' },
     ...overrides
   }
+}
+
+function isConfig(path: string) {
+  return path.startsWith('/api/v1/llamacpp/config?')
 }
 
 beforeEach(() => {
@@ -70,30 +76,86 @@ describe('GPU placement cards', () => {
     expect(wrapper.emitted('update:gpuDevices')?.some(args => JSON.stringify(args[0]) === JSON.stringify(['CUDA0']))).toBe(true)
   })
 
-  it('shows memory, context and offload guidance for the selected model', async () => {
+  it('uses inherited context and shows memory, capability and offload guidance', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
-      if (path === '/api/v1/models/model-1/recommendation') return recommendation()
+      if (isConfig(path)) return { effective: { values: { 'ctx-size': '8192' } } }
+      if (path === '/api/v1/models/model-1/recommendation?context_length=8192') return recommendation()
       throw new Error(`unexpected request ${path}`)
     })
 
     const wrapper = await mountSuspended(HardwarePlacementEditor, {
       route: false,
-      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1' }
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
     })
     await flushPromises()
 
     const panel = wrapper.get('[data-testid="hardware-recommendation"]')
+    expect(wrapper.text()).toContain('inherited llama.cpp config')
+    expect(wrapper.text()).toContain('Model capability: 262,144 tokens')
     expect(panel.text()).toContain('Fits current resources')
     expect(panel.text()).toContain('high confidence')
     expect(panel.text()).toContain('8,192 tokens')
     expect(panel.text()).toContain('Recommended GPU layers: 32')
+    expect(panel.text()).toContain('KV cache: GPU')
     expect(panel.text()).toContain('Q4_K_M')
+  })
+
+  it('recalculates when context changes and emits a persistent ctx-size override', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (isConfig(path)) return { effective: { values: {} } }
+      if (path === '/api/v1/models/model-1/recommendation?context_length=4096') return recommendation({ context_length: 4096 })
+      if (path === '/api/v1/models/model-1/recommendation?context_length=65536') return recommendation({
+        context_length: 65536,
+        memory: { weights_bytes: 4, kv_cache_bytes: 64, runtime_overhead_bytes: 1, cpu_only_ram_bytes: 69, full_offload_vram_bytes: 69 },
+        offload: { mode: 'hybrid', gpu_layers: 24, devices: ['CUDA1'], kv_on_gpu: false, reason: 'Keep KV in RAM.' }
+      })
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
+
+    const input = wrapper.findComponent('[data-testid="context-input"]')
+    expect(input.exists()).toBe(true)
+    input.vm.$emit('update:modelValue', 65536)
+    await flushPromises()
+
+    expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '65536')).toBe(true)
+    await vi.waitFor(() => {
+      expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=65536')
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('hybrid')
+    expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('KV cache: system RAM')
+  })
+
+  it('prefers an unsaved Instance ctx-size override over inherited config', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path === '/api/v1/models/model-1/recommendation?context_length=32768') return recommendation({ context_length: 32768 })
+      if (isConfig(path)) throw new Error('config should not be needed for a local override')
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: { 'ctx-size': '32768' } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Instance override')
+    expect(wrapper.text()).toContain('Estimate: 32,768 tokens')
   })
 
   it('renders installed-hardware, CPU and pressure recommendation states', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
+      if (isConfig(path)) return { effective: { values: {} } }
       if (path.includes('/model-2/')) return recommendation({
         context_assumed: true,
         current_fit: false,
@@ -102,32 +164,31 @@ describe('GPU placement cards', () => {
         metadata_warning: 'Metadata fallback active',
         hardware_warning: 'GPU probe degraded',
         quantization: { summary: 'Unknown quantization.', tradeoff: 'Use actual file size.' },
-        offload: { mode: 'multi_gpu', gpu_layers: 40, devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1', reason: 'Needs both GPUs.' }
+        offload: { mode: 'multi_gpu', gpu_layers: 40, devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1', kv_on_gpu: true, reason: 'Needs both GPUs.' }
       })
       if (path.includes('/model-3/')) return recommendation({
         current_fit: false,
         total_hardware_fit: false,
         cpu_fit: true,
-        offload: { mode: 'cpu', reason: 'CPU fallback.' }
+        offload: { mode: 'cpu', kv_on_gpu: false, reason: 'CPU fallback.' }
       })
       if (path.includes('/model-4/')) return recommendation({
         current_fit: false,
         total_hardware_fit: false,
         cpu_fit: false,
-        offload: { mode: 'cpu', reason: 'Insufficient resources.' }
+        offload: { mode: 'cpu', kv_on_gpu: false, reason: 'Insufficient resources.' }
       })
       throw new Error(`unexpected request ${path}`)
     })
 
     const wrapper = await mountSuspended(HardwarePlacementEditor, {
       route: false,
-      props: { gpuMode: 'manual', gpuDevices: ['CUDA0', 'CUDA1'], tensorSplit: '', modelId: 'model-2' }
+      props: { gpuMode: 'manual', gpuDevices: ['CUDA0', 'CUDA1'], tensorSplit: '', modelId: 'model-2', llamaOptions: {} }
     })
     await flushPromises()
 
     let panel = wrapper.get('[data-testid="hardware-recommendation"]')
     expect(panel.text()).toContain('Fits installed hardware after freeing resources')
-    expect(panel.text()).toContain('assumed')
     expect(panel.text()).toContain('Tensor split: 1,1')
     expect(panel.text()).toContain('Metadata fallback active')
     expect(panel.text()).toContain('GPU probe degraded')
@@ -162,6 +223,7 @@ describe('GPU placement cards', () => {
     }
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return { gpus: [] }
+      if (isConfig(path)) return { effective: { values: {} } }
       const id = path.split('/')[4]
       if (id === 'request-error') throw new Error('recommendation unavailable')
       return invalid[id!]
@@ -169,7 +231,7 @@ describe('GPU placement cards', () => {
 
     const wrapper = await mountSuspended(HardwarePlacementEditor, {
       route: false,
-      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'primitive' }
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'primitive', llamaOptions: {} }
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(false)
@@ -186,18 +248,20 @@ describe('GPU placement cards', () => {
     expect(wrapper.text()).toContain('recommendation unavailable')
   })
 
-  it('surfaces hardware request failures without blocking a valid recommendation', async () => {
+  it('falls back to 4K when inherited config fails and surfaces hardware failures without blocking recommendations', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') throw { data: { error: 'hardware unavailable' } }
-      if (path.includes('/model-1/')) return recommendation()
+      if (isConfig(path)) throw new Error('config unavailable')
+      if (path === '/api/v1/models/model-1/recommendation?context_length=4096') return recommendation({ context_length: 4096 })
       throw new Error('unexpected request')
     })
     const wrapper = await mountSuspended(HardwarePlacementEditor, {
       route: false,
-      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1' }
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
     })
     await flushPromises()
     expect(wrapper.text()).toContain('hardware unavailable')
+    expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
     expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(true)
   })
 })
