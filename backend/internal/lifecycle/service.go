@@ -547,6 +547,7 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 		}
 	}
 	args := optionArgs(launchOptions)
+	_, hasTensorSplitOverride := launchOptions["tensor-split"]
 
 	placement, placementErr := s.preparePlacement(ctx, i, m.TotalBytes)
 	if placementErr != nil {
@@ -554,14 +555,14 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	}
 	if len(placement.Devices) > 0 {
 		args = append(args, "--device", strings.Join(placement.Devices, ","))
-		if placement.TensorSplit != "" && len(placement.Devices) > 1 {
+		if !hasTensorSplitOverride && placement.TensorSplit != "" && len(placement.Devices) > 1 {
 			args = append(args, "--tensor-split", placement.TensorSplit)
 		}
 	} else if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
 		// Preserve explicitly configured non-NVIDIA/ROCm backends when this Phase 7
 		// detector cannot observe them.
 		args = append(args, "--device", strings.Join(i.GPUDevices, ","))
-		if i.TensorSplit != "" {
+		if !hasTensorSplitOverride && i.TensorSplit != "" {
 			args = append(args, "--tensor-split", i.TensorSplit)
 		}
 	}
