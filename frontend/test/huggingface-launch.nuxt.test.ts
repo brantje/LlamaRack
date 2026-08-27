@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import DiscoverPage from '~/pages/discover.vue'
+import DiscoverPage from '~/components/ModelsDiscover.vue'
 import NewModelPage from '~/pages/models/new.vue'
 import InstancesPage from '~/pages/instances/index.vue'
 import { useManager } from '~/composables/useManager'
@@ -55,7 +55,7 @@ describe('Hugging Face launch import', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(DiscoverPage, { route: '/discover' })
+    const wrapper = await mountSuspended(DiscoverPage, { route: '/models/discover' })
     await new Promise(resolve => setTimeout(resolve, 375))
     await flushPromises()
     expect(wrapper.text()).toContain('Model size 180B params')
