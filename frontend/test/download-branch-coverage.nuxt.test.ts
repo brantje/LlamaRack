@@ -66,9 +66,12 @@ describe('download branch coverage', () => {
     expect(wrapper.text()).toContain('2.0h remaining')
     expect(wrapper.text()).toContain('checksum mismatch')
     expect(wrapper.text()).toContain('0 B / 0 B')
+    expect(wrapper.text()).not.toContain('completed.gguf')
+
+    await button(wrapper, '1 file').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('512 B / 1 KB')
     expect(wrapper.text()).toContain('/models/part.gguf')
-    expect(wrapper.text()).not.toContain('completed.gguf')
     wrapper.unmount()
   })
 
