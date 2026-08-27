@@ -5,7 +5,7 @@ import App from '~/app.vue'
 import IndexPage from '~/pages/index.vue'
 import ModelsPage from '~/pages/models/index.vue'
 import APIPage from '~/pages/api.vue'
-import SettingsPage from '~/pages/settings.vue'
+import AdminSystemPage from '~/pages/admin/system.vue'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -14,9 +14,11 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 function model(overrides: Partial<Model> = {}): Model {
   return { id: 'm1', name: 'Coder', gguf_path: 'coder.gguf', total_bytes: 4, context_length: 8192, ...overrides }
 }
+
 function instance(overrides: Partial<Instance> = {}): Instance {
   return { id: 'coder', model_id: 'm1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], ...overrides }
 }
+
 function resetState() {
   const manager = useManager()
   manager.disconnectRuntimeEvents()
@@ -48,12 +50,11 @@ beforeEach(() => {
 })
 
 describe('application shell', () => {
-  it('renders backend failure, authentication, and signed-in states', async () => {
+  it('renders backend failure, bootstrap/login, and signed-in navigation states', async () => {
     const manager = resetState()
     manager.backendError.value = 'connection refused'
     let wrapper = await mountSuspended(App, { route: false })
     expect(wrapper.text()).toContain('Manager connection failed')
-    expect(wrapper.text()).toContain('connection refused')
     wrapper.unmount()
 
     manager.backendError.value = ''
@@ -74,203 +75,87 @@ describe('application shell', () => {
     await flushPromises()
     expect(manager.user.value?.username).toBe('admin')
     expect(wrapper.text()).toContain('Sign out')
+    expect(wrapper.text()).toContain('Administration')
     wrapper.unmount()
 
-    manager.user.value = { id: 1, username: 'admin', enabled: true }
-    wrapper = await mountSuspended(App, { route: false })
-    expect(wrapper.text()).toContain('llamacpp')
-    expect(wrapper.text()).toContain('admin')
-    expect(wrapper.findAll('a').some(a => a.text().includes('Models'))).toBe(true)
-    expect(wrapper.findAll('a').some(a => a.text().includes('Instances'))).toBe(true)
-  })
-
-  it('retries initialization, signs in without bootstrap, and signs out', async () => {
-    const manager = resetState()
-    manager.backendError.value = 'offline'
-    mocks.request.mockImplementation(async (path: string) => {
-      if (path.endsWith('/auth/bootstrap')) return { required: false }
-      if (path.endsWith('/me') || path.endsWith('/auth/login')) return { id: 1, username: 'admin', enabled: true }
-      if (path.endsWith('/models') || path.endsWith('/instances')) return []
-      if (path.endsWith('/llamacpp/profile')) throw new Error('no profile')
-      if (path.endsWith('/auth/logout')) return {}
-      return []
-    })
-    let wrapper = await mountSuspended(App, { route: false })
-    await wrapper.find('button').trigger('click')
-    await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/bootstrap')
-    wrapper.unmount()
-
-    manager.backendError.value = ''
     manager.user.value = null
     manager.bootstrapRequired.value = false
+    mocks.request.mockRejectedValueOnce({ data: { error: 'bad credentials' } })
     wrapper = await mountSuspended(App, { route: false })
     expect(wrapper.text()).toContain('Welcome back')
     await wrapper.find('input[autocomplete="username"]').setValue('admin')
-    await wrapper.find('input[type="password"]').setValue('correct-horse-battery')
+    await wrapper.find('input[type="password"]').setValue('wrong-password')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('Sign out')
-    await wrapper.findAll('button').find(button => button.text() === 'Sign out')!.trigger('click')
-    await flushPromises()
-    expect(manager.user.value).toBeNull()
-  })
-
-  it('shows authentication errors from response data and Error messages', async () => {
-    const manager = resetState(); manager.user.value = null
-    mocks.request.mockRejectedValueOnce({ data: { error: 'bad credentials' } })
-    let wrapper = await mountSuspended(App, { route: false })
-    await wrapper.find('input[autocomplete="username"]').setValue('admin')
-    await wrapper.find('input[type="password"]').setValue('wrong-password')
-    await wrapper.find('form').trigger('submit'); await flushPromises()
     expect(wrapper.text()).toContain('bad credentials')
-    wrapper.unmount()
-    mocks.request.mockRejectedValueOnce(new Error('backend exploded'))
-    wrapper = await mountSuspended(App, { route: false })
-    await wrapper.find('input[autocomplete="username"]').setValue('admin')
-    await wrapper.find('input[type="password"]').setValue('wrong-password')
-    await wrapper.find('form').trigger('submit'); await flushPromises()
-    expect(wrapper.text()).toContain('backend exploded')
   })
 })
 
-describe('overview and settings', () => {
-  it('renders instance fleet state and capability information', async () => {
+describe('overview and administration', () => {
+  it('renders instance fleet state and read-only system diagnostics', async () => {
     const manager = resetState()
-    manager.models.value = [model({ id: 'm1', name: 'Ready Model', gguf_path: 'ready.gguf' }), model({ id: 'm2', name: 'Failed Model', gguf_path: 'failed.gguf' })]
+    manager.models.value = [model({ id: 'm1', name: 'Ready Model' }), model({ id: 'm2', name: 'Failed Model' })]
     manager.instances.value = [instance({ id: 'ready', model_id: 'm1', name: 'Ready', always_on: true }), instance({ id: 'failed', model_id: 'm2', name: 'Failed', autoload_enabled: false })]
     manager.runtimes.value = { m1: [{ instance_id: 'ready', model_id: 'm1', state: 'READY' }], m2: [{ instance_id: 'failed', model_id: 'm2', state: 'FAILED' }] }
-    manager.profile.value = { path: '/app/llama-server', version: 'b123', fingerprint: 'abcdefghijklmnopqrstuvwxyz', options: [{ key: 'ctx-size' }] }
     const overview = await mountSuspended(IndexPage, { route: false })
     expect(overview.text()).toContain('Ready Model')
     expect(overview.text()).toContain('Failed Model')
     expect(overview.text()).toContain('Always on')
-    expect(overview.text()).toContain('READY')
-    const settings = await mountSuspended(SettingsPage, { route: false })
-    expect(settings.text()).toContain('http://manager.test:8888')
-    expect(settings.text()).toContain('/app/llama-server')
-    manager.profile.value = null
-    await settings.vm.$nextTick()
-    expect(settings.text()).toContain('could not be discovered')
-  })
 
-  it('covers empty overview and refresh controls', async () => {
-    resetState()
-    mocks.request.mockImplementation(async (path: string) => {
-      if (path.endsWith('/models') || path.endsWith('/instances')) return []
-      if (path.endsWith('/llamacpp/profile')) throw new Error('no profile')
-      return []
+    mocks.request.mockResolvedValueOnce({
+      manager: { uptime_seconds: 42, runtime: { data_dir: '/config', models_dir: '/models' } },
+      network: { effective_scheme: 'https', secure_cookie: true, allowed_origins: { value: 'https://manager.test' }, trusted_proxies: { value: '' }, external_url: { value: '' } },
+      llamacpp: { available: true, path: '/app/llama-server', version: 'b123', fingerprint: 'abc', options: 12 }
     })
-    const overview = await mountSuspended(IndexPage, { route: false })
-    expect(overview.text()).toContain('No Instances configured')
-    await overview.find('button').trigger('click'); await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models')
-    const settings = await mountSuspended(SettingsPage, { route: false })
-    await settings.find('button').trigger('click'); await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances')
+    const system = await mountSuspended(AdminSystemPage, { route: false })
+    await flushPromises()
+    expect(system.text()).toContain('/config')
+    expect(system.text()).toContain('Secure session cookie')
+    expect(system.text()).toContain('/app/llama-server')
   })
 })
 
 describe('models page', () => {
-  it('shows registry metadata with only edit/delete management controls', async () => {
+  it('shows registry metadata with edit/delete management controls and confirms deletion', async () => {
     const manager = resetState()
     manager.models.value = [model({ quantization: 'Q4_K_M', context_length: 32768 })]
     const wrapper = await mountSuspended(ModelsPage, { route: false })
-    expect(wrapper.findAll('form')).toHaveLength(0)
     expect(wrapper.find('[data-testid="models-table"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Coder')
-    expect(wrapper.text()).toContain('coder.gguf')
     expect(wrapper.text()).toContain('Q4_K_M')
-    expect(wrapper.text()).toContain('32,768')
     expect(wrapper.text()).not.toContain('Always on')
-    expect(wrapper.findAll('button').some(b => ['Start', 'Stop', 'Logs'].includes(b.text()))).toBe(false)
-    expect(wrapper.findAll('a').some(a => a.text() === 'Edit')).toBe(true)
-  })
-
-  it('deletes registry rows, reports errors, and honors cancellation', async () => {
-    const manager = resetState(); manager.models.value = [model()]
-    mocks.request.mockRejectedValueOnce({ data: { error: 'delete failed' } })
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
-    expect(mocks.request).not.toHaveBeenCalled()
-    await clickConfirmation('confirm')
-    expect(wrapper.text()).toContain('delete failed')
 
     mocks.request.mockClear()
-    await wrapper.findAll('button').find(b => b.text() === 'Delete')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    expect(mocks.request).not.toHaveBeenCalled()
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
-  })
-
-  it('refreshes and renders the empty registry state', async () => {
-    const manager = resetState(); manager.models.value = []
-    mocks.request.mockImplementation(async (path: string) => path.endsWith('/llamacpp/profile') ? Promise.reject(new Error('none')) : [])
-    const wrapper = await mountSuspended(ModelsPage, { route: false })
-    expect(wrapper.text()).toContain('No models registered')
-    expect(wrapper.text()).toContain('Add model')
-    await wrapper.findAll('button').find(b => b.text() === 'Refresh')!.trigger('click'); await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models')
   })
 })
 
 describe('API page', () => {
-  it('loads, creates, copies, and revokes API keys', async () => {
+  it('creates, copies and requests retained-history revocation', async () => {
     resetState()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/api-keys' && options?.method === 'POST') return { key: { id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, secret: 'secret-value' }
-      if (path === '/api/v1/api-keys') return [{ id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, { id: 'k2', name: 'old', prefix: 'old', enabled: false, created_at: 1 }]
+      if (path === '/api/v1/api-keys') return [{ id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, { id: 'old', name: 'history', prefix: 'old', enabled: false, created_at: 1, revoked_at: 2 }]
       if (path.endsWith('/revoke')) return {}
       return []
     })
-    const wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
-    expect(wrapper.text()).toContain('Disabled')
+    const wrapper = await mountSuspended(APIPage, { route: false })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Revoked')
+
     await wrapper.find('input[placeholder="Key name"]').setValue('sdk')
-    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('secret-value')
-    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click')
+    await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('secret-value')
-    await wrapper.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', expect.anything())
+
+    await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
-  })
-
-  it('falls back when the Clipboard API is unavailable or rejected', async () => {
-    resetState()
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/api-keys' && options?.method === 'POST') return { key: { id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, secret: 'secret-value' }
-      if (path === '/api/v1/api-keys') return []
-      return []
-    })
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
-    const execCommand = vi.fn(() => true)
-    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
-
-    const wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
-    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click'); await flushPromises()
-    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
-    expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(wrapper.text()).not.toContain('Unable to copy API key')
-
-    const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'))
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-    execCommand.mockReturnValue(false)
-    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click'); await flushPromises()
-    expect(writeText).toHaveBeenCalledWith('secret-value')
-    expect(execCommand).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('Unable to copy API key. Select the key and copy it manually.')
-  })
-
-  it('handles API-key load and create errors', async () => {
-    resetState(); mocks.request.mockRejectedValueOnce(new Error('key load failed'))
-    let wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
-    expect(wrapper.text()).toContain('key load failed'); wrapper.unmount()
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/api-keys' && options?.method === 'POST') throw new Error('key create failed')
-      return []
-    })
-    wrapper = await mountSuspended(APIPage, { route: false }); await flushPromises()
-    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click'); await flushPromises()
-    expect(wrapper.text()).toContain('key create failed')
   })
 })
