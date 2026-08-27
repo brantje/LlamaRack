@@ -39,22 +39,37 @@ CREATE TABLE IF NOT EXISTS users (
  username TEXT NOT NULL UNIQUE,
  password_hash TEXT NOT NULL,
  enabled INTEGER NOT NULL DEFAULT 1,
- created_at INTEGER NOT NULL DEFAULT (unixepoch())
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ last_login_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS sessions (
  id TEXT PRIMARY KEY,
  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  token_hash TEXT NOT NULL UNIQUE,
- expires_at INTEGER NOT NULL
+ csrf_token_hash TEXT NOT NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ expires_at INTEGER NOT NULL,
+ remote_address TEXT NOT NULL DEFAULT '',
+ user_agent TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS api_keys (
  id TEXT PRIMARY KEY,
  name TEXT NOT NULL,
  prefix TEXT NOT NULL,
  token_hash TEXT NOT NULL UNIQUE,
  enabled INTEGER NOT NULL DEFAULT 1,
+ created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
- last_used_at INTEGER
+ last_used_at INTEGER,
+ revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS api_keys_token_hash_idx ON api_keys(token_hash);
+CREATE TABLE IF NOT EXISTS manager_settings (
+ setting_key TEXT PRIMARY KEY,
+ setting_value TEXT NOT NULL,
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE TABLE IF NOT EXISTS global_options (
  option_key TEXT PRIMARY KEY,
