@@ -56,7 +56,7 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	managerSettings := settings.New(db, settings.Defaults{
 		SessionLifetime: cfg.SessionLifetime, AllowedOrigins: cfg.AllowedOrigin, StartupTimeout: cfg.StartupTimeout,
-		IdleUnloadTimeout: cfg.IdleUnloadTimeout, AlwaysOnReconcile: cfg.AlwaysOnReconcileInterval,
+		AlwaysOnReconcile: cfg.AlwaysOnReconcileInterval,
 		DataDir: cfg.DataDir, ModelsDir: cfg.ModelsDir, DatabasePath: cfg.DatabasePath, ListenAddr: cfg.ListenAddr, LlamaServerPath: cfg.LlamaServerPath,
 	})
 	sessionLifetime := cfg.SessionLifetime
@@ -67,7 +67,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	if seconds, resolveErr := managerSettings.Int(ctx, settings.StartupTimeoutSeconds); resolveErr == nil {
 		startupTimeout = time.Duration(seconds) * time.Second
 	}
-	idleUnloadTimeout := cfg.IdleUnloadTimeout
+	idleUnloadTimeout := 5 * time.Minute
 	if seconds, resolveErr := managerSettings.Int(ctx, settings.IdleUnloadSeconds); resolveErr == nil {
 		idleUnloadTimeout = time.Duration(seconds) * time.Second
 	}
