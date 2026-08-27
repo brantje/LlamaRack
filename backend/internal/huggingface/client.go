@@ -51,14 +51,14 @@ type File struct {
 }
 
 type Artifact struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Quantization  string `json:"quantization,omitempty"`
-	TotalBytes    int64  `json:"total_bytes"`
-	ShardCount    int    `json:"shard_count"`
-	ExpectedShards int   `json:"expected_shards"`
-	Complete      bool   `json:"complete"`
-	Files         []File `json:"files"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Quantization   string `json:"quantization,omitempty"`
+	TotalBytes     int64  `json:"total_bytes"`
+	ShardCount     int    `json:"shard_count"`
+	ExpectedShards int    `json:"expected_shards"`
+	Complete       bool   `json:"complete"`
+	Files          []File `json:"files"`
 }
 
 type ModelDetail struct {
@@ -113,11 +113,19 @@ func NewClient(base string, token TokenProvider) (*Client, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("invalid Hugging Face base URL")
 	}
-	return &Client{
-		baseURL: u,
-		http: &http.Client{Timeout: 30 * time.Second},
-		token: token,
-	}, nil
+	c := &Client{baseURL: u, token: token}
+	c.http = &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many Hugging Face redirects")
+			}
+			if !strings.EqualFold(req.URL.Host, c.baseURL.Host) {
+				req.Header.Del("Authorization")
+			}
+			return nil
+		},
+	}
+	return c, nil
 }
 
 func NewClientWithHTTP(base string, token TokenProvider, client *http.Client) (*Client, error) {
@@ -215,9 +223,8 @@ func (c *Client) DownloadURL(repoID, revision, filename string) (string, error) 
 	if !validRepoID(repoID) || strings.TrimSpace(revision) == "" || !validProviderPath(filename) {
 		return "", errors.New("invalid Hugging Face artifact identity")
 	}
-	u := *c.baseURL
-	u.Path = strings.TrimSuffix(c.baseURL.Path, "/") + "/" + escapeRepo(repoID) + "/resolve/" + url.PathEscape(revision) + "/" + escapePath(filename)
-	return u.String(), nil
+	base := strings.TrimSuffix(c.baseURL.String(), "/")
+	return base + "/" + escapeRepo(repoID) + "/resolve/" + url.PathEscape(revision) + "/" + escapePath(filename), nil
 }
 
 func (c *Client) NewDownloadRequest(ctx context.Context, method, rawURL string) (*http.Request, error) {
@@ -319,7 +326,9 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, dst any) error {
 		return err
 	}
 	resolved := c.baseURL.ResolveReference(u)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolved.String(), nil)
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, resolved.String(), nil)
 	if err != nil {
 		return err
 	}
