@@ -315,7 +315,7 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 		if expected <= 0 {
 			expected = len(g.files)
 		}
-		kind := sidecarKind(g.name)
+		kind := sidecarKind(g.key)
 		if kind == "" {
 			mainGroups = append(mainGroups, g)
 			continue
@@ -376,12 +376,11 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 }
 
 func sidecarKind(name string) string {
-	base := strings.ToLower(strings.TrimSuffix(path.Base(name), path.Ext(name)))
-	for _, prefix := range []string{"mmproj", "mmoproj", "projector"} {
-		if base == prefix || strings.HasPrefix(base, prefix+"-") || strings.HasPrefix(base, prefix+"_") || strings.HasPrefix(base, prefix+".") {
-			return "mmproj"
-		}
+	normalized := strings.ToLower(name)
+	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
+		return "mmproj"
 	}
+	base := strings.ToLower(strings.TrimSuffix(path.Base(name), path.Ext(name)))
 	if base == "mtp" || strings.HasPrefix(base, "mtp-") || strings.HasPrefix(base, "mtp_") || strings.HasPrefix(base, "mtp.") {
 		return "mtp"
 	}
