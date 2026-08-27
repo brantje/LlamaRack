@@ -101,4 +101,31 @@ describe('model file deletion', () => {
     expect(checkboxChecked()).toBe(false)
     await clickModal('cancel')
   })
+
+  it('handles unknown artifact size and replaces an already-open delete request safely', async () => {
+    const manager = resetState()
+    manager.models.value = [model({ total_bytes: 0 })]
+    const wrapper = await mountSuspended(ModelsPage, { route: false })
+    const deleteButton = () => wrapper.findAll('button').find(button => button.text() === 'Delete')!
+
+    await deleteButton().trigger('click')
+    await flushPromises()
+    expect(checkboxChecked()).toBe(false)
+
+    // Opening a second request must resolve the first one as cancelled instead
+    // of leaving a stale resolver behind.
+    await deleteButton().trigger('click')
+    await flushPromises()
+    expect(checkboxChecked()).toBe(false)
+
+    modalCheckbox().click()
+    await flushPromises()
+    expect(checkboxChecked()).toBe(true)
+    expect(document.body.textContent).toContain('Backing artifact')
+    expect(document.body.textContent).not.toContain('Artifact size')
+
+    await clickModal('cancel')
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1', { method: 'DELETE' })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1?delete_files=true', { method: 'DELETE' })
+  })
 })
