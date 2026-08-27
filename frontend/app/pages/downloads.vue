@@ -23,13 +23,23 @@ type DownloadJob = {
   updated_at: number
   files?: DownloadFile[]
 }
+type DownloadEvent = {
+  type: 'download_snapshot' | 'download' | 'download_deleted' | string
+  downloads?: DownloadJob[]
+  job?: DownloadJob
+  id?: string
+}
 
 const manager = useManager()
 const jobs = ref<DownloadJob[]>([])
 const loading = ref(false)
 const actionID = ref('')
 const error = ref('')
-let timer: ReturnType<typeof setInterval> | undefined
+const liveUpdates = ref(false)
+let fallbackTimer: ReturnType<typeof setInterval> | undefined
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+let downloadSocket: WebSocket | null = null
+let disposed = false
 
 const activeStates = new Set(['QUEUED', 'RESOLVING', 'DOWNLOADING', 'VERIFYING'])
 
@@ -66,15 +76,68 @@ function stateColor(state: string) {
   return 'primary'
 }
 
+function sortJobs(items: DownloadJob[]) {
+  return [...items].sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id))
+}
+
+function applyJob(job: DownloadJob) {
+  const index = jobs.value.findIndex(item => item.id === job.id)
+  if (index === -1) jobs.value = sortJobs([...jobs.value, job])
+  else {
+    const next = [...jobs.value]
+    next[index] = job
+    jobs.value = sortJobs(next)
+  }
+}
+
 async function refresh(silent = false) {
   if (!silent) loading.value = true
   error.value = ''
   try {
-    jobs.value = await manager.request<DownloadJob[]>('/api/v1/downloads') || []
+    jobs.value = sortJobs(await manager.request<DownloadJob[]>('/api/v1/downloads') || [])
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load downloads'
   } finally {
     if (!silent) loading.value = false
+  }
+}
+
+function connectDownloadEvents() {
+  if (!import.meta.client || disposed || downloadSocket || typeof WebSocket === 'undefined') return
+  let socket: WebSocket
+  try {
+    socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws`)
+  } catch {
+    return
+  }
+  downloadSocket = socket
+  socket.onopen = () => {
+    if (downloadSocket === socket) liveUpdates.value = true
+  }
+  socket.onmessage = (event) => {
+    let message: DownloadEvent
+    try {
+      message = JSON.parse(String(event.data)) as DownloadEvent
+    } catch {
+      return
+    }
+    if (message.type === 'download_snapshot' && Array.isArray(message.downloads)) {
+      jobs.value = sortJobs(message.downloads)
+    } else if (message.type === 'download' && message.job) {
+      applyJob(message.job)
+    } else if (message.type === 'download_deleted' && message.id) {
+      jobs.value = jobs.value.filter(job => job.id !== message.id)
+    }
+  }
+  socket.onclose = () => {
+    if (downloadSocket !== socket) return
+    downloadSocket = null
+    liveUpdates.value = false
+    if (disposed) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined
+      connectDownloadEvents()
+    }, 1000)
   }
 }
 
@@ -83,7 +146,7 @@ async function cancel(job: DownloadJob) {
   error.value = ''
   try {
     await manager.request(`/api/v1/downloads/${encodeURIComponent(job.id)}/cancel`, { method: 'POST' })
-    await refresh(true)
+    applyJob({ ...job, state: 'CANCELLED', speed_bps: 0 })
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to cancel download'
   } finally {
@@ -95,8 +158,8 @@ async function retry(job: DownloadJob) {
   actionID.value = job.id
   error.value = ''
   try {
-    await manager.request(`/api/v1/downloads/${encodeURIComponent(job.id)}/retry`, { method: 'POST' })
-    await refresh(true)
+    const updated = await manager.request<DownloadJob>(`/api/v1/downloads/${encodeURIComponent(job.id)}/retry`, { method: 'POST' })
+    if (updated?.id) applyJob(updated)
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to retry download'
   } finally {
@@ -104,15 +167,34 @@ async function retry(job: DownloadJob) {
   }
 }
 
+async function remove(job: DownloadJob) {
+  actionID.value = job.id
+  error.value = ''
+  try {
+    await manager.request(`/api/v1/downloads/${encodeURIComponent(job.id)}`, { method: 'DELETE' })
+    jobs.value = jobs.value.filter(item => item.id !== job.id)
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to remove download'
+  } finally {
+    actionID.value = ''
+  }
+}
+
 onMounted(() => {
   void refresh()
-  timer = setInterval(() => {
-    if (jobs.value.some(job => activeStates.has(job.state))) void refresh(true)
+  connectDownloadEvents()
+  fallbackTimer = setInterval(() => {
+    if (!liveUpdates.value && jobs.value.some(job => activeStates.has(job.state))) void refresh(true)
   }, 1500)
 })
 
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
+  disposed = true
+  if (fallbackTimer) clearInterval(fallbackTimer)
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+  const socket = downloadSocket
+  downloadSocket = null
+  socket?.close()
 })
 </script>
 
@@ -120,7 +202,10 @@ onBeforeUnmount(() => {
   <div class="space-y-5">
     <div class="flex items-start justify-between gap-6">
       <UPageHeader class="min-w-0 flex-1" headline="MODEL STORAGE" title="Downloads" description="Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts." />
-      <UButton color="neutral" variant="soft" :loading="loading" @click="refresh()">Refresh</UButton>
+      <div class="flex items-center gap-2">
+        <UBadge :color="liveUpdates ? 'success' : 'neutral'" variant="subtle">{{ liveUpdates ? 'Live updates' : 'Reconnecting' }}</UBadge>
+        <UButton color="neutral" variant="soft" :loading="loading" @click="refresh()">Refresh</UButton>
+      </div>
     </div>
 
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
@@ -147,6 +232,7 @@ onBeforeUnmount(() => {
           <div class="flex gap-2">
             <UButton v-if="activeStates.has(job.state)" color="error" variant="soft" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</UButton>
             <UButton v-if="job.state === 'FAILED' || job.state === 'CANCELLED'" color="primary" variant="soft" size="sm" :loading="actionID === job.id" @click="retry(job)">Retry</UButton>
+            <UButton v-if="job.state === 'CANCELLED'" color="neutral" variant="soft" size="sm" :loading="actionID === job.id" @click="remove(job)">Remove</UButton>
           </div>
         </div>
 
