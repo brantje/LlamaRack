@@ -132,7 +132,7 @@ func TestPreparePlacementManualAndDetectorFallbacks(t *testing.T) {
 
 func TestEvictInstanceRevalidatesEligibility(t *testing.T) {
 	ctx := context.Background()
-	s, _, m, _, execDB := setupLifecycle(t, true, false)
+	s, _, m, sup, execDB := setupLifecycle(t, true, false)
 	items, err := s.instances.ListByModel(ctx, m.ID)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("instances=%+v err=%v", items, err)
@@ -146,8 +146,28 @@ func TestEvictInstanceRevalidatesEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	execDB("UPDATE instances SET always_on=1 WHERE id=?", victim.ID)
+	if err := s.evictInstance(ctx, victim.ID); err != nil {
+		t.Fatalf("always-on eviction-enabled victim should remain eligible: %v", err)
+	}
+	if state := sup.Status(victim.ID).State; state != supervisor.Unloaded {
+		t.Fatalf("always-on victim was not evicted: %s", state)
+	}
+	if reason := s.resourceBlockReason(victim.ID); reason != resourcePressureReason {
+		t.Fatalf("resource block reason=%q", reason)
+	}
+	if s.isManuallyStopped(victim.ID) {
+		t.Fatal("resource-pressure eviction must stay distinct from manual stop")
+	}
+
+	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
+		t.Fatal(err)
+	}
+	if reason := s.resourceBlockReason(victim.ID); reason != "" {
+		t.Fatalf("explicit start should clear resource block, got %q", reason)
+	}
+	execDB("UPDATE instances SET eviction_enabled=0 WHERE id=?", victim.ID)
 	if err := s.evictInstance(ctx, victim.ID); err == nil || !strings.Contains(err.Error(), "no longer eligible") {
-		t.Fatalf("always-on victim should be rejected: %v", err)
+		t.Fatalf("eviction-disabled victim should be protected: %v", err)
 	}
 }
 

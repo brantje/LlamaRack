@@ -18,7 +18,8 @@ A Model is configuration and artifact metadata. An Instance is the unit that sta
 - **Desired state** — what Instance policy says should exist.
 - **Observed state** — what the manager currently observes.
 - **Autoload on request** — permission for an inference request targeting a stopped Instance to start that exact Instance.
-- **Always On** — policy requiring that exact Instance to be continuously reconciled toward running/ready state, except during explicit temporary manual-stop suppression.
+- **Always On** — policy requiring that exact Instance to be continuously reconciled toward running/ready state whenever resources permit, except during explicit temporary manual-stop suppression. It does not itself grant resource-pressure eviction protection.
+- **Resource-pressure block** — session-local lifecycle state indicating that an Always-On Instance still has desired state READY but is temporarily unloaded because capacity was committed elsewhere.
 
 ## 3. Instance identity
 
@@ -124,9 +125,9 @@ If one caller disconnects:
 
 ## 9. Always-On policy
 
-`instance.always_on = true` means the manager reconciles that exact Instance toward a usable state.
+`instance.always_on = true` means the manager reconciles that exact Instance toward a usable state whenever resources permit.
 
-Desired invariant when not manually suppressed:
+Desired invariant when not manually suppressed or temporarily resource-blocked:
 
 ```text
 enabled && always_on
@@ -134,6 +135,8 @@ enabled && always_on
 ```
 
 Always On no longer means “at least one Instance for this Model.” Every Instance carries its own policy.
+
+Always On is a desired-lifecycle policy. It is independent from `eviction_enabled`, which alone controls normal resource-pressure eviction protection.
 
 ### 9.1 Manager startup
 
@@ -145,7 +148,23 @@ If an Always-On Instance crashes, retry with bounded backoff unless manually sup
 
 ### 9.3 Resource contention
 
-Always-On Instances are not normal resource-pressure eviction victims. If all desired Always-On Instances cannot fit, expose unsatisfied desired state without endless eviction/restart oscillation.
+An Always-On Instance may be selected for normal resource-pressure eviction when `eviction_enabled=true` and the ordinary victim-eligibility rules are satisfied.
+
+When that happens:
+
+```text
+Always-On + eviction_enabled=true + READY
+-> selected as victim
+-> stop/unload
+-> desired state remains READY
+-> resource-pressure block = resource_pressure
+```
+
+The resource-pressure block is **not** a manual stop. Automatic reconciliation must not immediately evict another Instance merely to restore the evicted Always-On Instance. While the block is active, automatic retry is non-preemptive: it starts the Instance only when current capacity can satisfy it without resource-pressure eviction.
+
+When sufficient capacity returns, reconciliation clears the block after the Instance successfully starts. An explicit user Launch or a targeted inference request may clear/override the block and use the normal scheduler policy, including eviction when permitted.
+
+If `eviction_enabled=false`, Always On plus eviction protection means the Instance is both continuously desired and protected from normal resource-pressure eviction.
 
 ## 10. Manual stop of Always-On Instances
 
@@ -169,6 +188,8 @@ Suppression clears when:
 - the manager restarts.
 
 Suppression is session-local and is not durable desired configuration.
+
+Manual-stop suppression and a resource-pressure block are separate lifecycle reasons. A user Stop replaces any resource-pressure block with manual-stop suppression.
 
 ## 11. Idle unloading
 
@@ -329,11 +350,14 @@ When Phase 7 scheduler execution chooses an Instance as an eviction victim:
 2. mark DRAINING;
 3. remove it from routing;
 4. allow active work to finish within policy;
-5. stop it;
-6. release/refresh resources;
-7. continue the requested Instance start.
+5. if it is Always On, record `resource_pressure` as the temporary unsatisfied desired-state reason before stopping;
+6. stop it;
+7. release/refresh resources;
+8. continue the requested Instance start.
 
-An Instance with `eviction_enabled = false` is protected from normal resource-pressure eviction.
+Normal resource-pressure eligibility is controlled by `eviction_enabled`, not `always_on`.
+
+An Instance with `eviction_enabled = false` is protected from normal resource-pressure eviction regardless of whether Always On is enabled. An Always-On Instance with `eviction_enabled = true` may be evicted, remains desired-running, and is reconciled non-preemptively once resources permit.
 
 ## 21. Lifecycle API semantics
 
@@ -369,14 +393,17 @@ At minimum:
 2. Only READY Instances receive new inference requests.
 3. One startup operation per Instance is active at a time.
 4. A request for one `instance.id` never silently uses a sibling Instance.
-5. Always On reconciles the exact Instance.
-6. Manual Stop can temporarily suppress Always-On reconciliation.
-7. Idle unload never stops an active request.
-8. PID/private port are cleared on process exit.
-9. Unexpected exits never remain displayed as READY.
-10. Direct Instance edits confirm and then automatically restart when needed.
-11. Instance rename warns that the OpenAI model ID changes.
-12. Manager restart never trusts stale READY state.
+5. Always On reconciles the exact Instance whenever resources permit.
+6. Always On does not itself protect an Instance from resource-pressure eviction.
+7. `eviction_enabled=false` is the normal resource-pressure protection control.
+8. Manual Stop can temporarily suppress Always-On reconciliation and stays distinct from resource-pressure blocking.
+9. An evicted Always-On Instance never immediately preempts another Instance merely to satisfy its own desired state.
+10. Idle unload never stops an active request.
+11. PID/private port are cleared on process exit.
+12. Unexpected exits never remain displayed as READY.
+13. Direct Instance edits confirm and then automatically restart when needed.
+14. Instance rename warns that the OpenAI model ID changes.
+15. Manager restart never trusts stale READY state.
 
 ## 24. Acceptance criteria
 
@@ -398,4 +425,10 @@ Tests demonstrate:
 - direct running-Instance edit confirms and restarts automatically;
 - Instance rename requires API-breaking warning;
 - resource eviction drains the selected Instance;
+- the four `always_on` × `eviction_enabled` combinations behave independently;
+- an eviction-enabled Always-On Instance may be selected as an idle victim;
+- an eviction-disabled Instance is protected whether or not it is Always On;
+- an evicted Always-On Instance remains explicitly resource-pressure-blocked instead of being marked manually stopped;
+- automatic Always-On reconciliation does not cause immediate eviction/restart oscillation;
+- the resource-pressure block clears and the Always-On Instance starts when capacity returns;
 - manager restart discards stale PID/READY state.
