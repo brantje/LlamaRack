@@ -1,7 +1,6 @@
 package modelimports
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"net/http"
