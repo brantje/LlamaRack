@@ -1,14 +1,10 @@
 package recommendations
 
 import (
-	"encoding/binary"
-	"errors"
-	"fmt"
-	"io"
 	"math"
-	"os"
 	"strings"
 
+	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
@@ -155,7 +151,6 @@ func estimateKV(context int64, m Metadata) int64 {
 	if headDim <= 0 || keyDim <= 0 || valueDim <= 0 {
 		return 0
 	}
-	// llama.cpp defaults to f16 KV unless configured otherwise: two bytes per K/V element.
 	return context * m.BlockCount * kvHeads * (keyDim + valueDim) * 2
 }
 
@@ -274,172 +269,15 @@ func ExplainQuantization(value string) QuantizationInfo {
 	return info
 }
 
-// ReadMetadata reads only the GGUF metadata section. Unsupported/corrupt metadata
-// degrades recommendations to file-size estimates instead of making the model unusable.
 func ReadMetadata(path string) (Metadata, error) {
-	f, err := os.Open(path)
+	inspection, err := ggufmeta.Inspect(path)
 	if err != nil {
 		return Metadata{}, err
 	}
-	defer f.Close()
-	var magic [4]byte
-	if _, err := io.ReadFull(f, magic[:]); err != nil {
-		return Metadata{}, err
-	}
-	if string(magic[:]) != "GGUF" {
-		return Metadata{}, errors.New("GGUF metadata unavailable: invalid magic")
-	}
-	version, err := readU32(f)
-	if err != nil {
-		return Metadata{}, err
-	}
-	if version < 2 || version > 3 {
-		return Metadata{}, fmt.Errorf("GGUF metadata unavailable: unsupported version %d", version)
-	}
-	if _, err = readU64(f); err != nil {
-		return Metadata{}, err
-	}
-	count, err := readU64(f)
-	if err != nil {
-		return Metadata{}, err
-	}
-	if count > 1_000_000 {
-		return Metadata{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
-	}
-	values := map[string]any{}
-	for i := uint64(0); i < count; i++ {
-		key, err := readString(f)
-		if err != nil {
-			return Metadata{}, err
-		}
-		t, err := readU32(f)
-		if err != nil {
-			return Metadata{}, err
-		}
-		value, err := readValue(f, t, true)
-		if err != nil {
-			return Metadata{}, err
-		}
-		if relevantKey(key) {
-			values[key] = value
-		}
-	}
-	m := Metadata{Architecture: stringValue(values["general.architecture"])}
-	for key, value := range values {
-		switch {
-		case strings.HasSuffix(key, ".context_length"):
-			m.ContextLength = intValue(value)
-		case strings.HasSuffix(key, ".block_count"):
-			m.BlockCount = intValue(value)
-		case strings.HasSuffix(key, ".embedding_length"):
-			m.Embedding = intValue(value)
-		case strings.HasSuffix(key, ".attention.head_count_kv"):
-			m.KVHeadCount = intValue(value)
-		case strings.HasSuffix(key, ".attention.head_count"):
-			m.HeadCount = intValue(value)
-		case strings.HasSuffix(key, ".attention.key_length"):
-			m.KeyLength = intValue(value)
-		case strings.HasSuffix(key, ".attention.value_length"):
-			m.ValueLength = intValue(value)
-		}
-	}
-	return m, nil
-}
-
-func relevantKey(key string) bool {
-	return key == "general.architecture" || strings.HasSuffix(key, ".context_length") || strings.HasSuffix(key, ".block_count") || strings.HasSuffix(key, ".embedding_length") || strings.Contains(key, ".attention.head_count") || strings.HasSuffix(key, ".attention.key_length") || strings.HasSuffix(key, ".attention.value_length")
-}
-
-func readValue(r io.ReadSeeker, t uint32, keep bool) (any, error) {
-	sizes := map[uint32]int64{0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
-	if size, ok := sizes[t]; ok {
-		buf := make([]byte, size)
-		if _, err := io.ReadFull(r, buf); err != nil {
-			return nil, err
-		}
-		if !keep {
-			return nil, nil
-		}
-		switch t {
-		case 0, 7:
-			return int64(buf[0]), nil
-		case 1:
-			return int64(int8(buf[0])), nil
-		case 2:
-			return int64(binary.LittleEndian.Uint16(buf)), nil
-		case 3:
-			return int64(int16(binary.LittleEndian.Uint16(buf))), nil
-		case 4:
-			return int64(binary.LittleEndian.Uint32(buf)), nil
-		case 5:
-			return int64(int32(binary.LittleEndian.Uint32(buf))), nil
-		case 10, 11:
-			return int64(binary.LittleEndian.Uint64(buf)), nil
-		default:
-			return nil, nil
-		}
-	}
-	switch t {
-	case 8:
-		value, err := readString(r)
-		if !keep {
-			return nil, err
-		}
-		return value, err
-	case 9:
-		elem, err := readU32(r)
-		if err != nil {
-			return nil, err
-		}
-		count, err := readU64(r)
-		if err != nil {
-			return nil, err
-		}
-		if count > 10_000_000 {
-			return nil, errors.New("GGUF metadata array is unreasonable")
-		}
-		for i := uint64(0); i < count; i++ {
-			if _, err := readValue(r, elem, false); err != nil {
-				return nil, err
-			}
-		}
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("GGUF metadata has unsupported value type %d", t)
-	}
-}
-
-func readString(r io.Reader) (string, error) {
-	n, err := readU64(r)
-	if err != nil {
-		return "", err
-	}
-	if n > uint64(16*mib) {
-		return "", errors.New("GGUF metadata string is unreasonable")
-	}
-	buf := make([]byte, int(n))
-	_, err = io.ReadFull(r, buf)
-	return string(buf), err
-}
-
-func readU32(r io.Reader) (uint32, error) {
-	var v uint32
-	err := binary.Read(r, binary.LittleEndian, &v)
-	return v, err
-}
-
-func readU64(r io.Reader) (uint64, error) {
-	var v uint64
-	err := binary.Read(r, binary.LittleEndian, &v)
-	return v, err
-}
-
-func intValue(v any) int64 {
-	n, _ := v.(int64)
-	return n
-}
-
-func stringValue(v any) string {
-	s, _ := v.(string)
-	return s
+	d := inspection.Derived
+	return Metadata{
+		Architecture: d.Architecture, ContextLength: d.ContextLength, BlockCount: d.BlockCount,
+		Embedding: d.Embedding, HeadCount: d.HeadCount, KVHeadCount: d.KVHeadCount,
+		KeyLength: d.KeyLength, ValueLength: d.ValueLength,
+	}, nil
 }
