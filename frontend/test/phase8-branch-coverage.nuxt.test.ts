@@ -191,11 +191,20 @@ describe('Downloads live-event and formatting branches', () => {
     expect(text).toContain('2.0h remaining')
     expect(text).toContain('100%')
     expect(text).toContain('0 B / 0 B')
-    expect(text).toContain('local/model.gguf')
     expect(text).toContain('boom')
     expect(text).toContain('Q4')
-    const cancelledCards = wrapper.findAllComponents({ name: 'UCard' }).filter(card => card.text().includes('cancelled.gguf'))
-    const card = cancelledCards[0] || wrapper.findAllComponents({ name: 'Card' }).find(card => card.text().includes('cancelled.gguf'))!
+    const cards = [
+      ...wrapper.findAllComponents({ name: 'UCard' }),
+      ...wrapper.findAllComponents({ name: 'Card' })
+    ]
+    const overCard = cards.find(card => card.text().includes('over.gguf'))!
+    const filesToggle = overCard.findAll('button').find(button => button.text().includes('1 file'))
+    if (filesToggle) {
+      await filesToggle.trigger('click')
+      await flushPromises()
+      expect(overCard.text()).toContain('local/model.gguf')
+    }
+    const card = cards.find(card => card.text().includes('cancelled.gguf'))!
     const retry = card.findAll('button').find(button => button.text() === 'Retry')!
     await retry.trigger('click'); await flushPromises()
     const remove = card.findAll('button').find(button => button.text() === 'Remove')!
