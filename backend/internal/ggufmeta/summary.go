@@ -126,7 +126,7 @@ func summaryMetadataKey(key string) bool {
 
 func summaryFeatures(derived Derived, values map[string]string) Features {
 	architecture := strings.TrimSpace(derived.Architecture)
-	standaloneMTP := standaloneMTPArchitecture(architecture)
+	standaloneMTP := IsStandaloneMTPArchitecture(architecture)
 	features := Features{
 		Architecture: architecture,
 		Projector:    strings.EqualFold(architecture, "clip"),
