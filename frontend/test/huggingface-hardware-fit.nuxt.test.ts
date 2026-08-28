@@ -127,6 +127,13 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     expect(wrapper.text()).toContain('Q8 usually offers a small quality gain')
     expect(wrapper.findAll('[data-testid="artifact-hardware-fit"]')).toHaveLength(4)
     expect(wrapper.findAll('[data-testid^="artifact-"]').filter(node => node.text().includes('Recommended'))).toHaveLength(1)
+
+    const recommendedArtifact = wrapper.get('[data-testid="artifact-single"]')
+    expect(recommendedArtifact.attributes('data-recommended')).toBe('true')
+    expect(recommendedArtifact.classes()).toContain('border-primary')
+    expect(recommendedArtifact.classes()).toContain('bg-primary/5')
+    expect(wrapper.get('[data-testid="recommended-badge"]').text()).toBe('Recommended')
+    expect(wrapper.get('[data-testid="artifact-multi"]').attributes('data-recommended')).toBeUndefined()
     wrapper.unmount()
   })
 
