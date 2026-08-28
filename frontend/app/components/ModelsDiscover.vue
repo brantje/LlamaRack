@@ -399,17 +399,7 @@ onBeforeUnmount(() => {
     <div v-if="isDetail && detailLoading" class="space-y-3"><USkeleton class="h-32 w-full rounded-xl" /><USkeleton class="h-64 w-full rounded-xl" /></div>
     <template v-else-if="isDetail && selected">
       <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="backToResults">Back to results</UButton>
-      <UCard>
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">REPOSITORY</p>
-            <h2 class="text-2xl font-bold">{{ selected.id }}</h2>
-            <div v-if="selected.parameter_count" class="mt-1 text-sm text-muted">Hugging Face GGUF metadata: {{ formatParameters(selected.parameter_count) }}</div>
-            <p v-if="selected.description" class="mt-3 max-w-4xl whitespace-pre-line text-sm leading-6 text-muted">{{ selected.description }}</p>
-          </div>
-          <div class="flex gap-2"><UBadge v-if="selected.private" color="warning">Private</UBadge><UBadge v-if="selected.gated" color="warning">Gated</UBadge></div>
-        </div>
-      </UCard>
+      <ModelsDiscoverRepositoryHeader :model="selected" :recommendations="recommendations" />
 
       <UAlert v-if="selected.gated" color="warning" variant="subtle" title="Access may require approval" description="A configured Hugging Face token is used only for Hugging Face requests. The manager does not accept licenses or request gated access on your behalf." />
       <UAlert v-if="recommendationError" color="warning" variant="subtle" title="Hardware guidance unavailable" :description="recommendationError" />
