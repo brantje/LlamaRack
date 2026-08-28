@@ -32,6 +32,12 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	if general.IdleUnloadTimeout.Value != 300 || general.IdleUnloadTimeout.Source != "default" || !general.IdleUnloadTimeout.Editable {
 		t.Fatalf("idle unload default=%+v", general.IdleUnloadTimeout)
 	}
+	if general.ObservabilityRetention.Value != 30 || general.ObservabilityRetention.Source != "default" || !general.ObservabilityRetention.Editable {
+		t.Fatalf("observability retention default=%+v", general.ObservabilityRetention)
+	}
+	if general.PrometheusToken.Value != "" || general.PrometheusToken.Source != "default" || !general.PrometheusToken.Editable {
+		t.Fatalf("prometheus token default=%+v", general.PrometheusToken)
+	}
 	if general.Runtime.ModelsDir != "/models" || general.AllowedOrigins.Value != "http://localhost:3000" {
 		t.Fatalf("general=%+v", general)
 	}
@@ -48,6 +54,25 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	if got, err := s.String(ctx, TrustedProxies); err != nil || got != "10.0.0.0/8" { t.Fatalf("string=%q err=%v", got, err) }
 	if _, err := s.Set(ctx, IdleUnloadSeconds, 600); err != nil { t.Fatal(err) }
 	if got, err := s.Int(ctx, IdleUnloadSeconds); err != nil || got != 600 { t.Fatalf("idle unload=%d err=%v", got, err) }
+	if _, err := s.Set(ctx, ObservabilityRetentionDays, 45); err != nil { t.Fatal(err) }
+	if got, err := s.Int(ctx, ObservabilityRetentionDays); err != nil || got != 45 { t.Fatalf("retention=%d err=%v", got, err) }
+	if _, err := s.Set(ctx, PrometheusAuthToken, "dashboard-token"); err != nil { t.Fatal(err) }
+	if got, err := s.String(ctx, PrometheusAuthToken); err != nil || got != "dashboard-token" { t.Fatalf("prometheus token=%q err=%v", got, err) }
+}
+
+func TestPrometheusTokenDatabaseCanOverrideEnvironment(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LCM_PROMETHEUS_AUTH_TOKEN", "environment-token")
+	s := testSettings(t)
+	value, err := s.Resolve(ctx, PrometheusAuthToken)
+	if err != nil || value.Value != "environment-token" || value.Source != "environment" || !value.Editable {
+		t.Fatalf("environment token=%+v err=%v", value, err)
+	}
+	if _, err := s.Set(ctx, PrometheusAuthToken, "database-token"); err != nil { t.Fatal(err) }
+	value, err = s.Resolve(ctx, PrometheusAuthToken)
+	if err != nil || value.Value != "database-token" || value.Source != "database" || !value.Editable {
+		t.Fatalf("database token=%+v err=%v", value, err)
+	}
 }
 
 func TestEnvironmentOverridesDatabaseAndValidation(t *testing.T) {
@@ -86,7 +111,7 @@ func TestSettingValidationAndTypeErrors(t *testing.T) {
 	ctx := context.Background()
 	s := testSettings(t)
 	for _, tc := range []struct { key string; value any }{
-		{SessionLifetimeSeconds, 1}, {LoginFailureThreshold, 1}, {LoginLockoutSeconds, 0}, {StartupTimeoutSeconds, 0}, {IdleUnloadSeconds, -1}, {AlwaysOnReconcileSeconds, -1},
+		{SessionLifetimeSeconds, 1}, {LoginFailureThreshold, 1}, {LoginLockoutSeconds, 0}, {StartupTimeoutSeconds, 0}, {IdleUnloadSeconds, -1}, {AlwaysOnReconcileSeconds, -1}, {ObservabilityRetentionDays, 0}, {ObservabilityRetentionDays, 3651},
 	} {
 		if _, err := s.Set(ctx, tc.key, tc.value); err == nil { t.Fatalf("expected validation error for %s", tc.key) }
 	}
