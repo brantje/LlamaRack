@@ -146,33 +146,13 @@ func (s *Sampler) Run(ctx context.Context) {
 func (s *Sampler) observeLifecycle(ctx context.Context, previous, next supervisor.Runtime) {
 	if next.InstanceID == "" || previous.State == next.State || s.lifecycle == nil || s.service == nil { return }
 	state := s.lifecycle.OperationalState(next.InstanceID)
-	record := func(event string, duration time.Duration) {
+	instance, instanceErr := s.lifecycle.Instances().Get(ctx, next.InstanceID)
+	instancePtr := &instance
+	if instanceErr != nil { instancePtr = nil }
+	for _, transition := range classifyLifecycle(previous, next, state, instancePtr, s.idleTimeout, time.Now()) {
 		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		_ = s.service.RecordLifecycle(persistCtx, event, next.InstanceID, duration)
-	}
-	if next.State == supervisor.Starting && state.Activity.ActiveRequests > 0 {
-		record(LifecycleAutoload, 0)
-	}
-	if next.State == supervisor.Ready {
-		duration := time.Duration(0)
-		if !next.StartedAt.IsZero() && !next.ReadyAt.IsZero() && next.ReadyAt.After(next.StartedAt) { duration = next.ReadyAt.Sub(next.StartedAt) }
-		record(LifecycleLoad, duration)
-	}
-	if next.State == supervisor.Failed {
-		record(LifecycleFailedStart, 0)
-	}
-	if !runtimeWasRunning(previous.State) || (next.State != supervisor.Stopping && next.State != supervisor.Unloaded) { return }
-	if state.ResourceBlocked || state.ResourceStartActive {
-		record(LifecycleEviction, 0)
-		return
-	}
-	instance, err := s.lifecycle.Instances().Get(ctx, next.InstanceID)
-	if err != nil || instance.AlwaysOn || state.ManuallyStopped || state.Activity.LastUsed.IsZero() { return }
-	idle := s.idleTimeout
-	if instance.IdleUnloadSeconds > 0 { idle = time.Duration(instance.IdleUnloadSeconds) * time.Second }
-	if idle > 0 && time.Since(state.Activity.LastUsed) >= idle {
-		record(LifecycleIdleUnload, 0)
+		_ = s.service.RecordLifecycle(persistCtx, transition.Event, next.InstanceID, transition.Duration)
+		cancel()
 	}
 }
 
