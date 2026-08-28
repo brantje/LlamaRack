@@ -3,13 +3,13 @@ package ggufmeta
 import (
 	"errors"
 	"io"
-	"strings"
 )
 
-// InspectDerivedReader reads only the metadata prefix needed by the hardware
-// recommendation engine. GGUF model metadata is emitted before the large
-// tokenizer tables by llama.cpp tooling, so remote discovery can stop before
-// transferring tokenizer data or tensor weights.
+// InspectDerivedReader reads the GGUF metadata section needed by the hardware
+// recommendation engine. Metadata keys are not ordered by category, so the
+// parser must continue through tokenizer entries instead of assuming all model
+// architecture fields appear first. The caller is responsible for bounding the
+// reader; this function never advances into tensor descriptors or tensor data.
 func InspectDerivedReader(reader io.Reader) (Derived, error) {
 	if reader == nil {
 		return Derived{}, errors.New("GGUF metadata unavailable: empty reader")
@@ -45,15 +45,6 @@ func InspectDerivedReader(reader io.Reader) (Derived, error) {
 		key, err := readKey(r)
 		if err != nil {
 			return derive(scalars), err
-		}
-		// The tokenizer section can contain megabytes of tokens/merges. All
-		// architecture dimensions used for KV estimation should precede it.
-		if strings.HasPrefix(key, "tokenizer.") {
-			derived := derive(scalars)
-			if derivedCoreReady(derived) {
-				return derived, nil
-			}
-			return derived, errors.New("GGUF metadata unavailable: architecture dimensions are incomplete before tokenizer metadata")
 		}
 		typeID, err := readU32(r)
 		if err != nil {
