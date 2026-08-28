@@ -125,3 +125,119 @@ func TestInspectGGUFArtifactGroupsSplitFiles(t *testing.T) {
 		t.Fatalf("split bytes model=%d total=%d", inspection.ModelBytes, inspection.TotalBytes)
 	}
 }
+
+func TestInspectGGUFArtifactNativeMTPUsesDefaultsWithoutDraftDependency(t *testing.T) {
+	s, dir := testModelService(t)
+	main := writeClassifiedGGUF(t, dir, "native-MTP-Q8_0.gguf", "qwen35", 1, true)
+
+	inspection, err := s.InspectGGUFArtifact(context.Background(), main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inspection.Dependencies) != 0 {
+		t.Fatalf("native MTP dependencies = %+v", inspection.Dependencies)
+	}
+	if inspection.SuggestedOptions["spec-type"] != "draft-mtp" || inspection.SuggestedOptions["spec-draft-n-max"] != "16" || inspection.SuggestedOptions["spec-draft-p-min"] != "0.8" {
+		t.Fatalf("native MTP defaults = %+v", inspection.SuggestedOptions)
+	}
+	if _, exists := inspection.SuggestedOptions["spec-draft-model"]; exists {
+		t.Fatalf("native MTP must not invent draft file: %+v", inspection.SuggestedOptions)
+	}
+}
+
+func TestInspectGGUFArtifactReturnsArtifactWithWarningForMalformedMain(t *testing.T) {
+	s, dir := testModelService(t)
+	main := filepath.Join(dir, "broken-Q4_0.gguf")
+	if err := os.WriteFile(main, []byte("not a gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	inspection, err := s.InspectGGUFArtifact(context.Background(), main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Name != "broken-Q4_0.gguf" || !inspection.Complete || inspection.ModelBytes == 0 || inspection.Warning == "" {
+		t.Fatalf("malformed inspection = %+v", inspection)
+	}
+}
+
+func TestInspectGGUFArtifactKeepsIncompleteMainArtifactUnattached(t *testing.T) {
+	s, dir := testModelService(t)
+	main := writeClassifiedGGUF(t, dir, "partial-Q4_K_M-00001-of-00002.gguf", "qwen2", 0, true)
+	_ = writeClassifiedGGUF(t, dir, "projector-F16.gguf", "clip", 0, false)
+
+	inspection, err := s.InspectGGUFArtifact(context.Background(), main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Complete || inspection.ShardCount != 1 || inspection.ExpectedShards != 2 {
+		t.Fatalf("partial main = %+v", inspection)
+	}
+	if len(inspection.Dependencies) != 0 || inspection.TotalBytes != inspection.ModelBytes {
+		t.Fatalf("partial main must not attach dependencies = %+v", inspection)
+	}
+}
+
+func TestInspectGGUFArtifactPrefersExactQuantization(t *testing.T) {
+	s, dir := testModelService(t)
+	main := writeClassifiedGGUF(t, dir, "model-Q8_0.gguf", "qwen2", 0, true)
+	_ = writeClassifiedGGUF(t, dir, "projector-F16.gguf", "clip", 0, false)
+	exact := writeClassifiedGGUF(t, dir, "projector-Q8_0.gguf", "clip", 0, false)
+
+	inspection, err := s.InspectGGUFArtifact(context.Background(), main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inspection.Dependencies) != 1 || inspection.Dependencies[0].Quantization != "Q8_0" {
+		t.Fatalf("exact quant dependency = %+v", inspection.Dependencies)
+	}
+	if inspection.SuggestedOptions["mmproj"] != exact {
+		t.Fatalf("mmproj = %q want %q", inspection.SuggestedOptions["mmproj"], exact)
+	}
+}
+
+func TestInspectGGUFArtifactSkipsMalformedHelperAndUsesDeterministicFallback(t *testing.T) {
+	s, dir := testModelService(t)
+	main := writeClassifiedGGUF(t, dir, "model.gguf", "qwen2", 0, true)
+	first := writeClassifiedGGUF(t, dir, "a-helper.gguf", "clip", 0, false)
+	_ = writeClassifiedGGUF(t, dir, "z-helper.gguf", "clip", 0, false)
+	if err := os.WriteFile(filepath.Join(dir, "broken-helper.gguf"), []byte("broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	inspection, err := s.InspectGGUFArtifact(context.Background(), main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inspection.Dependencies) != 1 || inspection.Dependencies[0].Name != "a-helper.gguf" {
+		t.Fatalf("fallback dependency = %+v", inspection.Dependencies)
+	}
+	if inspection.SuggestedOptions["mmproj"] != first {
+		t.Fatalf("fallback mmproj = %q want %q", inspection.SuggestedOptions["mmproj"], first)
+	}
+}
+
+func TestLocalArtifactIdentityRejectsInvalidSplitIndexes(t *testing.T) {
+	for _, name := range []string{
+		"model-00000-of-00002.gguf",
+		"model-00003-of-00002.gguf",
+		"model-00001-of-00000.gguf",
+	} {
+		if _, _, _, _, ok := localArtifactIdentity(name); ok {
+			t.Fatalf("expected invalid split identity for %q", name)
+		}
+	}
+	if key, name, part, expected, ok := localArtifactIdentity("nested/model.gguf"); !ok || key != "nested/model.gguf" || name != "model.gguf" || part != 1 || expected != 1 {
+		t.Fatalf("single identity = %q %q %d %d %v", key, name, part, expected, ok)
+	}
+}
+
+func TestLocalArtifactGroupFirstRelFallsBackToLowestPart(t *testing.T) {
+	group := &localArtifactGroup{rels: map[int]string{3: "z/part3.gguf", 2: "z/part2.gguf"}}
+	if got := group.firstRel(); got != "z/part2.gguf" {
+		t.Fatalf("first rel = %q", got)
+	}
+	if got := (*localArtifactGroup)(nil).firstRel(); got != "" {
+		t.Fatalf("nil first rel = %q", got)
+	}
+}
