@@ -7,6 +7,10 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 )
 
+func speedMetadata() Metadata {
+	return Metadata{BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8}
+}
+
 func TestEstimateGenerationSpeedSingleGPU(t *testing.T) {
 	gib := int64(1024 * 1024 * 1024)
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_032_000_000}}}
@@ -14,7 +18,7 @@ func TestEstimateGenerationSpeedSingleGPU(t *testing.T) {
 	offload := Offload{Mode: "full", Devices: []string{"CUDA0"}, KVOnGPU: true}
 	guide := ClassifyQuantization("3.69BPW")
 
-	got := estimateGenerationSpeed(snapshot, memory, offload, guide)
+	got := estimateGenerationSpeed(snapshot, memory, offload, guide, speedMetadata())
 	if !got.Estimated || got.MinTokensPerSecond <= 0 || got.MaxTokensPerSecond <= got.MinTokensPerSecond {
 		t.Fatalf("estimate=%+v", got)
 	}
@@ -31,8 +35,8 @@ func TestEstimateGenerationSpeedMultiGPUDoesNotAddBandwidthNaively(t *testing.T)
 	}}
 	memory := MemoryEstimate{WeightsBytes: 20 * gib, KVCacheBytes: 2 * gib}
 	guide := ClassifyQuantization("Q4_K_M")
-	single := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide)
-	multi := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "multi_gpu", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "1,1"}, guide)
+	single := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide, speedMetadata())
+	multi := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "multi_gpu", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "1,1"}, guide, speedMetadata())
 	if !single.Estimated || !multi.Estimated {
 		t.Fatalf("single=%+v multi=%+v", single, multi)
 	}
@@ -41,32 +45,80 @@ func TestEstimateGenerationSpeedMultiGPUDoesNotAddBandwidthNaively(t *testing.T)
 	}
 }
 
-func TestEstimateGenerationSpeedRequiresMeasuredBandwidthAndGPUOnlyPlacement(t *testing.T) {
+func TestEstimateGenerationSpeedHybridPlacements(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	snapshot := hardware.Snapshot{
+		RAMBandwidthBytesPerSecond: 52_000_000_000,
+		GPUs: []hardware.GPU{{
+			ID: "CUDA0",
+			MemoryBandwidthBytesPerSecond: 288_000_000_000,
+			PCIeBandwidthBytesPerSecond: 15_753_846_153,
+		}},
+	}
+	memory := MemoryEstimate{WeightsBytes: 16 * gib, KVCacheBytes: 2 * gib}
+	guide := ClassifyQuantization("Q4_K_M")
+	metadata := speedMetadata()
+
+	partial := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "partial", Devices: []string{"CUDA0"}, GPULayers: 20, KVOnGPU: true}, guide, metadata)
+	if !partial.Estimated || !strings.Contains(partial.Label, "tok/s") || !strings.Contains(partial.Reason, "measured memory-copy throughput") || !strings.Contains(partial.Reason, "PCIe") || !strings.Contains(partial.Reason, "VRAM traffic") {
+		t.Fatalf("partial=%+v", partial)
+	}
+
+	hybrid := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "hybrid", Devices: []string{"CUDA0"}, GPULayers: 20, KVOnGPU: false}, guide, metadata)
+	if !hybrid.Estimated || !strings.Contains(hybrid.Reason, "system RAM traffic") {
+		t.Fatalf("hybrid=%+v", hybrid)
+	}
+	if hybrid.MaxTokensPerSecond >= partial.MaxTokensPerSecond {
+		t.Fatalf("moving KV traffic from VRAM to host RAM should reduce the estimate: partial=%+v hybrid=%+v", partial, hybrid)
+	}
+}
+
+func TestEstimateGenerationSpeedHybridRequiresHostAndPCIeTelemetry(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	memory := MemoryEstimate{WeightsBytes: 8 * gib, KVCacheBytes: gib}
+	guide := ClassifyQuantization("Q4_K_M")
+	metadata := speedMetadata()
+	offload := Offload{Mode: "partial", Devices: []string{"CUDA0"}, GPULayers: 16, KVOnGPU: true}
+	gpu := hardware.GPU{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_000_000_000, PCIeBandwidthBytesPerSecond: 15_753_846_153}
+
+	missingRAM := estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{gpu}}, memory, offload, guide, metadata)
+	if missingRAM.Estimated || !strings.Contains(missingRAM.Reason, "host-memory bandwidth") {
+		t.Fatalf("missing RAM=%+v", missingRAM)
+	}
+	gpu.PCIeBandwidthBytesPerSecond = 0
+	missingPCIe := estimateGenerationSpeed(hardware.Snapshot{RAMBandwidthBytesPerSecond: 50_000_000_000, GPUs: []hardware.GPU{gpu}}, memory, offload, guide, metadata)
+	if missingPCIe.Estimated || !strings.Contains(missingPCIe.Reason, "PCIe") {
+		t.Fatalf("missing PCIe=%+v", missingPCIe)
+	}
+	missingMetadata := estimateGenerationSpeed(hardware.Snapshot{RAMBandwidthBytesPerSecond: 50_000_000_000, GPUs: []hardware.GPU{{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_000_000_000, PCIeBandwidthBytesPerSecond: 15_753_846_153}}}, memory, offload, guide, Metadata{})
+	if missingMetadata.Estimated || !strings.Contains(missingMetadata.Reason, "layer/embedding metadata") {
+		t.Fatalf("missing metadata=%+v", missingMetadata)
+	}
+}
+
+func TestEstimateGenerationSpeedRequiresMeasuredGPUBandwidth(t *testing.T) {
 	gib := int64(1024 * 1024 * 1024)
 	memory := MemoryEstimate{WeightsBytes: 4 * gib, KVCacheBytes: gib}
 	guide := ClassifyQuantization("Q4_K_M")
-
-	missing := estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0"}}}, memory, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide)
+	missing := estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0"}}}, memory, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide, speedMetadata())
 	if missing.Estimated || !strings.Contains(missing.Reason, "memory-bandwidth telemetry") {
 		t.Fatalf("missing bandwidth=%+v", missing)
 	}
-
-	for _, mode := range []string{"partial", "hybrid", "cpu"} {
-		got := estimateGenerationSpeed(hardware.Snapshot{}, memory, Offload{Mode: mode}, guide)
-		if got.Estimated || !strings.Contains(got.Reason, "system-RAM") {
-			t.Fatalf("mode=%s estimate=%+v", mode, got)
-		}
+	cpu := estimateGenerationSpeed(hardware.Snapshot{}, memory, Offload{Mode: "cpu"}, guide, speedMetadata())
+	if cpu.Estimated || !strings.Contains(cpu.Reason, "CPU-only") {
+		t.Fatalf("cpu=%+v", cpu)
 	}
 }
 
 func TestEstimateGenerationSpeedCoversInvalidInputs(t *testing.T) {
 	guide := ClassifyQuantization("Q4_K_M")
 	bandwidthGPU := hardware.GPU{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_000_000_000}
+	metadata := speedMetadata()
 	for name, got := range map[string]GenerationSpeedEstimate{
-		"mode": estimateGenerationSpeed(hardware.Snapshot{}, MemoryEstimate{WeightsBytes: 1}, Offload{}, guide),
-		"weights": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{}, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide),
-		"devices": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full"}, guide),
-		"missing device": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full", Devices: []string{"CUDA1"}}, guide),
+		"mode": estimateGenerationSpeed(hardware.Snapshot{}, MemoryEstimate{WeightsBytes: 1}, Offload{}, guide, metadata),
+		"weights": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{}, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide, metadata),
+		"devices": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full"}, guide, metadata),
+		"missing device": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full", Devices: []string{"CUDA1"}}, guide, metadata),
 	} {
 		if got.Estimated || got.Label != "Estimate unavailable" {
 			t.Fatalf("%s=%+v", name, got)
@@ -105,6 +157,12 @@ func TestGenerationSpeedHelpers(t *testing.T) {
 	}
 	if got := tensorSplitFractions("", 0); got != nil {
 		t.Fatalf("zero devices=%v", got)
+	}
+	if estimatedHybridBoundaryTraffic(Metadata{Embedding: 4096}) != 32768 || estimatedHybridBoundaryTraffic(Metadata{}) != 0 {
+		t.Fatal("unexpected hybrid boundary estimate")
+	}
+	if slowestPCIeBandwidth([]hardware.GPU{{PCIeBandwidthBytesPerSecond: 20}, {PCIeBandwidthBytesPerSecond: 10}}) != 10 {
+		t.Fatal("unexpected PCIe bottleneck")
 	}
 	if got := formatTPSRange(4.2, 6.7); got != "~4.2–6.7 tok/s" {
 		t.Fatalf("range=%q", got)
