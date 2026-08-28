@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 
@@ -13,8 +14,9 @@ import (
 )
 
 const (
-	discoveryMetadataLimit    = int64(8 << 20)
-	discoveryMetadataMaxLimit = int64(50_000_000)
+	discoveryMetadataLimit          = int64(8 << 20)
+	discoveryMetadataMaxLimit       = int64(50_000_000)
+	discoveryMetadataCandidateLimit = 3
 )
 
 var discoveryMetadataCache sync.Map
@@ -25,49 +27,146 @@ var discoveryMetadataCache sync.Map
 // bounded GGUF read supplies block/embedding/head dimensions that model-info
 // does not expose today.
 //
+// Repositories frequently contain several GGUF roles (target, draft, vision,
+// projector) and may expose a large sharded BF16 artifact before the practical
+// inference quantizations. Metadata is model-wide, so prefer a compact,
+// single-file target quantization and retry a small number of alternatives when
+// one artifact is auxiliary, malformed, or otherwise lacks target dimensions.
+//
 // Most files fit in the initial 8 MiB range. If a large or interleaved tokenizer
 // payload pushes the required dimensions beyond that range, retry once with the
 // same 50 MB safety ceiling used by Hugging Face's remote GGUF parser. Tensor
 // descriptors and tensor data are never parsed.
 func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufmeta.Derived, error) {
-	var modelFile string
-	for _, artifact := range detail.Artifacts {
-		if !artifact.Complete || len(artifact.Files) == 0 {
-			continue
-		}
-		modelFile = strings.TrimSpace(artifact.Files[0].Path)
-		if modelFile != "" {
-			break
-		}
-	}
-	if modelFile == "" {
+	candidates := discoveryMetadataCandidates(detail.Artifacts)
+	if len(candidates) == 0 {
 		return providerDerived(ggufmeta.Derived{}, detail.GGUF), fmt.Errorf("GGUF metadata unavailable: no complete model artifact")
-	}
-	cacheKey := c.baseURL.String() + "|" + detail.ID + "|" + detail.Revision + "|" + modelFile
-	if cached, ok := discoveryMetadataCache.Load(cacheKey); ok {
-		return providerDerived(cached.(ggufmeta.Derived), detail.GGUF), nil
-	}
-
-	rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
-	if err != nil {
-		return providerDerived(ggufmeta.Derived{}, detail.GGUF), err
 	}
 
 	var lastDerived ggufmeta.Derived
-	for attempt, limit := range []int64{discoveryMetadataLimit, discoveryMetadataMaxLimit} {
-		derived, err := c.readDerivedMetadataRange(ctx, rawURL, limit)
-		derived = providerDerived(derived, detail.GGUF)
-		lastDerived = derived
-		if err == nil {
-			discoveryMetadataCache.Store(cacheKey, derived)
-			return derived, nil
+	var lastErr error
+	for _, modelFile := range candidates {
+		if err := ctx.Err(); err != nil {
+			return providerDerived(lastDerived, detail.GGUF), err
 		}
-		if attempt == 0 && metadataRangeExhausted(err) {
+		cacheKey := c.baseURL.String() + "|" + detail.ID + "|" + detail.Revision + "|" + modelFile
+		if cached, ok := discoveryMetadataCache.Load(cacheKey); ok {
+			return providerDerived(cached.(ggufmeta.Derived), detail.GGUF), nil
+		}
+
+		rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-		return derived, err
+
+		for attempt, limit := range []int64{discoveryMetadataLimit, discoveryMetadataMaxLimit} {
+			derived, inspectErr := c.readDerivedMetadataRange(ctx, rawURL, limit)
+			lastDerived = derived
+			if inspectErr == nil {
+				discoveryMetadataCache.Store(cacheKey, derived)
+				return providerDerived(derived, detail.GGUF), nil
+			}
+			lastErr = fmt.Errorf("%s: %w", modelFile, inspectErr)
+			if attempt == 0 && metadataRangeExhausted(inspectErr) {
+				continue
+			}
+			break
+		}
 	}
-	return lastDerived, errors.New("GGUF metadata unavailable")
+	if lastErr == nil {
+		lastErr = errors.New("no metadata candidate succeeded")
+	}
+	return providerDerived(lastDerived, detail.GGUF), fmt.Errorf("GGUF metadata unavailable after %d candidate artifacts: %w", len(candidates), lastErr)
+}
+
+type discoveryMetadataCandidate struct {
+	path  string
+	score int
+	size  int64
+}
+
+func discoveryMetadataCandidates(artifacts []Artifact) []string {
+	candidates := make([]discoveryMetadataCandidate, 0, len(artifacts))
+	seen := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		if !artifact.Complete || len(artifact.Files) == 0 {
+			continue
+		}
+		modelFile := strings.TrimSpace(artifact.Files[0].Path)
+		if modelFile == "" {
+			continue
+		}
+		if _, ok := seen[modelFile]; ok {
+			continue
+		}
+		seen[modelFile] = struct{}{}
+		candidates = append(candidates, discoveryMetadataCandidate{
+			path: modelFile, score: discoveryMetadataCandidateScore(artifact), size: artifact.ModelBytes,
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score < candidates[j].score
+		}
+		if candidates[i].size != candidates[j].size {
+			return candidates[i].size < candidates[j].size
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	if len(candidates) > discoveryMetadataCandidateLimit {
+		candidates = candidates[:discoveryMetadataCandidateLimit]
+	}
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, candidate.path)
+	}
+	return out
+}
+
+func discoveryMetadataCandidateScore(artifact Artifact) int {
+	quantization := strings.ToUpper(strings.TrimSpace(artifact.Quantization))
+	score := 50
+	switch quantization {
+	case "Q4_K_M":
+		score = 0
+	case "Q4_K_S", "IQ4_XS", "IQ4_NL", "Q4_0", "Q4_1":
+		score = 5
+	case "Q5_K_M", "Q5_K_S", "Q5_K_L":
+		score = 10
+	case "Q6_K", "Q6_K_L", "Q8_0":
+		score = 15
+	case "F16", "BF16", "F32":
+		score = 40
+	default:
+		if strings.HasPrefix(quantization, "Q4") || strings.HasPrefix(quantization, "IQ4") {
+			score = 6
+		} else if strings.HasPrefix(quantization, "Q5") {
+			score = 11
+		} else if strings.HasPrefix(quantization, "Q6") || strings.HasPrefix(quantization, "Q8") {
+			score = 16
+		}
+	}
+	if artifact.ShardCount > 1 || artifact.ExpectedShards > 1 {
+		score += 20
+	}
+	name := strings.ToLower(artifact.Name)
+	if hasArtifactRoleToken(name, "draft") || hasArtifactRoleToken(name, "vision") {
+		score += 100
+	}
+	return score
+}
+
+func hasArtifactRoleToken(name, token string) bool {
+	name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".gguf")
+	for _, part := range strings.FieldsFunc(name, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == '/'
+	}) {
+		if part == token {
+			return true
+		}
+	}
+	return false
 }
 
 func providerDerived(value ggufmeta.Derived, info *GGUFInfo) ggufmeta.Derived {
