@@ -21,7 +21,7 @@ func TestRecordLifecycleCounters(t *testing.T) {
 		if counter.InstanceID == "one" { values[counter.Metric] += counter.Value }
 	}
 	for _, metric := range []string{"autoload_total", "failed_start_total", "eviction_total", "idle_unload_total", "load_total"} {
-		if values[metric] != 1 { t.Fatalf("%s=%v counters=%v", metric, values[counter.Metric]) }
+		if values[metric] != 1 { t.Fatalf("%s=%v counters=%v", metric, values[metric], values) }
 	}
 	if values["load_duration_ms_total"] != 1500 { t.Fatalf("load duration=%v", values["load_duration_ms_total"]) }
 }
