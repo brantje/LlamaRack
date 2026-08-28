@@ -44,10 +44,10 @@ describe('Hugging Face launch import', () => {
     const lastModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/search?')) {
-        return [{
+        return { items: [{
           id: 'Qwen/Qwen3.8-Flash-Next', downloads: 2550, likes: 3770, parameter_count: 180_000_000_000,
           last_modified: lastModified, private: false, gated: false, tags: ['gguf']
-        }]
+        }] }
       }
       if (path.startsWith('/api/v1/huggingface/model?repo=')) {
         return { id: 'Qwen/Qwen3.8-Flash-Next', revision: 'rev1', artifacts: [artifact], downloads: 2550, likes: 3770, private: false, gated: false }
