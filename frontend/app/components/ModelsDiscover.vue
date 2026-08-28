@@ -4,26 +4,37 @@ type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
 type HFDetail = HFModel & { description?: string; revision: string; artifacts: HFArtifact[] }
+type HFSearchPage = { items: HFModel[]; next_cursor?: string }
 type GPU = { id: string; name?: string; total_bytes: number; free_bytes: number }
 type HardwareSnapshot = { ram_available_bytes?: number; gpus?: GPU[] }
 type ArtifactFit = { label: string; detail: string; color: 'success' | 'warning' | 'neutral' }
 
+const props = defineProps<{ repoId?: string }>()
 const manager = useManager()
-const query = ref('')
-const author = ref('')
-const sort = ref('trending_score')
-const results = ref<HFModel[]>([])
+const query = useState<string>('models-discover-query', () => '')
+const author = useState<string>('models-discover-author', () => '')
+const sort = useState<string>('models-discover-sort', () => 'trending_score')
+const results = useState<HFModel[]>('models-discover-results', () => [])
+const nextCursor = useState<string>('models-discover-next-cursor', () => '')
+const hasSearched = useState<boolean>('models-discover-has-searched', () => false)
+const scrollPosition = useState<number>('models-discover-scroll-position', () => 0)
 const selected = ref<HFDetail | null>(null)
 const hardware = ref<HardwareSnapshot | null>(null)
 const loading = ref(false)
+const loadingMore = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
 const downloading = ref<string[]>([])
 const downloadNotice = ref('')
+const loadMoreSentinel = ref<HTMLElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let searchVersion = 0
+let loadObserver: IntersectionObserver | undefined
 
+const repoID = computed(() => String(props.repoId || '').trim())
+const isDetail = computed(() => Boolean(repoID.value))
 const vramReserve = 512 * 1024 ** 2
+const pageSize = 30
 const sortOptions = [
   { label: 'Trending', value: 'trending_score' },
   { label: 'Most likes', value: 'likes' },
@@ -159,24 +170,80 @@ function scheduleSearch() {
   }, 350)
 }
 
-async function search() {
-  clearDebounce()
-  const version = ++searchVersion
-  loading.value = true
+function normalizeSearchPage(value: HFSearchPage | HFModel[] | null | undefined): HFSearchPage {
+  if (Array.isArray(value)) return { items: value }
+  return { items: value?.items || [], next_cursor: value?.next_cursor || '' }
+}
+
+function mergeResults(existing: HFModel[], incoming: HFModel[]) {
+  const byID = new Map(existing.map(item => [item.id, item]))
+  for (const item of incoming) byID.set(item.id, item)
+  return [...byID.values()]
+}
+
+async function fetchSearchPage(reset: boolean) {
+  const version = reset ? ++searchVersion : searchVersion
+  if (reset) loading.value = true
+  else loadingMore.value = true
   error.value = ''
-  selected.value = null
-  hardware.value = null
   const normalizedURL = huggingFaceRepo(query.value)
   const searchQuery = normalizedURL || query.value.trim()
+  const cursor = reset ? '' : nextCursor.value
   try {
-    const params = new URLSearchParams({ q: searchQuery, author: author.value.trim(), sort: sort.value, limit: '30' })
-    const items = await manager.request<HFModel[]>(`/api/v1/huggingface/search?${params.toString()}`) || []
-    if (version === searchVersion) results.value = items
+    const params = new URLSearchParams({ q: searchQuery, author: author.value.trim(), sort: sort.value, limit: String(pageSize), paged: 'true' })
+    if (cursor) params.set('cursor', cursor)
+    const response = await manager.request<HFSearchPage | HFModel[]>(`/api/v1/huggingface/search?${params.toString()}`)
+    if (version !== searchVersion) return false
+    const page = normalizeSearchPage(response)
+    results.value = reset ? page.items : mergeResults(results.value, page.items)
+    nextCursor.value = page.next_cursor || ''
+    hasSearched.value = true
+    return true
   } catch (value: any) {
     if (version === searchVersion) error.value = value?.data?.error || value?.message || 'Unable to search Hugging Face'
+    return false
   } finally {
-    if (version === searchVersion) loading.value = false
+    if (version === searchVersion) {
+      if (reset) loading.value = false
+      else loadingMore.value = false
+    }
   }
+}
+
+async function search() {
+  clearDebounce()
+  nextCursor.value = ''
+  const succeeded = await fetchSearchPage(true)
+  if (succeeded && isDetail.value) await navigateTo('/models/discover')
+}
+
+async function loadMore() {
+  if (isDetail.value || !nextCursor.value || loading.value || loadingMore.value) return
+  await fetchSearchPage(false)
+}
+
+function modelRoute(id: string) {
+  const [owner, name] = id.split('/', 2)
+  if (!owner || !name) return '/models/discover'
+  return `/models/discover/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+}
+
+async function goToModel(id: string) {
+  if (import.meta.client) scrollPosition.value = window.scrollY
+  error.value = ''
+  downloadNotice.value = ''
+  await navigateTo(modelRoute(id))
+}
+
+async function backToResults() {
+  await navigateTo('/models/discover')
+}
+
+function restoreScroll() {
+  if (!import.meta.client || scrollPosition.value <= 0) return
+  void nextTick(() => {
+    requestAnimationFrame(() => window.scrollTo(0, scrollPosition.value))
+  })
 }
 
 async function openModel(id: string) {
@@ -221,9 +288,27 @@ watch(sort, () => {
   clearDebounce()
   void search()
 })
+watch(loadMoreSentinel, (element, previous) => {
+  if (!loadObserver) return
+  if (previous) loadObserver.unobserve(previous)
+  if (element) loadObserver.observe(element)
+})
 
-onMounted(scheduleSearch)
-onBeforeUnmount(clearDebounce)
+onMounted(() => {
+  if (import.meta.client && typeof IntersectionObserver !== 'undefined') {
+    loadObserver = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) void loadMore()
+    }, { rootMargin: '500px 0px' })
+    if (loadMoreSentinel.value) loadObserver.observe(loadMoreSentinel.value)
+  }
+  if (isDetail.value) void openModel(repoID.value)
+  else if (!hasSearched.value) scheduleSearch()
+  else restoreScroll()
+})
+onBeforeUnmount(() => {
+  clearDebounce()
+  loadObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -239,28 +324,33 @@ onBeforeUnmount(clearDebounce)
     </UCard>
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="downloadNotice" color="success" variant="subtle" :description="downloadNotice" />
-    <div v-if="loading" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
-    <UEmpty v-else-if="!results.length && !selected" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned. Results load automatically and update as you search." />
-    <div v-else-if="!selected" class="grid gap-3 xl:grid-cols-2">
-      <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="openModel(item.id)">
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <h2 class="truncate text-base font-bold text-highlighted">{{ item.id }}</h2>
-            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-              <span v-if="item.parameter_count">Model size {{ formatParameters(item.parameter_count) }}</span>
-              <span v-if="formatUpdated(item.last_modified)">{{ formatUpdated(item.last_modified) }}</span>
-              <span>↓ {{ item.downloads.toLocaleString() }}</span>
-              <span>♡ {{ item.likes.toLocaleString() }}</span>
+    <div v-if="loading && !results.length && !isDetail" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
+    <UEmpty v-else-if="!isDetail && !results.length" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned. Results load automatically and update as you search." />
+    <template v-else-if="!isDetail">
+      <div class="grid gap-3 xl:grid-cols-2">
+        <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="goToModel(item.id)">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h2 class="truncate text-base font-bold text-highlighted">{{ item.id }}</h2>
+              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+                <span v-if="item.parameter_count">Model size {{ formatParameters(item.parameter_count) }}</span>
+                <span v-if="formatUpdated(item.last_modified)">{{ formatUpdated(item.last_modified) }}</span>
+                <span>↓ {{ item.downloads.toLocaleString() }}</span>
+                <span>♡ {{ item.likes.toLocaleString() }}</span>
+              </div>
             </div>
+            <div class="flex gap-2"><UBadge v-if="item.private" color="warning" variant="subtle">Private</UBadge><UBadge v-if="item.gated" color="warning" variant="subtle">Gated</UBadge><UBadge color="primary" variant="subtle">GGUF</UBadge></div>
           </div>
-          <div class="flex gap-2"><UBadge v-if="item.private" color="warning" variant="subtle">Private</UBadge><UBadge v-if="item.gated" color="warning" variant="subtle">Gated</UBadge><UBadge color="primary" variant="subtle">GGUF</UBadge></div>
-        </div>
-        <div class="mt-4 flex flex-wrap gap-1.5"><UBadge v-for="tag in (item.tags || []).slice(0, 5)" :key="tag" color="neutral" variant="soft">{{ tag }}</UBadge></div>
-      </UCard>
-    </div>
-    <div v-if="detailLoading" class="space-y-3"><USkeleton class="h-32 w-full rounded-xl" /><USkeleton class="h-64 w-full rounded-xl" /></div>
-    <template v-else-if="selected">
-      <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="selected = null">Back to results</UButton>
+          <div class="mt-4 flex flex-wrap gap-1.5"><UBadge v-for="tag in (item.tags || []).slice(0, 5)" :key="tag" color="neutral" variant="soft">{{ tag }}</UBadge></div>
+        </UCard>
+      </div>
+      <div v-if="nextCursor || loadingMore" ref="loadMoreSentinel" class="flex min-h-14 items-center justify-center py-2 text-sm text-muted" data-testid="discover-load-more-sentinel">
+        <span v-if="loadingMore" class="flex items-center gap-2"><UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />Loading more models…</span>
+      </div>
+    </template>
+    <div v-if="isDetail && detailLoading" class="space-y-3"><USkeleton class="h-32 w-full rounded-xl" /><USkeleton class="h-64 w-full rounded-xl" /></div>
+    <template v-else-if="isDetail && selected">
+      <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="backToResults">Back to results</UButton>
       <UCard>
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
