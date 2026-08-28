@@ -37,8 +37,6 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<ConfigResponse | null>(null)
 
-// Compatibility fallback for profiles cached before manager_owned metadata was
-// added. Newly discovered profiles use the backend-provided field.
 const legacyProtectedKeys = new Set([
   'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
   'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
@@ -60,8 +58,22 @@ const editorSummary = computed(() => {
   if (count === 0) return 'No overrides configured · inheriting all values'
   return count === 1 ? '1 override configured · remaining values inherited' : `${count} overrides configured · remaining values inherited`
 })
-const inherited = computed(() => ({ ...(config.value?.effective?.values || {}) }))
-const inheritedSources = computed(() => ({ ...(config.value?.effective?.sources || {}) }))
+const inherited = computed(() => {
+  const effective = config.value?.effective
+  if (!effective) return {} as Record<string, string>
+  if (Object.keys(effective.values || {}).length) return { ...effective.values }
+  return { ...(effective.global || {}), ...(effective.model || {}), ...(effective.instance || {}) }
+})
+const inheritedSources = computed(() => {
+  const effective = config.value?.effective
+  if (!effective) return {} as Record<string, string>
+  if (Object.keys(effective.sources || {}).length) return { ...effective.sources }
+  const out: Record<string, string> = {}
+  for (const key of Object.keys(effective.global || {})) out[key] = 'global'
+  for (const key of Object.keys(effective.model || {})) out[key] = 'model'
+  for (const key of Object.keys(effective.instance || {})) out[key] = 'instance'
+  return out
+})
 
 const allOptions = computed<OptionDefinition[]>(() => {
   const discovered: OptionDefinition[] = [...(config.value?.profile?.options || manager.profile.value?.options || [])]
