@@ -41,7 +41,7 @@ func TestQ1DiscoverProfileIsKnownAndRunnable(t *testing.T) {
 		t.Fatalf("artifacts=%+v", result.Artifacts)
 	}
 	artifact := result.Artifacts[0]
-	if !artifact.Recommended || !artifact.Runnable || artifact.Fit != FitGPU || !artifact.GenerationSpeed.Estimated {
+	if !artifact.Recommended || !artifact.Runnable || artifact.Fit != FitGPU || !artifact.EstimatedGenerationSpeed.Estimated {
 		t.Fatalf("artifact=%+v", artifact)
 	}
 }
