@@ -27,6 +27,10 @@ function choicesFor(option: ProfileOption) {
   return hint.includes('|') ? hint.split('|').map(value => value.trim()).filter(Boolean) : []
 }
 
+function inverseBooleanKey(key: string) {
+  return key.startsWith('no-') ? key.slice(3) : `no-${key}`
+}
+
 function validateValue(option: ProfileOption, value: string) {
   switch (inferredKind(option)) {
     case 'boolean':
@@ -69,6 +73,12 @@ export function parseLlamaCppOptions(text: string, profile: Profile | null) {
     if (!profile) throw new Error('Cannot validate llama.cpp overrides because the llama-server option schema is unavailable')
     if (!option) throw new Error(`Unsupported llama.cpp option “${key}” for ${profile.version || profile.path}`)
     validateValue(option, value)
+    if (inferredKind(option) === 'boolean' && value === 'false') {
+      const inverse = available.get(inverseBooleanKey(key))
+      if (!inverse || inferredKind(inverse) !== 'boolean') {
+        throw new Error(`llama.cpp option “${key}” cannot express explicit false because inverse flag --${inverseBooleanKey(key)} is unavailable`)
+      }
+    }
     parsed[key] = value
   }
 
