@@ -102,7 +102,15 @@ describe('instance control plane', () => {
   it('shows logs and deletes without deleting the registered model', async () => {
     const manager = seed()
     mocks.request.mockImplementation(async (path: string) => {
-      if (path.endsWith('/logs')) return { lines: ['worker ready', 'request complete'] }
+      if (path === '/api/v1/logs?instance_id=coder-primary&limit=2000') {
+        return {
+          instance_id: 'coder-primary',
+          entries: [
+            { source: 'manager', timestamp: '2026-08-28T12:00:00Z', text: 'worker ready' },
+            { source: 'stdout', timestamp: '2026-08-28T12:00:01Z', text: 'request complete' }
+          ]
+        }
+      }
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }
@@ -111,6 +119,7 @@ describe('instance control plane', () => {
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=coder-primary&limit=2000')
     expect(document.body.textContent).toContain('worker ready')
     await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary', expect.anything())
@@ -150,9 +159,9 @@ describe('instance control plane', () => {
     }
     let logMode: 'empty' | 'error' = 'empty'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/instances/protected/logs') {
+      if (path === '/api/v1/logs?instance_id=protected&limit=2000') {
         if (logMode === 'error') throw new Error('log retrieval failed')
-        return {}
+        return { instance_id: 'protected', entries: [] }
       }
       if (path === '/api/v1/instances/protected/start' && options?.method === 'POST') throw {}
       if (path === '/api/v1/instances/protected/restart' && options?.method === 'POST') throw new Error('restart failed')
@@ -175,7 +184,8 @@ describe('instance control plane', () => {
     const protectedCard = wrapper.findAll('[data-testid="instance-card"]')[0]!
     await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('No logs captured.')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=protected&limit=2000')
+    expect(document.body.textContent).toContain('No logs in the current view')
 
     await protectedCard.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
     await flushPromises()
@@ -186,9 +196,11 @@ describe('instance control plane', () => {
     expect(wrapper.text()).toContain('restart failed')
 
     logMode = 'error'
-    await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
+    const reconnect = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Reconnect')
+    if (!reconnect) throw new Error('Missing log reconnect button')
+    reconnect.click()
     await flushPromises()
-    expect(wrapper.text()).toContain('log retrieval failed')
+    expect(document.body.textContent).toContain('log retrieval failed')
 
     mocks.request.mockClear()
     await protectedCard.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
