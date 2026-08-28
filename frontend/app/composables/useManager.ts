@@ -64,7 +64,51 @@ export type HardwareSnapshot = {
   processes: HardwareProcess[]
   collected_at: string
 }
-export type ObservabilityLive = { collected_at: string; hardware: HardwareSnapshot; telemetry: RuntimeTelemetry[] }
+export type Percentiles = { p50?: number; p95?: number; p99?: number }
+export type GatewaySummary = {
+  since: number
+  requests: number
+  successes: number
+  errors: number
+  active: number
+  queued: number
+  active_api_keys: number
+  prompt_tokens: number
+  generated_tokens: number
+  total_tokens: number
+  latency_ms: Percentiles
+  ttft_ms: Percentiles
+}
+export type ObservabilityRequest = {
+  id: number
+  started_at: number
+  finished_at: number
+  instance_id: string
+  endpoint: string
+  api_key?: { id: string; name: string; prefix: string }
+  streaming: boolean
+  status_code: number
+  result: string
+  duration_ms: number
+  ttft_ms?: number
+  prompt_tokens: number
+  generated_tokens: number
+  total_tokens: number
+  tokens_per_second?: number
+  queue_duration_ms: number
+  load_duration_ms: number
+  autoloaded: boolean
+  error?: string
+  request_body?: string
+  response_body?: string
+}
+export type ObservabilityLive = {
+  collected_at: string
+  hardware: HardwareSnapshot
+  telemetry: RuntimeTelemetry[]
+  gateway: GatewaySummary
+  requests: ObservabilityRequest[]
+}
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = {
   path: string
@@ -80,6 +124,8 @@ type RuntimeEvent = {
   telemetry?: RuntimeTelemetry[]
   collected_at?: string
   hardware?: HardwareSnapshot
+  gateway?: GatewaySummary
+  requests?: ObservabilityRequest[]
 }
 
 let runtimeSocket: WebSocket | null = null
@@ -143,7 +189,27 @@ export function useManager() {
   function applyObservability(message: RuntimeEvent) {
     if (!message.hardware || !message.collected_at) return
     const telemetry = Array.isArray(message.telemetry) ? message.telemetry : []
-    observabilityLive.value = { collected_at: message.collected_at, hardware: message.hardware, telemetry }
+    const gateway = message.gateway || {
+      since: Date.now() - 15 * 60 * 1000,
+      requests: 0,
+      successes: 0,
+      errors: 0,
+      active: 0,
+      queued: 0,
+      active_api_keys: 0,
+      prompt_tokens: 0,
+      generated_tokens: 0,
+      total_tokens: 0,
+      latency_ms: {},
+      ttft_ms: {}
+    }
+    observabilityLive.value = {
+      collected_at: message.collected_at,
+      hardware: message.hardware,
+      telemetry,
+      gateway,
+      requests: Array.isArray(message.requests) ? message.requests : []
+    }
     if (telemetry.length) applyRuntimeTelemetry(telemetry)
   }
 
