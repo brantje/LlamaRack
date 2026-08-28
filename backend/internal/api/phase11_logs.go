@@ -15,8 +15,9 @@ type phase11LogSource interface {
 }
 
 type logEntry struct {
-	Source string `json:"source"`
-	Text   string `json:"text"`
+	Source    string `json:"source"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Text      string `json:"text"`
 }
 
 type phase11LogHandler struct{ source phase11LogSource }
@@ -111,9 +112,14 @@ func parseLogEntry(line string) logEntry {
 	trimmed := strings.TrimSpace(line)
 	for _, source := range []string{"stdout", "stderr", "manager"} {
 		prefix := "[" + source + "]"
-		if strings.HasPrefix(trimmed, prefix) {
-			return logEntry{Source: source, Text: strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))}
+		if !strings.HasPrefix(trimmed, prefix) { continue }
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if parts := strings.SplitN(rest, "\t", 2); len(parts) == 2 {
+			if _, err := time.Parse(time.RFC3339Nano, parts[0]); err == nil {
+				return logEntry{Source: source, Timestamp: parts[0], Text: strings.TrimSpace(parts[1])}
+			}
 		}
+		return logEntry{Source: source, Text: rest}
 	}
 	return logEntry{Source: "manager", Text: trimmed}
 }
