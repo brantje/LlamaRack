@@ -1,6 +1,6 @@
 <script setup lang="ts">
 type LogSource = 'stdout' | 'stderr' | 'manager'
-type LogEntry = { source: LogSource; timestamp?: string; text: string }
+type LogEntry = { source: LogSource; timestamp: string; text: string }
 type LogResponse = { instance_id: string; entries: LogEntry[] }
 
 const props = defineProps<{ instanceId: string }>()
@@ -35,8 +35,7 @@ function sourceColor(value: LogSource) {
   return 'neutral'
 }
 
-function formatTimestamp(value?: string) {
-  if (!value) return '—'
+function formatTimestamp(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC')
@@ -47,7 +46,8 @@ function validEntry(value: unknown): value is LogEntry {
   const candidate = value as Partial<LogEntry>
   return ['stdout', 'stderr', 'manager'].includes(String(candidate.source))
     && typeof candidate.text === 'string'
-    && (candidate.timestamp === undefined || typeof candidate.timestamp === 'string')
+    && typeof candidate.timestamp === 'string'
+    && !Number.isNaN(Date.parse(candidate.timestamp))
 }
 
 function append(entry: LogEntry) {
