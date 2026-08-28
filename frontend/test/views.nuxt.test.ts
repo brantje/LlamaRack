@@ -92,15 +92,16 @@ describe('application shell', () => {
 })
 
 describe('overview and administration', () => {
-  it('renders instance fleet state and read-only system diagnostics', async () => {
+  it('renders instance fleet health on the dashboard and read-only system diagnostics', async () => {
     const manager = resetState()
     manager.models.value = [model({ id: 'm1', name: 'Ready Model' }), model({ id: 'm2', name: 'Failed Model' })]
     manager.instances.value = [instance({ id: 'ready', model_id: 'm1', name: 'Ready', always_on: true }), instance({ id: 'failed', model_id: 'm2', name: 'Failed', autoload_enabled: false })]
     manager.runtimes.value = { m1: [{ instance_id: 'ready', model_id: 'm1', state: 'READY' }], m2: [{ instance_id: 'failed', model_id: 'm2', state: 'FAILED' }] }
     const overview = await mountSuspended(IndexPage, { route: false })
-    expect(overview.text()).toContain('Ready Model')
-    expect(overview.text()).toContain('Failed Model')
-    expect(overview.text()).toContain('Always on')
+    expect(overview.text()).toContain('Dashboard')
+    expect(overview.text()).toContain('1 / 2 Instances')
+    expect(overview.text()).toContain('failed failed to start')
+    expect(overview.text()).toContain('VRAM ALLOCATION')
 
     mocks.request.mockResolvedValueOnce({
       manager: { uptime_seconds: 42, runtime: { data_dir: '/config', models_dir: '/models' } },
