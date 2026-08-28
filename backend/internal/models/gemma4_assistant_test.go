@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -11,6 +12,9 @@ func TestGemma4AssistantIsExcludedFromAvailableAndAttachedByInspect(t *testing.T
 	s, dir := testModelService(t)
 	main := writeClassifiedGGUF(t, dir, "gemma-4-12b-it-UD-Q5_K_XL.gguf", "gemma4", 0, true)
 	mtp := writeClassifiedGGUF(t, dir, "mtp-gemma-4-12b-it.gguf", "gemma4-assistant", 4, true)
+	if err := os.WriteFile(filepath.Join(dir, "not-really-a-model.gguf"), []byte("broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	available, err := s.AvailableGGUFs(ctx)
 	if err != nil {
