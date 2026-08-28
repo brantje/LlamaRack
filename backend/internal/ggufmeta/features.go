@@ -21,11 +21,11 @@ type Features struct {
 	Projector          bool   `json:"projector"`
 }
 
-// standaloneMTPArchitecture identifies GGUF architectures whose model contract
-// is itself a speculative draft/helper model. These architectures may contain
-// normal blk.0.* tensors, so tensor-prefix heuristics cannot distinguish them
-// from selectable target models.
-func standaloneMTPArchitecture(architecture string) bool {
+// IsStandaloneMTPArchitecture identifies GGUF architectures whose model
+// contract is itself a speculative draft/helper model. These architectures may
+// contain normal blk.0.* tensors, so tensor-prefix heuristics cannot distinguish
+// them from selectable target models.
+func IsStandaloneMTPArchitecture(architecture string) bool {
 	switch strings.ToLower(strings.TrimSpace(architecture)) {
 	case "gemma4-assistant", "gemma4_assistant":
 		return true
@@ -39,7 +39,7 @@ func standaloneMTPArchitecture(architecture string) bool {
 // formats are refined by DetectFeatures using tensor names.
 func FeaturesFromInspection(inspection Inspection) Features {
 	architecture := strings.TrimSpace(inspection.Derived.Architecture)
-	standaloneMTP := standaloneMTPArchitecture(architecture)
+	standaloneMTP := IsStandaloneMTPArchitecture(architecture)
 	features := Features{
 		Architecture: architecture,
 		Projector:    strings.EqualFold(architecture, "clip"),
