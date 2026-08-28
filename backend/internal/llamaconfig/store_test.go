@@ -166,6 +166,27 @@ func TestLaunchOptionsRejectsUnrepresentableFalse(t *testing.T) {
 	}
 }
 
+func TestLaunchResolverHelperBranches(t *testing.T) {
+	store := testStore(t)
+	launch, effective, err := store.LaunchOptions(context.Background(), llamacpp.Profile{}, "m1", "i1")
+	if err != nil || len(launch) != 0 || effective.Values["ctx-size"] != DefaultContextSize {
+		t.Fatalf("empty profile launch=%+v effective=%+v err=%v", launch, effective, err)
+	}
+
+	if !isBooleanOption(llamacpp.Option{ValueHint: ""}) || isBooleanOption(llamacpp.Option{ValueHint: "N"}) {
+		t.Fatal("legacy boolean option classification mismatch")
+	}
+	if got := inverseBooleanKey("no-mmap"); got != "mmap" {
+		t.Fatalf("inverse no-*=%q", got)
+	}
+	if got := launchProfileLabel(llamacpp.Profile{Path: "/tmp/llama-server"}); got != "/tmp/llama-server" {
+		t.Fatalf("path label=%q", got)
+	}
+	if got := launchProfileLabel(llamacpp.Profile{}); got != "llama-server" {
+		t.Fatalf("default label=%q", got)
+	}
+}
+
 func TestReplaceGlobalReplacesPriorSet(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
