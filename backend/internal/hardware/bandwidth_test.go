@@ -15,6 +15,8 @@ func TestNVIDIAMemoryBandwidthTelemetry(t *testing.T) {
 		}
 		joined := strings.Join(args, " ")
 		switch {
+		case strings.Contains(joined, "pcie.link.gen.max"):
+			return []byte("0, 4, 8\n1, 4, 16\n"), nil
 		case strings.Contains(joined, "--query-gpu="):
 			return []byte("0, GPU-a, NVIDIA GeForce RTX 4060 Ti, 16380, 1000, 4, 9001\n1, GPU-b, NVIDIA GeForce RTX 4090, 24564, 2000, 7, 10501\n"), nil
 		case joined == "-q":
@@ -37,6 +39,12 @@ func TestNVIDIAMemoryBandwidthTelemetry(t *testing.T) {
 	if got, want := gpus[1].MemoryBandwidthBytesPerSecond, int64(1_008_096_000_000); got != want {
 		t.Fatalf("4090 bandwidth=%d want=%d", got, want)
 	}
+	if got, want := gpus[0].PCIeBandwidthBytesPerSecond, int64(15_753_846_153); got != want {
+		t.Fatalf("4060 Ti PCIe bandwidth=%d want=%d", got, want)
+	}
+	if got, want := gpus[1].PCIeBandwidthBytesPerSecond, int64(31_507_692_307); got != want {
+		t.Fatalf("4090 PCIe bandwidth=%d want=%d", got, want)
+	}
 }
 
 func TestNVIDIABandwidthProbeIsBestEffort(t *testing.T) {
@@ -47,6 +55,9 @@ func TestNVIDIABandwidthProbeIsBestEffort(t *testing.T) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "clocks.max.memory") {
 			return nil, errors.New("field unsupported")
+		}
+		if strings.Contains(joined, "pcie.link.gen.max") {
+			return nil, errors.New("pcie unsupported")
 		}
 		if strings.Contains(joined, "--query-gpu=") {
 			return []byte("0, GPU-a, Legacy GPU, 1024, 0, 0\n"), nil
@@ -60,11 +71,28 @@ func TestNVIDIABandwidthProbeIsBestEffort(t *testing.T) {
 	if err != nil || len(gpus) != 1 {
 		t.Fatalf("gpus=%+v err=%v", gpus, err)
 	}
-	if gpus[0].MemoryBandwidthBytesPerSecond != 0 {
+	if gpus[0].MemoryBandwidthBytesPerSecond != 0 || gpus[0].PCIeBandwidthBytesPerSecond != 0 {
 		t.Fatalf("bandwidth should remain unknown: %+v", gpus[0])
 	}
-	if calls < 3 {
-		t.Fatalf("expected enriched query, fallback query and best-effort -q probe, calls=%d", calls)
+	if calls < 4 {
+		t.Fatalf("expected enriched query, fallback query, best-effort -q and PCIe probe, calls=%d", calls)
+	}
+}
+
+func TestROCmPCIeBandwidthTelemetry(t *testing.T) {
+	d := New()
+	d.readFile = func(path string) ([]byte, error) {
+		switch {
+		case strings.HasSuffix(path, "max_link_speed"):
+			return []byte("16.0 GT/s PCIe\n"), nil
+		case strings.HasSuffix(path, "max_link_width"):
+			return []byte("16\n"), nil
+		default:
+			return nil, errors.New("missing")
+		}
+	}
+	if got, want := d.rocmPCIeBandwidth(3), int64(31_507_692_307); got != want {
+		t.Fatalf("ROCm PCIe bandwidth=%d want=%d", got, want)
 	}
 }
 
@@ -78,5 +106,23 @@ func TestMemoryBandwidthHelpers(t *testing.T) {
 	}
 	if got := theoreticalMemoryBandwidth(1000, 256); got != 64_000_000_000 {
 		t.Fatalf("bandwidth=%d", got)
+	}
+	if theoreticalPCIeBandwidth(0, 16) != 0 || theoreticalPCIeBandwidth(4, 0) != 0 || theoreticalPCIeBandwidth(99, 16) != 0 {
+		t.Fatal("invalid PCIe telemetry should not produce bandwidth")
+	}
+	if got, want := theoreticalPCIeBandwidth(4, 8), int64(15_753_846_153); got != want {
+		t.Fatalf("PCIe 4 x8=%d want=%d", got, want)
+	}
+	if got, want := pcieBandwidthForTransfers(5, 16), int64(8_000_000_000); got != want {
+		t.Fatalf("PCIe 2 x16=%d want=%d", got, want)
+	}
+	if parsePCIeTransfersPerSecond("16.0 GT/s PCIe") != 16 || parsePCIeTransfersPerSecond("bad") != 0 {
+		t.Fatal("unexpected PCIe speed parse")
+	}
+}
+
+func TestHostMemoryBandwidthBenchmarkProducesTelemetry(t *testing.T) {
+	if got := benchmarkHostMemoryBandwidth(); got <= 0 {
+		t.Fatalf("host memory bandwidth=%d", got)
 	}
 }
