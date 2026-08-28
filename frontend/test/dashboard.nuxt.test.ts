@@ -116,16 +116,19 @@ describe('Phase 11 Dashboard', () => {
 
     expect(wrapper.get('[data-testid="observability-dashboard"]').text()).toContain('Dashboard')
     expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('1 / 2 Instances')
-    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('23 GiB')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('20 GiB')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('83% attributed to managed Instances')
     expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('12')
     expect(wrapper.get('[data-testid="dashboard-idle"]').text()).toContain('5 min')
     const allocation = wrapper.get('[data-testid="dashboard-vram-allocation"]')
     expect(allocation.text()).toContain('coder')
+    expect(allocation.text()).toContain('20 GiB / 24 GiB')
     const progress = wrapper.get('[data-testid="gpu-progress-CUDA0"]')
     expect(progress.text()).toContain('coder')
     expect(progress.text()).toContain('20 GiB')
-    expect(progress.text()).toContain('Unattributed')
-    expect(progress.text()).toContain('3.0 GiB')
+    expect(progress.text()).toContain('Free')
+    expect(progress.text()).toContain('4.0 GiB')
+    expect(progress.text()).not.toContain('Unattributed')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('Primary key')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('1.84 s')
     const attention = wrapper.get('[data-testid="dashboard-attention"]').text()
@@ -141,7 +144,59 @@ describe('Phase 11 Dashboard', () => {
       }
     }
     await flushPromises()
-    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('12 GiB')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('20 GiB')
+    expect(wrapper.get('[data-testid="dashboard-vram-allocation"]').text()).toContain('20 GiB / 24 GiB')
+  })
+
+  it('uses per-GPU process attribution for split models instead of device-wide used VRAM', async () => {
+    const manager = resetManager()
+    manager.instances.value = [instance('gemma-4')]
+    manager.runtimes.value = { m1: [{ instance_id: 'gemma-4', model_id: 'm1', state: 'READY', pid: 777 }] }
+    manager.observabilityLive.value = {
+      collected_at: '2026-08-28T08:00:00Z',
+      hardware: {
+        ram_total_bytes: 64 * gib,
+        ram_available_bytes: 32 * gib,
+        collected_at: '2026-08-28T08:00:00Z',
+        processes: [],
+        gpus: [
+          { id: 'CUDA0', backend: 'cuda', index: 0, name: 'RTX 3090', total_bytes: 24 * gib, used_bytes: 23 * gib, free_bytes: gib, utilization_pct: 8 },
+          { id: 'CUDA1', backend: 'cuda', index: 1, name: 'RTX 3090', total_bytes: 24 * gib, used_bytes: 24 * gib, free_bytes: 0, utilization_pct: 5 }
+        ]
+      },
+      telemetry: [
+        {
+          instance_id: 'gemma-4',
+          pid: 777,
+          gpu_devices: ['CUDA0', 'CUDA1'],
+          gpus: [
+            { device_id: 'CUDA0', vram_used_bytes: 20 * gib },
+            { device_id: 'CUDA1', vram_used_bytes: 17 * gib }
+          ],
+          vram_used_bytes: 37 * gib,
+          collected_at: '2026-08-28T08:00:00Z'
+        }
+      ]
+    }
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/summary')) return { requests: 0, active_api_keys: 0, lifecycle: {}, hardware: { hardware: manager.observabilityLive.value!.hardware, telemetry: manager.observabilityLive.value!.telemetry } }
+      if (path.startsWith('/api/v1/observability/requests')) return { items: [] }
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0, source: 'default', editable: true } }
+      return {}
+    })
+
+    const wrapper = await mountSuspended(DashboardPage, { route: '/' })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('37 GiB')
+    const cuda0 = wrapper.get('[data-testid="gpu-progress-CUDA0"]')
+    const cuda1 = wrapper.get('[data-testid="gpu-progress-CUDA1"]')
+    expect(cuda0.text()).toContain('20 GiB')
+    expect(cuda0.text()).toContain('4.0 GiB')
+    expect(cuda1.text()).toContain('17 GiB')
+    expect(cuda1.text()).toContain('7.0 GiB')
+    expect(wrapper.get('[data-testid="dashboard-vram-allocation"]').text()).toContain('17 GiB / 24 GiB')
+    expect(cuda1.text()).not.toContain('Unattributed')
   })
 
   it('shows empty operational states and a management API failure without crashing', async () => {
