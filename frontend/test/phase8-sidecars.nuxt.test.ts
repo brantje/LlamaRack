@@ -84,7 +84,7 @@ describe('Phase 8 GGUF helper integration', () => {
     expect(wrapper.text()).toContain('2 detected helper artifacts were added to Downloads')
   })
 
-  it('preconfigures downloaded helpers when registering the main model', async () => {
+  it('preconfigures downloaded helpers and labels dropdown capabilities', async () => {
     const available = [{
       path: 'huggingface/acme/vision/vision-Q4_K_M.gguf', name: 'vision-Q4_K_M.gguf', total_bytes: 1024, quantization: 'Q4_K_M',
       suggested_options: {
@@ -92,6 +92,12 @@ describe('Phase 8 GGUF helper integration', () => {
         'spec-draft-model': '/models/huggingface/acme/vision/mtp-vision-Q4_0.gguf',
         'spec-type': 'draft-mtp'
       }
+    }, {
+      path: 'huggingface/acme/mtp/model-Q5_K_M.gguf', name: 'model-Q5_K_M.gguf', total_bytes: 1024, quantization: 'Q5_K_M',
+      suggested_options: { 'spec-type': 'draft-mtp' }
+    }, {
+      path: 'huggingface/acme/vision-only/model-Q8_0.gguf', name: 'model-Q8_0.gguf', total_bytes: 1024, quantization: 'Q8_0',
+      suggested_options: { mmproj: '/models/huggingface/acme/vision-only/mmproj-F16.gguf' }
     }]
     const inspection = {
       id: available[0].path,
@@ -125,6 +131,12 @@ describe('Phase 8 GGUF helper integration', () => {
 
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
+    expect(selectMenu(wrapper).props('items')).toEqual([
+      { label: `${available[0].path} · Q4_K_M · MTP · Vision`, value: available[0].path },
+      { label: `${available[1].path} · Q5_K_M · MTP`, value: available[1].path },
+      { label: `${available[2].path} · Q8_0 · Vision`, value: available[2].path }
+    ])
+
     selectMenu(wrapper).vm.$emit('update:modelValue', available[0].path)
     await flushPromises()
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: mmproj-F16.gguf')
