@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
@@ -32,50 +31,35 @@ func TestRecordLifecycleCounters(t *testing.T) {
 
 func TestClassifyLifecycleTransitions(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
-	instance := &instances.Instance{ID:"one", IdleUnloadSeconds:30}
 	state := lifecycle.OperationalState{Activity:lifecycle.Activity{ActiveRequests:1, LastUsed:now.Add(-time.Minute)}}
 
 	transitions := classifyLifecycle(
 		supervisor.Runtime{InstanceID:"one", State:supervisor.Unloaded},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting}, state, instance, 5*time.Minute, now,
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting}, state,
 	)
 	if len(transitions) != 1 || transitions[0].Event != LifecycleAutoload { t.Fatalf("autoload=%+v", transitions) }
 
 	transitions = classifyLifecycle(
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready, StartedAt:now.Add(-2*time.Second), ReadyAt:now}, state, instance, 5*time.Minute, now,
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Loading},
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready, StartedAt:now.Add(-2*time.Second), ReadyAt:now}, state,
 	)
 	if len(transitions) != 1 || transitions[0].Event != LifecycleLoad || transitions[0].Duration != 2*time.Second { t.Fatalf("load=%+v", transitions) }
 
 	transitions = classifyLifecycle(
 		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Failed}, state, instance, 5*time.Minute, now,
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Failed}, state,
 	)
 	if len(transitions) != 1 || transitions[0].Event != LifecycleFailedStart { t.Fatalf("failed=%+v", transitions) }
 
-	resource := state
-	resource.ResourceStartActive = true
-	transitions = classifyLifecycle(
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Stopping}, resource, instance, 5*time.Minute, now,
-	)
-	if len(transitions) != 1 || transitions[0].Event != LifecycleEviction { t.Fatalf("eviction=%+v", transitions) }
+	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Stopping}, state); len(got) != 0 {
+		t.Fatalf("stop transitions must be recorded by lifecycle call sites, got=%+v", got)
+	}
+	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, state); len(got) != 0 { t.Fatalf("same state=%+v", got) }
+	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{State:supervisor.Unloaded}, state); len(got) != 0 { t.Fatalf("missing instance id=%+v", got) }
 
-	idle := state
-	idle.Activity.ActiveRequests = 0
-	transitions = classifyLifecycle(
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Unloaded}, idle, instance, 5*time.Minute, now,
+	zeroDuration := classifyLifecycle(
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Loading},
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready, StartedAt:now, ReadyAt:now.Add(-time.Second)}, state,
 	)
-	if len(transitions) != 1 || transitions[0].Event != LifecycleIdleUnload { t.Fatalf("idle=%+v", transitions) }
-
-	alwaysOn := *instance
-	alwaysOn.AlwaysOn = true
-	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Unloaded}, idle, &alwaysOn, 5*time.Minute, now); len(got) != 0 { t.Fatalf("always-on stop=%+v", got) }
-	manual := idle
-	manual.ManuallyStopped = true
-	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Unloaded}, manual, instance, 5*time.Minute, now); len(got) != 0 { t.Fatalf("manual stop=%+v", got) }
-	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, idle, instance, 5*time.Minute, now); len(got) != 0 { t.Fatalf("same state=%+v", got) }
-	if got := classifyLifecycle(supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{State:supervisor.Unloaded}, idle, instance, 5*time.Minute, now); len(got) != 0 { t.Fatalf("missing instance id=%+v", got) }
-	if !runtimeWasRunning(supervisor.Ready) || runtimeWasRunning(supervisor.Unloaded) { t.Fatal("runtime running classification") }
+	if len(zeroDuration) != 1 || zeroDuration[0].Duration != 0 { t.Fatalf("invalid timestamps=%+v", zeroDuration) }
 }
