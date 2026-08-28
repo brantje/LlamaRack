@@ -135,6 +135,8 @@ func run(ctx context.Context, cfg config.Config) error {
 	allowedOrigins, _ := managerSettings.String(ctx, settings.AllowedOrigins)
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, allowedOrigins, observabilitySampler))
 	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardwareDetector))
+	managementAPI.Handle("GET /api/v1/huggingface/recommendations", api.NewDiscoverRecommendationHandler(authService, hfClient, hardwareDetector, managerSettings))
+	managementAPI.Handle("/api/v1/settings/discover", api.NewDiscoverSettingsHandler(authService, managerSettings))
 	logHandler := api.NewPhase11LogHandler(lifecycleService)
 	managementAPI.Handle("/api/v1/logs", logHandler)
 	managementAPI.Handle("/api/v1/logs/", logHandler)
