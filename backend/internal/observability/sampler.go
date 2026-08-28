@@ -26,6 +26,8 @@ type LiveSnapshot struct {
 	CollectedAt time.Time                `json:"collected_at"`
 	Hardware    hardware.Snapshot        `json:"hardware"`
 	Telemetry   []RuntimeTelemetrySample `json:"telemetry"`
+	Gateway     Summary                  `json:"gateway"`
+	Requests    []RequestRecord          `json:"requests"`
 }
 
 type Sampler struct {
@@ -75,9 +77,7 @@ func (s *Sampler) Subscribe() (LiveSnapshot, <-chan LiveSnapshot, func()) {
 
 func (s *Sampler) Run(ctx context.Context) {
 	runtimes, events, cancel, err := s.lifecycle.SubscribeRuntimes(ctx)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer cancel()
 	current := make(map[string]supervisor.Runtime, len(runtimes))
 	for _, runtime := range runtimes { current[runtime.InstanceID] = runtime }
@@ -94,7 +94,9 @@ func (s *Sampler) Run(ctx context.Context) {
 		samples := collector.Collect(ctx, values)
 		samples = applyHardwareFallback(samples, snapshot)
 		withMetrics := attachNativeMetrics(ctx, samples, values, s.lifecycle.RuntimeEndpoint)
-		live := LiveSnapshot{Type: "observability", CollectedAt: snapshot.CollectedAt, Hardware: snapshot, Telemetry: withMetrics}
+		gateway, _ := s.service.Summary(ctx, time.Now().Add(-15*time.Minute).UnixMilli())
+		requests, _ := s.service.ListRequests(ctx, RequestFilters{SinceMS: time.Now().Add(-15*time.Minute).UnixMilli(), Limit: 20})
+		live := LiveSnapshot{Type: "observability", CollectedAt: snapshot.CollectedAt, Hardware: snapshot, Telemetry: withMetrics, Gateway: gateway, Requests: requests}
 		s.publish(live)
 
 		plain := make([]telemetry.Sample, len(withMetrics))
@@ -140,6 +142,7 @@ func copyLiveSnapshot(value LiveSnapshot) LiveSnapshot {
 	copyValue.Hardware.GPUs = append([]hardware.GPU(nil), value.Hardware.GPUs...)
 	copyValue.Hardware.Processes = append([]hardware.GPUProcess(nil), value.Hardware.Processes...)
 	copyValue.Telemetry = append([]RuntimeTelemetrySample(nil), value.Telemetry...)
+	copyValue.Requests = append([]RequestRecord(nil), value.Requests...)
 	return copyValue
 }
 
