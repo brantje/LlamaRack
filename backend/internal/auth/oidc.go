@@ -228,7 +228,7 @@ func (m *OIDCManager) UpdateProvider(ctx context.Context, id string, in OIDCProv
 	if current.LastTestedAt != nil {
 		testedAt = *current.LastTestedAt
 	}
-	if changed {
+	if changed || (!in.Enabled && current.Enabled) {
 		tested, testedAt = false, nil
 	}
 	_, err = m.auth.db.ExecContext(ctx, `UPDATE oidc_providers SET name=?,enabled=?,issuer=?,discovery_url=?,client_id=?,scopes=?,username_claim=?,authorization_endpoint=?,token_endpoint=?,jwks_url=?,last_tested_at=?,last_test_succeeded=?,updated_at=? WHERE id=?`, in.Name, boolInt(in.Enabled), in.Issuer, in.DiscoveryURL, in.ClientID, string(scopes), in.UsernameClaim, in.AuthorizationEndpoint, in.TokenEndpoint, in.JWKSURL, testedAt, boolInt(tested), time.Now().Unix(), id)
