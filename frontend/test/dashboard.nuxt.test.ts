@@ -125,7 +125,7 @@ describe('Phase 11 Dashboard', () => {
     expect(progress.text()).toContain('coder')
     expect(progress.text()).toContain('20 GiB')
     expect(progress.text()).toContain('Unattributed')
-    expect(progress.text()).toContain('3 GiB')
+    expect(progress.text()).toContain('3.0 GiB')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('Primary key')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('1.84 s')
     const attention = wrapper.get('[data-testid="dashboard-attention"]').text()
