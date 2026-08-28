@@ -30,7 +30,7 @@ beforeEach(() => {
 })
 
 describe('model discovery navigation', () => {
-  it('uses only /models/discover and removes Discover from the sidebar', async () => {
+  it('uses sibling list/detail routes under /models/discover and removes Discover from the sidebar', async () => {
     const manager = resetManager()
     manager.models.value = [{ id: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 1, context_length: 0 }]
     const wrapper = await mountSuspended(ModelsPage, { route: false })
@@ -41,7 +41,15 @@ describe('model discovery navigation', () => {
     const layout = readFileSync(resolve(process.cwd(), 'app/layouts/default.vue'), 'utf8')
     expect(layout).not.toContain("{ label: 'Discover'")
     expect(existsSync(resolve(process.cwd(), 'app/pages/discover.vue'))).toBe(false)
-    expect(readFileSync(resolve(process.cwd(), 'app/pages/models/discover.vue'), 'utf8')).toContain('ModelsDiscover')
+
+    const legacyParent = resolve(process.cwd(), 'app/pages/models/discover.vue')
+    const listPage = resolve(process.cwd(), 'app/pages/models/discover/index.vue')
+    const detailPage = resolve(process.cwd(), 'app/pages/models/discover/[owner]/[repo].vue')
+    expect(existsSync(legacyParent)).toBe(false)
+    expect(existsSync(listPage)).toBe(true)
+    expect(existsSync(detailPage)).toBe(true)
+    expect(readFileSync(listPage, 'utf8')).toContain('ModelsDiscover')
+    expect(readFileSync(detailPage, 'utf8')).toContain(':repo-id="repoID"')
   })
 })
 
