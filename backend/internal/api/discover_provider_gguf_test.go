@@ -47,14 +47,17 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 		t.Fatal(err)
 	}
 	managerSettings := settings.New(fixture.models.DB(), settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
-	handler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: hardware.Snapshot{
+	fullSnapshot := hardware.Snapshot{
 		RAMAvailableBytes: 64 << 30,
 		RAMTotalBytes: 64 << 30,
+		RAMBandwidthBytesPerSecond: 52_000_000_000,
 		GPUs: []hardware.GPU{{
 			ID: "CUDA0", FreeBytes: 24 << 30, TotalBytes: 24 << 30,
 			MemoryBandwidthBytesPerSecond: 288_032_000_000,
+			PCIeBandwidthBytesPerSecond: 15_753_846_153,
 		}},
-	}}, managerSettings)
+	}
+	handler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: fullSnapshot}, managerSettings)
 
 	response := doRequest(t, handler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=empero-ai%2FQwen3.8-27B-Ridge-GGUF", nil, cookie)
 	body := response.Body.String()
@@ -78,5 +81,29 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	}
 	if strings.Contains(body, `"tier":"Unknown profile"`) || strings.Contains(body, `"speed":"Hardware-dependent"`) {
 		t.Fatalf("provider-backed mixed profile retained generic guidance: %s", body)
+	}
+
+	hybridSnapshot := fullSnapshot
+	hybridSnapshot.GPUs = []hardware.GPU{{
+		ID: "CUDA0", FreeBytes: 8 << 30, TotalBytes: 8 << 30,
+		MemoryBandwidthBytesPerSecond: 288_032_000_000,
+		PCIeBandwidthBytesPerSecond: 15_753_846_153,
+	}}
+	hybridHandler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: hybridSnapshot}, managerSettings)
+	hybridResponse := doRequest(t, hybridHandler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=empero-ai%2FQwen3.8-27B-Ridge-GGUF", nil, cookie)
+	hybridBody := hybridResponse.Body.String()
+	if hybridResponse.Code != http.StatusOK {
+		t.Fatalf("hybrid status=%d body=%s", hybridResponse.Code, hybridBody)
+	}
+	for _, want := range []string{
+		`"fit_label":"GPU + CPU"`,
+		`"generation_speed":{"estimated":true`,
+		`Hybrid bandwidth-limited generation/decode estimate`,
+		`measured memory-copy throughput`,
+		`theoretical PCIe link`,
+	} {
+		if !strings.Contains(hybridBody, want) {
+			t.Fatalf("hybrid missing %s in %s", want, hybridBody)
+		}
 	}
 }
