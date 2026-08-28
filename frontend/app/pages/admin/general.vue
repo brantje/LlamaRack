@@ -11,6 +11,8 @@ type GeneralSettings = {
   startup_timeout_seconds: SettingValue<number>
   idle_unload_seconds: SettingValue<number>
   always_on_reconcile_seconds: SettingValue<number>
+  observability_retention_days: SettingValue<number>
+  prometheus_auth_token: SettingValue<string>
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
 }
 type SystemNetwork = { network: { effective_scheme: string; secure_cookie: boolean } }
@@ -18,7 +20,20 @@ type SystemNetwork = { network: { effective_scheme: string; secure_cookie: boole
 const manager = useManager()
 const settings = ref<GeneralSettings | null>(null)
 const network = ref<SystemNetwork['network'] | null>(null)
-const form = reactive({ session_lifetime_seconds: 86400, login_protection_enabled: true, login_failure_threshold: 5, login_lockout_seconds: 900, trusted_proxies: '', allowed_origins: '', external_url: '', startup_timeout_seconds: 180, idle_unload_seconds: 300, always_on_reconcile_seconds: 15 })
+const form = reactive({
+  session_lifetime_seconds: 86400,
+  login_protection_enabled: true,
+  login_failure_threshold: 5,
+  login_lockout_seconds: 900,
+  trusted_proxies: '',
+  allowed_origins: '',
+  external_url: '',
+  startup_timeout_seconds: 180,
+  idle_unload_seconds: 300,
+  always_on_reconcile_seconds: 15,
+  observability_retention_days: 30,
+  prometheus_auth_token: ''
+})
 const error = ref('')
 const saved = ref(false)
 const busy = ref(false)
@@ -81,7 +96,7 @@ function editable(key: keyof typeof form) { return settings.value?.[key]?.editab
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network and lifecycle defaults. Environment values normally override database values; Allowed Origins is explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings" @click="save">Save changes</UButton></div>
+    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network, lifecycle and observability defaults. Environment values normally override database values; Allowed Origins and the Prometheus token are explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings" @click="save">Save changes</UButton></div>
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="saved" color="success" variant="subtle" description="Manager settings saved." />
 
@@ -122,6 +137,20 @@ function editable(key: keyof typeof form) { return settings.value?.[key]?.editab
             <template #help>Defaults to 300 seconds (5 minutes). Set to 0 to disable the global idle timeout.</template>
           </UFormField>
           <UFormField label="Always-on reconcile (seconds)" :hint="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></UFormField>
+        </div>
+      </UCard>
+
+      <UCard data-testid="observability-settings">
+        <template #header><div><h2 class="text-xl font-bold">Observability</h2><p class="text-sm text-muted">Control retained operational history and optional Prometheus scrape authentication.</p></div></template>
+        <div class="grid gap-5 md:grid-cols-2">
+          <UFormField label="History retention (days)" :hint="source('observability_retention_days')">
+            <UInputNumber v-model="form.observability_retention_days" class="w-full" :min="1" :max="3650" :disabled="!editable('observability_retention_days')" />
+            <template #help>Applies to individual inference requests and persisted hardware history. Default: 30 days.</template>
+          </UFormField>
+          <UFormField label="Prometheus Bearer token" :hint="source('prometheus_auth_token')">
+            <UInput v-model="form.prometheus_auth_token" type="password" autocomplete="off" class="w-full" :disabled="!editable('prometheus_auth_token')" placeholder="Leave empty for unauthenticated /metrics" />
+            <template #help>An empty token keeps /metrics unauthenticated. Set a token to require Authorization: Bearer &lt;token&gt;.</template>
+          </UFormField>
         </div>
       </UCard>
 
