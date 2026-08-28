@@ -66,7 +66,6 @@ afterEach(() => {
 
 describe('Discover URL navigation and endless scrolling', () => {
   it('loads cursor pages and restores cached items and scroll position after detail navigation', async () => {
-    vi.useFakeTimers()
     const first = { id: 'acme/one', downloads: 1, likes: 1, private: false, gated: false }
     const second = { id: 'acme/two', downloads: 2, likes: 2, private: false, gated: false }
     const third = { id: 'acme/three', downloads: 3, likes: 3, private: false, gated: false }
@@ -84,7 +83,7 @@ describe('Discover URL navigation and endless scrolling', () => {
     })
 
     const list = await mountSuspended(DiscoverPage, { route: '/models/discover' })
-    await vi.advanceTimersByTimeAsync(350)
+    await list.find('form').trigger('submit')
     await flushPromises()
     expect(list.text()).toContain('acme/one')
     expect(list.text()).toContain('acme/two')
