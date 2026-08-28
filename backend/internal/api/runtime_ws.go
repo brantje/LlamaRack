@@ -33,14 +33,22 @@ type runtimeSnapshotEvent struct {
 }
 
 type runtimeTelemetryEvent struct {
-	Type      string                                  `json:"type"`
-	Telemetry []observability.RuntimeTelemetrySample `json:"telemetry"`
+	Type      string                   `json:"type"`
+	Telemetry []runtimeTelemetrySample `json:"telemetry"`
 }
 
 func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string, samplers ...*observability.Sampler) http.Handler {
 	var sampler *observability.Sampler
 	if len(samplers) > 0 { sampler = samplers[0] }
 	return &runtimeWebSocketHandler{auth: a, lifecycle: l, sampler: sampler, allowedOrigins: allowedOrigins}
+}
+
+func sharedTelemetry(samples []observability.RuntimeTelemetrySample) []runtimeTelemetrySample {
+	out := make([]runtimeTelemetrySample, len(samples))
+	for index := range samples {
+		out[index] = runtimeTelemetrySample{Sample: samples[index].Sample, LlamaMetrics: samples[index].LlamaMetrics}
+	}
+	return out
 }
 
 func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +86,7 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		if !initial.CollectedAt.IsZero() {
 			if err := conn.WriteJSON(initial); err != nil { return }
 			if len(initial.Telemetry) > 0 {
-				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: initial.Telemetry}); err != nil { return }
+				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: sharedTelemetry(initial.Telemetry)}); err != nil { return }
 			}
 		}
 	}
@@ -102,7 +110,7 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			if !open { observabilityEvents = nil; continue }
 			if err := conn.WriteJSON(sample); err != nil { return }
 			if len(sample.Telemetry) > 0 {
-				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: sample.Telemetry}); err != nil { return }
+				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: sharedTelemetry(sample.Telemetry)}); err != nil { return }
 			}
 		}
 	}
