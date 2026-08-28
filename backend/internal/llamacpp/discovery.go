@@ -10,11 +10,12 @@ import (
 )
 
 type Option struct {
-	Key         string   `json:"key"`
-	ValueHint   string   `json:"value_hint,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Kind        string   `json:"kind"`
-	Choices     []string `json:"choices,omitempty"`
+	Key          string   `json:"key"`
+	ValueHint    string   `json:"value_hint,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Kind         string   `json:"kind"`
+	Choices      []string `json:"choices,omitempty"`
+	ManagerOwned bool     `json:"manager_owned,omitempty"`
 }
 
 type Profile struct {
@@ -79,7 +80,7 @@ func parseHelp(text string) []Option {
 		kind, choices := classifyValueHint(afterFlag)
 		out = append(out, Option{
 			Key: key, ValueHint: afterFlag, Description: description,
-			Kind: kind, Choices: choices,
+			Kind: kind, Choices: choices, ManagerOwned: IsManagerOwnedOption(key),
 		})
 	}
 	return out
