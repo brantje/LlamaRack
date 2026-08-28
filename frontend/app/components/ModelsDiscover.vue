@@ -436,11 +436,20 @@ onBeforeUnmount(() => {
 
         <div v-if="!selected.artifacts.length" class="flex items-center gap-3 py-8 text-muted"><UIcon name="i-lucide-file-x" class="size-5" /><span>No GGUF model files found</span></div>
         <div v-else class="mt-5 divide-y divide-default">
-          <div v-for="artifact in orderedArtifacts" :key="artifact.id" class="grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_150px] xl:items-start" :data-testid="`artifact-${artifact.id}`">
+          <div
+            v-for="artifact in orderedArtifacts"
+            :key="artifact.id"
+            :class="[
+              'grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_150px] xl:items-start',
+              artifactAdvice(artifact)?.recommended ? '-mx-3 border-l-2 border-primary bg-primary/5 px-3 sm:-mx-4 sm:px-4' : ''
+            ]"
+            :data-testid="`artifact-${artifact.id}`"
+            :data-recommended="artifactAdvice(artifact)?.recommended ? 'true' : undefined"
+          >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <UBadge v-if="artifactAdvice(artifact)?.recommended" color="primary" variant="solid">Recommended</UBadge>
-                <span class="text-base font-semibold">{{ artifactAdvice(artifact)?.quantization.tier || 'Quantization details unavailable' }}</span>
+                <UBadge v-if="artifactAdvice(artifact)?.recommended" color="primary" variant="solid" size="lg" class="font-bold" data-testid="recommended-badge">Recommended</UBadge>
+                <span class="text-base font-semibold" :class="artifactAdvice(artifact)?.recommended ? 'text-primary' : ''">{{ artifactAdvice(artifact)?.quantization.tier || 'Quantization details unavailable' }}</span>
                 <UBadge color="neutral" variant="soft" class="font-mono">{{ artifact.quantization || 'Unknown' }}</UBadge>
                 <UBadge v-if="artifact.shard_count > 1" color="neutral" variant="soft">{{ artifact.shard_count }} shards</UBadge>
                 <UBadge v-if="!artifact.complete" color="error" variant="subtle">Incomplete split</UBadge>
