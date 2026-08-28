@@ -126,7 +126,7 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			artifact.Fit, artifact.FitLabel = discoverFit(artifact.Runnable, artifact.Offload)
 			artifact.Reason = artifact.Offload.Reason
 			if artifact.Runnable {
-				artifact.GenerationSpeed = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide)
+				artifact.GenerationSpeed = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide, metadata)
 			}
 		}
 		result.Artifacts = append(result.Artifacts, artifact)
