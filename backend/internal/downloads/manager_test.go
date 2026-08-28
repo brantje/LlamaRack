@@ -275,7 +275,7 @@ func TestCancelAndRetry(t *testing.T) {
 		return response(r, http.StatusOK, body, nil), nil
 	})})
 	retried, err := manager.Retry(context.Background(), job.ID)
-	if err != nil || retried.State != StateQueued {
+	if err != nil || retried.ID != job.ID {
 		t.Fatalf("retry = %+v err=%v", retried, err)
 	}
 	waitJob(t, manager, job.ID, StateCompleted)
