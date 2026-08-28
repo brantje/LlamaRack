@@ -170,11 +170,6 @@ function scheduleSearch() {
   }, 350)
 }
 
-function normalizeSearchPage(value: HFSearchPage | HFModel[] | null | undefined): HFSearchPage {
-  if (Array.isArray(value)) return { items: value }
-  return { items: value?.items || [], next_cursor: value?.next_cursor || '' }
-}
-
 function mergeResults(existing: HFModel[], incoming: HFModel[]) {
   const byID = new Map(existing.map(item => [item.id, item]))
   for (const item of incoming) byID.set(item.id, item)
@@ -190,11 +185,10 @@ async function fetchSearchPage(reset: boolean) {
   const searchQuery = normalizedURL || query.value.trim()
   const cursor = reset ? '' : nextCursor.value
   try {
-    const params = new URLSearchParams({ q: searchQuery, author: author.value.trim(), sort: sort.value, limit: String(pageSize), paged: 'true' })
+    const params = new URLSearchParams({ q: searchQuery, author: author.value.trim(), sort: sort.value, limit: String(pageSize) })
     if (cursor) params.set('cursor', cursor)
-    const response = await manager.request<HFSearchPage | HFModel[]>(`/api/v1/huggingface/search?${params.toString()}`)
+    const page = await manager.request<HFSearchPage>(`/api/v1/huggingface/search?${params.toString()}`)
     if (version !== searchVersion) return false
-    const page = normalizeSearchPage(response)
     results.value = reset ? page.items : mergeResults(results.value, page.items)
     nextCursor.value = page.next_cursor || ''
     hasSearched.value = true
@@ -302,7 +296,7 @@ onMounted(() => {
     if (loadMoreSentinel.value) loadObserver.observe(loadMoreSentinel.value)
   }
   if (isDetail.value) void openModel(repoID.value)
-  else if (!hasSearched.value) scheduleSearch()
+  else if (!hasSearched.value || !results.value.length) scheduleSearch()
   else restoreScroll()
 })
 onBeforeUnmount(() => {
