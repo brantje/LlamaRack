@@ -55,21 +55,22 @@ describe('Hugging Face launch import', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(DiscoverPage, { route: '/models/discover' })
+    const list = await mountSuspended(DiscoverPage, { route: '/models/discover' })
     await new Promise(resolve => setTimeout(resolve, 375))
     await flushPromises()
-    expect(wrapper.text()).toContain('Model size 180B params')
-    expect(wrapper.text()).toContain('Updated 3h ago')
+    expect(list.text()).toContain('Model size 180B params')
+    expect(list.text()).toContain('Updated 3h ago')
+    list.unmount()
 
-    await wrapper.findAll('[class*="cursor-pointer"]')[0]!.trigger('click')
+    const detail = await mountSuspended(DiscoverPage, { props: { repoId: 'Qwen/Qwen3.8-Flash-Next' }, route: false })
     await flushPromises()
-    const actions = wrapper.findAll('a,button').filter(node => ['Launch', 'Download'].includes(node.text()))
+    const actions = detail.findAll('a,button').filter(node => ['Launch', 'Download'].includes(node.text()))
     expect(actions.map(node => node.text())).toEqual(['Launch', 'Download'])
     const launch = actions[0]!
     expect(launch.attributes('href')).toContain('/models/new')
     expect(launch.attributes('href')).toContain('artifact=artifact-q4')
     expect(decodeURIComponent(launch.attributes('href'))).toContain('repo=Qwen/Qwen3.8-Flash-Next')
-    wrapper.unmount()
+    detail.unmount()
   })
 
   it('reuses the Add model form and creates a downloading Instance', async () => {
