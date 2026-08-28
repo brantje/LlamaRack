@@ -190,6 +190,10 @@ describe('Phase 10 deep user branches', () => {
     await flushPromises()
     expect(initializeCalls).toBe(2)
 
+    // Resetting the current user's password invalidates their bearer session.
+    // Restore the synthetic signed-in state before exercising unrelated user
+    // management branches in this isolated component test.
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     sessions = null
     operator = tableRow(wrapper, 'operator')
     await rowButton(operator, 'Sessions').trigger('click')
@@ -208,6 +212,9 @@ describe('Phase 10 deep user branches', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/sessions/current%2Ftwo', { method: 'DELETE' })
     expect(initializeCalls).toBe(3)
 
+    // Revoking a current session reinitializes authentication as well. Keep
+    // this fixture signed in for the remaining non-current session/delete cases.
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     const revokeAfterRefresh = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(candidate => candidate.textContent?.trim() === 'Revoke')
     revokeAfterRefresh[1]!.click()
     await flushPromises()
@@ -267,7 +274,7 @@ describe('Phase 10 deep user branches', () => {
     await flushPromises()
     failurePath = '/api/v1/sessions/s'
     failure = { data: { error: 'revoke denied' } }
-    const revoke = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === 'Revoke')!
+    const revoke = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(candidate => candidate.textContent?.trim() === 'Revoke').at(-1)!
     revoke.click()
     await flushPromises()
     expect(wrapper.text()).toContain('revoke denied')
