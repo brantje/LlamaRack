@@ -11,8 +11,8 @@ type GeneralSettings = {
   startup_timeout_seconds: SettingValue<number>
   idle_unload_seconds: SettingValue<number>
   always_on_reconcile_seconds: SettingValue<number>
-  observability_retention_days: SettingValue<number>
-  prometheus_auth_token: SettingValue<string>
+  observability_retention_days?: SettingValue<number>
+  prometheus_auth_token?: SettingValue<string>
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
 }
 type SystemNetwork = { network: { effective_scheme: string; secure_cookie: boolean } }
@@ -37,15 +37,22 @@ const form = reactive({
 const error = ref('')
 const saved = ref(false)
 const busy = ref(false)
+const legacySettingKeys = [
+  'session_lifetime_seconds', 'login_protection_enabled', 'login_failure_threshold', 'login_lockout_seconds',
+  'trusted_proxies', 'allowed_origins', 'external_url', 'startup_timeout_seconds', 'idle_unload_seconds', 'always_on_reconcile_seconds'
+] as const
 
 function isGeneralSettings(value: unknown): value is GeneralSettings {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<GeneralSettings>
-  return Boolean(candidate.runtime && Object.keys(form).every(key => candidate[key as keyof typeof form] && typeof candidate[key as keyof typeof form] === 'object'))
+  return Boolean(candidate.runtime && legacySettingKeys.every(key => candidate[key] && typeof candidate[key] === 'object'))
 }
 
 function syncForm(value: GeneralSettings) {
-  for (const key of Object.keys(form) as Array<keyof typeof form>) (form[key] as any) = value[key].value
+  for (const key of Object.keys(form) as Array<keyof typeof form>) {
+    const setting = value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+    if (setting && typeof setting === 'object' && 'value' in setting) (form[key] as any) = setting.value
+  }
 }
 
 async function load() {
@@ -74,7 +81,10 @@ async function save() {
   error.value = ''
   saved.value = false
   const body: Record<string, unknown> = {}
-  for (const key of Object.keys(form) as Array<keyof typeof form>) if (settings.value[key]?.editable) body[key] = form[key]
+  for (const key of Object.keys(form) as Array<keyof typeof form>) {
+    const setting = settings.value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+    if (setting?.editable) body[key] = form[key]
+  }
   try {
     const value = await manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body })
     if (!isGeneralSettings(value)) throw new Error('Invalid manager settings response')
@@ -90,8 +100,14 @@ async function save() {
   }
 }
 
-function source(key: keyof typeof form) { return settings.value?.[key]?.source || 'default' }
-function editable(key: keyof typeof form) { return settings.value?.[key]?.editable !== false }
+function source(key: keyof typeof form) {
+  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+  return setting?.source || 'default'
+}
+function editable(key: keyof typeof form) {
+  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+  return setting?.editable !== false
+}
 </script>
 
 <template>
