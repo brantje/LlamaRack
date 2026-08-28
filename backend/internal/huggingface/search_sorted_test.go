@@ -66,6 +66,51 @@ func TestSearchSortedUsesDiscoveryOrdering(t *testing.T) {
 	}
 }
 
+func TestSearchSortedPageReturnsAndAcceptsProviderCursor(t *testing.T) {
+	var seenCursor string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenCursor = r.URL.Query().Get("cursor")
+		w.Header().Set("Link", `</api/models?cursor=next-token>; rel="next"`)
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "acme/demo"}})
+	}))
+	defer server.Close()
+	client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := client.SearchSortedPage(context.Background(), SearchOptions{Limit: 30}, "current-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenCursor != "current-token" {
+		t.Fatalf("cursor = %q", seenCursor)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "acme/demo" {
+		t.Fatalf("items = %+v", page.Items)
+	}
+	if page.NextCursor != "next-token" {
+		t.Fatalf("next cursor = %q", page.NextCursor)
+	}
+}
+
+func TestNextCursorFromLink(t *testing.T) {
+	cases := []struct {
+		header string
+		want   string
+	}{
+		{`<https://huggingface.co/api/models?cursor=abc123&limit=30>; rel="next"`, "abc123"},
+		{`<https://huggingface.co/api/models?cursor=prev>; rel="prev", <https://huggingface.co/api/models?cursor=next>; rel="next"`, "next"},
+		{`<https://huggingface.co/api/models?limit=30>; rel="next"`, ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := nextCursorFromLink(tc.header); got != tc.want {
+			t.Fatalf("nextCursorFromLink(%q) = %q, want %q", tc.header, got, tc.want)
+		}
+	}
+}
+
 func TestSearchSortedDefaultsLimitSkipsEmptyIDsAndFallsBackToSafetensorsParameters(t *testing.T) {
 	var seen url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
