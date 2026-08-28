@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
@@ -22,6 +23,7 @@ func TestClassifyQuantizationForNoviceGuidance(t *testing.T) {
 		{"Q5_K_M", "High quality", "High", "Moderate-high", false, true},
 		{"Q6_K_P", "High quality", "High", "High", false, true},
 		{"Q8_0", "Maximum quality", "Maximum", "Very high", true, true},
+		{"F16", "Maximum quality", "Maximum", "Extreme", true, true},
 		{"BF16", "Maximum quality", "Maximum", "Extreme", true, true},
 		{"F32", "Maximum quality", "Maximum", "Extreme", true, true},
 		{"EXPERIMENTAL", "Unknown profile", "Unknown", "Unknown", false, false},
@@ -89,4 +91,51 @@ func TestAnalyzeDiscoverFitStatesAndUnknowns(t *testing.T) {
 
 	incomplete := AnalyzeDiscover([]ArtifactInput{{ID: "split", Quantization: "Q6_K", WeightsBytes: 4 * gib, Complete: false}}, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib}, 4096, nil, true)
 	if incomplete.Artifacts[0].Fit != FitUnknown || incomplete.Artifacts[0].Runnable { t.Fatalf("incomplete=%+v", incomplete.Artifacts[0]) }
+}
+
+func TestAnalyzeDiscoverEdgeOrderingAndBounds(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	metadata := Metadata{Architecture: "llama", ContextLength: 32768, BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8}
+	snapshot := hardware.Snapshot{RAMAvailableBytes: 32 * gib, RAMTotalBytes: 48 * gib}
+	inputs := []ArtifactInput{
+		{ID: "larger-q4", Quantization: "Q4_K_M", WeightsBytes: 5 * gib, Complete: true},
+		{ID: "smaller-q4", Quantization: "Q4_K_S", WeightsBytes: 4 * gib, Complete: true},
+		{ID: "unknown", Quantization: "experimental", WeightsBytes: 1 * gib, Complete: true},
+		{ID: "zero-size", Quantization: "Q5_K_M", WeightsBytes: 0, Complete: true},
+	}
+	result := AnalyzeDiscover(inputs, metadata, nil, snapshot, 4096, nil, true)
+	if len(result.Artifacts) != 4 || result.Artifacts[0].ArtifactID != "smaller-q4" || !result.Artifacts[0].Recommended {
+		t.Fatalf("ordered=%+v", result.Artifacts)
+	}
+	var zero, unknown DiscoverArtifact
+	for _, artifact := range result.Artifacts {
+		switch artifact.ArtifactID {
+		case "zero-size": zero = artifact
+		case "unknown": unknown = artifact
+		}
+	}
+	if zero.Fit != FitUnknown || zero.Runnable || !strings.Contains(zero.Reason, "size is unavailable") {
+		t.Fatalf("zero=%+v", zero)
+	}
+	if !unknown.Runnable || unknown.Quantization.Known || unknown.Recommended {
+		t.Fatalf("unknown=%+v", unknown)
+	}
+
+	overContext := AnalyzeDiscover([]ArtifactInput{{ID: "q4", Quantization: "Q4_K_M", WeightsBytes: 4 * gib, Complete: true}}, metadata, nil, snapshot, 65536, nil, true)
+	if overContext.Artifacts[0].Fit != FitNo || overContext.Artifacts[0].Runnable || !strings.Contains(overContext.Artifacts[0].Reason, "larger than the context capability") {
+		t.Fatalf("over-context=%+v", overContext.Artifacts[0])
+	}
+
+	if fit, label := discoverFit(true, Offload{Mode: "future-mode"}); fit != FitUnknown || label != "Fit unknown" {
+		t.Fatalf("unexpected future-mode fit=%q label=%q", fit, label)
+	}
+	if hardwareTelemetryAvailable(hardware.Snapshot{}, contextUnavailableError{}) {
+		t.Fatal("explicit unavailable telemetry must stay unavailable")
+	}
+	if !hardwareTelemetryAvailable(hardware.Snapshot{}, nil) {
+		t.Fatal("a successful zero-valued snapshot remains a valid telemetry response")
+	}
+	if contextUnavailableError{}.Error() != "hardware telemetry unavailable" {
+		t.Fatal("unexpected contextUnavailableError text")
+	}
 }
