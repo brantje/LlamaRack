@@ -155,8 +155,9 @@ async function testProvider(provider: Provider) {
     successMessage.value = `${provider.name} configuration test passed.`
     await load()
   } catch (error: any) {
-    errorMessage.value = error?.data?.error || error?.message || `${provider.name} configuration test failed`
+    const message = error?.data?.error || error?.message || `${provider.name} configuration test failed`
     await load()
+    errorMessage.value = message
   } finally {
     providerBusy.value = ''
   }
