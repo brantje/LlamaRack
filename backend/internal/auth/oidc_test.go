@@ -170,7 +170,7 @@ func TestOIDCProviderLifecycleTestingAndLockoutPolicy(t *testing.T) {
 	disabledSecond.ClientSecret = nil
 	disabledSecond.Enabled = false
 	updated, err := f.manager.UpdateProvider(ctx, second.ID, disabledSecond)
-	if err != nil || updated.Enabled || !updated.LastTestSucceeded { t.Fatalf("disabled provider=%+v err=%v", updated, err) }
+	if err != nil || updated.Enabled || updated.LastTestSucceeded || updated.LastTestedAt != nil { t.Fatalf("disabled provider=%+v err=%v", updated, err) }
 	public, err = f.manager.PublicProviders(ctx)
 	if err != nil || len(public) != 0 { t.Fatalf("disabled public providers=%+v err=%v", public, err) }
 	if err := f.manager.DeleteProvider(ctx, second.ID); err != nil { t.Fatal(err) }
