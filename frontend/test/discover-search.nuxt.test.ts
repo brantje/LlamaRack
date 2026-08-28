@@ -12,7 +12,7 @@ beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockImplementation(async (path: string) => {
     if (path.startsWith('/api/v1/huggingface/search?')) {
-      return [{ id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, tags: ['gguf'] }]
+      return { items: [{ id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, tags: ['gguf'] }] }
     }
     return []
   })
