@@ -26,7 +26,10 @@ type HardwareSeriesPoint struct {
 
 type LifecycleSummary struct {
 	Autoloads    int64   `json:"autoloads"`
+	Loads        int64   `json:"loads"`
 	FailedStarts int64   `json:"failed_starts"`
+	Evictions    int64   `json:"evictions"`
+	IdleUnloads  int64   `json:"idle_unloads"`
 	LoadMS       float64 `json:"load_duration_ms_total"`
 }
 
@@ -146,7 +149,7 @@ func (s *Service) HardwareTimeseries(ctx context.Context, metric string, sinceMS
 }
 
 func (s *Service) LifecycleSummary(ctx context.Context) (LifecycleSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0) FROM observability_counters WHERE metric IN ('autoload_total','failed_start_total','load_duration_ms_total') GROUP BY metric`)
+	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0) FROM observability_counters WHERE metric IN ('autoload_total','load_total','failed_start_total','eviction_total','idle_unload_total','load_duration_ms_total') GROUP BY metric`)
 	if err != nil { return LifecycleSummary{}, err }
 	defer rows.Close()
 	var summary LifecycleSummary
@@ -156,7 +159,10 @@ func (s *Service) LifecycleSummary(ctx context.Context) (LifecycleSummary, error
 		if err := rows.Scan(&metric, &value); err != nil { return LifecycleSummary{}, err }
 		switch strings.TrimSpace(metric) {
 		case "autoload_total": summary.Autoloads = int64(value)
+		case "load_total": summary.Loads = int64(value)
 		case "failed_start_total": summary.FailedStarts = int64(value)
+		case "eviction_total": summary.Evictions = int64(value)
+		case "idle_unload_total": summary.IdleUnloads = int64(value)
 		case "load_duration_ms_total": summary.LoadMS = value
 		}
 	}
