@@ -209,7 +209,7 @@ onBeforeUnmount(() => {
 
     <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }">
       <template #body>
-        <InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" />
+        <InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" embedded />
       </template>
     </UModal>
     <AppConfirmationModal ref="confirmation" />
