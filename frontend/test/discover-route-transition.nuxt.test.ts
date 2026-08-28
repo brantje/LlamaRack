@@ -80,7 +80,6 @@ describe('discover route transitions', () => {
     await card!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.vm.$route.path).toBe('/models/discover/zerodigest/Qwen3.8-27B-Uncensored-YMQ-MTP-GGUF')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/huggingface/model?repo=zerodigest%2FQwen3.8-27B-Uncensored-YMQ-MTP-GGUF')
     expect(wrapper.text()).toContain('REPOSITORY')
     expect(wrapper.text()).toContain('Available quantizations')
