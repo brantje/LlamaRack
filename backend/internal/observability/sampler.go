@@ -14,6 +14,8 @@ import (
 const (
 	defaultLiveSampleInterval = time.Second
 	defaultPersistInterval    = 10 * time.Second
+	defaultGatewayRefresh     = 2 * time.Second
+	defaultIdleUnload         = 5 * time.Minute
 )
 
 type RuntimeTelemetrySample struct {
@@ -35,18 +37,24 @@ type Sampler struct {
 	service   *Service
 	interval  time.Duration
 	persist   time.Duration
+	gatewayRefresh time.Duration
+	idleTimeout time.Duration
 
 	mu     sync.RWMutex
 	latest LiveSnapshot
 	subs   map[chan LiveSnapshot]struct{}
 }
 
-func NewSampler(lifecycleService *lifecycle.Service, service *Service) *Sampler {
+func NewSampler(lifecycleService *lifecycle.Service, service *Service, idleTimeout ...time.Duration) *Sampler {
+	idle := defaultIdleUnload
+	if len(idleTimeout) > 0 && idleTimeout[0] >= 0 { idle = idleTimeout[0] }
 	return &Sampler{
 		lifecycle: lifecycleService,
 		service: service,
 		interval: defaultLiveSampleInterval,
 		persist: defaultPersistInterval,
+		gatewayRefresh: defaultGatewayRefresh,
+		idleTimeout: idle,
 		subs: map[chan LiveSnapshot]struct{}{},
 	}
 }
@@ -76,6 +84,7 @@ func (s *Sampler) Subscribe() (LiveSnapshot, <-chan LiveSnapshot, func()) {
 }
 
 func (s *Sampler) Run(ctx context.Context) {
+	if s.lifecycle == nil || s.service == nil { return }
 	runtimes, events, cancel, err := s.lifecycle.SubscribeRuntimes(ctx)
 	if err != nil { return }
 	defer cancel()
@@ -85,6 +94,9 @@ func (s *Sampler) Run(ctx context.Context) {
 	var currentHardware hardware.Snapshot
 	collector := telemetry.New(func(context.Context) (hardware.Snapshot, error) { return currentHardware, nil })
 	lastPersist := time.Time{}
+	lastGateway := time.Time{}
+	gateway := Summary{}
+	requests := []RequestRecord{}
 	collect := func() {
 		snapshot, err := s.lifecycle.HardwareSnapshot(ctx)
 		if err != nil { return }
@@ -94,8 +106,13 @@ func (s *Sampler) Run(ctx context.Context) {
 		samples := collector.Collect(ctx, values)
 		samples = applyHardwareFallback(samples, snapshot)
 		withMetrics := attachNativeMetrics(ctx, samples, values, s.lifecycle.RuntimeEndpoint)
-		gateway, _ := s.service.Summary(ctx, time.Now().Add(-15*time.Minute).UnixMilli())
-		requests, _ := s.service.ListRequests(ctx, RequestFilters{SinceMS: time.Now().Add(-15*time.Minute).UnixMilli(), Limit: 20})
+		now := time.Now()
+		if lastGateway.IsZero() || now.Sub(lastGateway) >= s.gatewayRefresh {
+			since := now.Add(-15 * time.Minute).UnixMilli()
+			if value, summaryErr := s.service.Summary(ctx, since); summaryErr == nil { gateway = value }
+			if value, requestErr := s.service.ListRequests(ctx, RequestFilters{SinceMS: since, Limit: 20}); requestErr == nil { requests = value }
+			lastGateway = now
+		}
 		live := LiveSnapshot{Type: "observability", CollectedAt: snapshot.CollectedAt, Hardware: snapshot, Telemetry: withMetrics, Gateway: gateway, Requests: requests}
 		s.publish(live)
 
@@ -118,11 +135,49 @@ func (s *Sampler) Run(ctx context.Context) {
 		case <-ctx.Done(): return
 		case runtime, ok := <-events:
 			if !ok { return }
+			s.observeLifecycle(ctx, current[runtime.InstanceID], runtime)
 			current[runtime.InstanceID] = runtime
 		case <-ticker.C:
 			collect()
 		}
 	}
+}
+
+func (s *Sampler) observeLifecycle(ctx context.Context, previous, next supervisor.Runtime) {
+	if next.InstanceID == "" || previous.State == next.State || s.lifecycle == nil || s.service == nil { return }
+	state := s.lifecycle.OperationalState(next.InstanceID)
+	record := func(event string, duration time.Duration) {
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_ = s.service.RecordLifecycle(persistCtx, event, next.InstanceID, duration)
+	}
+	if next.State == supervisor.Starting && state.Activity.ActiveRequests > 0 {
+		record(LifecycleAutoload, 0)
+	}
+	if next.State == supervisor.Ready {
+		duration := time.Duration(0)
+		if !next.StartedAt.IsZero() && !next.ReadyAt.IsZero() && next.ReadyAt.After(next.StartedAt) { duration = next.ReadyAt.Sub(next.StartedAt) }
+		record(LifecycleLoad, duration)
+	}
+	if next.State == supervisor.Failed {
+		record(LifecycleFailedStart, 0)
+	}
+	if !runtimeWasRunning(previous.State) || (next.State != supervisor.Stopping && next.State != supervisor.Unloaded) { return }
+	if state.ResourceBlocked || state.ResourceStartActive {
+		record(LifecycleEviction, 0)
+		return
+	}
+	instance, err := s.lifecycle.Instances().Get(ctx, next.InstanceID)
+	if err != nil || instance.AlwaysOn || state.ManuallyStopped || state.Activity.LastUsed.IsZero() { return }
+	idle := s.idleTimeout
+	if instance.IdleUnloadSeconds > 0 { idle = time.Duration(instance.IdleUnloadSeconds) * time.Second }
+	if idle > 0 && time.Since(state.Activity.LastUsed) >= idle {
+		record(LifecycleIdleUnload, 0)
+	}
+}
+
+func runtimeWasRunning(state supervisor.State) bool {
+	return state == supervisor.Starting || state == supervisor.Loading || state == supervisor.Ready
 }
 
 func (s *Sampler) publish(snapshot LiveSnapshot) {
