@@ -259,6 +259,11 @@ func ClassifyQuantization(value string) QuantizationGuide {
 		prefix = "Q" + strings.TrimPrefix(prefix, "IQ")
 	}
 	switch {
+	case strings.HasPrefix(prefix, "Q1"):
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Extreme compression", "Model-dependent", "Minimal", "See generation estimate", true, 10
+		guide.Summary = "One-bit quantization with an exceptionally small weight footprint."
+		guide.Tradeoff = "Q1 formats are highly specialized: quality and kernel support depend more on the model and runtime than with conventional Q2–Q8 quantizations."
+		guide.Warning = "Q1 is an aggressive, specialized format. Prefer a higher-bit variant when available unless the model was explicitly designed or validated for 1-bit inference."
 	case strings.HasPrefix(prefix, "Q2"):
 		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Very compact", "Very low", "Very low", "See generation estimate", true, 20
 		guide.Warning = "Q2 variants make significant quality trade-offs. Prefer Q4 or better when memory allows."
