@@ -7,8 +7,11 @@ import (
 )
 
 const (
-	ObservabilityEviction   = "eviction"
-	ObservabilityIdleUnload = "idle_unload"
+	ObservabilityAutoload    = "autoload"
+	ObservabilityLoad        = "load"
+	ObservabilityFailedStart = "failed_start"
+	ObservabilityEviction    = "eviction"
+	ObservabilityIdleUnload  = "idle_unload"
 )
 
 type ObservabilityRecorder func(context.Context, string, string, time.Duration) error
