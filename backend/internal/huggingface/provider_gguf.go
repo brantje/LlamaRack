@@ -1,6 +1,11 @@
 package huggingface
 
-import "math"
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"strings"
+)
 
 // GGUFInfo mirrors the provider-owned GGUF summary returned by the Hugging Face
 // model-info API. The Hub computes these values from the model's GGUF data, so
@@ -41,4 +46,29 @@ func artifactBitsPerWeight(modelBytes, parameterCount int64) float64 {
 		return 0
 	}
 	return math.Round(value*100) / 100
+}
+
+// ProfileQuantization returns the most precise profile Discover can support.
+// Canonical quantization labels are retained when the provider filename exposes
+// one. Otherwise the Hub-provided parameter count plus provider file size gives
+// us an average BPW profile without guessing from the filename.
+func (a Artifact) ProfileQuantization() string {
+	if value := strings.TrimSpace(a.Quantization); value != "" {
+		return value
+	}
+	if a.BitsPerWeight <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%gBPW", a.BitsPerWeight)
+}
+
+// MarshalJSON keeps the management API useful for mixed/custom GGUFs whose
+// filenames do not contain a canonical Q*/IQ* label. Internally Quantization
+// remains the exact filename-derived value; the API representation falls back
+// to provider-derived BPW only when that exact label is unavailable.
+func (a Artifact) MarshalJSON() ([]byte, error) {
+	type artifactJSON Artifact
+	value := artifactJSON(a)
+	value.Quantization = a.ProfileQuantization()
+	return json.Marshal(value)
 }
