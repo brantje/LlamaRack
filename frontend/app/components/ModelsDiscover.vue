@@ -8,8 +8,8 @@ type HFSearchPage = { items: HFModel[]; next_cursor?: string }
 type QuantizationGuide = { name?: string; tier: string; quality: string; memory: string; speed: string; summary: string; tradeoff: string; warning?: string; known: boolean }
 type MemoryEstimate = { weights_bytes: number; kv_cache_bytes: number; runtime_overhead_bytes: number; cpu_only_ram_bytes: number; full_offload_vram_bytes: number }
 type Offload = { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
-type GenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
-type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; generation_speed?: GenerationSpeed; confidence: string; warnings?: string[] }
+type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
+type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
 type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; artifacts: ArtifactAdvice[] }
 
 const props = defineProps<{ repoId?: string }>()
@@ -142,10 +142,10 @@ function fitReason(advice: ArtifactAdvice | null) {
   return advice?.reason || 'Context-aware hardware guidance is unavailable for this artifact.'
 }
 function speedLabel(advice: ArtifactAdvice | null) {
-  return advice?.generation_speed?.label || 'Estimate unavailable'
+  return advice?.estimated_generation_speed?.label || 'Estimate unavailable'
 }
 function speedReason(advice: ArtifactAdvice | null) {
-  return advice?.generation_speed?.reason || 'Generation speed requires a runnable GPU placement and measured memory-bandwidth telemetry.'
+  return advice?.estimated_generation_speed?.reason || 'Estimated generation speed requires a runnable GPU placement and measured memory-bandwidth telemetry.'
 }
 
 function huggingFaceRepo(value: string) {
@@ -461,7 +461,7 @@ onBeforeUnmount(() => {
                 <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
                 <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
                 <div>
-                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Generation</dt>
+                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Estimated Generation</dt>
                   <dd class="mt-1 font-semibold">
                     <UTooltip :text="speedReason(artifactAdvice(artifact))">
                       <span data-testid="artifact-generation-speed">{{ speedLabel(artifactAdvice(artifact)) }}</span>
@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
                     <div v-if="artifactAdvice(artifact)!.offload.tensor_split"><dt class="text-dimmed">Tensor split</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.tensor_split }}</dd></div>
                     <div><dt class="text-dimmed">Estimated weights</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.weights_bytes) }}</dd></div>
                     <div><dt class="text-dimmed">Estimated KV cache</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.kv_cache_bytes) }}</dd></div>
-                    <div><dt class="text-dimmed">Estimated generation</dt><dd class="mt-0.5">{{ speedLabel(artifactAdvice(artifact)) }}</dd></div>
+                    <div><dt class="text-dimmed">Estimated Generation</dt><dd class="mt-0.5">{{ speedLabel(artifactAdvice(artifact)) }}</dd></div>
                     <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Generation estimate basis</dt><dd class="mt-0.5">{{ speedReason(artifactAdvice(artifact)) }}</dd></div>
                     <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Technical reason</dt><dd class="mt-0.5">{{ fitReason(artifactAdvice(artifact)) }}</dd></div>
                   </dl>
