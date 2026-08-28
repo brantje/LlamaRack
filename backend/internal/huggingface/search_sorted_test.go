@@ -3,9 +3,11 @@ package huggingface
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +94,67 @@ func TestSearchSortedPageReturnsAndAcceptsProviderCursor(t *testing.T) {
 	if page.NextCursor != "next-token" {
 		t.Fatalf("next cursor = %q", page.NextCursor)
 	}
+}
+
+func TestDiscoveryJSONErrors(t *testing.T) {
+	t.Run("invalid endpoint", func(t *testing.T) {
+		client, err := NewClient("https://huggingface.co", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "://bad", &dst); err == nil {
+			t.Fatal("expected invalid endpoint error")
+		}
+	})
+
+	t.Run("token provider", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Fatal("request should not be sent when token lookup fails")
+		}))
+		defer server.Close()
+		client, err := NewClientWithHTTP(server.URL, func(context.Context) (string, error) {
+			return "", errors.New("token unavailable")
+		}, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "token unavailable") {
+			t.Fatalf("token error = %v", err)
+		}
+	})
+
+	t.Run("provider status", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("upstream exploded"))
+		}))
+		defer server.Close()
+		client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), "upstream exploded") {
+			t.Fatalf("status error = %v", err)
+		}
+	})
+
+	t.Run("decode", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("not-json"))
+		}))
+		defer server.Close()
+		client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "decode Hugging Face response") {
+			t.Fatalf("decode error = %v", err)
+		}
+	})
 }
 
 func TestNextCursorFromLink(t *testing.T) {
