@@ -42,30 +42,31 @@ type QuantizationGuide struct {
 }
 
 type DiscoverArtifact struct {
-	ArtifactID   string            `json:"artifact_id"`
-	Quantization QuantizationGuide `json:"quantization"`
-	Recommended bool              `json:"recommended"`
-	Runnable     bool              `json:"runnable"`
-	Fit          string            `json:"fit"`
-	FitLabel     string            `json:"fit_label"`
-	Reason       string            `json:"reason"`
-	Memory       MemoryEstimate    `json:"memory"`
-	Offload      Offload           `json:"offload"`
-	Confidence   string            `json:"confidence"`
-	Warnings     []string          `json:"warnings,omitempty"`
-	weightsBytes int64
-	complete     bool
+	ArtifactID      string                  `json:"artifact_id"`
+	Quantization    QuantizationGuide       `json:"quantization"`
+	Recommended     bool                    `json:"recommended"`
+	Runnable        bool                    `json:"runnable"`
+	Fit             string                  `json:"fit"`
+	FitLabel        string                  `json:"fit_label"`
+	Reason          string                  `json:"reason"`
+	Memory          MemoryEstimate          `json:"memory"`
+	Offload         Offload                 `json:"offload"`
+	GenerationSpeed GenerationSpeedEstimate `json:"generation_speed"`
+	Confidence      string                  `json:"confidence"`
+	Warnings        []string                `json:"warnings,omitempty"`
+	weightsBytes    int64
+	complete        bool
 }
 
 type DiscoverAnalysis struct {
-	ContextLength         int64             `json:"context_length"`
-	ContextCapability     int64             `json:"context_capability"`
-	ContextAssumed        bool              `json:"context_assumed"`
-	Metadata              Metadata          `json:"metadata"`
-	MetadataWarning       string            `json:"metadata_warning,omitempty"`
-	HardwareWarning       string            `json:"hardware_warning,omitempty"`
-	HardwareAvailable     bool              `json:"hardware_available"`
-	HybridRecommendations bool              `json:"hybrid_recommendations_enabled"`
+	ContextLength         int64              `json:"context_length"`
+	ContextCapability     int64              `json:"context_capability"`
+	ContextAssumed        bool               `json:"context_assumed"`
+	Metadata              Metadata           `json:"metadata"`
+	MetadataWarning       string             `json:"metadata_warning,omitempty"`
+	HardwareWarning       string             `json:"hardware_warning,omitempty"`
+	HardwareAvailable     bool               `json:"hardware_available"`
+	HybridRecommendations bool               `json:"hybrid_recommendations_enabled"`
 	Artifacts             []DiscoverArtifact `json:"artifacts"`
 }
 
@@ -93,13 +94,14 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 	for _, input := range inputs {
 		guide := ClassifyQuantization(input.Quantization)
 		artifact := DiscoverArtifact{
-			ArtifactID:    input.ID,
-			Quantization:  guide,
-			Fit:           FitUnknown,
-			FitLabel:      "Fit unknown",
-			Confidence:    confidence(metadata, metadataErr),
-			weightsBytes:  input.WeightsBytes,
-			complete:      input.Complete,
+			ArtifactID:      input.ID,
+			Quantization:    guide,
+			Fit:             FitUnknown,
+			FitLabel:        "Fit unknown",
+			GenerationSpeed: unavailableGenerationSpeed("A runnable GPU placement and memory-bandwidth telemetry are required before generation speed can be estimated."),
+			Confidence:      confidence(metadata, metadataErr),
+			weightsBytes:    input.WeightsBytes,
+			complete:        input.Complete,
 		}
 		if guide.Warning != "" {
 			artifact.Warnings = append(artifact.Warnings, guide.Warning)
@@ -123,6 +125,9 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			artifact.Runnable, artifact.Offload = discoverOffload(snapshot, artifact.Memory, metadata)
 			artifact.Fit, artifact.FitLabel = discoverFit(artifact.Runnable, artifact.Offload)
 			artifact.Reason = artifact.Offload.Reason
+			if artifact.Runnable {
+				artifact.GenerationSpeed = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide)
+			}
 		}
 		result.Artifacts = append(result.Artifacts, artifact)
 	}
@@ -233,7 +238,7 @@ func ClassifyQuantization(value string) QuantizationGuide {
 		Tier:     "Unknown profile",
 		Quality:  "Unknown",
 		Memory:   "Unknown",
-		Speed:    "Hardware-dependent",
+		Speed:    "See generation estimate",
 		Summary:  base.Summary,
 		Tradeoff: base.Tradeoff,
 	}
@@ -241,7 +246,7 @@ func ClassifyQuantization(value string) QuantizationGuide {
 		guide.Tier = "Mixed quantization"
 		guide.Quality = "Recipe-dependent"
 		guide.Memory = bpwMemoryLabel(bpw)
-		guide.Speed = "Hardware-dependent"
+		guide.Speed = "See generation estimate"
 		guide.Summary = "Mixed quantization averaging " + strings.TrimSuffix(q, "BPW") + " bits per weight; exact tensor formats vary by recipe."
 		guide.Tradeoff = "BPW describes average storage density, not a single quantization method or guaranteed quality level."
 		guide.Warning = "Mixed quantizations can vary substantially at the same BPW. Treat BPW as a size signal, not a guaranteed quality ranking."
@@ -255,25 +260,25 @@ func ClassifyQuantization(value string) QuantizationGuide {
 	}
 	switch {
 	case strings.HasPrefix(prefix, "Q2"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Very compact", "Very low", "Very low", "Often lighter to load", true, 20
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Very compact", "Very low", "Very low", "See generation estimate", true, 20
 		guide.Warning = "Q2 variants make significant quality trade-offs. Prefer Q4 or better when memory allows."
 	case strings.HasPrefix(prefix, "Q3"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Compact", "Low", "Low", "Often lighter to load", true, 30
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Compact", "Low", "Low", "See generation estimate", true, 30
 		guide.Warning = "Q3 variants make noticeable quality trade-offs. Prefer Q4 or better when memory allows."
 	case strings.HasPrefix(prefix, "Q4"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Balanced", "Balanced", "Moderate", "Good general-purpose balance", true, 40
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Balanced", "Balanced", "Moderate", "See generation estimate", true, 40
 	case strings.HasPrefix(prefix, "Q5"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "High quality", "High", "Moderate-high", "Hardware-dependent", true, 50
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "High quality", "High", "Moderate-high", "See generation estimate", true, 50
 	case strings.HasPrefix(prefix, "Q6"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "High quality", "High", "High", "Hardware-dependent", true, 60
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "High quality", "High", "High", "See generation estimate", true, 60
 	case strings.HasPrefix(prefix, "Q8"):
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Very high", "Hardware-dependent", true, 80
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Very high", "See generation estimate", true, 80
 		guide.Warning = "Q8 usually offers a small quality gain over Q6 for substantially more memory."
 	case q == "F16", q == "BF16":
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Extreme", "Hardware-dependent", true, 90
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Extreme", "See generation estimate", true, 90
 		guide.Warning = "Near-full precision is usually unnecessary for local inference and leaves much less memory for context."
 	case q == "F32":
-		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Extreme", "Hardware-dependent", true, 100
+		guide.Tier, guide.Quality, guide.Memory, guide.Speed, guide.Known, guide.rank = "Maximum quality", "Maximum", "Extreme", "See generation estimate", true, 100
 		guide.Warning = "Full precision is rarely practical for local inference; quantized variants normally retain useful quality with far lower memory use."
 	}
 	return guide
