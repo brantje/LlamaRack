@@ -16,7 +16,7 @@ const { instances, models } = manager
 const pending = ref('')
 const error = ref('')
 const logsOpen = ref(false)
-const logLines = ref<string[]>([])
+const logInstanceId = ref('')
 const logTitle = ref('')
 const importStates = ref<Record<string, ImportStatus>>({})
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
@@ -128,16 +128,11 @@ async function remove(instance: Instance) {
   }
 }
 
-async function showLogs(instance: Instance) {
+function showLogs(instance: Instance) {
   error.value = ''
-  try {
-    const result = await manager.request<{ lines: string[] }>(`/api/v1/instances/${encodeURIComponent(instance.id)}/logs`)
-    logLines.value = result.lines || []
-    logTitle.value = `${instance.name} logs`
-    logsOpen.value = true
-  } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to load logs'
-  }
+  logInstanceId.value = instance.id
+  logTitle.value = `${instance.name} logs`
+  logsOpen.value = true
 }
 
 onMounted(() => {
@@ -214,7 +209,7 @@ onBeforeUnmount(() => {
 
     <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }">
       <template #body>
-        <pre data-testid="instance-logs-output" class="min-h-[55vh] max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-md bg-elevated p-4 font-mono text-xs">{{ logLines.length ? logLines.join('\n') : 'No logs captured.' }}</pre>
+        <InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" />
       </template>
     </UModal>
     <AppConfirmationModal ref="confirmation" />
