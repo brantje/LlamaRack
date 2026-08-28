@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -113,19 +112,30 @@ func apiDiscoveryGGUF(t *testing.T) []byte {
 	b.WriteString("GGUF")
 	apiWriteBinary(t, &b, uint32(3))
 	apiWriteBinary(t, &b, uint64(0))
-	apiWriteBinary(t, &b, uint64(7))
+	apiWriteBinary(t, &b, uint64(8))
 	apiWriteString(t, &b, "general.architecture")
 	apiWriteBinary(t, &b, uint32(8))
 	apiWriteString(t, &b, "llama")
-	for _, item := range []struct { key string; value int64 }{
-		{"llama.context_length", 131072}, {"llama.block_count", 32}, {"llama.embedding_length", 4096}, {"llama.attention.head_count", 32}, {"llama.attention.head_count_kv", 8},
-	} {
-		apiWriteString(t, &b, item.key)
-		apiWriteBinary(t, &b, uint32(11))
-		apiWriteBinary(t, &b, item.value)
-	}
-	apiWriteString(t, &b, "tokenizer.ggml.tokens")
+
+	apiWriteInt(t, &b, "llama.context_length", 131072)
+	apiWriteString(t, &b, "tokenizer.ggml.add_space_prefix")
+	apiWriteBinary(t, &b, uint32(7))
+	apiWriteBinary(t, &b, uint8(1))
+	apiWriteString(t, &b, "tokenizer.ggml.pre")
+	apiWriteBinary(t, &b, uint32(8))
+	apiWriteString(t, &b, "llama-bpe")
+	apiWriteInt(t, &b, "llama.block_count", 32)
+	apiWriteInt(t, &b, "llama.embedding_length", 4096)
+	apiWriteInt(t, &b, "llama.attention.head_count", 32)
+	apiWriteInt(t, &b, "llama.attention.head_count_kv", 8)
 	return b.Bytes()
+}
+
+func apiWriteInt(t *testing.T, b *bytes.Buffer, key string, value int64) {
+	t.Helper()
+	apiWriteString(t, b, key)
+	apiWriteBinary(t, b, uint32(11))
+	apiWriteBinary(t, b, value)
 }
 
 func apiWriteString(t *testing.T, b *bytes.Buffer, value string) {
@@ -137,5 +147,3 @@ func apiWriteBinary(t *testing.T, b *bytes.Buffer, value any) {
 	t.Helper()
 	if err := binary.Write(b, binary.LittleEndian, value); err != nil { t.Fatal(err) }
 }
-
-var _ = context.Background
