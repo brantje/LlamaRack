@@ -140,7 +140,7 @@ func nextCursorFromLink(header string) string {
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
 		relation := strings.ToLower(part)
-		if !strings.Contains(relation, `rel="next"`) && !strings.Contains(relation, "rel=next") {
+		if !strings.Contains(relation, "rel=next") && !(strings.Contains(relation, "rel=") && strings.Contains(relation, "next")) {
 			continue
 		}
 		start := strings.IndexByte(part, '<')
