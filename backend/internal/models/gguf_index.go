@@ -65,6 +65,14 @@ FROM gguf_index`)
 				Projector:          projector != 0,
 			},
 		}
+		// Classification rules can improve independently of the file fingerprint.
+		// Normalize architecture-defined helpers when loading old cached rows so
+		// users do not have to touch the GGUF or delete their database after an
+		// application upgrade.
+		if ggufmeta.IsStandaloneMTPArchitecture(architecture) {
+			entry.Summary.Features.HasMTP = true
+			entry.Summary.Features.MTPOnly = true
+		}
 		out[filepath.ToSlash(filepath.Clean(path))] = entry
 	}
 	return out, rows.Err()
