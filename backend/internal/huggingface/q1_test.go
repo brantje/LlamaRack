@@ -13,4 +13,7 @@ func TestBonsaiQ1QuantizationDetection(t *testing.T) {
 	if len(artifacts) != 1 || artifacts[0].Quantization != "Q1_0" || !artifacts[0].Complete {
 		t.Fatalf("artifacts=%+v", artifacts)
 	}
+	if artifacts[0].BitsPerWeight <= 0 || artifacts[0].ProfileQuantization() != "Q1_0" {
+		t.Fatalf("canonical Q1 profile should outrank derived BPW: %+v", artifacts[0])
+	}
 }
