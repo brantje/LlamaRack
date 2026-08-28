@@ -94,7 +94,17 @@ const gatewayColumns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'result', header: 'Result' }
 ]
 
-const gpuProgressColors: NonNullable<ProgressGroupItem['color']>[] = ['primary', 'success', 'warning', 'secondary', 'error']
+// `primary` and `success` both resolve to mint in app.config.ts, so using both
+// would make separate models visually indistinguishable. Reserve `info` for Free.
+const gpuProgressColors: NonNullable<ProgressGroupItem['color']>[] = ['primary', 'secondary', 'warning', 'error', 'neutral']
+const gpuProgressColorByInstance = computed<Map<string, NonNullable<ProgressGroupItem['color']>>>(() => {
+  const colors = new Map<string, NonNullable<ProgressGroupItem['color']>>()
+  const instanceIDs = Array.from(new Set(telemetry.value.map(sample => sample.instance_id))).sort()
+  instanceIDs.forEach((instanceID, index) => {
+    colors.set(instanceID, gpuProgressColors[index % gpuProgressColors.length]!)
+  })
+  return colors
+})
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return '—'
@@ -156,10 +166,10 @@ function gpuCommittedBytes(gpu: HardwareGPU) {
 function gpuProgressItems(gpu: HardwareGPU): ProgressGroupItem[] {
   const items: ProgressGroupItem[] = gpuAssignments(gpu.id)
     .filter(assignment => assignment.used !== undefined && assignment.used > 0)
-    .map((assignment, index) => ({
+    .map(assignment => ({
       label: assignment.instanceID,
       value: assignment.used,
-      color: gpuProgressColors[index % gpuProgressColors.length]
+      color: gpuProgressColorByInstance.value.get(assignment.instanceID) || 'primary'
     }))
   const committed = Math.min(gpu.total_bytes, items.reduce((total, item) => total + (item.value || 0), 0))
   const free = Math.max(0, gpu.total_bytes - committed)
@@ -294,7 +304,7 @@ onMounted(loadDashboard)
             size="sm"
           >
             <template #item-label="{ item }">
-              <span class="font-mono text-xs">{{ item.label }}</span>
+              <span class="font-mono text-xs" :data-vram-label="item.label" :data-vram-color="item.color">{{ item.label }}</span>
             </template>
             <template #item-trailing="{ item }">
               <span class="text-xs text-muted">{{ formatBytes(item.value || 0) }}</span>
