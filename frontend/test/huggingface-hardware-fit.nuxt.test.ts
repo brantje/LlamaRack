@@ -35,9 +35,9 @@ beforeEach(() => {
 describe('Hugging Face GGUF hardware fit', () => {
   it('keeps cached HF GGUF metadata visible and classifies single-GPU, multi-GPU and CPU-split weight fits', async () => {
     mocks.request.mockImplementation(async (path: string) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [{
+      if (path.startsWith('/api/v1/huggingface/search?')) return { items: [{
         id: 'acme/demo', downloads: 1, likes: 2, parameter_count: 27_000_000_000, private: false, gated: false, tags: ['gguf']
-      }]
+      }] }
       if (path.startsWith('/api/v1/huggingface/model?repo=')) return {
         id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts
       }
