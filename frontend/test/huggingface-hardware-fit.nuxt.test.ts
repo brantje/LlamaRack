@@ -130,7 +130,8 @@ describe('Hugging Face GGUF hardware recommendations', () => {
 
     const recommendedArtifact = wrapper.get('[data-testid="artifact-single"]')
     expect(recommendedArtifact.attributes('data-recommended')).toBe('true')
-    expect(recommendedArtifact.classes()).toContain('border-primary')
+    expect(recommendedArtifact.classes()).not.toContain('border-primary')
+    expect(recommendedArtifact.classes()).not.toContain('border-l-2')
     expect(recommendedArtifact.classes()).toContain('bg-primary/5')
     expect(wrapper.get('[data-testid="recommended-badge"]').text()).toBe('Recommended')
     expect(wrapper.get('[data-testid="artifact-multi"]').attributes('data-recommended')).toBeUndefined()
