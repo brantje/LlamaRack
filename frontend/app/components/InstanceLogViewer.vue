@@ -3,7 +3,7 @@ type LogSource = 'stdout' | 'stderr' | 'manager'
 type LogEntry = { source: LogSource; timestamp: string; text: string }
 type LogResponse = { instance_id: string; entries: LogEntry[] }
 
-const props = defineProps<{ instanceId: string }>()
+const props = defineProps<{ instanceId: string; embedded?: boolean }>()
 const manager = useManager()
 const entries = ref<LogEntry[]>([])
 const source = ref<'all' | LogSource>('all')
@@ -124,7 +124,15 @@ onBeforeUnmount(closeStream)
 </script>
 
 <template>
-  <UCard id="logs" data-testid="instance-log-viewer">
+  <UCard
+    id="logs"
+    data-testid="instance-log-viewer"
+    :ui="props.embedded ? {
+      root: 'rounded-none bg-transparent shadow-none ring-0 divide-y-0',
+      header: 'px-0 pt-0 pb-4 sm:px-0',
+      body: 'p-0 sm:p-0'
+    } : undefined"
+  >
     <template #header>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
