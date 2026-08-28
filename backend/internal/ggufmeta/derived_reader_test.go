@@ -8,35 +8,55 @@ import (
 	"testing"
 )
 
-func TestInspectDerivedReaderStopsBeforeTokenizerPayload(t *testing.T) {
+func TestInspectDerivedReaderHandlesInterleavedTokenizerMetadata(t *testing.T) {
 	var b bytes.Buffer
 	b.WriteString("GGUF")
 	writeDerivedValue(t, &b, uint32(3))
 	writeDerivedValue(t, &b, uint64(0))
-	writeDerivedValue(t, &b, uint64(7))
+	writeDerivedValue(t, &b, uint64(8))
+
 	writeDerivedString(t, &b, "general.architecture")
 	writeDerivedValue(t, &b, uint32(8))
-	writeDerivedString(t, &b, "llama")
-	for key, value := range map[string]int64{
-		"llama.context_length": 131072,
-		"llama.block_count": 32,
-		"llama.embedding_length": 4096,
-		"llama.attention.head_count": 32,
-		"llama.attention.head_count_kv": 8,
-	} {
-		writeDerivedString(t, &b, key)
-		writeDerivedValue(t, &b, uint32(11))
-		writeDerivedValue(t, &b, value)
-	}
-	// No type/value follows this key on purpose. The remote parser must return
-	// before reading the huge tokenizer section.
+	writeDerivedString(t, &b, "gemma3")
+
+	writeDerivedString(t, &b, "gemma3.context_length")
+	writeDerivedValue(t, &b, uint32(11))
+	writeDerivedValue(t, &b, int64(131072))
+
+	// Real GGUF files may interleave tokenizer metadata with architecture keys.
+	// The parser must consume it and continue instead of treating tokenizer.* as
+	// the end of useful metadata.
 	writeDerivedString(t, &b, "tokenizer.ggml.tokens")
+	writeDerivedValue(t, &b, uint32(9))
+	writeDerivedValue(t, &b, uint32(8))
+	writeDerivedValue(t, &b, uint64(3))
+	for _, token := range []string{"<pad>", "hello", "world"} {
+		writeDerivedString(t, &b, token)
+	}
+
+	writeDerivedString(t, &b, "tokenizer.ggml.add_space_prefix")
+	writeDerivedValue(t, &b, uint32(7))
+	writeDerivedValue(t, &b, uint8(1))
+
+	for _, item := range []struct {
+		key   string
+		value int64
+	}{
+		{"gemma3.block_count", 34},
+		{"gemma3.embedding_length", 2560},
+		{"gemma3.attention.head_count", 8},
+		{"gemma3.attention.head_count_kv", 4},
+	} {
+		writeDerivedString(t, &b, item.key)
+		writeDerivedValue(t, &b, uint32(11))
+		writeDerivedValue(t, &b, item.value)
+	}
 
 	derived, err := InspectDerivedReader(bytes.NewReader(b.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if derived.Architecture != "llama" || derived.ContextLength != 131072 || derived.BlockCount != 32 || derived.Embedding != 4096 || derived.HeadCount != 32 || derived.KVHeadCount != 8 {
+	if derived.Architecture != "gemma3" || derived.ContextLength != 131072 || derived.BlockCount != 34 || derived.Embedding != 2560 || derived.HeadCount != 8 || derived.KVHeadCount != 4 {
 		t.Fatalf("derived=%+v", derived)
 	}
 }
@@ -86,7 +106,7 @@ func TestInspectDerivedReaderHeaderAndMetadataErrors(t *testing.T) {
 			writeDerivedString(t, b, "general.architecture")
 			writeDerivedValue(t, b, uint32(8))
 		})},
-		{"tokenizer-before-core", build(3, &zero, &one, func(b *bytes.Buffer) { writeDerivedString(t, b, "tokenizer.ggml.tokens") })},
+		{"tokenizer-missing-type", build(3, &zero, &one, func(b *bytes.Buffer) { writeDerivedString(t, b, "tokenizer.ggml.tokens") })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
