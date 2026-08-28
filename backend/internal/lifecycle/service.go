@@ -78,7 +78,7 @@ func (s *Service) Acquire(ctx context.Context, instanceID string) (string, func(
 	lock.Lock()
 	s.beginRequest(i.ID)
 	lock.Unlock()
-	endpoint, err := s.ensureReadyInstance(ctx, i)
+	endpoint, err := s.ensureReadyInstance(ctx, i, true)
 	if err != nil {
 		s.finishRequest(i.ID)
 		return "", nil, err
@@ -92,10 +92,10 @@ func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return s.ensureReadyInstance(ctx, i)
+	return s.ensureReadyInstance(ctx, i, false)
 }
 
-func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance) (string, error) {
+func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance, inferenceRequest ...bool) (string, error) {
 	if !i.Enabled {
 		return "", errors.New("instance disabled")
 	}
@@ -113,7 +113,8 @@ func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance)
 		s.clearResourceBlock(i.ID)
 		slog.Info("resource-pressure block overridden by inference request", "instance_id", i.ID)
 	}
-	return s.startSingleFlight(ctx, i)
+	autoload := len(inferenceRequest) > 0 && inferenceRequest[0]
+	return s.startSingleFlight(ctx, i, autoload)
 }
 
 func (s *Service) StartInstance(ctx context.Context, id string) (string, error) {
@@ -137,7 +138,7 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 	if endpoint, ok := s.sup.Endpoint(id); ok {
 		return endpoint, nil
 	}
-	return s.startSingleFlight(ctx, i)
+	return s.startSingleFlight(ctx, i, false)
 }
 
 func (s *Service) StopInstance(ctx context.Context, id string) error {
@@ -556,19 +557,28 @@ func (s *Service) resourceStartActive() bool {
 	return s.resourceStarts > 0
 }
 
-func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (string, error) {
+func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, autoload ...bool) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
+	requestedAutoload := len(autoload) > 0 && autoload[0]
+	created := false
 	s.mu.Lock()
 	c := s.loads[i.ID]
 	if c == nil {
 		c = &loadCall{done: make(chan struct{})}
 		s.loads[i.ID] = c
-		go s.runLoad(i.ID, c)
+		created = true
 	}
 	s.mu.Unlock()
+	if created {
+		if requestedAutoload {
+			s.recordObservabilityEvent(ctx, ObservabilityAutoload, i.ID, 0)
+			s.AddManagerLog(i.ID, "autoload triggered by inference request")
+		}
+		go s.runLoad(i.ID, c)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -621,7 +631,22 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	return s.startOneWithEviction(ctx, i, true)
 }
 
-func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (string, error) {
+func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (endpoint string, err error) {
+	started := time.Now()
+	defer func() {
+		duration := time.Since(started)
+		if err == nil {
+			s.recordObservabilityEvent(ctx, ObservabilityLoad, i.ID, duration)
+			s.AddManagerLog(i.ID, fmt.Sprintf("worker ready after %s", duration.Round(time.Millisecond)))
+			return
+		}
+		if errors.Is(err, errResourcePressureBlocked) {
+			return
+		}
+		s.recordObservabilityEvent(ctx, ObservabilityFailedStart, i.ID, duration)
+		s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())
+	}()
+
 	if allowEviction {
 		s.beginResourceStart()
 		defer s.endResourceStart()
