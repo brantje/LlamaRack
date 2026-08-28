@@ -1,4 +1,4 @@
-name: Performance - model discovery
+name: Performance - model discovery and model list
 
 on:
   push:
@@ -21,11 +21,17 @@ jobs:
           go-version: '1.27.x'
       - name: Resolve Go modules
         run: go mod tidy
-      - name: Discovery benchmark samples
-        run: go test -run='^$' -bench='^BenchmarkAvailableGGUFs(20|Split16)$' -benchmem -count=10 ./internal/models
-      - name: CPU and allocation profile
-        run: go test -run='^$' -bench='^BenchmarkAvailableGGUFs20$' -benchtime=3s -cpuprofile=cpu.out -memprofile=mem.out ./internal/models
-      - name: CPU profile top
-        run: go tool pprof -top -nodecount=30 cpu.out
-      - name: Allocation profile top
-        run: go tool pprof -top -alloc_space -nodecount=30 mem.out
+      - name: Benchmark samples
+        run: go test -run='^$' -bench='^(BenchmarkAvailableGGUFs(20|Split16)|BenchmarkListModels100)$' -benchmem -count=10 ./internal/models
+      - name: Discovery CPU and allocation profile
+        run: go test -run='^$' -bench='^BenchmarkAvailableGGUFs20$' -benchtime=3s -cpuprofile=discovery-cpu.out -memprofile=discovery-mem.out ./internal/models
+      - name: Discovery CPU profile top
+        run: go tool pprof -top -nodecount=20 discovery-cpu.out
+      - name: Discovery allocation profile top
+        run: go tool pprof -top -alloc_space -nodecount=20 discovery-mem.out
+      - name: Model list CPU and allocation profile
+        run: go test -run='^$' -bench='^BenchmarkListModels100$' -benchtime=3s -cpuprofile=list-cpu.out -memprofile=list-mem.out ./internal/models
+      - name: Model list CPU profile top
+        run: go tool pprof -top -nodecount=25 list-cpu.out
+      - name: Model list allocation profile top
+        run: go tool pprof -top -alloc_space -nodecount=25 list-mem.out
