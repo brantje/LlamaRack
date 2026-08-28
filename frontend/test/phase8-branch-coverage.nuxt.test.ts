@@ -45,7 +45,7 @@ describe('Discover formatting and URL branches', () => {
       { id: 'acme/unknown', downloads: 1, likes: 1, parameter_count: 0, last_modified: 'not-a-date', private: false, gated: false },
       { id: 'acme/missing-meta', downloads: 1, likes: 1, private: false, gated: false }
     ]
-    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? results : [])
+    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? { items: results } : [])
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -64,7 +64,7 @@ describe('Discover formatting and URL branches', () => {
   })
 
   it('exercises supported and rejected Hugging Face URL shapes', async () => {
-    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? [] : [])
+    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? { items: [] } : [])
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
     const input = wrapper.find('input[placeholder="Qwen, Llama, Gemma… or Hugging Face URL"]')
 
@@ -100,14 +100,12 @@ describe('Discover formatting and URL branches', () => {
       }]
     }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [{ id: 'acme/demo', downloads: 1, likes: 1, private: false, gated: false }]
       if (path.startsWith('/api/v1/huggingface/model?')) return detail
       if (path === '/api/v1/downloads' && options?.method === 'POST') return { id: 'job' }
       return []
     })
-    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-    await wrapper.find('form').trigger('submit'); await flushPromises()
-    await wrapper.find('[class*="cursor-pointer"]').trigger('click'); await flushPromises()
+    const wrapper = await mountSuspended(DiscoverPage, { props: { repoId: 'acme/demo' }, route: false })
+    await flushPromises()
     expect(wrapper.text()).toContain('Vision projector')
     expect(wrapper.text()).toContain('MTP draft model')
     expect(wrapper.text()).toContain('future')

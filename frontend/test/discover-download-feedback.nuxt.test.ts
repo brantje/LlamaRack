@@ -41,14 +41,10 @@ function downloadButton(wrapper: any) {
   return found
 }
 
-async function openArtifact(wrapper: any) {
-  await wrapper.find('form').trigger('submit')
+async function mountArtifact() {
+  const wrapper = await mountSuspended(DiscoverPage, { props: { repoId: 'acme/demo' }, route: false })
   await flushPromises()
-  const card = wrapper.findAllComponents({ name: 'Card' }).find((component: any) => component.text().includes('acme/demo'))
-    || wrapper.findAllComponents({ name: 'UCard' }).find((component: any) => component.text().includes('acme/demo'))
-  if (!card) throw new Error('missing model card')
-  await card.trigger('click')
-  await flushPromises()
+  return wrapper
 }
 
 beforeEach(() => {
@@ -59,14 +55,12 @@ beforeEach(() => {
 describe('Discover download feedback', () => {
   it('keeps a successfully queued artifact spinning and disabled', async () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [searchResult]
       if (path.startsWith('/api/v1/huggingface/model?')) return detail
       if (path === '/api/v1/downloads' && options?.method === 'POST') return { id: 'job1' }
       return []
     })
 
-    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-    await openArtifact(wrapper)
+    const wrapper = await mountArtifact()
 
     const button = downloadButton(wrapper)
     expect(button.props('loading')).toBeFalsy()
@@ -87,14 +81,12 @@ describe('Discover download feedback', () => {
 
   it('re-enables the button when queueing the download fails', async () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [searchResult]
       if (path.startsWith('/api/v1/huggingface/model?')) return detail
       if (path === '/api/v1/downloads' && options?.method === 'POST') throw new Error('queue failed')
       return []
     })
 
-    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-    await openArtifact(wrapper)
+    const wrapper = await mountArtifact()
     await downloadButton(wrapper).trigger('click')
     await flushPromises()
 

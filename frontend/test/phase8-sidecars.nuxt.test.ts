@@ -56,19 +56,12 @@ describe('Phase 8 GGUF helper integration', () => {
       }]
     }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [{ id: 'acme/vision', downloads: 10, likes: 2, private: false, gated: false, tags: ['gguf'] }]
       if (path === '/api/v1/huggingface/model?repo=acme%2Fvision') return detail
       if (path === '/api/v1/downloads' && options?.method === 'POST') return { id: 'job' }
       return []
     })
 
-    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-    const modelCard = wrapper.findAllComponents({ name: 'Card' }).find(card => card.text().includes('acme/vision'))
-      || wrapper.findAllComponents({ name: 'UCard' }).find(card => card.text().includes('acme/vision'))
-    expect(modelCard).toBeTruthy()
-    await modelCard!.trigger('click')
+    const wrapper = await mountSuspended(DiscoverPage, { props: { repoId: 'acme/vision' }, route: false })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Vision projector')
