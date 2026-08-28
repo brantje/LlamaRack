@@ -50,7 +50,10 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	handler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: hardware.Snapshot{
 		RAMAvailableBytes: 64 << 30,
 		RAMTotalBytes: 64 << 30,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 24 << 30, TotalBytes: 24 << 30}},
+		GPUs: []hardware.GPU{{
+			ID: "CUDA0", FreeBytes: 24 << 30, TotalBytes: 24 << 30,
+			MemoryBandwidthBytesPerSecond: 288_032_000_000,
+		}},
 	}}, managerSettings)
 
 	response := doRequest(t, handler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=empero-ai%2FQwen3.8-27B-Ridge-GGUF", nil, cookie)
@@ -65,12 +68,15 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 		`"tier":"Mixed quantization"`,
 		`"recommended":true`,
 		`"fit_label":"Fits on GPU"`,
+		`"generation_speed":{"estimated":true`,
+		`tok/s`,
+		`288 GB/s theoretical VRAM bandwidth`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %s in %s", want, body)
 		}
 	}
-	if strings.Contains(body, `"tier":"Unknown profile"`) {
-		t.Fatalf("provider-backed mixed profile remained unknown: %s", body)
+	if strings.Contains(body, `"tier":"Unknown profile"`) || strings.Contains(body, `"speed":"Hardware-dependent"`) {
+		t.Fatalf("provider-backed mixed profile retained generic guidance: %s", body)
 	}
 }
