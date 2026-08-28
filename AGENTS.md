@@ -1,5 +1,14 @@
 # AGENTS.md
 
+## Feature and phase planning — clarification rule
+
+When starting work on a **feature, phase, or substantial implementation slice**, review the request for ambiguity before implementation begins.
+
+- If **anything is unclear**, ask the user **15–30 focused clarification/planning questions** before starting implementation.
+- Questions should resolve the relevant product behavior, UX, API/contracts, data model, lifecycle, defaults, edge cases, compatibility, testing, migration/rollout, and operational expectations as applicable.
+- Do not silently invent requirements when the user can resolve a meaningful ambiguity.
+- If the work is already fully specified and there are no meaningful ambiguities, do not manufacture questions merely to reach a quota.
+
 ## Frontend UI: component-first is mandatory
 
 For frontend work, **Nuxt UI components are the first choice**. Before creating markup, a local component, or custom styling, check the Nuxt UI component catalog: https://ui.nuxt.com/docs/components
