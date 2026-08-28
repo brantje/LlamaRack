@@ -42,7 +42,7 @@ func parseNVIDIAPCIeQuery(text string) map[int]int64 {
 
 	for _, rawLine := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(rawLine)
-		if strings.HasPrefix(line, "GPU ") {
+		if isNVIDIAQueryGPUHeader(line) {
 			flush()
 			continue
 		}
@@ -84,6 +84,14 @@ func parseNVIDIAPCIeQuery(text string) map[int]int64 {
 	}
 	flush()
 	return result
+}
+
+func isNVIDIAQueryGPUHeader(line string) bool {
+	if !strings.HasPrefix(line, "GPU ") {
+		return false
+	}
+	identifier := strings.TrimSpace(strings.TrimPrefix(line, "GPU "))
+	return strings.Contains(identifier, ":") && strings.Contains(identifier, ".")
 }
 
 func nvidiaQueryValue(line string) (string, bool) {
