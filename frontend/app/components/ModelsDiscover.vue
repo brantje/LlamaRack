@@ -5,9 +5,12 @@ type HFDependency = { kind: string; name: string; quantization?: string; total_b
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
 type HFDetail = HFModel & { description?: string; revision: string; artifacts: HFArtifact[] }
 type HFSearchPage = { items: HFModel[]; next_cursor?: string }
-type GPU = { id: string; name?: string; total_bytes: number; free_bytes: number }
-type HardwareSnapshot = { ram_available_bytes?: number; gpus?: GPU[] }
-type ArtifactFit = { label: string; detail: string; color: 'success' | 'warning' | 'neutral' }
+type QuantizationGuide = { name?: string; tier: string; quality: string; memory: string; speed: string; summary: string; tradeoff: string; warning?: string; known: boolean }
+type MemoryEstimate = { weights_bytes: number; kv_cache_bytes: number; runtime_overhead_bytes: number; cpu_only_ram_bytes: number; full_offload_vram_bytes: number }
+type Offload = { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
+type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
+type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
+type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; artifacts: ArtifactAdvice[] }
 
 const props = defineProps<{ repoId?: string }>()
 const manager = useManager()
@@ -19,21 +22,26 @@ const nextCursor = useState<string>('models-discover-next-cursor', () => '')
 const hasSearched = useState<boolean>('models-discover-has-searched', () => false)
 const scrollPosition = useState<number>('models-discover-scroll-position', () => 0)
 const selected = ref<HFDetail | null>(null)
-const hardware = ref<HardwareSnapshot | null>(null)
+const recommendations = ref<DiscoverRecommendations | null>(null)
 const loading = ref(false)
 const loadingMore = ref(false)
 const detailLoading = ref(false)
+const recommendationLoading = ref(false)
 const error = ref('')
+const recommendationError = ref('')
 const downloading = ref<string[]>([])
 const downloadNotice = ref('')
 const loadMoreSentinel = ref<HTMLElement | null>(null)
+const contextIndex = ref(0)
+const contextExplicit = ref(false)
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
+let recommendationTimer: ReturnType<typeof setTimeout> | undefined
 let searchVersion = 0
+let recommendationVersion = 0
 let loadObserver: IntersectionObserver | undefined
 
 const repoID = computed(() => String(props.repoId || '').trim())
 const isDetail = computed(() => Boolean(repoID.value))
-const vramReserve = 512 * 1024 ** 2
 const pageSize = 30
 const sortOptions = [
   { label: 'Trending', value: 'trending_score' },
@@ -42,6 +50,28 @@ const sortOptions = [
   { label: 'Recently created', value: 'created_at' },
   { label: 'Recently updated', value: 'last_modified' }
 ]
+const standardContexts = [4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576]
+const contextOptions = computed(() => {
+  const capability = Math.max(0, recommendations.value?.context_capability || 0)
+  const current = Math.max(0, recommendations.value?.context_length || 0)
+  const ceiling = capability || Math.max(131072, current)
+  const values = standardContexts.filter(value => value <= ceiling)
+  if (capability > 0 && !values.includes(capability)) values.push(capability)
+  if (current > 0 && !values.includes(current)) values.push(current)
+  values.sort((a, b) => a - b)
+  return values
+})
+const selectedContext = computed(() => contextOptions.value[contextIndex.value] || recommendations.value?.context_length || 4096)
+const adviceByID = computed(() => new Map((recommendations.value?.artifacts || []).map(item => [item.artifact_id, item])))
+const orderedArtifacts = computed(() => {
+  const artifacts = selected.value?.artifacts || []
+  const order = recommendations.value?.artifacts || []
+  if (!order.length) return artifacts
+  const byID = new Map(artifacts.map(item => [item.id, item]))
+  const sorted = order.map(item => byID.get(item.artifact_id)).filter((item): item is HFArtifact => Boolean(item))
+  const included = new Set(sorted.map(item => item.id))
+  return [...sorted, ...artifacts.filter(item => !included.has(item.id))]
+})
 
 function formatBytes(value: number) {
   if (!value) return 'Unknown size'
@@ -67,6 +97,11 @@ function formatParameters(value?: number) {
   }
   return `${value.toLocaleString()} params`
 }
+function formatContext(value: number) {
+  if (value >= 1024 * 1024 && value % (1024 * 1024) === 0) return `${value / (1024 * 1024)}M`
+  if (value >= 1024) return `${Math.round(value / 1024)}K`
+  return String(value)
+}
 function formatUpdated(value?: string) {
   if (!value) return ''
   const timestamp = new Date(value).getTime()
@@ -88,53 +123,29 @@ function isDownloading(artifactID: string) {
 }
 function launchTo(artifact: HFArtifact) {
   if (!selected.value) return '/models/new'
-  return {
-    path: '/models/new',
-    query: { repo: selected.value.id, artifact: artifact.id }
-  }
+  return { path: '/models/new', query: { repo: selected.value.id, artifact: artifact.id } }
 }
-function isHardwareSnapshot(value: unknown): value is HardwareSnapshot {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+function artifactAdvice(artifact: HFArtifact) {
+  return adviceByID.value.get(artifact.id) || null
 }
-function artifactModelBytes(artifact: HFArtifact) {
-  if (artifact.model_bytes > 0) return artifact.model_bytes
-  const shards = artifact.files.slice(0, artifact.shard_count).reduce((sum, file) => sum + Math.max(0, file.size || 0), 0)
-  return shards || artifact.total_bytes || 0
+function fitColor(advice: ArtifactAdvice | null): 'success' | 'warning' | 'error' | 'neutral' {
+  if (!advice) return 'neutral'
+  if (advice.fit === 'gpu' || advice.fit === 'multi_gpu') return 'success'
+  if (advice.fit === 'hybrid') return 'warning'
+  if (advice.fit === 'no_fit') return 'error'
+  return 'neutral'
 }
-function artifactFit(artifact: HFArtifact): ArtifactFit {
-  const bytes = artifactModelBytes(artifact)
-  if (!hardware.value || bytes <= 0) {
-    return { label: 'Hardware fit unavailable', detail: 'Select Launch for the context-aware RAM/VRAM estimate.', color: 'neutral' }
-  }
-  const gpus = hardware.value.gpus || []
-  if (!gpus.length) {
-    return { label: 'CPU only', detail: 'No NVIDIA/ROCm GPU is currently detected.', color: 'neutral' }
-  }
-  const usable = gpus.map(gpu => ({ id: gpu.id, bytes: Math.max(0, gpu.free_bytes - vramReserve) }))
-  const single = [...usable].sort((a, b) => b.bytes - a.bytes)[0]
-  if (single && single.bytes >= bytes) {
-    return {
-      label: 'GPU-only weight fit',
-      detail: `Hugging Face reports ${formatBytes(bytes)} of model weights; they fit in current free VRAM on ${single.id}. Context/KV is checked at Launch.`,
-      color: 'success'
-    }
-  }
-  const total = usable.reduce((sum, gpu) => sum + gpu.bytes, 0)
-  if (total >= bytes) {
-    return {
-      label: 'GPU-only weights · multi-GPU',
-      detail: `The reported ${formatBytes(bytes)} of weights fit across current GPU VRAM. Context/KV may still require RAM.`,
-      color: 'success'
-    }
-  }
-  if (total > 0) {
-    return {
-      label: 'GPU + CPU split likely',
-      detail: `The reported ${formatBytes(bytes)} of weights exceed current usable VRAM. Launch computes the exact layer/KV split for the selected context.`,
-      color: 'warning'
-    }
-  }
-  return { label: 'CPU only', detail: 'No useful free GPU VRAM is currently available.', color: 'neutral' }
+function fitLabel(advice: ArtifactAdvice | null) {
+  return advice?.fit_label || 'Fit unknown'
+}
+function fitReason(advice: ArtifactAdvice | null) {
+  return advice?.reason || 'Context-aware hardware guidance is unavailable for this artifact.'
+}
+function speedLabel(advice: ArtifactAdvice | null) {
+  return advice?.estimated_generation_speed?.label || 'Estimate unavailable'
+}
+function speedReason(advice: ArtifactAdvice | null) {
+  return advice?.estimated_generation_speed?.reason || 'Estimated generation speed requires a runnable GPU placement and measured memory-bandwidth telemetry.'
 }
 
 function huggingFaceRepo(value: string) {
@@ -161,7 +172,11 @@ function clearDebounce() {
   clearTimeout(debounceTimer)
   debounceTimer = undefined
 }
-
+function clearRecommendationDebounce() {
+  if (!recommendationTimer) return
+  clearTimeout(recommendationTimer)
+  recommendationTimer = undefined
+}
 function scheduleSearch() {
   clearDebounce()
   debounceTimer = setTimeout(() => {
@@ -169,7 +184,6 @@ function scheduleSearch() {
     void search()
   }, 350)
 }
-
 function mergeResults(existing: HFModel[], incoming: HFModel[]) {
   const byID = new Map(existing.map(item => [item.id, item]))
   for (const item of incoming) byID.set(item.id, item)
@@ -203,60 +217,100 @@ async function fetchSearchPage(reset: boolean) {
     }
   }
 }
-
 async function search() {
   clearDebounce()
   nextCursor.value = ''
   const succeeded = await fetchSearchPage(true)
   if (succeeded && isDetail.value) await navigateTo('/models/discover')
 }
-
 async function loadMore() {
   if (isDetail.value || !nextCursor.value || loading.value || loadingMore.value) return
   await fetchSearchPage(false)
 }
-
 function modelRoute(id: string) {
   const [owner, name] = id.split('/', 2)
   if (!owner || !name) return '/models/discover'
   return `/models/discover/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
 }
-
 async function goToModel(id: string) {
   if (import.meta.client) scrollPosition.value = window.scrollY
   error.value = ''
   downloadNotice.value = ''
   await navigateTo(modelRoute(id))
 }
-
 async function backToResults() {
   await navigateTo('/models/discover')
 }
-
 function restoreScroll() {
   if (!import.meta.client || scrollPosition.value <= 0) return
-  void nextTick(() => {
-    requestAnimationFrame(() => window.scrollTo(0, scrollPosition.value))
-  })
+  void nextTick(() => requestAnimationFrame(() => window.scrollTo(0, scrollPosition.value)))
+}
+
+function isRecommendationResponse(value: unknown): value is DiscoverRecommendations {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Partial<DiscoverRecommendations>
+  return typeof candidate.context_length === 'number' && Array.isArray(candidate.artifacts)
+}
+function syncContextIndex() {
+  const target = recommendations.value?.context_length || 4096
+  const exact = contextOptions.value.indexOf(target)
+  if (exact >= 0) contextIndex.value = exact
+}
+async function loadRecommendations(contextLength?: number) {
+  if (!repoID.value) return
+  const version = ++recommendationVersion
+  recommendationLoading.value = true
+  recommendationError.value = ''
+  const params = new URLSearchParams({ repo: repoID.value })
+  if (contextLength && contextLength > 0) params.set('context_length', String(contextLength))
+  try {
+    const value = await manager.request<DiscoverRecommendations>(`/api/v1/huggingface/recommendations?${params.toString()}`)
+    if (version !== recommendationVersion) return
+    if (!isRecommendationResponse(value)) throw new Error('Context-aware recommendation data is unavailable')
+    recommendations.value = value
+    syncContextIndex()
+  } catch (value: any) {
+    if (version === recommendationVersion) recommendationError.value = value?.data?.error || value?.message || 'Unable to calculate hardware recommendations'
+  } finally {
+    if (version === recommendationVersion) recommendationLoading.value = false
+  }
+}
+function selectContext(value: number | number[]) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const index = Math.max(0, Math.min(contextOptions.value.length - 1, Number(raw) || 0))
+  contextIndex.value = index
+  contextExplicit.value = true
+  clearRecommendationDebounce()
+  recommendationTimer = setTimeout(() => {
+    recommendationTimer = undefined
+    void loadRecommendations(contextOptions.value[index])
+  }, 250)
 }
 
 async function openModel(id: string) {
-  detailLoading.value = true; error.value = ''; downloadNotice.value = ''
+  detailLoading.value = true
+  error.value = ''
+  recommendationError.value = ''
+  downloadNotice.value = ''
+  recommendations.value = null
+  contextExplicit.value = false
   const summary = results.value.find(item => item.id === id)
   try {
-    const [detail, snapshot] = await Promise.all([
-      manager.request<HFDetail>(`/api/v1/huggingface/model?repo=${encodeURIComponent(id)}`),
-      manager.request<HardwareSnapshot>('/api/v1/hardware').catch(() => null)
-    ])
+    const detail = await manager.request<HFDetail>(`/api/v1/huggingface/model?repo=${encodeURIComponent(id)}`)
     selected.value = { ...detail, parameter_count: detail.parameter_count || summary?.parameter_count }
-    hardware.value = isHardwareSnapshot(snapshot) ? snapshot : null
-  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load repository details' }
-  finally { detailLoading.value = false }
+    await loadRecommendations()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to load repository details'
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 async function download(artifact: HFArtifact) {
   if (!selected.value || !artifact.complete || isDownloading(artifact.id)) return
-  downloading.value = [...downloading.value, artifact.id]; error.value = ''; downloadNotice.value = ''
+  downloading.value = [...downloading.value, artifact.id]
+  error.value = ''
+  downloadNotice.value = ''
   try {
     await manager.request('/api/v1/downloads', { method: 'POST', body: { repo_id: selected.value.id, artifact_id: artifact.id } })
     const helpers = artifact.dependencies?.length || 0
@@ -271,22 +325,17 @@ async function download(artifact: HFArtifact) {
 
 watch(query, (value) => {
   const repo = huggingFaceRepo(value)
-  if (repo && repo !== value.trim()) {
-    query.value = repo
-    return
-  }
+  if (repo && repo !== value.trim()) { query.value = repo; return }
   scheduleSearch()
 })
 watch(author, scheduleSearch)
-watch(sort, () => {
-  clearDebounce()
-  void search()
-})
+watch(sort, () => { clearDebounce(); void search() })
 watch(loadMoreSentinel, (element, previous) => {
   if (!loadObserver) return
   if (previous) loadObserver.unobserve(previous)
   if (element) loadObserver.observe(element)
 })
+watch(contextOptions, syncContextIndex)
 
 onMounted(() => {
   if (import.meta.client && typeof IntersectionObserver !== 'undefined') {
@@ -301,13 +350,15 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   clearDebounce()
+  clearRecommendationDebounce()
   loadObserver?.disconnect()
 })
 </script>
 
 <template>
   <div class="space-y-5">
-    <UPageHeader headline="HUGGING FACE" title="Discover" description="Search GGUF repositories, inspect quantizations and download complete artifacts into the local model directory." />
+    <UPageHeader headline="HUGGING FACE" title="Discover" description="Search GGUF repositories, compare quantizations in plain language and choose the best fit for this manager." />
+
     <UCard>
       <UForm :state="{}" class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]" @submit="search">
         <UFormField label="Search" name="search"><UInput v-model="query" class="w-full" placeholder="Qwen, Llama, Gemma… or Hugging Face URL" icon="i-lucide-search" /></UFormField>
@@ -316,10 +367,12 @@ onBeforeUnmount(() => {
         <div class="flex items-end"><UButton class="w-full justify-center" type="submit" :loading="loading">Search</UButton></div>
       </UForm>
     </UCard>
+
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="downloadNotice" color="success" variant="subtle" :description="downloadNotice" />
     <div v-if="loading && !results.length && !isDetail" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
     <UEmpty v-else-if="!isDetail && !results.length" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned. Results load automatically and update as you search." />
+
     <template v-else-if="!isDetail">
       <div class="grid gap-3 xl:grid-cols-2">
         <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="goToModel(item.id)">
@@ -342,42 +395,95 @@ onBeforeUnmount(() => {
         <span v-if="loadingMore" class="flex items-center gap-2"><UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />Loading more models…</span>
       </div>
     </template>
+
     <div v-if="isDetail && detailLoading" class="space-y-3"><USkeleton class="h-32 w-full rounded-xl" /><USkeleton class="h-64 w-full rounded-xl" /></div>
     <template v-else-if="isDetail && selected">
       <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="backToResults">Back to results</UButton>
-      <UCard>
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">REPOSITORY</p>
-            <h2 class="text-2xl font-bold">{{ selected.id }}</h2>
-            <div v-if="selected.parameter_count" class="mt-1 text-sm text-muted">Hugging Face GGUF metadata: {{ formatParameters(selected.parameter_count) }}</div>
-            <p v-if="selected.description" class="mt-3 max-w-4xl whitespace-pre-line text-sm leading-6 text-muted">{{ selected.description }}</p>
-          </div>
-          <div class="flex gap-2"><UBadge v-if="selected.private" color="warning">Private</UBadge><UBadge v-if="selected.gated" color="warning">Gated</UBadge></div>
-        </div>
-      </UCard>
+      <ModelsDiscoverRepositoryHeader :model="selected" :recommendations="recommendations" />
+
       <UAlert v-if="selected.gated" color="warning" variant="subtle" title="Access may require approval" description="A configured Hugging Face token is used only for Hugging Face requests. The manager does not accept licenses or request gated access on your behalf." />
+      <UAlert v-if="recommendationError" color="warning" variant="subtle" title="Hardware guidance unavailable" :description="recommendationError" />
+      <UAlert v-else-if="recommendations && !recommendations.hardware_available" color="neutral" variant="subtle" title="Hardware-aware recommendation unavailable" description="Quantization guidance is still shown, but this manager does not currently have enough hardware telemetry to claim which option will fit." />
+
       <UCard>
-        <div class="mb-4">
-          <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">GGUF ARTIFACTS</p>
-          <h2 class="text-xl font-bold">Available quantizations</h2>
-          <p class="mt-1 text-sm text-muted">Hugging Face GGUF file sizes provide a pre-download weight-fit check against current VRAM. Launch performs the final context/KV-aware GPU-only vs GPU + CPU split estimate.</p>
-          <p class="mt-1 text-sm text-muted">Matching vision projectors and MTP draft GGUFs are detected automatically and included with the selected model.</p>
+        <div class="space-y-5">
+          <div>
+            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">GGUF ARTIFACTS</p>
+            <h2 class="text-xl font-bold">Choose a quantization</h2>
+            <p class="mt-1 max-w-4xl text-sm text-muted">Start with the Recommended option when available. Quality, memory use, estimated generation speed and runtime placement are shown separately so the raw quantization label does not have to carry the explanation.</p>
+          </div>
+
+          <div v-if="recommendations" class="border-y border-default py-4" data-testid="discover-context-control">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="font-semibold">Context size</h3>
+                  <UBadge color="neutral" variant="soft">{{ formatContext(selectedContext) }}</UBadge>
+                  <span v-if="recommendationLoading" class="flex items-center gap-1 text-xs text-muted"><UIcon name="i-lucide-loader-circle" class="size-3.5 animate-spin" />Recalculating</span>
+                </div>
+                <p class="mt-1 text-sm text-muted">Larger context uses more KV-cache memory and can change both hardware fit and estimated generation speed.</p>
+              </div>
+              <span v-if="recommendations.context_capability" class="text-xs text-muted">Detected capability: {{ formatContext(recommendations.context_capability) }}</span>
+            </div>
+            <USlider :model-value="contextIndex" :min="0" :max="Math.max(0, contextOptions.length - 1)" :step="1" class="mt-4" data-testid="discover-context-slider" @update:model-value="selectContext" />
+            <div class="mt-2 flex justify-between text-xs text-dimmed"><span>{{ formatContext(contextOptions[0] || 4096) }}</span><span>{{ formatContext(contextOptions[contextOptions.length - 1] || 4096) }}</span></div>
+            <UAlert v-if="recommendations.context_assumed && !contextExplicit" class="mt-4" color="warning" variant="subtle" title="Temporary context assumption" description="No context size is configured for this Discover choice yet. Hardware recommendations are using a temporary 4K context assumption. Choose a context size above to make the estimate explicit." />
+            <UAlert v-if="recommendations.metadata_warning" class="mt-4" color="warning" variant="subtle" title="Limited GGUF metadata" :description="recommendations.metadata_warning" />
+          </div>
+
+          <p class="text-sm text-muted">Matching vision projectors and MTP draft GGUFs are detected automatically and included with the selected model.</p>
         </div>
+
         <div v-if="!selected.artifacts.length" class="flex items-center gap-3 py-8 text-muted"><UIcon name="i-lucide-file-x" class="size-5" /><span>No GGUF model files found</span></div>
-        <div v-else class="divide-y divide-default">
-          <div v-for="artifact in selected.artifacts" :key="artifact.id" class="grid gap-4 py-4 lg:grid-cols-[minmax(0,1fr)_170px_140px_auto] lg:items-center">
+        <div v-else class="mt-5 divide-y divide-default">
+          <div
+            v-for="artifact in orderedArtifacts"
+            :key="artifact.id"
+            :class="[
+              'grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_150px] xl:items-start',
+              artifactAdvice(artifact)?.recommended ? '-mx-3 bg-primary/5 px-3 sm:-mx-4 sm:px-4' : ''
+            ]"
+            :data-testid="`artifact-${artifact.id}`"
+            :data-recommended="artifactAdvice(artifact)?.recommended ? 'true' : undefined"
+          >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="truncate font-semibold">{{ artifact.name }}</span>
-                <UBadge v-if="artifact.quantization" color="primary" variant="subtle">{{ artifact.quantization }}</UBadge>
+                <UBadge v-if="artifactAdvice(artifact)?.recommended" color="primary" variant="solid" size="lg" class="font-bold" data-testid="recommended-badge">Recommended</UBadge>
+                <span class="text-base font-semibold" :class="artifactAdvice(artifact)?.recommended ? 'text-primary' : ''">{{ artifactAdvice(artifact)?.quantization.tier || 'Quantization details unavailable' }}</span>
+                <UBadge color="neutral" variant="soft" class="font-mono">{{ artifact.quantization || 'Unknown' }}</UBadge>
                 <UBadge v-if="artifact.shard_count > 1" color="neutral" variant="soft">{{ artifact.shard_count }} shards</UBadge>
                 <UBadge v-if="!artifact.complete" color="error" variant="subtle">Incomplete split</UBadge>
-                <UBadge :color="artifactFit(artifact).color" variant="subtle" data-testid="artifact-hardware-fit">{{ artifactFit(artifact).label }}</UBadge>
               </div>
-              <p class="mt-1 truncate font-mono text-xs text-dimmed">{{ artifact.files.slice(0, artifact.shard_count).map(file => file.path).join(', ') }}</p>
-              <p class="mt-1 text-xs text-muted">{{ artifactFit(artifact).detail }}</p>
-              <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-2 space-y-1">
+              <p class="mt-1 truncate text-sm text-muted">{{ artifact.name }} · {{ formatBytes(artifact.total_bytes) }}</p>
+
+              <dl v-if="artifactAdvice(artifact)" class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
+                <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
+                <div>
+                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Estimated Generation</dt>
+                  <dd class="mt-1 font-semibold">
+                    <UTooltip :text="speedReason(artifactAdvice(artifact))">
+                      <span data-testid="artifact-generation-speed">{{ speedLabel(artifactAdvice(artifact)) }}</span>
+                    </UTooltip>
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Hardware</dt>
+                  <dd class="mt-1">
+                    <UTooltip :text="fitReason(artifactAdvice(artifact))">
+                      <UBadge :color="fitColor(artifactAdvice(artifact))" variant="subtle" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</UBadge>
+                    </UTooltip>
+                  </dd>
+                </div>
+              </dl>
+              <div v-else class="mt-4"><UBadge color="neutral" variant="subtle" data-testid="artifact-hardware-fit">Fit unknown</UBadge></div>
+
+              <p v-if="artifactAdvice(artifact)" class="mt-3 text-sm text-muted">{{ artifactAdvice(artifact)!.quantization.summary }}</p>
+              <div v-if="artifactAdvice(artifact)?.warnings?.length" class="mt-3 space-y-1 text-sm text-warning">
+                <p v-for="warning in artifactAdvice(artifact)!.warnings" :key="warning" class="flex gap-2"><UIcon name="i-lucide-triangle-alert" class="mt-0.5 size-4 shrink-0" /><span>{{ warning }}</span></p>
+              </div>
+
+              <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-3 space-y-1">
                 <div v-for="dependency in artifact.dependencies" :key="`${dependency.kind}-${dependency.name}`" class="flex flex-wrap items-center gap-2 text-xs text-muted">
                   <UBadge color="success" variant="subtle">{{ dependencyLabel(dependency.kind) }}</UBadge>
                   <span class="font-mono">{{ dependency.name }}</span>
@@ -385,10 +491,30 @@ onBeforeUnmount(() => {
                   <span>{{ formatBytes(dependency.total_bytes) }}</span>
                 </div>
               </div>
+
+              <UCollapsible v-if="artifactAdvice(artifact)" class="mt-3">
+                <UButton color="neutral" variant="link" size="xs" trailing-icon="i-lucide-chevron-down" class="px-0">Advanced details</UButton>
+                <template #content>
+                  <dl class="mt-2 grid gap-x-6 gap-y-2 border-l border-default pl-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                    <div><dt class="text-dimmed">Raw quantization</dt><dd class="mt-0.5 font-mono">{{ artifact.quantization || 'Unknown' }}</dd></div>
+                    <div><dt class="text-dimmed">Context used</dt><dd class="mt-0.5">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
+                    <div><dt class="text-dimmed">Confidence</dt><dd class="mt-0.5 capitalize">{{ artifactAdvice(artifact)!.confidence }}</dd></div>
+                    <div><dt class="text-dimmed">Placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.mode || 'Unknown' }}</dd></div>
+                    <div><dt class="text-dimmed">GPU layers</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.gpu_layers || '—' }}</dd></div>
+                    <div><dt class="text-dimmed">KV placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.kv_on_gpu ? 'GPU' : artifactAdvice(artifact)!.offload.mode ? 'System RAM' : 'Unknown' }}</dd></div>
+                    <div v-if="artifactAdvice(artifact)!.offload.devices?.length"><dt class="text-dimmed">Devices</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.devices!.join(', ') }}</dd></div>
+                    <div v-if="artifactAdvice(artifact)!.offload.tensor_split"><dt class="text-dimmed">Tensor split</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.tensor_split }}</dd></div>
+                    <div><dt class="text-dimmed">Estimated weights</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.weights_bytes) }}</dd></div>
+                    <div><dt class="text-dimmed">Estimated KV cache</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.kv_cache_bytes) }}</dd></div>
+                    <div><dt class="text-dimmed">Estimated Generation</dt><dd class="mt-0.5">{{ speedLabel(artifactAdvice(artifact)) }}</dd></div>
+                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Generation estimate basis</dt><dd class="mt-0.5">{{ speedReason(artifactAdvice(artifact)) }}</dd></div>
+                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Technical reason</dt><dd class="mt-0.5">{{ fitReason(artifactAdvice(artifact)) }}</dd></div>
+                  </dl>
+                </template>
+              </UCollapsible>
             </div>
-            <div class="text-sm text-muted"><div>{{ formatBytes(artifact.total_bytes) }}</div><div v-if="artifact.dependencies?.length" class="text-xs text-dimmed">Model {{ formatBytes(artifact.model_bytes) }} + helpers</div></div>
-            <div class="text-sm text-muted">{{ artifact.complete ? 'Ready to download' : `${artifact.shard_count}/${artifact.expected_shards} shards` }}</div>
-            <div class="flex min-w-28 flex-col gap-2">
+
+            <div class="flex min-w-32 flex-col gap-2">
               <UButton :to="launchTo(artifact)" :disabled="!artifact.complete" icon="i-lucide-play">Launch</UButton>
               <UButton color="neutral" variant="soft" :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</UButton>
             </div>

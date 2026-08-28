@@ -15,15 +15,17 @@ import (
 const mib = int64(1024 * 1024)
 
 type GPU struct {
-	ID             string  `json:"id"`
-	Backend        string  `json:"backend"`
-	Index          int     `json:"index"`
-	UUID           string  `json:"uuid,omitempty"`
-	Name           string  `json:"name"`
-	TotalBytes     int64   `json:"total_bytes"`
-	UsedBytes      int64   `json:"used_bytes"`
-	FreeBytes      int64   `json:"free_bytes"`
-	UtilizationPct float64 `json:"utilization_pct"`
+	ID                            string  `json:"id"`
+	Backend                       string  `json:"backend"`
+	Index                         int     `json:"index"`
+	UUID                          string  `json:"uuid,omitempty"`
+	Name                          string  `json:"name"`
+	TotalBytes                    int64   `json:"total_bytes"`
+	UsedBytes                     int64   `json:"used_bytes"`
+	FreeBytes                     int64   `json:"free_bytes"`
+	MemoryBandwidthBytesPerSecond int64   `json:"memory_bandwidth_bytes_per_second,omitempty"`
+	PCIeBandwidthBytesPerSecond   int64   `json:"pcie_bandwidth_bytes_per_second,omitempty"`
+	UtilizationPct                float64 `json:"utilization_pct"`
 }
 
 type GPUProcess struct {
@@ -34,11 +36,12 @@ type GPUProcess struct {
 }
 
 type Snapshot struct {
-	RAMTotalBytes     int64        `json:"ram_total_bytes"`
-	RAMAvailableBytes int64        `json:"ram_available_bytes"`
-	GPUs              []GPU        `json:"gpus"`
-	Processes         []GPUProcess `json:"processes"`
-	CollectedAt       time.Time    `json:"collected_at"`
+	RAMTotalBytes                  int64        `json:"ram_total_bytes"`
+	RAMAvailableBytes              int64        `json:"ram_available_bytes"`
+	RAMBandwidthBytesPerSecond     int64        `json:"ram_bandwidth_bytes_per_second,omitempty"`
+	GPUs                           []GPU        `json:"gpus"`
+	Processes                      []GPUProcess `json:"processes"`
+	CollectedAt                    time.Time    `json:"collected_at"`
 }
 
 type Snapshotter interface {
@@ -67,6 +70,9 @@ func (d *Detector) Snapshot(ctx context.Context) (Snapshot, error) {
 	snapshot := Snapshot{CollectedAt: d.now().UTC(), GPUs: []GPU{}, Processes: []GPUProcess{}}
 	if data, err := d.readFile("/proc/meminfo"); err == nil {
 		snapshot.RAMTotalBytes, snapshot.RAMAvailableBytes = parseMemInfo(string(data))
+		if snapshot.RAMTotalBytes > 0 {
+			snapshot.RAMBandwidthBytesPerSecond = hostMemoryBandwidth()
+		}
 	}
 
 	var probeErrors []error
@@ -116,11 +122,20 @@ func parseMemInfo(text string) (total, available int64) {
 }
 
 func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
-	out, err := d.run(ctx, "nvidia-smi", "--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits")
+	// clocks.max.memory is optional enrichment used to derive the theoretical
+	// VRAM bandwidth. Fall back to the older query on drivers that do not expose
+	// this property so bandwidth telemetry can never break GPU detection.
+	out, err := d.run(ctx, "nvidia-smi", "--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu,clocks.max.memory", "--format=csv,noheader,nounits")
+	withMemoryClock := err == nil
 	if err != nil {
-		return nil, err
+		out, err = d.run(ctx, "nvidia-smi", "--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits")
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	var gpus []GPU
+	memoryClocksMHz := make([]float64, 0)
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -138,8 +153,61 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 		util, _ := strconv.ParseFloat(parts[5], 64)
 		total, used := totalMiB*mib, usedMiB*mib
 		gpus = append(gpus, GPU{ID: "CUDA" + strconv.Itoa(index), Backend: "cuda", Index: index, UUID: parts[1], Name: parts[2], TotalBytes: total, UsedBytes: used, FreeBytes: max64(0, total-used), UtilizationPct: util})
+		clock := float64(0)
+		if withMemoryClock && len(parts) > 6 {
+			clock, _ = strconv.ParseFloat(parts[6], 64)
+		}
+		memoryClocksMHz = append(memoryClocksMHz, clock)
+	}
+
+	// nvidia-smi's selective query exposes the max memory clock but not the bus
+	// width consistently across driver generations. The regular -q report does;
+	// parse those widths in device order and combine both facts. This enrichment
+	// is deliberately best-effort and never turns a healthy GPU probe into an
+	// error if a driver omits the field.
+	if len(gpus) > 0 {
+		if query, queryErr := d.run(ctx, "nvidia-smi", "-q"); queryErr == nil {
+			widths := parseNVIDIAMemoryBusWidths(string(query))
+			if len(widths) == len(gpus) && len(memoryClocksMHz) == len(gpus) {
+				for i := range gpus {
+					gpus[i].MemoryBandwidthBytesPerSecond = theoreticalMemoryBandwidth(memoryClocksMHz[i], widths[i])
+				}
+			}
+		}
+		d.enrichNVIDIAPCIe(ctx, gpus)
 	}
 	return gpus, nil
+}
+
+func parseNVIDIAMemoryBusWidths(text string) []float64 {
+	var widths []float64
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(strings.ToLower(line), "memory bus width") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(parts[1]))
+		if len(fields) == 0 {
+			continue
+		}
+		width, err := strconv.ParseFloat(fields[0], 64)
+		if err == nil && width > 0 {
+			widths = append(widths, width)
+		}
+	}
+	return widths
+}
+
+func theoreticalMemoryBandwidth(memoryClockMHz, busWidthBits float64) int64 {
+	if memoryClockMHz <= 0 || busWidthBits <= 0 {
+		return 0
+	}
+	// NVML/nvidia-smi reports the GDDR memory clock at half the effective data
+	// transfer rate. DDR transfers on both clock edges, hence the factor of two.
+	return int64(memoryClockMHz * 1_000_000 * 2 * busWidthBits / 8)
 }
 
 func (d *Detector) rocmGPUs(ctx context.Context) ([]GPU, error) {
@@ -168,7 +236,9 @@ func (d *Detector) rocmGPUs(ctx context.Context) ([]GPU, error) {
 		}
 		uuid := stringValue(firstValue(card, "Unique ID", "Unique ID (Hex)", "GPU ID"))
 		util := float64Value(findValue(card, "GPU use (%)"))
-		gpus = append(gpus, GPU{ID: "ROCm" + strconv.Itoa(index), Backend: "rocm", Index: index, UUID: uuid, Name: name, TotalBytes: total, UsedBytes: used, FreeBytes: max64(0, total-used), UtilizationPct: util})
+		bandwidth := int64Value(firstValue(card, "Memory Bandwidth (B/s)", "VRAM Memory Bandwidth (B/s)"))
+		pcieBandwidth := d.rocmPCIeBandwidth(index)
+		gpus = append(gpus, GPU{ID: "ROCm" + strconv.Itoa(index), Backend: "rocm", Index: index, UUID: uuid, Name: name, TotalBytes: total, UsedBytes: used, FreeBytes: max64(0, total-used), MemoryBandwidthBytesPerSecond: bandwidth, PCIeBandwidthBytesPerSecond: pcieBandwidth, UtilizationPct: util})
 	}
 	return gpus, nil
 }

@@ -15,10 +15,12 @@ type GeneralSettings = {
   prometheus_auth_token?: SettingValue<string>
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
 }
+type DiscoverSettings = { hybrid_recommendations_enabled: SettingValue<boolean> }
 type SystemNetwork = { network: { effective_scheme: string; secure_cookie: boolean } }
 
 const manager = useManager()
 const settings = ref<GeneralSettings | null>(null)
+const discoverSettings = ref<DiscoverSettings | null>(null)
 const network = ref<SystemNetwork['network'] | null>(null)
 const form = reactive({
   session_lifetime_seconds: 86400,
@@ -34,6 +36,7 @@ const form = reactive({
   observability_retention_days: 30,
   prometheus_auth_token: ''
 })
+const allowHybridDiscoverRecommendations = ref(true)
 const error = ref('')
 const saved = ref(false)
 const busy = ref(false)
@@ -47,7 +50,17 @@ function isGeneralSettings(value: unknown): value is GeneralSettings {
   const candidate = value as Partial<GeneralSettings>
   return Boolean(candidate.runtime && legacySettingKeys.every(key => candidate[key] && typeof candidate[key] === 'object'))
 }
-
+function isDiscoverSettings(value: unknown): value is DiscoverSettings {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<DiscoverSettings>
+  return Boolean(candidate.hybrid_recommendations_enabled && typeof candidate.hybrid_recommendations_enabled.value === 'boolean')
+}
+function defaultDiscoverSettings(): DiscoverSettings {
+  return { hybrid_recommendations_enabled: { value: true, source: 'default', editable: true } }
+}
+function normalizeDiscoverSettings(value: unknown): DiscoverSettings {
+  return isDiscoverSettings(value) ? value : defaultDiscoverSettings()
+}
 function syncForm(value: GeneralSettings) {
   for (const key of Object.keys(form) as Array<keyof typeof form>) {
     const setting = value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
@@ -59,16 +72,21 @@ async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    const [value, system] = await Promise.all([
+    const [value, system, discoverValue] = await Promise.all([
       manager.request<GeneralSettings>('/api/v1/settings/general'),
-      manager.request<SystemNetwork>('/api/v1/system')
+      manager.request<SystemNetwork>('/api/v1/system'),
+      manager.request<DiscoverSettings>('/api/v1/settings/discover')
     ])
     if (!isGeneralSettings(value) || !system?.network) throw new Error('Invalid manager settings response')
+    const discover = normalizeDiscoverSettings(discoverValue)
     settings.value = value
+    discoverSettings.value = discover
     network.value = system.network
+    allowHybridDiscoverRecommendations.value = discover.hybrid_recommendations_enabled.value
     syncForm(value)
   } catch (value: any) {
     settings.value = null
+    discoverSettings.value = null
     network.value = null
     error.value = value?.data?.error || value?.message || 'Unable to load manager settings'
   }
@@ -76,7 +94,7 @@ async function load() {
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
-  if (!settings.value) return
+  if (!settings.value || !discoverSettings.value) return
   busy.value = true
   error.value = ''
   saved.value = false
@@ -86,9 +104,15 @@ async function save() {
     if (setting?.editable) body[key] = form[key]
   }
   try {
-    const value = await manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body })
+    const [value, discoverValue] = await Promise.all([
+      manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body }),
+      manager.request<DiscoverSettings>('/api/v1/settings/discover', { method: 'PUT', body: { hybrid_recommendations_enabled: allowHybridDiscoverRecommendations.value } })
+    ])
     if (!isGeneralSettings(value)) throw new Error('Invalid manager settings response')
+    const discover = normalizeDiscoverSettings(discoverValue)
     settings.value = value
+    discoverSettings.value = discover
+    allowHybridDiscoverRecommendations.value = discover.hybrid_recommendations_enabled.value
     syncForm(value)
     const system = await manager.request<SystemNetwork>('/api/v1/system')
     network.value = system?.network || null
@@ -112,11 +136,11 @@ function editable(key: keyof typeof form) {
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network, lifecycle and observability defaults. Environment values normally override database values; Allowed Origins and the Prometheus token are explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings" @click="save">Save changes</UButton></div>
+    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network, lifecycle, recommendation and observability defaults. Environment values normally override database values; Allowed Origins and the Prometheus token are explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings || !discoverSettings" @click="save">Save changes</UButton></div>
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="saved" color="success" variant="subtle" description="Manager settings saved." />
 
-    <template v-if="settings">
+    <template v-if="settings && discoverSettings">
       <UCard>
         <template #header><div><h2 class="text-xl font-bold">Authentication</h2><p class="text-sm text-muted">Hard session lifetime and bounded login protection. Sessions do not use idle or sliding expiration.</p></div></template>
         <div class="grid gap-5 md:grid-cols-2">
@@ -145,7 +169,7 @@ function editable(key: keyof typeof form) {
       </UCard>
 
       <UCard>
-        <template #header><div><h2 class="text-xl font-bold">Resource defaults</h2><p class="text-sm text-muted">Persisted lifecycle defaults are applied when the manager starts.</p></div></template>
+        <template #header><div><h2 class="text-xl font-bold">Resource defaults</h2><p class="text-sm text-muted">Persisted lifecycle and Discover recommendation defaults are applied by the manager.</p></div></template>
         <div class="grid gap-5 md:grid-cols-3">
           <UFormField label="Worker startup timeout (seconds)" :hint="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></UFormField>
           <UFormField label="Global idle unload (seconds)" :hint="source('idle_unload_seconds')">
@@ -154,6 +178,11 @@ function editable(key: keyof typeof form) {
           </UFormField>
           <UFormField label="Always-on reconcile (seconds)" :hint="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></UFormField>
         </div>
+        <USeparator class="my-5" />
+        <UFormField label="Discover recommendations" :hint="discoverSettings.hybrid_recommendations_enabled.source" data-testid="discover-hybrid-policy">
+          <USwitch v-model="allowHybridDiscoverRecommendations" label="Allow GPU + CPU / CPU-only choices to outrank a GPU-fit quantization" />
+          <template #help>Enabled by default. Disable this when the primary Discover recommendation should prefer the highest-quality option that fits fully on GPU whenever one is available. Fallback choices remain visible and selectable.</template>
+        </UFormField>
       </UCard>
 
       <UCard data-testid="observability-settings">

@@ -68,7 +68,9 @@ describe('Phase 8 GGUF helper integration', () => {
     expect(wrapper.text()).toContain('mmproj-F16.gguf')
     expect(wrapper.text()).toContain('MTP draft model')
     expect(wrapper.text()).toContain('mtp-vision-Q4_0.gguf')
-    expect(wrapper.text()).toContain('Model 1.0 GB + helpers')
+    expect(wrapper.text()).toContain('vision-Q4_K_M.gguf · 1.3 GB')
+    expect(wrapper.text()).toContain('200 MB')
+    expect(wrapper.text()).toContain('100 MB')
 
     const download = wrapper.findAll('button').find(button => button.text().trim() === 'Download')!
     await download.trigger('click')

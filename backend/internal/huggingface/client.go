@@ -62,6 +62,7 @@ type Artifact struct {
 	ID             string               `json:"id"`
 	Name           string               `json:"name"`
 	Quantization   string               `json:"quantization,omitempty"`
+	BitsPerWeight  float64              `json:"bits_per_weight,omitempty"`
 	ModelBytes     int64                `json:"model_bytes"`
 	TotalBytes     int64                `json:"total_bytes"`
 	ShardCount     int                  `json:"shard_count"`
@@ -72,17 +73,19 @@ type Artifact struct {
 }
 
 type ModelDetail struct {
-	ID           string     `json:"id"`
-	Author       string     `json:"author,omitempty"`
-	Description  string     `json:"description,omitempty"`
-	Downloads    int64      `json:"downloads"`
-	Likes        int64      `json:"likes"`
-	LastModified string     `json:"last_modified,omitempty"`
-	Tags         []string   `json:"tags,omitempty"`
-	Private      bool       `json:"private"`
-	Gated        bool       `json:"gated"`
-	Revision     string     `json:"revision"`
-	Artifacts    []Artifact `json:"artifacts"`
+	ID             string     `json:"id"`
+	Author         string     `json:"author,omitempty"`
+	Description    string     `json:"description,omitempty"`
+	Downloads      int64      `json:"downloads"`
+	Likes          int64      `json:"likes"`
+	LastModified   string     `json:"last_modified,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+	Private        bool       `json:"private"`
+	Gated          bool       `json:"gated"`
+	Revision       string     `json:"revision"`
+	ParameterCount int64      `json:"parameter_count,omitempty"`
+	GGUF           *GGUFInfo  `json:"gguf,omitempty"`
+	Artifacts      []Artifact `json:"artifacts"`
 }
 
 type rawModel struct {
@@ -96,6 +99,7 @@ type rawModel struct {
 	Private      bool            `json:"private"`
 	Gated        json.RawMessage `json:"gated"`
 	SHA          string          `json:"sha"`
+	GGUF         *GGUFInfo       `json:"gguf"`
 	CardData     struct {
 		Description string `json:"description"`
 	} `json:"cardData"`
@@ -222,10 +226,12 @@ func (c *Client) Detail(ctx context.Context, repoID string) (ModelDetail, error)
 		}
 		files = append(files, File{Path: sibling.Filename, Size: size, OID: oid})
 	}
+	parameterCount := ggufParameterCount(raw.GGUF)
 	return ModelDetail{
 		ID: id, Author: firstNonEmpty(raw.Author, repoAuthor(id)), Description: strings.TrimSpace(raw.CardData.Description),
 		Downloads: raw.Downloads, Likes: raw.Likes, LastModified: raw.LastModified, Tags: raw.Tags,
-		Private: raw.Private, Gated: rawGated(raw.Gated), Revision: raw.SHA, Artifacts: GroupArtifacts(id, raw.SHA, files),
+		Private: raw.Private, Gated: rawGated(raw.Gated), Revision: raw.SHA,
+		ParameterCount: parameterCount, GGUF: raw.GGUF, Artifacts: GroupArtifacts(id, raw.SHA, files, parameterCount),
 	}, nil
 }
 
@@ -262,7 +268,14 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	return c.http.Do(req)
 }
 
-func GroupArtifacts(repoID, revision string, files []File) []Artifact {
+func GroupArtifacts(repoID, revision string, files []File, parameterCounts ...int64) []Artifact {
+	parameterCount := int64(0)
+	for _, value := range parameterCounts {
+		if value > 0 {
+			parameterCount = value
+			break
+		}
+	}
 	type group struct {
 		key      string
 		name     string
@@ -348,6 +361,7 @@ func GroupArtifacts(repoID, revision string, files []File) []Artifact {
 		}
 		artifact := Artifact{
 			ID: artifactID(repoID, revision, g.key), Name: g.name, Quantization: detectQuantization(g.name),
+			BitsPerWeight: artifactBitsPerWeight(modelBytes, parameterCount),
 			ModelBytes: modelBytes, TotalBytes: modelBytes, ShardCount: len(g.files), ExpectedShards: expected,
 			Complete: len(g.files) == expected, Files: append([]File(nil), g.files...),
 		}
@@ -397,7 +411,7 @@ func selectDependency(kind, targetQuant string, candidates []ArtifactDependency)
 			if strings.EqualFold(candidate.Quantization, targetQuant) {
 				return candidate, true
 			}
-		}
+	}
 	}
 	preferences := []string{"F16", "BF16", "Q8_0", "Q4_K_M", "Q4_0"}
 	if kind == "mtp" {

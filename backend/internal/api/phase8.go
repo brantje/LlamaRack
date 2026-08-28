@@ -90,7 +90,7 @@ func (h *phase8Handler) detail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo is required"})
 		return
 	}
-	item, err := h.hf.Detail(r.Context(), repoID)
+	item, err := h.hf.DetailWithCard(r.Context(), repoID)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
