@@ -10,6 +10,10 @@ import (
 // LLAMA_ARG_* value cannot silently change worker behavior behind the manager's
 // effective configuration.
 func init() {
+	sanitizeLlamaArgEnvironment()
+}
+
+func sanitizeLlamaArgEnvironment() {
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		if strings.HasPrefix(key, "LLAMA_ARG_") {
