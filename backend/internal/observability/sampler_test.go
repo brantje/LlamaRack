@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +14,8 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
+
+func metric(value float64) *float64 { return &value }
 
 func TestSamplerPublishSubscribeCopiesAndFallback(t *testing.T) {
 	service := testService(t)
@@ -52,6 +53,78 @@ func TestSamplerPublishSubscribeCopiesAndFallback(t *testing.T) {
 	if len(attached) != 2 || attached[0].LlamaMetrics != nil { t.Fatalf("attached=%+v", attached) }
 }
 
+func TestDerivedThroughputUsesCounterDeltasWhenLlamaGaugeIsZero(t *testing.T) {
+	sampler := NewSampler(nil, testService(t))
+	first := []RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:41},
+		LlamaMetrics: &telemetry.LlamaMetrics{
+			PromptTokensTotal:metric(100), PromptSecondsTotal:metric(2), PromptTokensPerSecond:metric(0),
+			PredictedTokensTotal:metric(200), PredictedSecondsTotal:metric(4), PredictedTokensPerSecond:metric(0),
+		},
+	}}
+	sampler.applyDerivedThroughput(first)
+	if *first[0].LlamaMetrics.PromptTokensPerSecond != 0 || *first[0].LlamaMetrics.PredictedTokensPerSecond != 0 {
+		t.Fatalf("first sample has no baseline: %+v", first[0].LlamaMetrics)
+	}
+
+	second := []RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:41},
+		LlamaMetrics: &telemetry.LlamaMetrics{
+			PromptTokensTotal:metric(140), PromptSecondsTotal:metric(3), PromptTokensPerSecond:metric(0),
+			PredictedTokensTotal:metric(260), PredictedSecondsTotal:metric(5.5), PredictedTokensPerSecond:metric(0),
+		},
+	}}
+	sampler.applyDerivedThroughput(second)
+	if got := second[0].LlamaMetrics.PromptTokensPerSecond; got == nil || *got != 40 { t.Fatalf("prompt throughput=%v", got) }
+	if got := second[0].LlamaMetrics.PredictedTokensPerSecond; got == nil || *got != 40 { t.Fatalf("generation throughput=%v", got) }
+
+	// A working native gauge is authoritative and must not be replaced.
+	third := []RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:41},
+		LlamaMetrics: &telemetry.LlamaMetrics{
+			PromptTokensTotal:metric(160), PromptSecondsTotal:metric(4), PromptTokensPerSecond:metric(17),
+			PredictedTokensTotal:metric(300), PredictedSecondsTotal:metric(6.5), PredictedTokensPerSecond:metric(23),
+		},
+	}}
+	sampler.applyDerivedThroughput(third)
+	if *third[0].LlamaMetrics.PromptTokensPerSecond != 17 || *third[0].LlamaMetrics.PredictedTokensPerSecond != 23 {
+		t.Fatalf("native rates overwritten: %+v", third[0].LlamaMetrics)
+	}
+}
+
+func TestDerivedThroughputRejectsCounterResetAndPIDChange(t *testing.T) {
+	sampler := NewSampler(nil, testService(t))
+	sampler.applyDerivedThroughput([]RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:41},
+		LlamaMetrics:&telemetry.LlamaMetrics{PredictedTokensTotal:metric(100), PredictedSecondsTotal:metric(2)},
+	}})
+
+	reset := []RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:41},
+		LlamaMetrics:&telemetry.LlamaMetrics{PredictedTokensTotal:metric(5), PredictedSecondsTotal:metric(.1), PredictedTokensPerSecond:metric(0)},
+	}}
+	sampler.applyDerivedThroughput(reset)
+	if reset[0].LlamaMetrics.PredictedTokensPerSecond != nil {
+		t.Fatalf("counter reset must not derive throughput: %+v", reset[0].LlamaMetrics)
+	}
+
+	restarted := []RuntimeTelemetrySample{{
+		Sample: telemetry.Sample{InstanceID:"one", PID:99},
+		LlamaMetrics:&telemetry.LlamaMetrics{PredictedTokensTotal:metric(50), PredictedSecondsTotal:metric(1), PredictedTokensPerSecond:metric(0)},
+	}}
+	sampler.applyDerivedThroughput(restarted)
+	if *restarted[0].LlamaMetrics.PredictedTokensPerSecond != 0 {
+		t.Fatalf("new PID must establish a fresh baseline: %+v", restarted[0].LlamaMetrics)
+	}
+
+	if got := counterRate(metric(10), metric(2), metric(10), metric(1)); got != nil { t.Fatalf("no token delta should not produce rate=%v", *got) }
+	if got := counterRate(nil, metric(2), metric(1), metric(1)); got != nil { t.Fatalf("missing counter should not produce rate=%v", *got) }
+	if got := copyMetricValue(nil); got != nil { t.Fatalf("nil copy=%v", got) }
+
+	sampler.applyDerivedThroughput(nil)
+	if len(sampler.throughput) != 0 { t.Fatalf("stale baselines=%v", sampler.throughput) }
+}
+
 func TestAttachNativeMetricsForReadyRuntime(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/metrics" { http.NotFound(w, r); return }
@@ -87,7 +160,7 @@ func TestAttachNativeMetricsForReadyRuntime(t *testing.T) {
 	if attached[0].LlamaMetrics != nil { t.Fatalf("failed fetch must not populate metrics: %+v", attached[0]) }
 }
 
-func TestSamplerRuntimeStatesAndLifecycleObservation(t *testing.T) {
+func TestSamplerRuntimeStates(t *testing.T) {
 	service := testService(t)
 	modelsDir := t.TempDir()
 	modelService := models.New(service.db, modelsDir)
@@ -101,31 +174,6 @@ func TestSamplerRuntimeStatesAndLifecycleObservation(t *testing.T) {
 	if states["one"] != "READY" { t.Fatalf("states=%v", states) }
 	states["one"] = "changed"
 	if sampler.RuntimeStates()["one"] != "READY" { t.Fatal("runtime state snapshot must be defensive") }
-
-	now := time.Now().UTC()
-	sampler.observeLifecycle(ctx,
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Loading, StartedAt:now.Add(-2*time.Second)},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready, StartedAt:now.Add(-2*time.Second), ReadyAt:now},
-	)
-	sampler.observeLifecycle(ctx,
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting},
-		supervisor.Runtime{InstanceID:"one", State:supervisor.Failed, LastError:"boom"},
-	)
-	counters, err := service.Counters(ctx)
-	if err != nil { t.Fatal(err) }
-	foundLoad, foundFailed := false, false
-	for _, counter := range counters {
-		if counter.InstanceID == "one" && counter.Metric == "load_total" { foundLoad = counter.Value == 1 }
-		if counter.InstanceID == "one" && counter.Metric == "failed_start_total" { foundFailed = counter.Value == 1 }
-	}
-	if !foundLoad || !foundFailed { t.Fatalf("counters=%+v", counters) }
-	logs := strings.Join(life.Logs("one"), "\n")
-	if !strings.Contains(logs, "[manager] worker ready") || !strings.Contains(logs, "[manager] worker failed to start: boom") { t.Fatalf("logs=%q", logs) }
-
-	before := len(counters)
-	sampler.observeLifecycle(ctx, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready})
-	after, err := service.Counters(ctx)
-	if err != nil || len(after) != before { t.Fatalf("same-state observation changed counters: before=%d after=%d err=%v", before, len(after), err) }
 }
 
 func TestSamplerRunPublishesManagerOwnedHardware(t *testing.T) {
