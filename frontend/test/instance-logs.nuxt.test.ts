@@ -1,0 +1,166 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
+import InstanceLogViewer from '~/components/InstanceLogViewer.vue'
+
+const mocks = vi.hoisted(() => ({ request: vi.fn() }))
+mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
+
+function component(wrapper: any, names: string[]) {
+  for (const name of names) {
+    const found = wrapper.findAllComponents({ name })[0]
+    if (found) return found
+  }
+  throw new Error(`Missing component: ${names.join(', ')}`)
+}
+
+function button(wrapper: any, text: string) {
+  const found = wrapper.findAll('button').find((candidate: any) => candidate.text().trim() === text)
+  if (!found) throw new Error(`Missing button: ${text}`)
+  return found
+}
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = []
+  url: string
+  withCredentials: boolean
+  onopen: ((event: Event) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  closed = false
+  listeners = new Map<string, any[]>()
+
+  constructor(url: string, init?: any) {
+    this.url = url
+    this.withCredentials = Boolean(init?.withCredentials)
+    FakeEventSource.instances.push(this)
+  }
+
+  addEventListener(type: string, listener: any) {
+    this.listeners.set(type, [...(this.listeners.get(type) || []), listener])
+  }
+
+  close() {
+    this.closed = true
+  }
+
+  emit(type: string, data: string) {
+    const event = new MessageEvent(type, { data })
+    for (const listener of this.listeners.get(type) || []) listener(event)
+  }
+}
+
+beforeEach(() => {
+  mocks.request.mockReset()
+  FakeEventSource.instances = []
+  vi.unstubAllGlobals()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('InstanceLogViewer', () => {
+  it('loads a snapshot fallback, filters sources/search and resets the browser view', async () => {
+    vi.stubGlobal('EventSource', undefined)
+    mocks.request.mockResolvedValue({
+      instance_id: 'gemma/4',
+      entries: [
+        { source: 'stdout', text: 'server booted' },
+        { source: 'stderr', text: 'CUDA warning' },
+        { source: 'manager', text: 'worker ready' },
+        { source: 'bogus', text: 'ignore me' },
+        { source: 'stdout', text: 42 }
+      ]
+    })
+
+    const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'gemma/4' }, route: false })
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=gemma%2F4&limit=2000')
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('server booted')
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('CUDA warning')
+    expect(wrapper.text()).not.toContain('ignore me')
+
+    const select = component(wrapper, ['SelectMenu', 'USelectMenu'])
+    select.vm.$emit('update:modelValue', 'stderr')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('CUDA warning')
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).not.toContain('server booted')
+
+    select.vm.$emit('update:modelValue', 'all')
+    await wrapper.find('input[aria-label="Search logs"]').setValue('ready')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('worker ready')
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).not.toContain('CUDA warning')
+
+    await wrapper.find('input[aria-label="Search logs"]').setValue('does-not-exist')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No logs match the current filters')
+
+    await wrapper.find('input[aria-label="Search logs"]').setValue('')
+    await button(wrapper, 'Clear view').trigger('click')
+    expect(wrapper.text()).toContain('No logs in the current view')
+    expect(wrapper.text()).toContain('does not stop live tailing')
+
+    await button(wrapper, 'Reconnect').trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('server booted')
+
+    mocks.request.mockRejectedValueOnce({ data: { error: 'log access denied' } })
+    await button(wrapper, 'Reconnect').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('log access denied')
+    wrapper.unmount()
+  })
+
+  it('tails SSE log events, ignores malformed frames and reconnects cleanly', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalled()
+    expect(FakeEventSource.instances).toHaveLength(1)
+    const first = FakeEventSource.instances[0]!
+    expect(first.url).toBe('http://manager.test:8888/api/v1/logs/stream?instance_id=coder&limit=2000')
+    expect(first.withCredentials).toBe(true)
+
+    first.onopen?.(new Event('open'))
+    first.emit('log', JSON.stringify({ source: 'stdout', text: 'ready on port 9000' }))
+    first.emit('log', JSON.stringify({ source: 'stderr', text: 'recoverable warning' }))
+    first.emit('log', JSON.stringify({ source: 'manager', text: 'autoload triggered by inference request' }))
+    first.emit('log', '{bad json')
+    first.emit('log', JSON.stringify({ source: 'unknown', text: 'ignore' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Live')
+    const output = wrapper.get('[data-testid="instance-log-output"]').text()
+    expect(output).toContain('ready on port 9000')
+    expect(output).toContain('recoverable warning')
+    expect(output).toContain('autoload triggered by inference request')
+    expect(output).not.toContain('ignore')
+
+    await button(wrapper, 'Clear view').trigger('click')
+    expect(wrapper.text()).toContain('No logs in the current view')
+    first.emit('log', JSON.stringify({ source: 'manager', text: 'future event' }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('future event')
+
+    first.onerror?.(new Event('error'))
+    await flushPromises()
+    expect(first.closed).toBe(true)
+    expect(wrapper.text()).toContain('Live log stream disconnected')
+    first.emit('log', JSON.stringify({ source: 'stdout', text: 'stale event' }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('stale event')
+
+    await button(wrapper, 'Reconnect').trigger('click')
+    expect(FakeEventSource.instances).toHaveLength(2)
+    const second = FakeEventSource.instances[1]!
+    second.onopen?.(new Event('open'))
+    await wrapper.setProps({ instanceId: 'coder-v2' })
+    await flushPromises()
+    expect(second.closed).toBe(true)
+    expect(FakeEventSource.instances).toHaveLength(3)
+    expect(FakeEventSource.instances[2]!.url).toContain('instance_id=coder-v2')
+    wrapper.unmount()
+    expect(FakeEventSource.instances[2]!.closed).toBe(true)
+  })
+})
