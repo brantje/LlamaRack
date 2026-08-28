@@ -31,6 +31,14 @@ type LiveSnapshot struct {
 	Requests    []RequestRecord          `json:"requests"`
 }
 
+type throughputBaseline struct {
+	PID              int
+	PromptTokens     *float64
+	PromptSeconds    *float64
+	PredictedTokens  *float64
+	PredictedSeconds *float64
+}
+
 type Sampler struct {
 	lifecycle      *lifecycle.Service
 	service        *Service
@@ -38,10 +46,11 @@ type Sampler struct {
 	persist        time.Duration
 	gatewayRefresh time.Duration
 
-	mu     sync.RWMutex
-	latest LiveSnapshot
-	states map[string]string
-	subs   map[chan LiveSnapshot]struct{}
+	mu         sync.RWMutex
+	latest     LiveSnapshot
+	states     map[string]string
+	throughput map[string]throughputBaseline
+	subs       map[chan LiveSnapshot]struct{}
 }
 
 func NewSampler(lifecycleService *lifecycle.Service, service *Service, _ ...time.Duration) *Sampler {
@@ -52,6 +61,7 @@ func NewSampler(lifecycleService *lifecycle.Service, service *Service, _ ...time
 		persist:        defaultPersistInterval,
 		gatewayRefresh: defaultGatewayRefresh,
 		states:         map[string]string{},
+		throughput:     map[string]throughputBaseline{},
 		subs:           map[chan LiveSnapshot]struct{}{},
 	}
 	if lifecycleService != nil && service != nil {
@@ -129,6 +139,7 @@ func (s *Sampler) Run(ctx context.Context) {
 		samples := collector.Collect(ctx, values)
 		samples = applyHardwareFallback(samples, snapshot)
 		withMetrics := attachNativeMetrics(ctx, samples, values, s.lifecycle.RuntimeEndpoint)
+		s.applyDerivedThroughput(withMetrics)
 		now := time.Now()
 		if lastGateway.IsZero() || now.Sub(lastGateway) >= s.gatewayRefresh {
 			since := now.Add(-15 * time.Minute).UnixMilli()
@@ -193,6 +204,67 @@ func (s *Sampler) refreshRuntimeStates(ctx context.Context, current map[string]s
 	s.mu.Lock()
 	s.states = states
 	s.mu.Unlock()
+}
+
+// applyDerivedThroughput works around llama.cpp builds where the instantaneous
+// prompt/prediction throughput gauges remain zero while inference is active.
+// The cumulative token and processing-time counters remain monotonic, so their
+// deltas provide the same average throughput for work completed between samples.
+func (s *Sampler) applyDerivedThroughput(samples []RuntimeTelemetrySample) {
+	seen := make(map[string]bool, len(samples))
+	for index := range samples {
+		instanceID := samples[index].InstanceID
+		if instanceID == "" {
+			continue
+		}
+		seen[instanceID] = true
+		metrics := samples[index].LlamaMetrics
+		if metrics == nil {
+			continue
+		}
+		previous, ok := s.throughput[instanceID]
+		if ok && previous.PID == samples[index].PID {
+			if metrics.PromptTokensPerSecond == nil || *metrics.PromptTokensPerSecond <= 0 {
+				metrics.PromptTokensPerSecond = counterRate(metrics.PromptTokensTotal, metrics.PromptSecondsTotal, previous.PromptTokens, previous.PromptSeconds)
+			}
+			if metrics.PredictedTokensPerSecond == nil || *metrics.PredictedTokensPerSecond <= 0 {
+				metrics.PredictedTokensPerSecond = counterRate(metrics.PredictedTokensTotal, metrics.PredictedSecondsTotal, previous.PredictedTokens, previous.PredictedSeconds)
+			}
+		}
+		s.throughput[instanceID] = throughputBaseline{
+			PID:              samples[index].PID,
+			PromptTokens:     copyMetricValue(metrics.PromptTokensTotal),
+			PromptSeconds:    copyMetricValue(metrics.PromptSecondsTotal),
+			PredictedTokens:  copyMetricValue(metrics.PredictedTokensTotal),
+			PredictedSeconds: copyMetricValue(metrics.PredictedSecondsTotal),
+		}
+	}
+	for instanceID := range s.throughput {
+		if !seen[instanceID] {
+			delete(s.throughput, instanceID)
+		}
+	}
+}
+
+func counterRate(currentTokens, currentSeconds, previousTokens, previousSeconds *float64) *float64 {
+	if currentTokens == nil || currentSeconds == nil || previousTokens == nil || previousSeconds == nil {
+		return nil
+	}
+	tokens := *currentTokens - *previousTokens
+	seconds := *currentSeconds - *previousSeconds
+	if tokens <= 0 || seconds <= 0 {
+		return nil
+	}
+	value := tokens / seconds
+	return &value
+}
+
+func copyMetricValue(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func (s *Sampler) publish(snapshot LiveSnapshot) {
