@@ -5,6 +5,7 @@ type OptionDefinition = {
   description?: string
   kind?: string
   choices?: string[]
+  manager_owned?: boolean
   unsupported?: boolean
 }
 type EffectiveConfig = {
@@ -36,7 +37,13 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<ConfigResponse | null>(null)
 
-const protectedKeys = new Set(['model', 'host', 'port', 'device', 'split-mode', 'main-gpu'])
+// Compatibility fallback for profiles cached before manager_owned metadata was
+// added. Newly discovered profiles use the backend-provided field.
+const legacyProtectedKeys = new Set([
+  'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
+  'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
+  'api-key', 'api-key-file'
+])
 const basicKeys = new Set([
   'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
   'parallel', 'flash-attn', 'jinja', 'reasoning-format', 'reasoning-budget', 'embeddings', 'reranking',
@@ -53,23 +60,11 @@ const editorSummary = computed(() => {
   if (count === 0) return 'No overrides configured · inheriting all values'
   return count === 1 ? '1 override configured · remaining values inherited' : `${count} overrides configured · remaining values inherited`
 })
-const inherited = computed(() => {
-  const effective = config.value?.effective
-  if (!effective || props.scope === 'global') return {} as Record<string, string>
-  if (props.scope === 'model') return { ...(effective.global || {}) }
-  return { ...(effective.global || {}), ...(effective.model || {}) }
-})
-const inheritedSources = computed(() => {
-  const effective = config.value?.effective
-  const out: Record<string, string> = {}
-  if (!effective || props.scope === 'global') return out
-  for (const key of Object.keys(effective.global || {})) out[key] = 'global'
-  if (props.scope === 'instance') for (const key of Object.keys(effective.model || {})) out[key] = 'model'
-  return out
-})
+const inherited = computed(() => ({ ...(config.value?.effective?.values || {}) }))
+const inheritedSources = computed(() => ({ ...(config.value?.effective?.sources || {}) }))
 
 const allOptions = computed<OptionDefinition[]>(() => {
-  const discovered = [...(config.value?.profile?.options || manager.profile.value?.options || [])]
+  const discovered: OptionDefinition[] = [...(config.value?.profile?.options || manager.profile.value?.options || [])]
   const overriddenKeys = new Set(Object.keys(overrides.value))
   const known = new Set(discovered.map(option => option.key))
   for (const key of overriddenKeys) {
@@ -85,7 +80,7 @@ const allOptions = computed<OptionDefinition[]>(() => {
 const visibleOptions = computed(() => {
   const term = search.value.trim().toLowerCase()
   return allOptions.value.filter((option) => {
-    if (mode.value === 'basic' && (!basicKeys.has(option.key) || protectedKeys.has(option.key))) return false
+    if (mode.value === 'basic' && (!basicKeys.has(option.key) || isProtected(option))) return false
     if (!term) return true
     return option.key.toLowerCase().includes(term) || (option.description || '').toLowerCase().includes(term)
   })
@@ -116,16 +111,19 @@ async function loadConfig() {
 watch(() => [props.modelId, props.instanceId], () => void loadConfig())
 onMounted(() => void loadConfig())
 
+function isProtected(option: OptionDefinition) {
+  return option.manager_owned === true || legacyProtectedKeys.has(option.key)
+}
 function isOverridden(key: string) {
   return Object.prototype.hasOwnProperty.call(overrides.value, key)
 }
 function effectiveValue(key: string) {
   return isOverridden(key) ? overrides.value[key] : inherited.value[key]
 }
-function effectiveSource(key: string) {
-  if (protectedKeys.has(key)) return 'manager'
-  if (isOverridden(key)) return props.scope
-  return inheritedSources.value[key] || 'upstream'
+function effectiveSource(option: OptionDefinition) {
+  if (isProtected(option)) return 'manager'
+  if (isOverridden(option.key)) return props.scope
+  return inheritedSources.value[option.key] || 'upstream'
 }
 function kind(option: OptionDefinition) {
   if (option.kind) return option.kind
@@ -141,7 +139,7 @@ function updateValue(key: string, value: string) {
   emit('update:modelValue', { ...overrides.value, [key]: value })
 }
 function enableOverride(option: OptionDefinition) {
-  if (protectedKeys.has(option.key) || option.unsupported) return
+  if (isProtected(option) || option.unsupported) return
   let value = inherited.value[option.key]
   if (value === undefined) {
     if (kind(option) === 'boolean') value = 'true'
@@ -200,8 +198,8 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
-                  <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option.key))">{{ effectiveSource(option.key) }}</UBadge>
-                  <UBadge v-if="protectedKeys.has(option.key)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
+                  <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option))">{{ effectiveSource(option) }}</UBadge>
+                  <UBadge v-if="isProtected(option)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
                   <UBadge v-if="option.unsupported" size="sm" color="warning" variant="outline">Unsupported · retained</UBadge>
                 </div>
                 <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
@@ -234,7 +232,7 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
                   />
                   <UButton type="button" size="xs" color="neutral" variant="ghost" @click="removeOverride(option.key)">Remove override</UButton>
                 </template>
-                <UButton v-else-if="!protectedKeys.has(option.key)" type="button" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
+                <UButton v-else-if="!isProtected(option)" type="button" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
               </div>
             </div>
           </UCard>
