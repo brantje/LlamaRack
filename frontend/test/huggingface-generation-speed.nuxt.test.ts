@@ -62,7 +62,7 @@ function recommendation(context = 4096, label = '~10–16 tok/s') {
         cpu_only_ram_bytes: 14 * gib, full_offload_vram_bytes: 14 * gib
       },
       offload: { mode: 'full', gpu_layers: 65, devices: ['CUDA0'], kv_on_gpu: true, reason: 'Fits.' },
-      generation_speed: {
+      estimated_generation_speed: {
         estimated: true,
         min_tokens_per_second: 10,
         max_tokens_per_second: 16,
@@ -87,7 +87,7 @@ beforeEach(() => {
   seedManager()
 })
 
-describe('Hugging Face generation speed estimate', () => {
+describe('Hugging Face estimated generation speed', () => {
   it('renders backend tok/s guidance instead of a generic hardware-dependent label', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/model?repo=')) {
@@ -105,14 +105,14 @@ describe('Hugging Face generation speed estimate', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="artifact-generation-speed"]').text()).toBe('~10–16 tok/s')
-    expect(wrapper.text()).toContain('Generation')
+    expect(wrapper.text()).toContain('Estimated Generation')
     expect(wrapper.text()).not.toContain('Hardware-dependent')
 
     const advanced = wrapper.findAll('button').find(button => button.text().trim() === 'Advanced details')
     expect(advanced).toBeTruthy()
     await advanced!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Estimated generation')
+    expect(wrapper.text()).toContain('Estimated Generation')
     expect(wrapper.text()).toContain('Generation estimate basis')
     wrapper.unmount()
   })
@@ -158,7 +158,7 @@ describe('Hugging Face generation speed estimate', () => {
       }
       if (path.startsWith('/api/v1/huggingface/recommendations?')) {
         const value = recommendation()
-        value.artifacts[0].generation_speed = {
+        value.artifacts[0].estimated_generation_speed = {
           estimated: false,
           label: 'Estimate unavailable',
           reason: 'GPU memory-bandwidth telemetry is unavailable for CUDA0.'
