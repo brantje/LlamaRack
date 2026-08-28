@@ -103,8 +103,20 @@ func TestStartReadyEndpointLogsAndStop(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	logs := s.Logs("instance-1")
-	if len(logs) == 0 || !strings.Contains(strings.Join(logs, "\n"), "fake worker online") {
+	joined := strings.Join(logs, "\n")
+	if len(logs) == 0 || !strings.Contains(joined, "fake worker online") {
 		t.Fatalf("logs=%v", logs)
+	}
+	for _, want := range []string{
+		"launch command:",
+		strconv.Quote(binary),
+		`"--model" "/tmp/model.gguf"`,
+		`"--host" "127.0.0.1"`,
+		`"--port" "` + strconv.Itoa(rt.Port) + `"`,
+		`"--ctx-size" "1024"`,
+		`"--cors-origins" "localhost"`,
+	} {
+		if !strings.Contains(joined, want) { t.Fatalf("launch command missing %q in logs=%v", want, logs) }
 	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -164,9 +176,10 @@ func TestRingCopyLogsPortAllocationAndShutdown(t *testing.T) {
 		t.Fatalf("ring=%v", got)
 	}
 	copyLogs(r, "instance", "model", "stderr", strings.NewReader("a\nb\n"))
-	if got := r.lines(); len(got) != 2 || got[0] != "[stderr] a" || got[1] != "[stderr] b" {
-		t.Fatalf("copied logs=%v", got)
-	}
+	got := r.lines()
+	if len(got) != 2 { t.Fatalf("copied logs=%v", got) }
+	assertTimestampedLog(t, got[0], "stderr", "a")
+	assertTimestampedLog(t, got[1], "stderr", "b")
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
