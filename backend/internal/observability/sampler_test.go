@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ func TestSamplerPublishSubscribeCopiesAndFallback(t *testing.T) {
 	service := testService(t)
 	sampler := NewSampler(nil, service)
 	if !sampler.Latest().CollectedAt.IsZero() { t.Fatal("new sampler should not have a sample") }
+	if len(sampler.RuntimeStates()) != 0 { t.Fatal("new sampler should not have runtime states") }
 	initial, events, cancel := sampler.Subscribe()
 	if !initial.CollectedAt.IsZero() { t.Fatal("initial snapshot should be empty") }
 
@@ -83,6 +85,47 @@ func TestAttachNativeMetricsForReadyRuntime(t *testing.T) {
 	defer bad.Close()
 	attached = attachNativeMetrics(context.Background(), []telemetry.Sample{{InstanceID:"ready", PID:7}}, []supervisor.Runtime{{InstanceID:"ready", PID:7, State:supervisor.Ready}}, func(string) (string, bool) { return bad.URL, true })
 	if attached[0].LlamaMetrics != nil { t.Fatalf("failed fetch must not populate metrics: %+v", attached[0]) }
+}
+
+func TestSamplerRuntimeStatesAndLifecycleObservation(t *testing.T) {
+	service := testService(t)
+	modelsDir := t.TempDir()
+	modelService := models.New(service.db, modelsDir)
+	sup := supervisor.New("unused", "127.0.0.1", 39901, time.Second)
+	life := lifecycle.New(modelService, sup)
+	sampler := NewSampler(life, service)
+	ctx := context.Background()
+
+	sampler.refreshRuntimeStates(ctx, map[string]supervisor.Runtime{"one": {InstanceID:"one", State:supervisor.Ready}})
+	states := sampler.RuntimeStates()
+	if states["one"] != "READY" { t.Fatalf("states=%v", states) }
+	states["one"] = "changed"
+	if sampler.RuntimeStates()["one"] != "READY" { t.Fatal("runtime state snapshot must be defensive") }
+
+	now := time.Now().UTC()
+	sampler.observeLifecycle(ctx,
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Loading, StartedAt:now.Add(-2*time.Second)},
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Ready, StartedAt:now.Add(-2*time.Second), ReadyAt:now},
+	)
+	sampler.observeLifecycle(ctx,
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Starting},
+		supervisor.Runtime{InstanceID:"one", State:supervisor.Failed, LastError:"boom"},
+	)
+	counters, err := service.Counters(ctx)
+	if err != nil { t.Fatal(err) }
+	foundLoad, foundFailed := false, false
+	for _, counter := range counters {
+		if counter.InstanceID == "one" && counter.Metric == "load_total" { foundLoad = counter.Value == 1 }
+		if counter.InstanceID == "one" && counter.Metric == "failed_start_total" { foundFailed = counter.Value == 1 }
+	}
+	if !foundLoad || !foundFailed { t.Fatalf("counters=%+v", counters) }
+	logs := strings.Join(life.Logs("one"), "\n")
+	if !strings.Contains(logs, "[manager] worker ready") || !strings.Contains(logs, "[manager] worker failed to start: boom") { t.Fatalf("logs=%q", logs) }
+
+	before := len(counters)
+	sampler.observeLifecycle(ctx, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready}, supervisor.Runtime{InstanceID:"one", State:supervisor.Ready})
+	after, err := service.Counters(ctx)
+	if err != nil || len(after) != before { t.Fatalf("same-state observation changed counters: before=%d after=%d err=%v", before, len(after), err) }
 }
 
 func TestSamplerRunPublishesManagerOwnedHardware(t *testing.T) {
