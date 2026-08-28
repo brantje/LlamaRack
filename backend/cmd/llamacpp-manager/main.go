@@ -73,6 +73,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	}()
 	lifecycleService := lifecycle.New(modelService, sup)
 	observabilityService := observability.New(db)
+	observabilitySampler := observability.NewSampler(lifecycleService, observabilityService)
 
 	var profileMu sync.RWMutex
 	var profile llamacpp.Profile
@@ -98,7 +99,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI := http.NewServeMux()
 	hardwareDetector := hardware.New()
 	allowedOrigins, _ := managerSettings.String(ctx, settings.AllowedOrigins)
-	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, allowedOrigins))
+	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, allowedOrigins, observabilitySampler))
 	managementAPI.Handle("/api/v1/hardware", api.NewPhase7HardwareHandler(authService, hardwareDetector))
 	managementAPI.Handle("POST /api/v1/models", api.NewPhase9ModelCreateHandler(apiServer, modelService))
 	managementAPI.Handle("POST /api/v1/models/inspect", api.NewPhase9ModelInspectHandler(authService, modelService))
@@ -149,11 +150,14 @@ func run(ctx context.Context, cfg config.Config) error {
 	go lifecycleService.RunIdleReconciler(ctx, idleUnloadTimeout)
 	go modelService.RunMetadataReconciler(ctx, 2*time.Second)
 	go importService.Run(ctx, 500*time.Millisecond)
-	go observabilityService.RunRetention(ctx, func(requestCtx context.Context) int {
+	go observabilitySampler.Run(ctx)
+	retentionDays := func(requestCtx context.Context) int {
 		value, resolveErr := managerSettings.Int(requestCtx, settings.ObservabilityRetentionDays)
 		if resolveErr != nil { return observability.DefaultRetentionDays }
 		return value
-	})
+	}
+	go observabilityService.RunRetention(ctx, retentionDays)
+	go observabilityService.RunHardwareRetention(ctx, retentionDays)
 	go func() {
 		slog.Info("backend listening", "addr", cfg.ListenAddr)
 		err := server.ListenAndServe()
@@ -208,7 +212,7 @@ func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handl
 func healthcheck() { if err := checkHealth("http://127.0.0.1:8000/health"); err != nil { os.Exit(1) } }
 
 func checkHealth(endpoint string) error {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: 2*time.Second}
 	resp, err := client.Get(endpoint)
 	if err != nil { return err }
 	defer resp.Body.Close()
