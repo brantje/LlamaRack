@@ -19,11 +19,16 @@ const (
 
 var discoveryMetadataCache sync.Map
 
-// DerivedMetadata reads only the GGUF metadata section needed for context-aware
-// recommendations. Most files fit in the initial 8 MiB range. If a large or
-// interleaved tokenizer payload pushes architecture metadata beyond that range,
-// retry once with the same 50 MB safety ceiling used by Hugging Face's remote
-// GGUF parser. Tensor descriptors and tensor data are never parsed.
+// DerivedMetadata enriches the Hugging Face model-info GGUF summary with only
+// the low-level architecture dimensions needed by the KV-cache estimator. The
+// Hub remains authoritative for architecture and context capability; the
+// bounded GGUF read supplies block/embedding/head dimensions that model-info
+// does not expose today.
+//
+// Most files fit in the initial 8 MiB range. If a large or interleaved tokenizer
+// payload pushes the required dimensions beyond that range, retry once with the
+// same 50 MB safety ceiling used by Hugging Face's remote GGUF parser. Tensor
+// descriptors and tensor data are never parsed.
 func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufmeta.Derived, error) {
 	var modelFile string
 	for _, artifact := range detail.Artifacts {
@@ -36,21 +41,22 @@ func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufm
 		}
 	}
 	if modelFile == "" {
-		return ggufmeta.Derived{}, fmt.Errorf("GGUF metadata unavailable: no complete model artifact")
+		return providerDerived(ggufmeta.Derived{}, detail.GGUF), fmt.Errorf("GGUF metadata unavailable: no complete model artifact")
 	}
 	cacheKey := c.baseURL.String() + "|" + detail.ID + "|" + detail.Revision + "|" + modelFile
 	if cached, ok := discoveryMetadataCache.Load(cacheKey); ok {
-		return cached.(ggufmeta.Derived), nil
+		return providerDerived(cached.(ggufmeta.Derived), detail.GGUF), nil
 	}
 
 	rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
 	if err != nil {
-		return ggufmeta.Derived{}, err
+		return providerDerived(ggufmeta.Derived{}, detail.GGUF), err
 	}
 
 	var lastDerived ggufmeta.Derived
 	for attempt, limit := range []int64{discoveryMetadataLimit, discoveryMetadataMaxLimit} {
 		derived, err := c.readDerivedMetadataRange(ctx, rawURL, limit)
+		derived = providerDerived(derived, detail.GGUF)
 		lastDerived = derived
 		if err == nil {
 			discoveryMetadataCache.Store(cacheKey, derived)
@@ -62,6 +68,19 @@ func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufm
 		return derived, err
 	}
 	return lastDerived, errors.New("GGUF metadata unavailable")
+}
+
+func providerDerived(value ggufmeta.Derived, info *GGUFInfo) ggufmeta.Derived {
+	if info == nil {
+		return value
+	}
+	if architecture := strings.TrimSpace(info.Architecture); architecture != "" {
+		value.Architecture = architecture
+	}
+	if info.ContextLength > 0 {
+		value.ContextLength = info.ContextLength
+	}
+	return value
 }
 
 func (c *Client) readDerivedMetadataRange(ctx context.Context, rawURL string, limit int64) (ggufmeta.Derived, error) {
