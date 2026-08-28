@@ -19,6 +19,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamacpp-manager/backend/internal/observability"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
@@ -50,16 +51,22 @@ func TestGatewayHelperProcess(t *testing.T) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"proxied": true, "path": r.URL.Path, "model": body["model"]})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"proxied": true,
+			"path": r.URL.Path,
+			"model": body["model"],
+			"usage": map[string]any{"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+		})
 	})
 	_ = (&http.Server{Handler: mux}).Serve(ln)
 	os.Exit(0)
 }
 
 type gatewayFixture struct {
-	gateway *Gateway
-	secret string
-	sup *supervisor.Supervisor
+	gateway       *Gateway
+	secret        string
+	sup           *supervisor.Supervisor
+	observability *observability.Service
 }
 
 func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
@@ -81,7 +88,8 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	sup := supervisor.New(gatewayFakeBinary(t), "127.0.0.1", 33000, 5*time.Second)
 	t.Cleanup(func(){ ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel(); sup.Shutdown(ctx) })
 	l := lifecycle.New(m, sup)
-	return &gatewayFixture{gateway: New(a, m, l), secret: secret, sup: sup}
+	obs := observability.New(db)
+	return &gatewayFixture{gateway: New(a, m, l, obs), secret: secret, sup: sup, observability: obs}
 }
 
 func gatewayRequest(t *testing.T, g http.Handler, method, path, secret, body string) *httptest.ResponseRecorder {
@@ -109,6 +117,16 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") { t.Fatalf("missing model=%d %s", w.Code, w.Body.String()) }
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"gateway-model\"}")
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "autoload disabled") { t.Fatalf("autoload disabled=%d %s", w.Code, w.Body.String()) }
+
+	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: "gateway-model"})
+	if err != nil { t.Fatal(err) }
+	if len(records) != 1 || records[0].StatusCode != http.StatusServiceUnavailable || records[0].Result != "error" || records[0].Error == "" {
+		t.Fatalf("unavailable observability=%+v", records)
+	}
+	if records[0].RequestBody != nil || records[0].ResponseBody != nil { t.Fatalf("metadata mode persisted content: %+v", records[0]) }
+	active, queued := f.observability.Activity()
+	if len(active) != 0 || len(queued) != 0 { t.Fatalf("activity leaked active=%v queued=%v", active, queued) }
+
 	for _, path := range []string{"/v1/chat/completions","/v1/completions","/v1/responses","/v1/embeddings"} { if !supported(path) { t.Fatalf("not supported: %s", path) } }
 	if supported("/v1/nope") { t.Fatal("unexpected supported path") }
 }
@@ -121,6 +139,19 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 		w = gatewayRequest(t, f.gateway, http.MethodPost, path, f.secret, "{\"model\":\"gateway-model\",\"input\":\"hello\"}")
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"proxied":true`) || !strings.Contains(w.Body.String(), path) { t.Fatalf("proxy %s=%d %s", path, w.Code, w.Body.String()) }
 	}
+	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: "gateway-model", Limit: 10})
+	if err != nil { t.Fatal(err) }
+	if len(records) != 4 { t.Fatalf("request history=%+v", records) }
+	for _, record := range records {
+		if record.Result != "success" || record.StatusCode != http.StatusOK || record.PromptTokens != 2 || record.GeneratedTokens != 3 || record.TotalTokens != 5 {
+			t.Fatalf("request observability=%+v", record)
+		}
+		if record.APIKey == nil || record.APIKey.Name != "gateway" || record.APIKey.Prefix == "" { t.Fatalf("safe API key identity missing: %+v", record) }
+		if record.RequestBody != nil || record.ResponseBody != nil { t.Fatalf("metadata mode persisted content: %+v", record) }
+	}
+	if !records[3].Autoloaded || records[3].LoadDurationMS <= 0 { t.Fatalf("first request should record autoload: %+v", records[3]) }
+	active, queued := f.observability.Activity()
+	if len(active) != 0 || len(queued) != 0 { t.Fatalf("activity leaked active=%v queued=%v", active, queued) }
 }
 
 func TestListModelsDatabaseError(t *testing.T) {
