@@ -10,6 +10,14 @@ import (
 )
 
 func BenchmarkListModels100(b *testing.B) {
+	benchmarkListModels(b, 1)
+}
+
+func BenchmarkListModels100FourInstances(b *testing.B) {
+	benchmarkListModels(b, 4)
+}
+
+func benchmarkListModels(b *testing.B, instancesPerModel int) {
 	ctx := context.Background()
 	root := b.TempDir()
 	db, err := database.Open(ctx, filepath.Join(root, "manager.db"))
@@ -29,10 +37,12 @@ func BenchmarkListModels100(b *testing.B) {
 			_ = tx.Rollback()
 			b.Fatal(err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`,
-			fmt.Sprintf("instance-%03d", i), modelID, fmt.Sprintf("Instance %03d", i), 1, 1, i%2, "normal", 1, 300); err != nil {
-			_ = tx.Rollback()
-			b.Fatal(err)
+		for j := 0; j < instancesPerModel; j++ {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+				fmt.Sprintf("instance-%03d-%d", i, j), modelID, fmt.Sprintf("Instance %03d-%d", i, j), 1, 1, (i+j)%2, "normal", 1, 300, j+1); err != nil {
+				_ = tx.Rollback()
+				b.Fatal(err)
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
