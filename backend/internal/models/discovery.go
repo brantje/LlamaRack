@@ -139,7 +139,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		if summary.Features.Projector || summary.Features.MTPOnly {
+		if warning != "" || summary.Features.Projector || summary.Features.MTPOnly {
 			continue
 		}
 		suggested, err := s.suggestedSidecarOptions(ctx, root, file.path, summary, index, sidecarsByMain)
@@ -175,7 +175,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		if summary.Features.Projector || summary.Features.MTPOnly {
+		if warning != "" || summary.Features.Projector || summary.Features.MTPOnly {
 			continue
 		}
 		suggested, err := s.suggestedSidecarOptions(ctx, root, first.path, summary, index, sidecarsByMain)
