@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS instances (
  gpu_mode TEXT NOT NULL DEFAULT 'auto',
  gpu_devices TEXT,
  tensor_split TEXT,
+ request_log_mode TEXT NOT NULL DEFAULT 'metadata',
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -143,6 +144,74 @@ CREATE TABLE IF NOT EXISTS instance_options (
  option_value TEXT NOT NULL,
  PRIMARY KEY(instance_id, option_key)
 );
+CREATE TABLE IF NOT EXISTS inference_requests (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ started_at INTEGER NOT NULL,
+ finished_at INTEGER NOT NULL,
+ instance_id TEXT NOT NULL,
+ endpoint TEXT NOT NULL,
+ api_key_id TEXT,
+ api_key_name TEXT,
+ api_key_prefix TEXT,
+ streaming INTEGER NOT NULL DEFAULT 0,
+ status_code INTEGER NOT NULL DEFAULT 0,
+ result TEXT NOT NULL,
+ duration_ms REAL NOT NULL DEFAULT 0,
+ ttft_ms REAL,
+ prompt_tokens INTEGER NOT NULL DEFAULT 0,
+ generated_tokens INTEGER NOT NULL DEFAULT 0,
+ total_tokens INTEGER NOT NULL DEFAULT 0,
+ tokens_per_second REAL,
+ queue_duration_ms REAL NOT NULL DEFAULT 0,
+ load_duration_ms REAL NOT NULL DEFAULT 0,
+ autoloaded INTEGER NOT NULL DEFAULT 0,
+ error TEXT NOT NULL DEFAULT '',
+ request_body TEXT,
+ response_body TEXT
+);
+CREATE INDEX IF NOT EXISTS inference_requests_started_at_idx ON inference_requests(started_at DESC);
+CREATE INDEX IF NOT EXISTS inference_requests_instance_started_idx ON inference_requests(instance_id,started_at DESC);
+CREATE INDEX IF NOT EXISTS inference_requests_api_key_started_idx ON inference_requests(api_key_id,started_at DESC);
+CREATE TABLE IF NOT EXISTS observability_counters (
+ metric TEXT NOT NULL,
+ instance_id TEXT NOT NULL DEFAULT '',
+ endpoint TEXT NOT NULL DEFAULT '',
+ status_code INTEGER NOT NULL DEFAULT 0,
+ result TEXT NOT NULL DEFAULT '',
+ streaming INTEGER NOT NULL DEFAULT 0,
+ value REAL NOT NULL DEFAULT 0,
+ PRIMARY KEY(metric,instance_id,endpoint,status_code,result,streaming)
+);
+CREATE TRIGGER IF NOT EXISTS inference_requests_autoload_counter
+AFTER INSERT ON inference_requests WHEN NEW.autoloaded=1
+BEGIN
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('autoload_total',NEW.instance_id,1)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+1;
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('load_duration_ms_total',NEW.instance_id,NEW.load_duration_ms)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+excluded.value;
+END;
+CREATE TRIGGER IF NOT EXISTS inference_requests_failed_autoload_counter
+AFTER INSERT ON inference_requests WHEN NEW.autoloaded=1 AND NEW.result<>'success'
+BEGIN
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('failed_start_total',NEW.instance_id,1)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+1;
+END;
+CREATE TABLE IF NOT EXISTS hardware_metric_samples (
+ collected_at INTEGER NOT NULL,
+ metric TEXT NOT NULL,
+ device_id TEXT NOT NULL DEFAULT '',
+ instance_id TEXT NOT NULL DEFAULT '',
+ value REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_time_idx ON hardware_metric_samples(collected_at DESC);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_metric_time_idx ON hardware_metric_samples(metric,collected_at DESC);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_device_time_idx ON hardware_metric_samples(device_id,collected_at DESC);
 CREATE TABLE IF NOT EXISTS download_jobs (
  id TEXT PRIMARY KEY,
  provider TEXT NOT NULL,

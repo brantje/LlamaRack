@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { mockNuxtImport } from '@nuxt/test-utils/runtime'
 import InstanceDetailPage from '~/pages/instances/[id]/detail.vue'
@@ -13,7 +14,7 @@ function seed() {
   const manager = useManager()
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = [{ id: 'm1', name: 'Gemma', gguf_path: 'gemma.gguf', total_bytes: 1, context_length: 32768 }]
-  manager.instances.value = [{ id: 'gemma-4', model_id: 'm1', name: 'Gemma 4', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }]
+  manager.instances.value = [{ id: 'gemma-4', model_id: 'm1', name: 'Gemma 4', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata' }]
   manager.runtimes.value = { m1: [{ instance_id: 'gemma-4', model_id: 'm1', state: 'READY', pid: 308, port: 12001 }] }
   manager.runtimeTelemetry.value = {
     'gemma-4': {
@@ -36,12 +37,18 @@ function seed() {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path.startsWith('/api/v1/logs?')) return { instance_id: 'gemma-4', entries: [] }
+    return []
+  })
+  vi.stubGlobal('EventSource', undefined)
   seed()
 })
 
 describe('Instance detail page', () => {
   it('renders runtime resources and every llama.cpp metrics snapshot field', async () => {
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('Gemma 4')
     expect(text).toContain('READY')
@@ -66,8 +73,9 @@ describe('Instance detail page', () => {
     expect(text).toContain('Accepted draft tokens')
     expect(text).toContain('Verification steps')
     expect(text).toContain('75.0%')
+    expect(text).toContain('Current-session logs')
     expect(wrapper.get('[data-testid="instance-detail-spec-positions"]').text()).toContain('Position 1: 18')
-    expect(mocks.request).not.toHaveBeenCalled()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=gemma-4&limit=2000')
   })
 
   it('shows stopped-state guidance when no llama metrics snapshot exists', async () => {
@@ -75,6 +83,7 @@ describe('Instance detail page', () => {
     manager.runtimes.value = { m1: [{ instance_id: 'gemma-4', model_id: 'm1', state: 'UNLOADED' }] }
     manager.runtimeTelemetry.value = {}
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    await flushPromises()
     expect(wrapper.text()).toContain('llama.cpp metrics unavailable while stopped')
     expect(wrapper.text()).toContain('Start the Instance')
   })

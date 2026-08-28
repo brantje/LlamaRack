@@ -10,10 +10,14 @@ const confirmation = ref<{ request: (options: Record<string, string>) => Promise
 const form = reactive({
   model_id: '', name: '', enabled: true, always_on: false, autoload_enabled: true,
   priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0,
-  gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '', options: {} as Record<string, string>
+  gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '', request_log_mode: 'metadata', options: {} as Record<string, string>
 })
 const modelItems = computed(() => manager.models.value.map(model => ({ label: model.name, value: model.id })))
 const priorityItems = ['low', 'normal', 'high'].map(value => ({ label: value[0]!.toUpperCase() + value.slice(1), value }))
+const requestLogItems = [
+  { label: 'Metadata only', value: 'metadata' },
+  { label: 'Full request and response content', value: 'full' }
+]
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/-+/g, '-').replace(/^[-._]+|[-._]+$/g, '')
@@ -29,7 +33,11 @@ onMounted(async () => {
       manager.request<any>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`),
       manager.request<Record<string, string>>(`/api/v1/instances/${encodeURIComponent(originalID.value)}/options`)
     ])
-    Object.assign(form, instance, { gpu_devices: [...(instance.gpu_devices || [])], options: { ...(options || {}) } })
+    Object.assign(form, instance, {
+      gpu_devices: [...(instance.gpu_devices || [])],
+      request_log_mode: instance.request_log_mode || 'metadata',
+      options: { ...(options || {}) }
+    })
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Instance'
   } finally {
@@ -71,7 +79,8 @@ async function submit() {
         priority: form.priority, eviction_enabled: form.eviction_enabled,
         idle_unload_seconds: form.idle_unload_seconds, gpu_mode: form.gpu_mode,
         gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices : [],
-        tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '', options: form.options,
+        tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '',
+        request_log_mode: form.request_log_mode, options: form.options,
         restart_running: running, confirm_model_id_change: rename
       }
     })
@@ -97,6 +106,12 @@ async function submit() {
         <USeparator label="Lifecycle & scheduling" />
         <div class="grid gap-4 md:grid-cols-2"><UFormField label="Priority" name="priority"><USelectMenu v-model="form.priority" class="w-full" :items="priorityItems" label-key="label" value-key="value" /></UFormField><UFormField label="Idle unload timeout (seconds)" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField></div>
         <div class="space-y-3"><UCheckbox v-model="form.enabled" label="Enabled" /><UCheckbox v-model="form.always_on" label="Always On" description="Keep this Instance running whenever resources permit." /><UCheckbox v-model="form.autoload_enabled" label="Autoload on request" /><UCheckbox v-model="form.eviction_enabled" label="Allow resource-pressure eviction" description="Allow the manager to stop this Instance when RAM/VRAM is needed for another Instance." /></div>
+
+        <USeparator label="Observability & privacy" />
+        <UFormField label="Inference request logging" name="request_log_mode" description="Metadata-only is the privacy-preserving default and still records timing, tokens, result, endpoint, streaming state and safe API-key attribution.">
+          <USelectMenu v-model="form.request_log_mode" class="w-full md:max-w-xl" :items="requestLogItems" label-key="label" value-key="value" />
+        </UFormField>
+        <UAlert v-if="form.request_log_mode === 'full'" color="warning" variant="subtle" title="Full content logging enabled" description="Prompts, messages, generated content, embeddings payloads and tool arguments for this Instance may be retained until the configured observability retention period expires." />
 
         <USeparator label="Placement" />
         <HardwarePlacementEditor

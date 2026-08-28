@@ -29,26 +29,28 @@ type Activity struct {
 }
 
 type Service struct {
-	models          *models.Service
-	instances       *instances.Service
-	sup             *supervisor.Supervisor
-	hardware        hardware.Snapshotter
-	profile         func() (llamacpp.Profile, error)
-	mu              sync.Mutex
-	loads           map[string]*loadCall
-	manuallyStopped map[string]bool
-	resourceBlocked map[string]string
-	resourceStarts  int
-	activities      map[string]Activity
-	idleLocks       map[string]*sync.Mutex
-	operationGates  map[string]chan struct{}
-	now             func() time.Time
+	models                *models.Service
+	instances             *instances.Service
+	sup                   *supervisor.Supervisor
+	hardware              hardware.Snapshotter
+	profile               func() (llamacpp.Profile, error)
+	observabilityRecorder ObservabilityRecorder
+	mu                    sync.Mutex
+	loads                 map[string]*loadCall
+	manuallyStopped       map[string]bool
+	resourceBlocked       map[string]string
+	resourceStarts        int
+	activities            map[string]Activity
+	idleLocks             map[string]*sync.Mutex
+	operationGates        map[string]chan struct{}
+	now                   func() time.Time
 }
 
 type loadCall struct {
 	done     chan struct{}
 	endpoint string
 	err      error
+	autoload bool
 }
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
@@ -77,7 +79,7 @@ func (s *Service) Acquire(ctx context.Context, instanceID string) (string, func(
 	lock.Lock()
 	s.beginRequest(i.ID)
 	lock.Unlock()
-	endpoint, err := s.ensureReadyInstance(ctx, i)
+	endpoint, err := s.ensureReadyInstance(ctx, i, true)
 	if err != nil {
 		s.finishRequest(i.ID)
 		return "", nil, err
@@ -91,10 +93,10 @@ func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	return s.ensureReadyInstance(ctx, i)
+	return s.ensureReadyInstance(ctx, i, false)
 }
 
-func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance) (string, error) {
+func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance, inferenceRequest ...bool) (string, error) {
 	if !i.Enabled {
 		return "", errors.New("instance disabled")
 	}
@@ -112,7 +114,8 @@ func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance)
 		s.clearResourceBlock(i.ID)
 		slog.Info("resource-pressure block overridden by inference request", "instance_id", i.ID)
 	}
-	return s.startSingleFlight(ctx, i)
+	autoload := len(inferenceRequest) > 0 && inferenceRequest[0]
+	return s.startSingleFlight(ctx, i, autoload)
 }
 
 func (s *Service) StartInstance(ctx context.Context, id string) (string, error) {
@@ -136,7 +139,7 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 	if endpoint, ok := s.sup.Endpoint(id); ok {
 		return endpoint, nil
 	}
-	return s.startSingleFlight(ctx, i)
+	return s.startSingleFlight(ctx, i, false)
 }
 
 func (s *Service) StopInstance(ctx context.Context, id string) error {
@@ -160,6 +163,7 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 		}
 		return err
 	}
+	s.AddManagerLog(id, "worker stopped")
 	return nil
 }
 
@@ -182,7 +186,11 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	if err := s.sup.Stop(ctx, id); err != nil {
 		return "", err
 	}
-	return s.startOne(ctx, i)
+	endpoint, err := s.startOne(ctx, i)
+	if err == nil {
+		s.AddManagerLog(id, "restart completed")
+	}
+	return endpoint, err
 }
 
 func (s *Service) KillInstance(ctx context.Context, id string) error {
@@ -197,7 +205,11 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 	}
 	s.clearResourceBlock(id)
 	s.markManualStop(id)
-	return s.sup.Kill(id)
+	if err := s.sup.Kill(id); err != nil {
+		return err
+	}
+	s.AddManagerLog(id, "worker killed")
+	return nil
 }
 
 func (s *Service) RuntimeInstance(ctx context.Context, id string) (supervisor.Runtime, error) {
@@ -395,7 +407,10 @@ func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Dura
 		lock.Unlock()
 		if err != nil {
 			slog.Warn("idle unload failed", "instance_id", i.ID, "error", err)
+			continue
 		}
+		s.recordObservabilityEvent(ctx, ObservabilityIdleUnload, i.ID, 0)
+		s.AddManagerLog(i.ID, fmt.Sprintf("idle-unloaded after %s without active requests", idleTimeout))
 	}
 }
 
@@ -543,19 +558,27 @@ func (s *Service) resourceStartActive() bool {
 	return s.resourceStarts > 0
 }
 
-func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (string, error) {
+func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, autoload ...bool) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
+	requestedAutoload := len(autoload) > 0 && autoload[0]
+	created := false
 	s.mu.Lock()
 	c := s.loads[i.ID]
 	if c == nil {
-		c = &loadCall{done: make(chan struct{})}
+		c = &loadCall{done: make(chan struct{}), autoload: requestedAutoload}
 		s.loads[i.ID] = c
-		go s.runLoad(i.ID, c)
+		created = true
 	}
 	s.mu.Unlock()
+	if created {
+		if requestedAutoload {
+			s.recordObservabilityEvent(ctx, ObservabilityAutoload, i.ID, 0)
+		}
+		go s.runLoad(i.ID, c)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -568,6 +591,9 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance) (
 func (s *Service) runLoad(id string, c *loadCall) {
 	release, err := s.acquireOperation(context.Background(), id)
 	if err != nil {
+		if c.autoload {
+			s.AddManagerLog(id, "autoload triggered by inference request")
+		}
 		s.completeLoad(id, c, "", err)
 		return
 	}
@@ -590,6 +616,9 @@ func (s *Service) runLoad(id string, c *loadCall) {
 			}
 		}
 	}
+	if c.autoload {
+		s.AddManagerLog(id, "autoload triggered by inference request")
+	}
 	s.completeLoad(id, c, endpoint, err)
 }
 
@@ -608,7 +637,22 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 	return s.startOneWithEviction(ctx, i, true)
 }
 
-func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (string, error) {
+func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (endpoint string, err error) {
+	started := time.Now()
+	defer func() {
+		duration := time.Since(started)
+		if err == nil {
+			s.recordObservabilityEvent(ctx, ObservabilityLoad, i.ID, duration)
+			s.AddManagerLog(i.ID, fmt.Sprintf("worker ready after %s", duration.Round(time.Millisecond)))
+			return
+		}
+		if errors.Is(err, errResourcePressureBlocked) {
+			return
+		}
+		s.recordObservabilityEvent(ctx, ObservabilityFailedStart, i.ID, duration)
+		s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())
+	}()
+
 	if allowEviction {
 		s.beginResourceStart()
 		defer s.endResourceStart()
@@ -752,6 +796,8 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 		}
 		return err
 	}
+	s.recordObservabilityEvent(ctx, ObservabilityEviction, id, 0)
+	s.AddManagerLog(id, "evicted for resource pressure")
 	slog.Info("evicted instance for resource pressure", "instance_id", id, "always_on", i.AlwaysOn)
 	return nil
 }

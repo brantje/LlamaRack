@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brantje/llamacpp-manager/backend/internal/observability"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
@@ -25,14 +26,19 @@ func TestRuntimeTelemetryHelpersAndEventShape(t *testing.T) {
 	gpuUtil := 17.0
 	vram := int64(2048)
 	predicted := 52.9
-	event := runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: []runtimeTelemetrySample{{
+	shared := []observability.RuntimeTelemetrySample{{
 		Sample: telemetry.Sample{
 			InstanceID: "ready", PID: 42, GPUDevices: []string{"CUDA0"},
 			GPUs:          []telemetry.GPUUsage{{DeviceID: "CUDA0", VRAMUsedBytes: &vram, UtilizationPct: &gpuUtil}},
 			VRAMUsedBytes: &vram, GPUUtilizationPct: &gpuUtil, CollectedAt: time.Unix(1, 0).UTC(),
 		},
 		LlamaMetrics: &telemetry.LlamaMetrics{PredictedTokensPerSecond: &predicted},
-	}}}
+	}}
+	converted := sharedTelemetry(shared)
+	if len(converted) != 1 || converted[0].InstanceID != "ready" || converted[0].LlamaMetrics == nil || converted[0].LlamaMetrics.PredictedTokensPerSecond == nil {
+		t.Fatalf("converted=%+v", converted)
+	}
+	event := runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: converted}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)

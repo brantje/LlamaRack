@@ -29,6 +29,7 @@ export type Instance = {
   gpu_mode: 'auto' | 'manual' | string
   gpu_devices?: string[]
   tensor_split?: string
+  request_log_mode?: 'metadata' | 'full' | string
 }
 export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
 export type RuntimeGPUUsage = { device_id: string; vram_used_bytes?: number; utilization_pct?: number }
@@ -42,6 +43,71 @@ export type RuntimeTelemetry = {
   cpu_percent?: number
   memory_used_bytes?: number
   collected_at: string
+  llama_metrics?: Record<string, unknown>
+}
+export type HardwareGPU = {
+  id: string
+  backend: string
+  index: number
+  uuid?: string
+  name: string
+  total_bytes: number
+  used_bytes: number
+  free_bytes: number
+  utilization_pct: number
+}
+export type HardwareProcess = { pid: number; device_id: string; used_bytes: number; process_name?: string }
+export type HardwareSnapshot = {
+  ram_total_bytes: number
+  ram_available_bytes: number
+  gpus: HardwareGPU[]
+  processes: HardwareProcess[]
+  collected_at: string
+}
+export type Percentiles = { p50?: number; p95?: number; p99?: number }
+export type GatewaySummary = {
+  since: number
+  requests: number
+  successes: number
+  errors: number
+  active: number
+  queued: number
+  active_api_keys: number
+  prompt_tokens: number
+  generated_tokens: number
+  total_tokens: number
+  latency_ms: Percentiles
+  ttft_ms: Percentiles
+}
+export type ObservabilityRequest = {
+  id: number
+  started_at: number
+  finished_at: number
+  instance_id: string
+  endpoint: string
+  api_key?: { id: string; name: string; prefix: string }
+  streaming: boolean
+  status_code: number
+  result: string
+  duration_ms: number
+  ttft_ms?: number
+  prompt_tokens: number
+  generated_tokens: number
+  total_tokens: number
+  tokens_per_second?: number
+  queue_duration_ms: number
+  load_duration_ms: number
+  autoloaded: boolean
+  error?: string
+  request_body?: string
+  response_body?: string
+}
+export type ObservabilityLive = {
+  collected_at: string
+  hardware: HardwareSnapshot
+  telemetry: RuntimeTelemetry[]
+  gateway: GatewaySummary
+  requests: ObservabilityRequest[]
 }
 export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
 export type Profile = {
@@ -51,7 +117,16 @@ export type Profile = {
   options: Array<{ key: string; value_hint?: string; description?: string; kind?: string; choices?: string[] }>
 }
 
-type RuntimeEvent = { type: string; runtime?: Runtime; runtimes?: Runtime[]; telemetry?: RuntimeTelemetry[] }
+type RuntimeEvent = {
+  type: string
+  runtime?: Runtime
+  runtimes?: Runtime[]
+  telemetry?: RuntimeTelemetry[]
+  collected_at?: string
+  hardware?: HardwareSnapshot
+  gateway?: GatewaySummary
+  requests?: ObservabilityRequest[]
+}
 
 let runtimeSocket: WebSocket | null = null
 let runtimeReconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -66,6 +141,7 @@ export function useManager() {
   const instances = useState<Instance[]>('manager-instances', () => [])
   const runtimes = useState<Record<string, Runtime[]>>('manager-runtimes', () => ({}))
   const runtimeTelemetry = useState<Record<string, RuntimeTelemetry>>('manager-runtime-telemetry', () => ({}))
+  const observabilityLive = useState<ObservabilityLive | null>('manager-observability-live', () => null)
   const profile = useState<Profile | null>('manager-profile', () => null)
   const backendError = useState('manager-backend-error', () => '')
   const runtimeEventsConnected = useState('manager-runtime-events-connected', () => false)
@@ -110,6 +186,33 @@ export function useManager() {
     runtimeTelemetry.value = next
   }
 
+  function applyObservability(message: RuntimeEvent) {
+    if (!message.hardware || !message.collected_at) return
+    const telemetry = Array.isArray(message.telemetry) ? message.telemetry : []
+    const gateway = message.gateway || {
+      since: Date.now() - 15 * 60 * 1000,
+      requests: 0,
+      successes: 0,
+      errors: 0,
+      active: 0,
+      queued: 0,
+      active_api_keys: 0,
+      prompt_tokens: 0,
+      generated_tokens: 0,
+      total_tokens: 0,
+      latency_ms: {},
+      ttft_ms: {}
+    }
+    observabilityLive.value = {
+      collected_at: message.collected_at,
+      hardware: message.hardware,
+      telemetry,
+      gateway,
+      requests: Array.isArray(message.requests) ? message.requests : []
+    }
+    if (telemetry.length) applyRuntimeTelemetry(telemetry)
+  }
+
   function disconnectRuntimeEvents() {
     if (runtimeReconnectTimer) {
       clearTimeout(runtimeReconnectTimer)
@@ -117,6 +220,7 @@ export function useManager() {
     }
     runtimeEventsConnected.value = false
     runtimeTelemetry.value = {}
+    observabilityLive.value = null
     const socket = runtimeSocket
     runtimeSocket = null
     socket?.close()
@@ -148,12 +252,14 @@ export function useManager() {
       if (message.type === 'runtime_snapshot' && Array.isArray(message.runtimes)) applyRuntimeSnapshot(message.runtimes)
       else if (message.type === 'runtime' && message.runtime) applyRuntime(message.runtime)
       else if (message.type === 'runtime_telemetry' && Array.isArray(message.telemetry)) applyRuntimeTelemetry(message.telemetry)
+      else if (message.type === 'observability') applyObservability(message)
     }
     socket.onclose = () => {
       if (runtimeSocket !== socket) return
       runtimeSocket = null
       runtimeEventsConnected.value = false
       runtimeTelemetry.value = {}
+      observabilityLive.value = null
       if (!user.value) return
       runtimeReconnectTimer = setTimeout(() => {
         runtimeReconnectTimer = undefined
@@ -205,6 +311,7 @@ export function useManager() {
     instances.value = []
     runtimes.value = {}
     runtimeTelemetry.value = {}
+    observabilityLive.value = null
   }
 
   async function refresh() {
@@ -266,6 +373,7 @@ export function useManager() {
     instances,
     runtimes,
     runtimeTelemetry,
+    observabilityLive,
     profile,
     backendError,
     runtimeEventsConnected,
