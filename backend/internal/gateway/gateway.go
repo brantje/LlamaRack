@@ -92,19 +92,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	requestID := newRequestID()
 	w.Header().Set(headerRequestID, requestID)
+	started := time.Now()
 	instanceID := strings.TrimSpace(envelope.Model)
+	record := observability.RequestRecord{
+		StartedAt: started.UnixMilli(), InstanceID: instanceID, Endpoint: r.URL.Path, Streaming: envelope.Stream,
+		APIKey: &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix},
+	}
 	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
 	if err != nil {
+		record.StatusCode = http.StatusServiceUnavailable
+		record.Result = "error"
+		record.Error = sanitizeError(err.Error())
+		record.FinishedAt = time.Now().UnixMilli()
+		record.DurationMS = milliseconds(time.Since(started))
+		g.persist(r.Context(), requestID, nil, record)
 		writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}
+	record.InstanceID = instance.ID
 	w.Header().Set(headerInstance, instance.ID)
-
-	started := time.Now()
-	record := observability.RequestRecord{
-		StartedAt: started.UnixMilli(), InstanceID: instance.ID, Endpoint: r.URL.Path, Streaming: envelope.Stream,
-		APIKey: &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix},
-	}
 	if instance.RequestLogMode == "full" {
 		value := string(body)
 		record.RequestBody = &value
