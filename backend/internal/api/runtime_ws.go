@@ -1,17 +1,16 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
+	"github.com/brantje/llamacpp-manager/backend/internal/observability"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
@@ -19,6 +18,7 @@ import (
 type runtimeWebSocketHandler struct {
 	auth           *auth.Service
 	lifecycle      *lifecycle.Service
+	sampler        *observability.Sampler
 	allowedOrigins string
 }
 
@@ -33,12 +33,14 @@ type runtimeSnapshotEvent struct {
 }
 
 type runtimeTelemetryEvent struct {
-	Type      string                   `json:"type"`
-	Telemetry []runtimeTelemetrySample `json:"telemetry"`
+	Type      string                                  `json:"type"`
+	Telemetry []observability.RuntimeTelemetrySample `json:"telemetry"`
 }
 
-func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string) http.Handler {
-	return &runtimeWebSocketHandler{auth: a, lifecycle: l, allowedOrigins: allowedOrigins}
+func NewRuntimeWebSocketHandler(a *auth.Service, l *lifecycle.Service, allowedOrigins string, samplers ...*observability.Sampler) http.Handler {
+	var sampler *observability.Sampler
+	if len(samplers) > 0 { sampler = samplers[0] }
+	return &runtimeWebSocketHandler{auth: a, lifecycle: l, sampler: sampler, allowedOrigins: allowedOrigins}
 }
 
 func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,115 +62,66 @@ func (h *runtimeWebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return websocketOriginAllowed(request, h.allowedOrigins)
 	}}
 	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer conn.Close()
 
 	snapshot, events, cancel, err := h.lifecycle.SubscribeRuntimes(r.Context())
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer cancel()
-	if err := conn.WriteJSON(runtimeSnapshotEvent{Type: "runtime_snapshot", Runtimes: snapshot}); err != nil {
-		return
-	}
+	if err := conn.WriteJSON(runtimeSnapshotEvent{Type: "runtime_snapshot", Runtimes: snapshot}); err != nil { return }
 
-	current := make(map[string]supervisor.Runtime, len(snapshot))
-	for _, runtime := range snapshot {
-		current[runtime.InstanceID] = runtime
-	}
-	var latestHardware hardware.Snapshot
-	collector := telemetry.New(func(ctx context.Context) (hardware.Snapshot, error) {
-		value, err := h.lifecycle.HardwareSnapshot(ctx)
-		latestHardware = value
-		return value, err
-	})
-	telemetryResults := make(chan []runtimeTelemetrySample, 1)
-	telemetryTicker := time.NewTicker(time.Second)
-	defer telemetryTicker.Stop()
-	collecting := false
-	collectTelemetry := func() {
-		if collecting {
-			return
-		}
-		runtimes := runtimeValues(current)
-		if !hasRunningRuntime(runtimes) {
-			return
-		}
-		collecting = true
-		go func() {
-			samples := collector.Collect(r.Context(), runtimes)
-			samples = applyGlobalTelemetryFallback(samples, latestHardware)
-			snapshots := attachLlamaMetrics(r.Context(), samples, runtimes, h.lifecycle.RuntimeEndpoint)
-			select {
-			case telemetryResults <- snapshots:
-			case <-r.Context().Done():
+	var observabilityEvents <-chan observability.LiveSnapshot
+	if h.sampler != nil {
+		initial, live, cancelLive := h.sampler.Subscribe()
+		defer cancelLive()
+		observabilityEvents = live
+		if !initial.CollectedAt.IsZero() {
+			if err := conn.WriteJSON(initial); err != nil { return }
+			if len(initial.Telemetry) > 0 {
+				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: initial.Telemetry}); err != nil { return }
 			}
-		}()
+		}
 	}
-	collectTelemetry()
 
 	disconnected := make(chan struct{})
 	go func() {
 		defer close(disconnected)
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
+			if _, _, err := conn.ReadMessage(); err != nil { return }
 		}
 	}()
 
 	for {
 		select {
-		case <-r.Context().Done():
-			return
-		case <-disconnected:
-			return
+		case <-r.Context().Done(): return
+		case <-disconnected: return
 		case runtime, open := <-events:
-			if !open {
-				return
+			if !open { return }
+			if err := conn.WriteJSON(runtimeEvent{Type: "runtime", Runtime: runtime}); err != nil { return }
+		case sample, open := <-observabilityEvents:
+			if !open { observabilityEvents = nil; continue }
+			if err := conn.WriteJSON(sample); err != nil { return }
+			if len(sample.Telemetry) > 0 {
+				if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: sample.Telemetry}); err != nil { return }
 			}
-			current[runtime.InstanceID] = runtime
-			if err := conn.WriteJSON(runtimeEvent{Type: "runtime", Runtime: runtime}); err != nil {
-				return
-			}
-		case samples := <-telemetryResults:
-			collecting = false
-			if len(samples) == 0 {
-				continue
-			}
-			if err := conn.WriteJSON(runtimeTelemetryEvent{Type: "runtime_telemetry", Telemetry: samples}); err != nil {
-				return
-			}
-		case <-telemetryTicker.C:
-			collectTelemetry()
 		}
 	}
 }
 
+// applyGlobalTelemetryFallback is retained for the focused telemetry helper
+// tests. Production WebSocket clients consume the shared observability sampler.
 func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.Snapshot) []telemetry.Sample {
-	if len(samples) == 0 || len(snapshot.GPUs) == 0 {
-		return samples
-	}
+	if len(samples) == 0 || len(snapshot.GPUs) == 0 { return samples }
 
 	byID := make(map[string]hardware.GPU, len(snapshot.GPUs))
-	for _, gpu := range snapshot.GPUs {
-		byID[gpu.ID] = gpu
-	}
+	for _, gpu := range snapshot.GPUs { byID[gpu.ID] = gpu }
 	fallbackGPUs := func(sample telemetry.Sample) []hardware.GPU {
-		if len(sample.GPUDevices) == 0 {
-			return snapshot.GPUs
-		}
+		if len(sample.GPUDevices) == 0 { return snapshot.GPUs }
 		selected := make([]hardware.GPU, 0, len(sample.GPUDevices))
 		for _, deviceID := range sample.GPUDevices {
-			if gpu, ok := byID[deviceID]; ok {
-				selected = append(selected, gpu)
-			}
+			if gpu, ok := byID[deviceID]; ok { selected = append(selected, gpu) }
 		}
-		if len(selected) == 0 {
-			return snapshot.GPUs
-		}
+		if len(selected) == 0 { return snapshot.GPUs }
 		return selected
 	}
 
@@ -176,17 +129,13 @@ func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.
 		gpus := fallbackGPUs(samples[index])
 		if samples[index].GPUUtilizationPct == nil {
 			var utilization float64
-			for _, gpu := range gpus {
-				utilization += gpu.UtilizationPct
-			}
+			for _, gpu := range gpus { utilization += gpu.UtilizationPct }
 			utilization /= float64(len(gpus))
 			samples[index].GPUUtilizationPct = &utilization
 		}
 		if samples[index].VRAMUsedBytes == nil {
 			var used int64
-			for _, gpu := range gpus {
-				used += gpu.UsedBytes
-			}
+			for _, gpu := range gpus { used += gpu.UsedBytes }
 			samples[index].VRAMUsedBytes = &used
 		}
 	}
@@ -195,38 +144,24 @@ func applyGlobalTelemetryFallback(samples []telemetry.Sample, snapshot hardware.
 
 func runtimeValues(current map[string]supervisor.Runtime) []supervisor.Runtime {
 	values := make([]supervisor.Runtime, 0, len(current))
-	for _, runtime := range current {
-		values = append(values, runtime)
-	}
+	for _, runtime := range current { values = append(values, runtime) }
 	return values
 }
 
 func hasRunningRuntime(runtimes []supervisor.Runtime) bool {
-	for _, runtime := range runtimes {
-		if runtime.PID > 0 {
-			return true
-		}
-	}
+	for _, runtime := range runtimes { if runtime.PID > 0 { return true } }
 	return false
 }
 
 func websocketOriginAllowed(r *http.Request, configured string) bool {
 	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
+	if origin == "" { return true }
 	for _, allowed := range strings.Split(configured, ",") {
-		if strings.TrimSpace(allowed) == origin {
-			return true
-		}
+		if strings.TrimSpace(allowed) == origin { return true }
 	}
 	originURL, err := url.Parse(origin)
-	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") {
-		return false
-	}
+	if err != nil || originURL.Hostname() == "" || (originURL.Scheme != "http" && originURL.Scheme != "https") { return false }
 	requestURL, err := url.Parse("http://" + r.Host)
-	if err != nil || requestURL.Hostname() == "" {
-		return false
-	}
+	if err != nil || requestURL.Hostname() == "" { return false }
 	return strings.EqualFold(originURL.Hostname(), requestURL.Hostname())
 }
