@@ -55,6 +55,12 @@ function isDiscoverSettings(value: unknown): value is DiscoverSettings {
   const candidate = value as Partial<DiscoverSettings>
   return Boolean(candidate.hybrid_recommendations_enabled && typeof candidate.hybrid_recommendations_enabled.value === 'boolean')
 }
+function defaultDiscoverSettings(): DiscoverSettings {
+  return { hybrid_recommendations_enabled: { value: true, source: 'default', editable: true } }
+}
+function normalizeDiscoverSettings(value: unknown): DiscoverSettings {
+  return isDiscoverSettings(value) ? value : defaultDiscoverSettings()
+}
 function syncForm(value: GeneralSettings) {
   for (const key of Object.keys(form) as Array<keyof typeof form>) {
     const setting = value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
@@ -66,12 +72,13 @@ async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    const [value, system, discover] = await Promise.all([
+    const [value, system, discoverValue] = await Promise.all([
       manager.request<GeneralSettings>('/api/v1/settings/general'),
       manager.request<SystemNetwork>('/api/v1/system'),
       manager.request<DiscoverSettings>('/api/v1/settings/discover')
     ])
-    if (!isGeneralSettings(value) || !system?.network || !isDiscoverSettings(discover)) throw new Error('Invalid manager settings response')
+    if (!isGeneralSettings(value) || !system?.network) throw new Error('Invalid manager settings response')
+    const discover = normalizeDiscoverSettings(discoverValue)
     settings.value = value
     discoverSettings.value = discover
     network.value = system.network
@@ -97,11 +104,12 @@ async function save() {
     if (setting?.editable) body[key] = form[key]
   }
   try {
-    const [value, discover] = await Promise.all([
+    const [value, discoverValue] = await Promise.all([
       manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body }),
       manager.request<DiscoverSettings>('/api/v1/settings/discover', { method: 'PUT', body: { hybrid_recommendations_enabled: allowHybridDiscoverRecommendations.value } })
     ])
-    if (!isGeneralSettings(value) || !isDiscoverSettings(discover)) throw new Error('Invalid manager settings response')
+    if (!isGeneralSettings(value)) throw new Error('Invalid manager settings response')
+    const discover = normalizeDiscoverSettings(discoverValue)
     settings.value = value
     discoverSettings.value = discover
     allowHybridDiscoverRecommendations.value = discover.hybrid_recommendations_enabled.value
