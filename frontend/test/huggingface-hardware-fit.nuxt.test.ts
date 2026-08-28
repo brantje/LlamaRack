@@ -27,22 +27,13 @@ function seedManager() {
   manager.runtimes.value = {}
 }
 
-async function selectModel(wrapper: any) {
-  await wrapper.find('form').trigger('submit')
-  await flushPromises()
-  const card = wrapper.findAll('[class*="cursor-pointer"]').find((node: any) => node.text().includes('acme/demo'))
-  expect(card).toBeTruthy()
-  await card.trigger('click')
-  await flushPromises()
-}
-
 beforeEach(() => {
   mocks.request.mockReset()
   seedManager()
 })
 
 describe('Hugging Face GGUF hardware fit', () => {
-  it('keeps HF GGUF metadata visible and classifies single-GPU, multi-GPU and CPU-split weight fits', async () => {
+  it('keeps cached HF GGUF metadata visible and classifies single-GPU, multi-GPU and CPU-split weight fits', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/search?')) return [{
         id: 'acme/demo', downloads: 1, likes: 2, parameter_count: 27_000_000_000, private: false, gated: false, tags: ['gguf']
@@ -60,8 +51,14 @@ describe('Hugging Face GGUF hardware fit', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ModelsDiscover, { route: false })
-    await selectModel(wrapper)
+    const list = await mountSuspended(ModelsDiscover, { route: false })
+    await list.find('form').trigger('submit')
+    await flushPromises()
+    expect(list.text()).toContain('Model size 27B params')
+    list.unmount()
+
+    const wrapper = await mountSuspended(ModelsDiscover, { props: { repoId: 'acme/demo' }, route: false })
+    await flushPromises()
 
     expect(wrapper.text()).toContain('Hugging Face GGUF metadata: 27B params')
     expect(wrapper.text()).toContain('GPU-only weight fit')
@@ -76,7 +73,6 @@ describe('Hugging Face GGUF hardware fit', () => {
   it('shows CPU-only or unavailable guidance when GPUs or hardware data are unavailable', async () => {
     let hardwareMode: 'cpu' | 'error' = 'cpu'
     mocks.request.mockImplementation(async (path: string) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [{ id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, tags: ['gguf'] }]
       if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
       if (path === '/api/v1/hardware') {
         if (hardwareMode === 'error') throw new Error('probe failed')
@@ -85,19 +81,16 @@ describe('Hugging Face GGUF hardware fit', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ModelsDiscover, { route: false })
-    await selectModel(wrapper)
-    expect(wrapper.get('[data-testid="artifact-hardware-fit"]').text()).toContain('CPU only')
-    expect(wrapper.text()).toContain('No NVIDIA/ROCm GPU is currently detected')
-
-    const back = wrapper.findAll('button').find((node: any) => node.text().trim() === 'Back to results')
-    expect(back).toBeTruthy()
-    await back.trigger('click')
-    hardwareMode = 'error'
-    const card = wrapper.findAll('[class*="cursor-pointer"]').find((node: any) => node.text().includes('acme/demo'))
-    await card.trigger('click')
+    const cpu = await mountSuspended(ModelsDiscover, { props: { repoId: 'acme/demo' }, route: false })
     await flushPromises()
-    expect(wrapper.get('[data-testid="artifact-hardware-fit"]').text()).toContain('Hardware fit unavailable')
-    wrapper.unmount()
+    expect(cpu.get('[data-testid="artifact-hardware-fit"]').text()).toContain('CPU only')
+    expect(cpu.text()).toContain('No NVIDIA/ROCm GPU is currently detected')
+    cpu.unmount()
+
+    hardwareMode = 'error'
+    const unavailable = await mountSuspended(ModelsDiscover, { props: { repoId: 'acme/demo' }, route: false })
+    await flushPromises()
+    expect(unavailable.get('[data-testid="artifact-hardware-fit"]').text()).toContain('Hardware fit unavailable')
+    unavailable.unmount()
   })
 })
