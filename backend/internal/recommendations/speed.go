@@ -259,6 +259,10 @@ func quantizationBandwidthEfficiency(value string) (float64, float64) {
 		prefix = "Q" + strings.TrimPrefix(prefix, "IQ")
 	}
 	switch {
+	case strings.HasPrefix(prefix, "Q1"):
+		// One-bit kernels trade much more decode/dequant work for their tiny weight
+		// traffic. Keep their sustained-bandwidth range deliberately conservative.
+		return 0.28, 0.52
 	case strings.HasPrefix(prefix, "Q2"), strings.HasPrefix(prefix, "Q3"):
 		return 0.42, 0.66
 	case strings.HasPrefix(prefix, "Q4"):
