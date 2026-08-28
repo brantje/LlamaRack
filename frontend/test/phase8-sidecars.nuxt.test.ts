@@ -93,8 +93,29 @@ describe('Phase 8 GGUF helper integration', () => {
         'spec-type': 'draft-mtp'
       }
     }]
+    const inspection = {
+      id: available[0].path,
+      name: available[0].name,
+      quantization: available[0].quantization,
+      model_bytes: 1024,
+      total_bytes: 1324,
+      shard_count: 1,
+      expected_shards: 1,
+      complete: true,
+      files: [
+        { path: available[0].path, size: 1024 },
+        { path: 'huggingface/acme/vision/mmproj-F16.gguf', size: 200 },
+        { path: 'huggingface/acme/vision/mtp-vision-Q4_0.gguf', size: 100 }
+      ],
+      dependencies: [
+        { kind: 'mmproj', name: 'mmproj-F16.gguf', quantization: 'F16', total_bytes: 200, files: [{ path: 'huggingface/acme/vision/mmproj-F16.gguf', size: 200 }] },
+        { kind: 'mtp', name: 'mtp-vision-Q4_0.gguf', quantization: 'Q4_0', total_bytes: 100, files: [{ path: 'huggingface/acme/vision/mtp-vision-Q4_0.gguf', size: 100 }] }
+      ],
+      suggested_options: available[0].suggested_options
+    }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return available
+      if (path === '/api/v1/models/inspect') return inspection
       if (path.startsWith('/api/v1/llamacpp/config')) return { profile: resetManager().profile.value, effective: { global: {}, model: {}, instance: {}, values: {}, sources: {} } }
       if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' } }
       if (path === '/api/v1/models' || path === '/api/v1/instances') return []
