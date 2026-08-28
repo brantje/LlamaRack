@@ -3,11 +3,18 @@ package llamaconfig
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 )
+
+const DefaultContextSize = "4096"
+
+var managerDefaults = map[string]string{
+	"ctx-size": DefaultContextSize,
+}
 
 type Store struct{ db *sql.DB }
 
@@ -52,6 +59,8 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 		Global: map[string]string{}, Model: map[string]string{}, Instance: map[string]string{},
 		Values: map[string]string{}, Sources: map[string]string{},
 	}
+	apply(result.Values, result.Sources, managerDefaults, "manager-default")
+
 	var err error
 	result.Global, err = s.Global(ctx)
 	if err != nil {
@@ -82,45 +91,77 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 		}
 		apply(result.Values, result.Sources, result.Instance, "instance")
 	}
+
+	if provider := detectedDefaultsProvider(s.db); provider != nil && strings.TrimSpace(modelID) != "" {
+		defaults, detectErr := provider(ctx, modelID)
+		if detectErr != nil {
+			return Effective{}, detectErr
+		}
+		for key, value := range defaults {
+			if _, resolved := result.Values[key]; resolved {
+				continue
+			}
+			result.Values[key] = value
+			result.Sources[key] = "detected"
+		}
+	}
 	return result, nil
 }
 
-// LaunchOptions returns only flags that the currently discovered llama-server
-// actually supports. Persisted options that disappeared after a binary change
-// remain visible/configured but are not passed to the process. Header-derived
-// defaults are injected only when no explicit effective value exists.
 func (s *Store) LaunchOptions(ctx context.Context, profile llamacpp.Profile, modelID, instanceID string) (map[string]string, Effective, error) {
 	effective, err := s.Effective(ctx, modelID, instanceID)
 	if err != nil {
 		return nil, Effective{}, err
 	}
-	if provider := detectedDefaultsProvider(s.db); provider != nil && strings.TrimSpace(modelID) != "" {
-		defaults, detectErr := provider(ctx, modelID)
-		if detectErr != nil {
-			return nil, Effective{}, detectErr
-		}
-		for key, value := range defaults {
-			if _, explicit := effective.Values[key]; explicit {
-				continue
-			}
-			effective.Values[key] = value
-			effective.Sources[key] = "detected"
-		}
-	}
 	if len(profile.Options) == 0 {
 		return map[string]string{}, effective, nil
 	}
-	supported := make(map[string]bool, len(profile.Options))
+	available := make(map[string]llamacpp.Option, len(profile.Options))
 	for _, option := range profile.Options {
-		supported[option.Key] = true
+		available[option.Key] = option
 	}
 	launch := map[string]string{}
 	for key, value := range effective.Values {
-		if supported[key] {
-			launch[key] = value
+		option, supported := available[key]
+		if !supported {
+			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(value), "false") && isBooleanOption(option) {
+			inverse := inverseBooleanKey(key)
+			inverseOption, ok := available[inverse]
+			if !ok || !isBooleanOption(inverseOption) {
+				return nil, effective, fmt.Errorf("llama.cpp option %q cannot express explicit false with the discovered %s profile", key, launchProfileLabel(profile))
+			}
+			launch[inverse] = "true"
+			continue
+		}
+		launch[key] = value
 	}
 	return launch, effective, nil
+}
+
+func isBooleanOption(option llamacpp.Option) bool {
+	if option.Kind != "" {
+		return option.Kind == "boolean"
+	}
+	return strings.TrimSpace(option.ValueHint) == ""
+}
+
+func inverseBooleanKey(key string) string {
+	if strings.HasPrefix(key, "no-") {
+		return strings.TrimPrefix(key, "no-")
+	}
+	return "no-" + key
+}
+
+func launchProfileLabel(profile llamacpp.Profile) string {
+	if strings.TrimSpace(profile.Version) != "" {
+		return profile.Version
+	}
+	if strings.TrimSpace(profile.Path) != "" {
+		return profile.Path
+	}
+	return "llama-server"
 }
 
 func apply(values, sources, layer map[string]string, source string) {
