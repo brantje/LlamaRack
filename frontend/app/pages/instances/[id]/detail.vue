@@ -98,10 +98,11 @@ onMounted(async () => {
         class="min-w-0 flex-1"
         headline="INSTANCE DETAIL"
         :title="instance?.name || instanceID"
-        description="Live runtime resources and the complete llama.cpp metrics snapshot for this Instance."
+        description="Live runtime resources, llama.cpp metrics and current-session logs for this Instance."
       />
       <div class="flex flex-wrap justify-end gap-2">
         <UButton to="/instances" color="neutral" variant="soft">Back to Instances</UButton>
+        <UButton v-if="instance" :to="`/instances/${encodeURIComponent(instance.id)}/detail#logs`" color="neutral" variant="soft">Logs</UButton>
         <UButton v-if="instance" :to="`/instances/${encodeURIComponent(instance.id)}/edit`" color="neutral" variant="soft">Edit</UButton>
       </div>
     </div>
@@ -186,6 +187,8 @@ onMounted(async () => {
           </div>
         </UCard>
       </template>
+
+      <InstanceLogViewer :instance-id="instance.id" />
     </template>
   </div>
 </template>
