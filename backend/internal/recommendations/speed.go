@@ -60,21 +60,19 @@ func estimateGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEstimate, 
 	}
 	lowEfficiency, highEfficiency := quantizationBandwidthEfficiency(guide.Name)
 	fractions := tensorSplitFractions(offload.TensorSplit, len(devices))
-	if len(fractions) != len(devices) {
-		fractions = equalFractions(len(devices))
-	}
 
 	var slowSeconds, fastSeconds float64
 	for index, gpu := range devices {
 		deviceTraffic := trafficBytes * fractions[index]
 		bandwidth := float64(gpu.MemoryBandwidthBytesPerSecond)
+		// llama.cpp layer-split decode traverses the allocated model layers, so
+		// their memory-read times are additive; bandwidth must not simply be summed.
 		slowSeconds += deviceTraffic / (bandwidth * lowEfficiency)
 		fastSeconds += deviceTraffic / (bandwidth * highEfficiency)
 	}
 	if len(devices) > 1 {
-		// llama.cpp layer/tensor splits add synchronization and transfer overhead.
-		// Without topology telemetry we apply a small conservative allowance rather
-		// than pretending aggregate VRAM bandwidth scales linearly with GPU count.
+		// Cross-device synchronization and transfers are not represented by VRAM
+		// bandwidth. Without topology telemetry, include a conservative allowance.
 		penalty := 1 + 0.05*float64(len(devices)-1)
 		if penalty > 1.20 {
 			penalty = 1.20
@@ -106,11 +104,6 @@ func estimateGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEstimate, 
 	)
 	if len(devices) > 1 {
 		reason += " Multi-GPU estimates follow the planned tensor split and include a conservative synchronization allowance."
-	}
-	if likelySparseArchitecture(guide, memory) {
-		// We do not have per-expert active-weight traffic in the current provider
-		// contract. Keep the estimate conservative and make that limitation clear.
-		reason += " Sparse/expert routing can read fewer weights per token, so this full-weight estimate may be conservative."
 	}
 
 	return GenerationSpeedEstimate{
@@ -225,14 +218,4 @@ func formatBinaryBytes(value int64) string {
 		return strconv.FormatFloat(float64(value)/gib, 'f', 1, 64) + " GiB"
 	}
 	return strconv.FormatFloat(float64(value)/mib, 'f', 0, 64) + " MiB"
-}
-
-// The speed model intentionally treats all model bytes as per-token traffic.
-// That is conservative for sparse expert models. We currently have no portable
-// active-expert byte count in ArtifactInput, so this marker only affects the
-// explanation rather than silently applying an invented MoE multiplier.
-func likelySparseArchitecture(guide QuantizationGuide, memory MemoryEstimate) bool {
-	_ = guide
-	_ = memory
-	return false
 }
