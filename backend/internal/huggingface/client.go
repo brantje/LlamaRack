@@ -112,7 +112,7 @@ type rawModel struct {
 
 var (
 	shardPattern = regexp.MustCompile(`(?i)^(.*)-(\d{5})-of-(\d{5})\.gguf$`)
-	quantPattern = regexp.MustCompile(`(?i)(?:^|[-_.])(IQ\d(?:_[A-Z0-9]+)+|Q\d(?:_[A-Z0-9]+)+|BF16|F16|F32)(?:[-_.]|$)`)
+	quantPattern = regexp.MustCompile(`(?i)(?:^|[-_.])(IQ\d(?:_[A-Z0-9]+)+|Q\d(?:_[A-Z0-9]+)+|BF16|F16|F32|\d+(?:\.\d+)?BPW)(?:[-_.]|$)`)
 )
 
 func NewClient(base string, token TokenProvider) (*Client, error) {
