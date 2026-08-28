@@ -16,6 +16,9 @@ const (
 	LoginProtectionEnabled      = "login_protection_enabled"
 	LoginFailureThreshold       = "login_failure_threshold"
 	LoginLockoutSeconds         = "login_lockout_seconds"
+	LocalLoginEnabled           = "local_login_enabled"
+	OIDCJITProvisioningEnabled  = "oidc_jit_provisioning_enabled"
+	OIDCAutoLinkEnabled         = "oidc_auto_link_enabled"
 	TrustedProxies              = "trusted_proxies"
 	AllowedOrigins              = "allowed_origins"
 	ExternalURL                 = "external_url"
@@ -54,18 +57,21 @@ type RuntimeInfo struct {
 
 type General struct {
 	SessionLifetime        Value       `json:"session_lifetime_seconds"`
-	LoginProtection       Value       `json:"login_protection_enabled"`
-	LoginFailureThreshold Value       `json:"login_failure_threshold"`
-	LoginLockout          Value       `json:"login_lockout_seconds"`
-	TrustedProxies        Value       `json:"trusted_proxies"`
-	AllowedOrigins        Value       `json:"allowed_origins"`
-	ExternalURL           Value       `json:"external_url"`
-	StartupTimeout        Value       `json:"startup_timeout_seconds"`
-	IdleUnloadTimeout     Value       `json:"idle_unload_seconds"`
-	AlwaysOnReconcile     Value       `json:"always_on_reconcile_seconds"`
-	ObservabilityRetention Value      `json:"observability_retention_days"`
-	PrometheusToken       Value       `json:"prometheus_auth_token"`
-	Runtime               RuntimeInfo `json:"runtime"`
+	LoginProtection        Value       `json:"login_protection_enabled"`
+	LoginFailureThreshold  Value       `json:"login_failure_threshold"`
+	LoginLockout           Value       `json:"login_lockout_seconds"`
+	LocalLogin             Value       `json:"local_login_enabled"`
+	OIDCJITProvisioning    Value       `json:"oidc_jit_provisioning_enabled"`
+	OIDCAutoLink           Value       `json:"oidc_auto_link_enabled"`
+	TrustedProxies         Value       `json:"trusted_proxies"`
+	AllowedOrigins         Value       `json:"allowed_origins"`
+	ExternalURL            Value       `json:"external_url"`
+	StartupTimeout         Value       `json:"startup_timeout_seconds"`
+	IdleUnloadTimeout      Value       `json:"idle_unload_seconds"`
+	AlwaysOnReconcile      Value       `json:"always_on_reconcile_seconds"`
+	ObservabilityRetention Value       `json:"observability_retention_days"`
+	PrometheusToken        Value       `json:"prometheus_auth_token"`
+	Runtime                RuntimeInfo `json:"runtime"`
 }
 
 type definition struct {
@@ -87,18 +93,21 @@ func New(db *sql.DB, defaults Defaults) *Service {
 	return &Service{
 		db: db,
 		defs: map[string]definition{
-			SessionLifetimeSeconds:      {env: "LCM_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
-			LoginProtectionEnabled:     {env: "LCM_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},
-			LoginFailureThreshold:      {env: "LCM_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
-			LoginLockoutSeconds:        {env: "LCM_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
-			TrustedProxies:             {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
-			AllowedOrigins:             {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
-			ExternalURL:                {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
-			StartupTimeoutSeconds:      {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
-			IdleUnloadSeconds:          {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
-			AlwaysOnReconcileSeconds:   {env: "LCM_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
-			ObservabilityRetentionDays: {defaultValue: "30", kind: "int", min: 1, max: 3650},
-			PrometheusAuthToken:        {env: "LCM_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
+			SessionLifetimeSeconds:       {env: "LCM_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
+			LoginProtectionEnabled:      {env: "LCM_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},
+			LoginFailureThreshold:       {env: "LCM_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
+			LoginLockoutSeconds:         {env: "LCM_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
+			LocalLoginEnabled:           {defaultValue: "true", kind: "bool"},
+			OIDCJITProvisioningEnabled:  {defaultValue: "true", kind: "bool"},
+			OIDCAutoLinkEnabled:         {defaultValue: "false", kind: "bool"},
+			TrustedProxies:              {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
+			AllowedOrigins:              {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
+			ExternalURL:                 {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
+			StartupTimeoutSeconds:       {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
+			IdleUnloadSeconds:           {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
+			AlwaysOnReconcileSeconds:    {env: "LCM_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
+			ObservabilityRetentionDays:  {defaultValue: "30", kind: "int", min: 1, max: 3650},
+			PrometheusAuthToken:         {env: "LCM_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
 		},
 		runtime: RuntimeInfo{DataDir: defaults.DataDir, ModelsDir: defaults.ModelsDir, DatabasePath: defaults.DatabasePath, ListenAddr: defaults.ListenAddr, LlamaServerPath: defaults.LlamaServerPath},
 	}
@@ -164,7 +173,7 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 }
 
 func (s *Service) General(ctx context.Context) (General, error) {
-	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, TrustedProxies, AllowedOrigins, ExternalURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, ObservabilityRetentionDays, PrometheusAuthToken}
+	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, LocalLoginEnabled, OIDCJITProvisioningEnabled, OIDCAutoLinkEnabled, TrustedProxies, AllowedOrigins, ExternalURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, ObservabilityRetentionDays, PrometheusAuthToken}
 	values := make(map[string]Value, len(keys))
 	for _, key := range keys {
 		value, err := s.Resolve(ctx, key)
@@ -173,6 +182,7 @@ func (s *Service) General(ctx context.Context) (General, error) {
 	}
 	return General{
 		SessionLifetime: values[SessionLifetimeSeconds], LoginProtection: values[LoginProtectionEnabled], LoginFailureThreshold: values[LoginFailureThreshold], LoginLockout: values[LoginLockoutSeconds],
+		LocalLogin: values[LocalLoginEnabled], OIDCJITProvisioning: values[OIDCJITProvisioningEnabled], OIDCAutoLink: values[OIDCAutoLinkEnabled],
 		TrustedProxies: values[TrustedProxies], AllowedOrigins: values[AllowedOrigins], ExternalURL: values[ExternalURL], StartupTimeout: values[StartupTimeoutSeconds], IdleUnloadTimeout: values[IdleUnloadSeconds], AlwaysOnReconcile: values[AlwaysOnReconcileSeconds],
 		ObservabilityRetention: values[ObservabilityRetentionDays], PrometheusToken: values[PrometheusAuthToken], Runtime: s.runtime,
 	}, nil

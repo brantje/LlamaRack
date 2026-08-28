@@ -78,6 +78,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 
 	authService := auth.New(db, sessionLifetime)
+	if err := authService.UsePersistentSigningKey(cfg.DataDir); err != nil {
+		return fmt.Errorf("initialize management signing key: %w", err)
+	}
 	network := managersecurity.NewNetwork(managerSettings)
 	loginProtector := managersecurity.NewLoginProtector(managerSettings)
 	modelService := models.New(db, cfg.ModelsDir)
@@ -119,6 +122,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize provider secrets: %w", err)
 	}
+	oidcManager := auth.NewOIDCManager(authService, managerSettings, providerSecrets)
 	hfClient, err := huggingface.NewClient(cfg.HuggingFaceBaseURL, providerSecrets.GetToken)
 	if err != nil {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
@@ -154,8 +158,14 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/downloads", phase8)
 	managementAPI.Handle("/api/v1/downloads/", phase8)
 
-	phase10Auth := api.NewPhase10AuthHandler(authService, network, loginProtector)
+	phase10Auth := api.NewPhase10AuthHandler(authService, network, loginProtector, managerSettings)
 	managementAPI.Handle("/api/v1/auth/", phase10Auth)
+	phase10OIDC := api.NewPhase10OIDCHandler(oidcManager, authService, managerSettings, network)
+	managementAPI.Handle("/api/v1/auth/providers", phase10OIDC)
+	managementAPI.Handle("/api/v1/auth/oidc/", phase10OIDC)
+	managementAPI.Handle("/api/v1/auth/ws-ticket", phase10OIDC)
+	managementAPI.Handle("/api/v1/admin/auth/", phase10OIDC)
+	managementAPI.Handle("/api/v1/me/identities", phase10OIDC)
 	phase10 := api.NewPhase10Handler(authService, managerSettings, providerSecrets, network, profileGetter)
 	managementAPI.Handle("GET /api/v1/me", phase10)
 	managementAPI.Handle("/api/v1/me/", phase10)
@@ -255,8 +265,7 @@ func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handl
 		if origin != "" && network.OriginAllowed(r, origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Expose-Headers", "X-LlamaCPP-Manager-Request-ID, X-LlamaCPP-Manager-Instance, X-LlamaCPP-Manager-Autoloaded, X-LlamaCPP-Manager-Queue-MS, X-LlamaCPP-Manager-Load-MS, X-LlamaCPP-Manager-TTFT-MS, X-LlamaCPP-Manager-Prompt-Tokens-Per-Second, X-LlamaCPP-Manager-Generation-Tokens-Per-Second, X-LlamaCPP-Manager-Prompt-Tokens, X-LlamaCPP-Manager-Generated-Tokens, X-LlamaCPP-Manager-Total-Tokens")
 		}

@@ -6,8 +6,8 @@ import (
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 )
 
 type phase7HardwareHandler struct {
@@ -111,14 +111,21 @@ func (h *llamaConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func phase7RequireUser(a *auth.Service, w http.ResponseWriter, r *http.Request) bool {
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-		return false
+	if _, _, ok := managementAuthFromRequest(r); ok {
+		return true
 	}
-	if _, _, err := a.SessionUserWithSession(r.Context(), cookie.Value); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-		return false
+	if token := bearerToken(r.Header.Get("Authorization")); token != "" {
+		if _, _, err := a.AuthenticateBearer(r.Context(), token); err == nil {
+			return true
+		}
 	}
-	return true
+	// Direct legacy unit fixtures bypass ManagementSecurity. Keep their cookie
+	// path isolated here; production requests are bearer-gated by the middleware.
+	if cookie, err := r.Cookie(sessionCookie); err == nil && cookie.Value != "" {
+		if _, _, err := a.SessionUserWithSession(r.Context(), cookie.Value); err == nil {
+			return true
+		}
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+	return false
 }

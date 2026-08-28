@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"sync"
@@ -14,6 +16,8 @@ const (
 	argonThreads      = 2
 	argonKeyLength    = 32
 	apiUseWriteEvery  = 30 * time.Second
+	managerIssuer     = "llamacpp-manager"
+	wsTicketLifetime  = 30 * time.Second
 )
 
 var (
@@ -22,6 +26,9 @@ var (
 	ErrSelfDelete         = errors.New("cannot delete the current management user")
 	ErrSessionInvalid     = errors.New("session invalid")
 	ErrCSRFInvalid        = errors.New("csrf token invalid")
+	ErrOIDCLinkRequired   = errors.New("external identity is not linked to a management user")
+	ErrOIDCUsernameTaken  = errors.New("OIDC username matches an existing account; explicit linking is required")
+	ErrAuthLockoutRisk    = errors.New("operation would leave no usable management login method")
 )
 
 type User struct {
@@ -41,6 +48,14 @@ type Session struct {
 	RemoteAddress string `json:"remote_address"`
 	UserAgent     string `json:"user_agent"`
 	Current       bool   `json:"current,omitempty"`
+	JTI           string `json:"-"`
+}
+
+type LoginResult struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresAt   int64  `json:"expires_at"`
+	User        User   `json:"user"`
 }
 
 type APIKey struct {
@@ -54,16 +69,36 @@ type APIKey struct {
 	RevokedAt       *int64 `json:"revoked_at,omitempty"`
 }
 
+type wsTicket struct {
+	SessionID string
+	JTI       string
+	ExpiresAt time.Time
+}
+
 type Service struct {
 	db *sql.DB
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
 	lastAPIKeyWrite map[string]time.Time
+	jwtPrivate      ed25519.PrivateKey
+	jwtPublic       ed25519.PublicKey
+	schemaErr       error
+
+	ticketMu  sync.Mutex
+	wsTickets map[string]wsTicket
 }
 
 func New(db *sql.DB, sessionLifetime time.Duration) *Service {
-	return &Service{db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{}}
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic("generate management signing key: " + err.Error())
+	}
+	return &Service{
+		db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		jwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
+		schemaErr: ensureAuthSchema(db),
+	}
 }
 
 func (s *Service) SetSessionLifetime(lifetime time.Duration) {
