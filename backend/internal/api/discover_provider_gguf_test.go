@@ -71,7 +71,7 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 		`"tier":"Mixed quantization"`,
 		`"recommended":true`,
 		`"fit_label":"Fits on GPU"`,
-		`"estimated_generation":{"estimated":true`,
+		`"estimated_generation_speed":{"estimated":true`,
 		`tok/s`,
 		`288 GB/s theoretical VRAM bandwidth`,
 	} {
@@ -79,8 +79,10 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 			t.Fatalf("missing %s in %s", want, body)
 		}
 	}
-	if strings.Contains(body, `"generation_speed"`) {
-		t.Fatalf("legacy generation_speed field leaked into API: %s", body)
+	for _, legacy := range []string{`"generation_speed"`, `"estimated_generation"`} {
+		if strings.Contains(body, legacy) {
+			t.Fatalf("legacy generation field %s leaked into API: %s", legacy, body)
+		}
 	}
 	if strings.Contains(body, `"tier":"Unknown profile"`) || strings.Contains(body, `"speed":"Hardware-dependent"`) {
 		t.Fatalf("provider-backed mixed profile retained generic guidance: %s", body)
@@ -100,7 +102,7 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	}
 	for _, want := range []string{
 		`"fit_label":"GPU + CPU"`,
-		`"estimated_generation":{"estimated":true`,
+		`"estimated_generation_speed":{"estimated":true`,
 		`Hybrid bandwidth-limited generation/decode estimate`,
 		`measured memory-copy throughput`,
 		`theoretical PCIe link`,
@@ -109,7 +111,9 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 			t.Fatalf("hybrid missing %s in %s", want, hybridBody)
 		}
 	}
-	if strings.Contains(hybridBody, `"generation_speed"`) {
-		t.Fatalf("legacy generation_speed field leaked into hybrid API: %s", hybridBody)
+	for _, legacy := range []string{`"generation_speed"`, `"estimated_generation"`} {
+		if strings.Contains(hybridBody, legacy) {
+			t.Fatalf("legacy generation field %s leaked into hybrid API: %s", legacy, hybridBody)
+		}
 	}
 }
