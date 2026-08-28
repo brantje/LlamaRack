@@ -45,7 +45,7 @@ describe('Discover formatting and URL branches', () => {
       { id: 'acme/unknown', downloads: 1, likes: 1, parameter_count: 0, last_modified: 'not-a-date', private: false, gated: false },
       { id: 'acme/missing-meta', downloads: 1, likes: 1, private: false, gated: false }
     ]
-    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? results : [])
+    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? { items: results } : [])
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -64,7 +64,7 @@ describe('Discover formatting and URL branches', () => {
   })
 
   it('exercises supported and rejected Hugging Face URL shapes', async () => {
-    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? [] : [])
+    mocks.request.mockImplementation(async (path: string) => path.startsWith('/api/v1/huggingface/search?') ? { items: [] } : [])
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
     const input = wrapper.find('input[placeholder="Qwen, Llama, Gemma… or Hugging Face URL"]')
 
