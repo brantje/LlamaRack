@@ -72,7 +72,7 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 	inputs := make([]recommendations.ArtifactInput, 0, len(detail.Artifacts))
 	for _, artifact := range detail.Artifacts {
 		inputs = append(inputs, recommendations.ArtifactInput{
-			ID: artifact.ID, Quantization: artifact.Quantization, WeightsBytes: artifact.ModelBytes, Complete: artifact.Complete,
+			ID: artifact.ID, Quantization: artifact.ProfileQuantization(), WeightsBytes: artifact.ModelBytes, Complete: artifact.Complete,
 		})
 	}
 	result := recommendations.AnalyzeDiscover(inputs, recommendationMetadata(derived), metadataErr, snapshot, contextLength, hardwareErr, allowHybrid)
