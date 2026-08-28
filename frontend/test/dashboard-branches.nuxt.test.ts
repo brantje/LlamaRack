@@ -169,7 +169,7 @@ describe('Phase 11 Dashboard edge branches', () => {
     const wrapper = await mountSuspended(DashboardPage, { route: '/' })
     await flushPromises()
     expect(wrapper.get('[data-testid="dashboard-idle"]').text()).toContain('61 sec')
-    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('0 B / 0 B')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('0 B/ 0 B')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('No recent gateway traffic')
   })
 
