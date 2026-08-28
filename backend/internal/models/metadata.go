@@ -11,7 +11,8 @@ import (
 )
 
 // InspectGGUF validates a path through the normal Model path rules and reads
-// only the GGUF metadata/header area. Tensor payloads are never loaded.
+// the complete GGUF metadata/header area for the detailed metadata view. Tensor
+// payloads are never loaded.
 func (s *Service) InspectGGUF(path string) (ggufmeta.Inspection, error) {
 	rel, _, err := s.resolveGGUF(path)
 	if err != nil {
@@ -25,7 +26,11 @@ func (s *Service) DetectGGUFFeatures(path string) (ggufmeta.Features, error) {
 	if err != nil {
 		return ggufmeta.Features{}, err
 	}
-	return ggufmeta.DetectFeatures(filepath.Join(s.modelsDir, filepath.FromSlash(rel)))
+	summary, err := ggufmeta.ReadSummary(filepath.Join(s.modelsDir, filepath.FromSlash(rel)))
+	if err != nil {
+		return ggufmeta.Features{}, err
+	}
+	return summary.Features, nil
 }
 
 // DetectedLlamaDefaults returns conservative runtime defaults for GGUF features
@@ -36,13 +41,13 @@ func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (ma
 	if err != nil {
 		return nil, err
 	}
-	features, err := s.DetectGGUFFeatures(model.GGUFPath)
+	summary, err := s.GGUFSummary(ctx, model.GGUFPath)
 	if err != nil {
 		// Pending provider downloads and malformed/unreadable GGUFs simply have no
 		// detected defaults. Normal model loading will surface its own error.
 		return nil, nil
 	}
-	mtp := features.HasMTP && !features.MTPOnly
+	mtp := summary.Features.HasMTP && !summary.Features.MTPOnly
 	if !mtp {
 		options, optionErr := s.Options(ctx, modelID)
 		if optionErr != nil {
@@ -50,7 +55,7 @@ func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (ma
 		}
 		draftPath := strings.TrimSpace(options["spec-draft-model"])
 		if draftPath != "" {
-			if draftFeatures, inspectErr := ggufmeta.DetectFeatures(draftPath); inspectErr == nil && draftFeatures.MTPOnly {
+			if draftSummary, inspectErr := s.GGUFSummary(ctx, draftPath); inspectErr == nil && draftSummary.Features.MTPOnly {
 				mtp = true
 			}
 		}
@@ -76,15 +81,21 @@ func (s *Service) RegisterDetectedLlamaDefaults() func() {
 // present in GGUF metadata. A zero result means the file was readable but did
 // not contain a usable context capability.
 func (s *Service) DetectContext(path string) (int, error) {
-	inspection, err := s.InspectGGUF(path)
+	rel, _, err := s.resolveGGUF(path)
 	if err != nil {
 		return 0, err
 	}
-	return safeContextInt(inspection.Derived.ContextLength), nil
+	summary, err := ggufmeta.ReadSummary(filepath.Join(s.modelsDir, filepath.FromSlash(rel)))
+	if err != nil {
+		return 0, err
+	}
+	return safeContextInt(summary.Derived.ContextLength), nil
 }
 
 // RefreshDetectedContext fills an unknown stored context capability from the
-// backing GGUF. Explicit/non-zero values are never overwritten.
+// backing GGUF. Explicit/non-zero values are never overwritten. The shared
+// summary index also means completed provider downloads are warmed as soon as
+// this reconciler observes them.
 func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model, error) {
 	model, err := s.GetByID(ctx, id)
 	if err != nil {
@@ -93,9 +104,13 @@ func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model,
 	if model.ContextLength > 0 {
 		return model, nil
 	}
-	contextLength, err := s.DetectContext(model.GGUFPath)
-	if err != nil || contextLength <= 0 {
+	summary, err := s.GGUFSummary(ctx, model.GGUFPath)
+	if err != nil {
 		return model, err
+	}
+	contextLength := safeContextInt(summary.Derived.ContextLength)
+	if contextLength <= 0 {
+		return model, nil
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE models SET context_length=?, updated_at=unixepoch() WHERE id=? AND context_length=0`, contextLength, id); err != nil {
 		return Model{}, err

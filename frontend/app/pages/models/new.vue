@@ -1,10 +1,10 @@
 <script setup lang="ts">
 type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string; suggested_options?: Record<string, string> }
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
-type ModelInspection = { architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string }
 type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
+type ModelInspection = HFArtifact & { architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string; suggested_options?: Record<string, string> }
 type HFDetail = { id: string; revision: string; artifacts: HFArtifact[] }
 
 const manager = useManager()
@@ -22,6 +22,7 @@ const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
 const firstInstanceSlugEdited = ref(false)
 const autoSuggestedOptions = ref<Record<string, string>>({})
+const localInspection = ref<ModelInspection | null>(null)
 const remoteDetail = ref<HFDetail | null>(null)
 const remoteArtifact = ref<HFArtifact | null>(null)
 const remoteRepo = computed(() => typeof route.query.repo === 'string' ? route.query.repo.trim() : '')
@@ -43,22 +44,36 @@ const form = reactive({
   }
 })
 
-const ggufItems = computed(() => availableGGUFs.value.map(file => ({
-  label: `${file.path}${file.quantization ? ` · ${file.quantization}` : ''}`,
-  value: file.path
-})))
+function ggufCapabilities(file: AvailableGGUF) {
+  const options = file.suggested_options || {}
+  const capabilities: string[] = []
+  if (options['spec-draft-model'] || options['spec-type'] === 'draft-mtp') capabilities.push('MTP')
+  if (options.mmproj) capabilities.push('Vision')
+  return capabilities
+}
+
+const ggufItems = computed(() => availableGGUFs.value.map(file => {
+  const details = [file.quantization, ...ggufCapabilities(file)].filter(Boolean)
+  return {
+    label: `${file.path}${details.length ? ` · ${details.join(' · ')}` : ''}`,
+    value: file.path
+  }
+}))
 const ggufPlaceholder = computed(() => scanning.value
   ? 'Scanning model folder…'
   : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
 const selectedGGUF = computed(() => availableGGUFs.value.find(file => file.path === form.gguf_path) || null)
 const detectedHelpers = computed(() => {
-  if (remoteMode.value) {
-    return (remoteArtifact.value?.dependencies || []).map(dependency => {
+  const dependencies = remoteMode.value
+    ? (remoteArtifact.value?.dependencies || [])
+    : (localInspection.value?.dependencies || [])
+  if (dependencies.length) {
+    return dependencies.map(dependency => {
       const label = dependency.kind === 'mmproj' ? 'Vision projector' : dependency.kind === 'mtp' ? 'MTP draft model' : dependency.kind
       return `${label}: ${dependency.name}`
     })
   }
-  const options = selectedGGUF.value?.suggested_options || {}
+  const options = localInspection.value?.suggested_options || selectedGGUF.value?.suggested_options || {}
   const helpers: string[] = []
   if (options.mmproj) helpers.push(`Vision projector: ${filename(options.mmproj)}`)
   if (options['spec-draft-model']) helpers.push(`MTP draft model: ${filename(options['spec-draft-model'])}`)
@@ -89,6 +104,21 @@ function remoteDefaultName() {
   const repoName = remoteRepo.value.split('/').pop() || remoteRepo.value
   return remoteArtifact.value?.quantization ? `${repoName} ${remoteArtifact.value.quantization}` : repoName
 }
+function applyAutoSuggestedOptions(suggested: Record<string, string>) {
+  const next = { ...form.options }
+  for (const [key, value] of Object.entries(autoSuggestedOptions.value)) {
+    if (next[key] === value) delete next[key]
+  }
+  const applied: Record<string, string> = {}
+  for (const [key, value] of Object.entries(suggested)) {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      next[key] = value
+      applied[key] = value
+    }
+  }
+  form.options = next
+  autoSuggestedOptions.value = applied
+}
 
 watch(() => form.name, (name) => {
   if (createFirstInstance.value) form.first_instance.name = name
@@ -101,21 +131,9 @@ watch(() => form.first_instance.name, (name) => {
 })
 watch(() => form.gguf_path, (path) => {
   if (remoteMode.value) return
-  const next = { ...form.options }
-  for (const [key, value] of Object.entries(autoSuggestedOptions.value)) {
-    if (next[key] === value) delete next[key]
-  }
-
+  localInspection.value = null
   const suggested = availableGGUFs.value.find(file => file.path === path)?.suggested_options || {}
-  const applied: Record<string, string> = {}
-  for (const [key, value] of Object.entries(suggested)) {
-    if (!Object.prototype.hasOwnProperty.call(next, key)) {
-      next[key] = value
-      applied[key] = value
-    }
-  }
-  form.options = next
-  autoSuggestedOptions.value = applied
+  applyAutoSuggestedOptions(suggested)
   void inspectSelectedGGUF(path)
 })
 
@@ -135,11 +153,16 @@ async function inspectSelectedGGUF(path: string) {
       body: { gguf_path: path }
     })
     if (form.gguf_path !== path) return
+    localInspection.value = result
+    applyAutoSuggestedOptions(result.suggested_options || {})
     metadataWarning.value = result.warning || ''
     detectedArchitecture.value = result.architecture || ''
     if (!contextEdited.value && Number(result.context_length) > 0) form.context_length = Number(result.context_length)
   } catch (e: any) {
-    if (form.gguf_path === path) metadataWarning.value = messageFor(e, 'Unable to inspect GGUF metadata automatically')
+    if (form.gguf_path === path) {
+      localInspection.value = null
+      metadataWarning.value = messageFor(e, 'Unable to inspect GGUF metadata automatically')
+    }
   } finally {
     if (form.gguf_path === path) inspectingMetadata.value = false
   }
@@ -257,7 +280,6 @@ async function createModel() {
         <UFormField v-else label="GGUF file" name="gguf_path" description="Already-registered GGUF files and detected helper GGUFs are hidden." required>
           <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
         </UFormField>
-
         <UAlert
           v-if="detectedHelpers.length"
           data-testid="detected-gguf-helpers"

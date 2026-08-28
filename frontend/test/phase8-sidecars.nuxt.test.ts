@@ -84,7 +84,7 @@ describe('Phase 8 GGUF helper integration', () => {
     expect(wrapper.text()).toContain('2 detected helper artifacts were added to Downloads')
   })
 
-  it('preconfigures downloaded helpers when registering the main model', async () => {
+  it('preconfigures downloaded helpers and labels dropdown capabilities', async () => {
     const available = [{
       path: 'huggingface/acme/vision/vision-Q4_K_M.gguf', name: 'vision-Q4_K_M.gguf', total_bytes: 1024, quantization: 'Q4_K_M',
       suggested_options: {
@@ -92,9 +92,36 @@ describe('Phase 8 GGUF helper integration', () => {
         'spec-draft-model': '/models/huggingface/acme/vision/mtp-vision-Q4_0.gguf',
         'spec-type': 'draft-mtp'
       }
+    }, {
+      path: 'huggingface/acme/mtp/model-Q5_K_M.gguf', name: 'model-Q5_K_M.gguf', total_bytes: 1024, quantization: 'Q5_K_M',
+      suggested_options: { 'spec-type': 'draft-mtp' }
+    }, {
+      path: 'huggingface/acme/vision-only/model-Q8_0.gguf', name: 'model-Q8_0.gguf', total_bytes: 1024, quantization: 'Q8_0',
+      suggested_options: { mmproj: '/models/huggingface/acme/vision-only/mmproj-F16.gguf' }
     }]
+    const inspection = {
+      id: available[0].path,
+      name: available[0].name,
+      quantization: available[0].quantization,
+      model_bytes: 1024,
+      total_bytes: 1324,
+      shard_count: 1,
+      expected_shards: 1,
+      complete: true,
+      files: [
+        { path: available[0].path, size: 1024 },
+        { path: 'huggingface/acme/vision/mmproj-F16.gguf', size: 200 },
+        { path: 'huggingface/acme/vision/mtp-vision-Q4_0.gguf', size: 100 }
+      ],
+      dependencies: [
+        { kind: 'mmproj', name: 'mmproj-F16.gguf', quantization: 'F16', total_bytes: 200, files: [{ path: 'huggingface/acme/vision/mmproj-F16.gguf', size: 200 }] },
+        { kind: 'mtp', name: 'mtp-vision-Q4_0.gguf', quantization: 'Q4_0', total_bytes: 100, files: [{ path: 'huggingface/acme/vision/mtp-vision-Q4_0.gguf', size: 100 }] }
+      ],
+      suggested_options: available[0].suggested_options
+    }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/models/available') return available
+      if (path === '/api/v1/models/inspect') return inspection
       if (path.startsWith('/api/v1/llamacpp/config')) return { profile: resetManager().profile.value, effective: { global: {}, model: {}, instance: {}, values: {}, sources: {} } }
       if (path === '/api/v1/models' && options?.method === 'POST') return { model: { id: 'm1' } }
       if (path === '/api/v1/models' || path === '/api/v1/instances') return []
@@ -104,6 +131,12 @@ describe('Phase 8 GGUF helper integration', () => {
 
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
+    expect(selectMenu(wrapper).props('items')).toEqual([
+      { label: `${available[0].path} · Q4_K_M · MTP · Vision`, value: available[0].path },
+      { label: `${available[1].path} · Q5_K_M · MTP`, value: available[1].path },
+      { label: `${available[2].path} · Q8_0 · Vision`, value: available[2].path }
+    ])
+
     selectMenu(wrapper).vm.$emit('update:modelValue', available[0].path)
     await flushPromises()
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: mmproj-F16.gguf')

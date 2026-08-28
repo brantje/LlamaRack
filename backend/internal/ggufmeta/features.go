@@ -21,14 +21,30 @@ type Features struct {
 	Projector          bool   `json:"projector"`
 }
 
+// IsStandaloneMTPArchitecture identifies GGUF architectures whose model
+// contract is itself a speculative draft/helper model. These architectures may
+// contain normal blk.0.* tensors, so tensor-prefix heuristics cannot distinguish
+// them from selectable target models.
+func IsStandaloneMTPArchitecture(architecture string) bool {
+	switch strings.ToLower(strings.TrimSpace(architecture)) {
+	case "gemma4-assistant", "gemma4_assistant":
+		return true
+	default:
+		return false
+	}
+}
+
 // FeaturesFromInspection derives metadata-only features. MTPOnly is populated
-// by DetectFeatures because distinguishing a bundled model from an MTP-only
-// helper requires looking at tensor names in the GGUF tensor directory.
+// directly for architectures that are standalone draft models; other MTP
+// formats are refined by DetectFeatures using tensor names.
 func FeaturesFromInspection(inspection Inspection) Features {
 	architecture := strings.TrimSpace(inspection.Derived.Architecture)
+	standaloneMTP := IsStandaloneMTPArchitecture(architecture)
 	features := Features{
 		Architecture: architecture,
 		Projector:    strings.EqualFold(architecture, "clip"),
+		HasMTP:       standaloneMTP,
+		MTPOnly:      standaloneMTP,
 	}
 	if architecture == "" {
 		return features
@@ -54,16 +70,17 @@ func FeaturesFromInspection(inspection Inspection) Features {
 }
 
 // DetectFeatures inspects GGUF metadata and, for MTP-capable files, the tensor
-// directory. Tensor payloads are never read. llama.cpp MTP-only exports keep
-// NextN metadata but omit the normal trunk blk.0 tensors; bundled/native MTP
-// models contain both trunk and NextN tensors.
+// directory. Tensor payloads are never read. Architecture-defined standalone
+// draft models are already MTP-only even when they contain blk.0.* tensors.
+// Other MTP formats are considered helper-only when they keep NextN metadata
+// but omit the target model's normal trunk tensors.
 func DetectFeatures(path string) (Features, error) {
 	inspection, err := Inspect(path)
 	if err != nil {
 		return Features{}, err
 	}
 	features := FeaturesFromInspection(inspection)
-	if !features.HasMTP {
+	if !features.HasMTP || features.MTPOnly {
 		return features, nil
 	}
 	hasTrunk, err := tensorPrefixPresent(path, "blk.0.")
