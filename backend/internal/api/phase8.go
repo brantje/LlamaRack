@@ -69,10 +69,20 @@ func (h *phase8Handler) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := h.hf.SearchSorted(r.Context(), huggingface.SearchOptions{
+	opts := huggingface.SearchOptions{
 		Query: r.URL.Query().Get("q"), Author: r.URL.Query().Get("author"),
 		Sort: r.URL.Query().Get("sort"), Limit: limit,
-	})
+	}
+	if r.URL.Query().Get("paged") == "true" {
+		page, err := h.hf.SearchSortedPage(r.Context(), opts, r.URL.Query().Get("cursor"))
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
+	items, err := h.hf.SearchSorted(r.Context(), opts)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
