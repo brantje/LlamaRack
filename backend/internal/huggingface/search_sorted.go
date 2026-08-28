@@ -45,8 +45,7 @@ func (c *Client) SearchSorted(ctx context.Context, opts SearchOptions) ([]Discov
 }
 
 // SearchSortedPage returns one provider-backed page plus the opaque cursor for
-// the next page. The cursor is deliberately kept provider-specific and is only
-// intended to be handed back to a subsequent call unchanged.
+// the next page. The cursor is handed back to Hugging Face unchanged.
 func (c *Client) SearchSortedPage(ctx context.Context, opts SearchOptions, cursor string) (DiscoverySearchPage, error) {
 	limit := opts.Limit
 	if limit <= 0 {
@@ -140,7 +139,8 @@ func (c *Client) getDiscoveryJSON(ctx context.Context, endpoint string, dst any)
 func nextCursorFromLink(header string) string {
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
-		if !strings.Contains(part, `rel="next"`) && !strings.Contains(part, "rel=next") {
+		relation := strings.ToLower(part)
+		if !strings.Contains(relation, `rel="next"`) && !strings.Contains(relation, "rel=next") {
 			continue
 		}
 		start := strings.IndexByte(part, '<')
