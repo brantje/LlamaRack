@@ -84,6 +84,7 @@ func TestRegistryCreateGetUpdateOptionsAndDelete(t *testing.T) {
 	if err != nil || byID.Name != m.Name { t.Fatalf("GetByID=%+v err=%v", byID, err) }
 	items, err := s.List(ctx)
 	if err != nil || len(items) != 1 { t.Fatalf("List=%+v err=%v", items, err) }
+	if items[0].PublicID != "" || items[0].RoutingPolicy != "" { t.Fatalf("registry-only List compatibility fields=%+v", items[0]) }
 	opts, err := s.Options(ctx, m.ID)
 	if err != nil || opts["ctx-size"] != "4096" || opts["flash-attn"] != "true" || len(opts) != 2 { t.Fatalf("Options=%+v err=%v", opts, err) }
 
@@ -113,6 +114,20 @@ func TestLegacyPublicIDCompatibilityCreatesAddressableInstance(t *testing.T) {
 	if instances[0].ID != "legacy-model" || instances[0].Autoload || !instances[0].AlwaysOn || instances[0].Priority != "high" || instances[0].EvictionEnabled || instances[0].IdleUnloadSeconds != 90 { t.Fatalf("legacy instance=%+v", instances[0]) }
 	resolved, err := s.GetByPublicID(ctx, "legacy-model")
 	if err != nil || resolved.ID != m.ID || resolved.PublicID != "legacy-model" { t.Fatalf("resolved=%+v err=%v", resolved, err) }
+
+	// List historically projects policy from the earliest Instance ordered by
+	// created_at then id. Keep that exact compatibility behavior while batching.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		"legacy-first", m.ID, "Legacy First", 0, 1, 0, "low", 1, 17, 1); err != nil { t.Fatal(err) }
+	expected, err := s.GetByID(ctx, m.ID)
+	if err != nil { t.Fatal(err) }
+	items, err := s.List(ctx)
+	if err != nil || len(items) != 1 { t.Fatalf("List=%+v err=%v", items, err) }
+	listed := items[0]
+	if expected.PublicID != "legacy-first" || listed.PublicID != expected.PublicID || listed.Enabled != expected.Enabled || listed.Autoload != expected.Autoload || listed.AlwaysOn != expected.AlwaysOn || listed.Priority != expected.Priority || listed.EvictionEnabled != expected.EvictionEnabled || listed.IdleUnloadSeconds != expected.IdleUnloadSeconds || listed.RoutingPolicy != expected.RoutingPolicy {
+		t.Fatalf("batched List legacy policy=%+v want=%+v", listed, expected)
+	}
+
 	if _, err := s.Create(ctx, CreateModelInput{PublicID: "bad id", Name: "Bad", GGUFPath: writeGGUF(t, dir, "bad.gguf")}); err == nil { t.Fatal("expected invalid legacy model id") }
 }
 
