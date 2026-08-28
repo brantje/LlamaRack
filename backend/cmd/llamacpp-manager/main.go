@@ -139,7 +139,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		value, resolveErr := managerSettings.String(requestCtx, settings.PrometheusAuthToken)
 		if resolveErr != nil { return "" }
 		return value
-	})
+	}, observabilitySampler.RuntimeStates)
 	mux := newMux(securedManagement, openAI, metrics)
 
 	server := &http.Server{
