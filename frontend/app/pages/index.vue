@@ -72,8 +72,8 @@ const emptyHardware = (): HardwareSnapshot => ({
 const hardware = computed(() => observabilityLive.value?.hardware || summary.value?.hardware?.hardware || emptyHardware())
 const telemetry = computed(() => observabilityLive.value?.telemetry || summary.value?.hardware?.telemetry || [])
 const totalVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + gpu.total_bytes, 0))
-const usedVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + gpu.used_bytes, 0))
-const vramPercent = computed(() => totalVRAM.value > 0 ? Math.min(100, (usedVRAM.value / totalVRAM.value) * 100) : 0)
+const committedVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + gpuCommittedBytes(gpu), 0))
+const vramPercent = computed(() => totalVRAM.value > 0 ? Math.min(100, (committedVRAM.value / totalVRAM.value) * 100) : 0)
 const ramUsed = computed(() => Math.max(0, hardware.value.ram_total_bytes - hardware.value.ram_available_bytes))
 const ramPercent = computed(() => hardware.value.ram_total_bytes > 0 ? Math.min(100, (ramUsed.value / hardware.value.ram_total_bytes) * 100) : 0)
 const idleSeconds = computed(() => Number(settings.value?.idle_unload_seconds?.value || 0))
@@ -94,7 +94,7 @@ const gatewayColumns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'result', header: 'Result' }
 ]
 
-const gpuProgressColors: NonNullable<ProgressGroupItem['color']>[] = ['primary', 'success', 'info', 'warning', 'secondary', 'error']
+const gpuProgressColors: NonNullable<ProgressGroupItem['color']>[] = ['primary', 'success', 'warning', 'secondary', 'error']
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return '—'
@@ -146,6 +146,13 @@ function gpuAssignments(gpuID: string) {
   })
 }
 
+function gpuCommittedBytes(gpu: HardwareGPU) {
+  const attributed = gpuAssignments(gpu.id).reduce((total, assignment) => {
+    return total + (assignment.used !== undefined && assignment.used > 0 ? assignment.used : 0)
+  }, 0)
+  return Math.min(gpu.total_bytes, attributed)
+}
+
 function gpuProgressItems(gpu: HardwareGPU): ProgressGroupItem[] {
   const items: ProgressGroupItem[] = gpuAssignments(gpu.id)
     .filter(assignment => assignment.used !== undefined && assignment.used > 0)
@@ -154,13 +161,10 @@ function gpuProgressItems(gpu: HardwareGPU): ProgressGroupItem[] {
       value: assignment.used,
       color: gpuProgressColors[index % gpuProgressColors.length]
     }))
-  const attributed = items.reduce((total, item) => total + (item.value || 0), 0)
-  const unattributed = Math.max(0, gpu.used_bytes - attributed)
-  if (unattributed > 0) {
-    items.push({ label: 'Unattributed', value: unattributed, color: 'neutral' })
-  }
-  if (!items.length && gpu.used_bytes > 0) {
-    items.push({ label: 'Used', value: gpu.used_bytes, color: 'neutral' })
+  const committed = Math.min(gpu.total_bytes, items.reduce((total, item) => total + (item.value || 0), 0))
+  const free = Math.max(0, gpu.total_bytes - committed)
+  if (free > 0) {
+    items.push({ label: 'Free', value: free, color: 'info' })
   }
   return items
 }
@@ -254,8 +258,8 @@ onMounted(loadDashboard)
       </UCard>
       <UCard data-testid="dashboard-vram">
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-dimmed">VRAM committed</p>
-        <div class="mt-2 flex items-baseline gap-1.5"><strong class="text-3xl">{{ formatBytes(usedVRAM) }}</strong><span class="text-sm text-muted">/ {{ formatBytes(totalVRAM) }}</span></div>
-        <p class="mt-1 text-xs text-muted">{{ Math.round(vramPercent) }}% of observed accelerator memory</p>
+        <div class="mt-2 flex items-baseline gap-1.5"><strong class="text-3xl">{{ formatBytes(committedVRAM) }}</strong><span class="text-sm text-muted">/ {{ formatBytes(totalVRAM) }}</span></div>
+        <p class="mt-1 text-xs text-muted">{{ Math.round(vramPercent) }}% attributed to managed Instances</p>
       </UCard>
       <UCard data-testid="dashboard-gateway">
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-dimmed">Gateway · 15 min</p>
@@ -273,7 +277,7 @@ onMounted(loadDashboard)
       <template #header>
         <div>
           <p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">VRAM ALLOCATION</p>
-          <p class="mt-1 text-xs text-muted">Observed device and per-process attribution from the shared manager sampler.</p>
+          <p class="mt-1 text-xs text-muted">Manager-attributed Instance VRAM; Free is device capacity not attributed to managed Instances.</p>
         </div>
       </template>
       <UEmpty v-if="!hardware.gpus.length" variant="naked" title="No GPU telemetry available" description="GPU allocation will appear when CUDA or ROCm devices are detected." />
@@ -281,7 +285,7 @@ onMounted(loadDashboard)
         <div v-for="gpu in hardware.gpus" :key="gpu.id" class="space-y-2">
           <div class="flex items-center justify-between gap-3 text-xs">
             <span class="font-mono text-muted">{{ gpu.id }} · {{ gpu.name }}</span>
-            <span class="font-semibold text-highlighted">{{ formatBytes(gpu.used_bytes) }} / {{ formatBytes(gpu.total_bytes) }} · {{ Math.round(gpu.utilization_pct) }}% util</span>
+            <span class="font-semibold text-highlighted">{{ formatBytes(gpuCommittedBytes(gpu)) }} / {{ formatBytes(gpu.total_bytes) }} · {{ Math.round(gpu.utilization_pct) }}% util</span>
           </div>
           <UProgressGroup
             :data-testid="`gpu-progress-${gpu.id}`"
