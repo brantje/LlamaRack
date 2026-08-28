@@ -3,5 +3,5 @@ import ModelsDiscover from '~/components/ModelsDiscover.vue'
 </script>
 
 <template>
-  <ModelsDiscover />
+  <ModelsDiscover key="discover-list" />
 </template>
