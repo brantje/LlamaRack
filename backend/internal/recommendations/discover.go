@@ -42,20 +42,20 @@ type QuantizationGuide struct {
 }
 
 type DiscoverArtifact struct {
-	ArtifactID          string                  `json:"artifact_id"`
-	Quantization        QuantizationGuide       `json:"quantization"`
-	Recommended         bool                    `json:"recommended"`
-	Runnable            bool                    `json:"runnable"`
-	Fit                 string                  `json:"fit"`
-	FitLabel            string                  `json:"fit_label"`
-	Reason              string                  `json:"reason"`
-	Memory              MemoryEstimate          `json:"memory"`
-	Offload             Offload                 `json:"offload"`
-	EstimatedGeneration GenerationSpeedEstimate `json:"estimated_generation"`
-	Confidence          string                  `json:"confidence"`
-	Warnings            []string                `json:"warnings,omitempty"`
-	weightsBytes        int64
-	complete            bool
+	ArtifactID               string                  `json:"artifact_id"`
+	Quantization             QuantizationGuide       `json:"quantization"`
+	Recommended              bool                    `json:"recommended"`
+	Runnable                 bool                    `json:"runnable"`
+	Fit                      string                  `json:"fit"`
+	FitLabel                 string                  `json:"fit_label"`
+	Reason                   string                  `json:"reason"`
+	Memory                   MemoryEstimate          `json:"memory"`
+	Offload                  Offload                 `json:"offload"`
+	EstimatedGenerationSpeed GenerationSpeedEstimate `json:"estimated_generation_speed"`
+	Confidence               string                  `json:"confidence"`
+	Warnings                 []string                `json:"warnings,omitempty"`
+	weightsBytes             int64
+	complete                 bool
 }
 
 type DiscoverAnalysis struct {
@@ -94,14 +94,14 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 	for _, input := range inputs {
 		guide := ClassifyQuantization(input.Quantization)
 		artifact := DiscoverArtifact{
-			ArtifactID:          input.ID,
-			Quantization:        guide,
-			Fit:                 FitUnknown,
-			FitLabel:            "Fit unknown",
-			EstimatedGeneration: unavailableGenerationSpeed("A runnable GPU placement and memory-bandwidth telemetry are required before generation speed can be estimated."),
-			Confidence:          confidence(metadata, metadataErr),
-			weightsBytes:        input.WeightsBytes,
-			complete:            input.Complete,
+			ArtifactID:               input.ID,
+			Quantization:             guide,
+			Fit:                      FitUnknown,
+			FitLabel:                 "Fit unknown",
+			EstimatedGenerationSpeed: unavailableGenerationSpeed("A runnable GPU placement and memory-bandwidth telemetry are required before generation speed can be estimated."),
+			Confidence:               confidence(metadata, metadataErr),
+			weightsBytes:             input.WeightsBytes,
+			complete:                 input.Complete,
 		}
 		if guide.Warning != "" {
 			artifact.Warnings = append(artifact.Warnings, guide.Warning)
@@ -126,7 +126,7 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			artifact.Fit, artifact.FitLabel = discoverFit(artifact.Runnable, artifact.Offload)
 			artifact.Reason = artifact.Offload.Reason
 			if artifact.Runnable {
-				artifact.EstimatedGeneration = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide, metadata)
+				artifact.EstimatedGenerationSpeed = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide, metadata)
 			}
 		}
 		result.Artifacts = append(result.Artifacts, artifact)
