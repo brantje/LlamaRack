@@ -6,5 +6,5 @@ const repoID = computed(() => `${String(route.params.owner || '')}/${String(rout
 </script>
 
 <template>
-  <ModelsDiscover :repo-id="repoID" />
+  <ModelsDiscover :key="`discover-detail:${repoID}`" :repo-id="repoID" />
 </template>
