@@ -100,14 +100,12 @@ describe('Discover formatting and URL branches', () => {
       }]
     }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path.startsWith('/api/v1/huggingface/search?')) return [{ id: 'acme/demo', downloads: 1, likes: 1, private: false, gated: false }]
       if (path.startsWith('/api/v1/huggingface/model?')) return detail
       if (path === '/api/v1/downloads' && options?.method === 'POST') return { id: 'job' }
       return []
     })
-    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-    await wrapper.find('form').trigger('submit'); await flushPromises()
-    await wrapper.find('[class*="cursor-pointer"]').trigger('click'); await flushPromises()
+    const wrapper = await mountSuspended(DiscoverPage, { props: { repoId: 'acme/demo' }, route: false })
+    await flushPromises()
     expect(wrapper.text()).toContain('Vision projector')
     expect(wrapper.text()).toContain('MTP draft model')
     expect(wrapper.text()).toContain('future')
