@@ -7,6 +7,7 @@ import AdminLlamaCppPage from '~/pages/admin/llamacpp.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
 import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 import { useManager, type Profile } from '~/composables/useManager'
+import { clearManagementToken, storeManagementToken } from '~/composables/useManagerApi'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -96,6 +97,7 @@ function settingsResponse(overrides: Record<string, any> = {}) {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  clearManagementToken()
   resetManager()
 })
 
@@ -150,6 +152,7 @@ describe('Phase 10 deep user branches', () => {
       return []
     })
 
+    const manager = useManager()
     const wrapper = await mountSuspended(AdminUsersPage, { route: false })
     await flushPromises()
 
@@ -173,6 +176,10 @@ describe('Phase 10 deep user branches', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Password reset for operator')
 
+    // Self-disable correctly reinitializes into a signed-out state with bearer
+    // auth. Restore the synthetic current-user state before exercising the
+    // independent self-password-reset branch in this component test.
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     await rowButton(tableRow(wrapper, 'admin'), 'Reset password').trigger('click')
     await flushPromises()
     modalInput = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)!
@@ -292,6 +299,7 @@ describe('Phase 10 deep profile branches', () => {
     sessions = [{ id: 'current', user_id: 1, created_at: 1, expires_at: 2, remote_address: '', user_agent: '', current: true }]
     wrapper.unmount()
     resetManager()
+    storeManagementToken('profile-token', false)
     const current = await mountSuspended(ProfilePage, { route: false })
     await flushPromises()
     await button(current, 'Sign out').trigger('click')

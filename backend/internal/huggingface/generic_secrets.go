@@ -30,6 +30,9 @@ func (s *SecretStore) GetSecret(ctx context.Context, name string) (string, error
 	return string(plain), nil
 }
 
+// SetSecret stores generic provider credentials as opaque secrets. Display
+// prefixes are intentionally reserved for token-specific storage such as
+// SetToken, where the prefix is part of the product UX.
 func (s *SecretStore) SetSecret(ctx context.Context, name, value string) error {
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
@@ -41,13 +44,9 @@ func (s *SecretStore) SetSecret(ctx context.Context, name, value string) error {
 		return err
 	}
 	ciphertext := s.aead.Seal(nil, nonce, []byte(value), []byte(name))
-	prefix := value
-	if len(prefix) > 6 {
-		prefix = prefix[:6]
-	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_secrets(name,ciphertext,nonce,prefix,updated_at)
 VALUES(?,?,?,?,unixepoch())
-ON CONFLICT(name) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,prefix=excluded.prefix,updated_at=unixepoch()`, name, ciphertext, nonce, prefix)
+ON CONFLICT(name) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,prefix=excluded.prefix,updated_at=unixepoch()`, name, ciphertext, nonce, "")
 	return err
 }
 

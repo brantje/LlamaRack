@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
@@ -23,6 +24,7 @@ type phase10OIDCHandler struct {
 	auth     *auth.Service
 	settings *settings.Service
 	network  *managersecurity.Network
+	policyMu sync.Mutex
 }
 
 func NewPhase10OIDCHandler(oidc *auth.OIDCManager, a *auth.Service, managerSettings *settings.Service, network *managersecurity.Network) http.Handler {
@@ -96,6 +98,12 @@ func (h *phase10OIDCHandler) authSettings(w http.ResponseWriter, r *http.Request
 		ExternalURL                *string `json:"external_url"`
 	}
 	if !decode(w, r, &in) { return }
+
+	// Serialize the lockout-sensitive check with provider test/update/delete
+	// operations so another request cannot invalidate the last usable OIDC
+	// provider between validation and committing local-login=false.
+	h.policyMu.Lock()
+	defer h.policyMu.Unlock()
 	if in.LocalLoginEnabled != nil && !*in.LocalLoginEnabled {
 		usable, err := h.oidc.CanDisableLocalLogin(r.Context())
 		if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
@@ -181,6 +189,8 @@ func (h *phase10OIDCHandler) provider(w http.ResponseWriter, r *http.Request, re
 	id := parts[0]
 	if len(parts) == 2 {
 		if parts[1] != "test" || r.Method != http.MethodPost { writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"}); return }
+		h.policyMu.Lock()
+		defer h.policyMu.Unlock()
 		provider, err := h.oidc.TestProvider(r.Context(), id)
 		if err != nil { writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "provider": provider}); return }
 		slog.Info("security event", "event", "auth.oidc_provider_tested", "provider_id", id, "success", true); writeJSON(w, http.StatusOK, provider); return
@@ -189,11 +199,15 @@ func (h *phase10OIDCHandler) provider(w http.ResponseWriter, r *http.Request, re
 	case http.MethodGet:
 		provider, err := h.oidc.GetProvider(r.Context(), id); if err != nil { writeOIDCNotFound(w, err, "OIDC provider not found"); return }; writeJSON(w, http.StatusOK, provider)
 	case http.MethodPut, http.MethodPatch:
+		h.policyMu.Lock()
+		defer h.policyMu.Unlock()
 		var in auth.OIDCProviderInput; if !decode(w, r, &in) { return }
 		provider, err := h.oidc.UpdateProvider(r.Context(), id, in)
 		if err != nil { if errors.Is(err, auth.ErrAuthLockoutRisk) { writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()}); return }; writeOIDCNotFound(w, err, "OIDC provider not found"); return }
 		slog.Info("security event", "event", "auth.oidc_provider_updated", "provider_id", id); writeJSON(w, http.StatusOK, provider)
 	case http.MethodDelete:
+		h.policyMu.Lock()
+		defer h.policyMu.Unlock()
 		if err := h.oidc.DeleteProvider(r.Context(), id); err != nil { if errors.Is(err, auth.ErrAuthLockoutRisk) { writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()}); return }; writeOIDCNotFound(w, err, "OIDC provider not found"); return }
 		slog.Info("security event", "event", "auth.oidc_provider_deleted", "provider_id", id); w.WriteHeader(http.StatusNoContent)
 	default: w.WriteHeader(http.StatusMethodNotAllowed)

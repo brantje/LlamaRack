@@ -13,9 +13,8 @@ import (
 )
 
 type phase10AuthHandler struct { auth *auth.Service; network *managersecurity.Network; protector *managersecurity.LoginProtector; settings *settings.Service }
-func NewPhase10AuthHandler(a *auth.Service, network *managersecurity.Network, protector *managersecurity.LoginProtector, managerSettings ...*settings.Service) http.Handler {
-	var configured *settings.Service; if len(managerSettings) > 0 { configured = managerSettings[0] }
-	return &phase10AuthHandler{auth: a, network: network, protector: protector, settings: configured}
+func NewPhase10AuthHandler(a *auth.Service, network *managersecurity.Network, protector *managersecurity.LoginProtector, managerSettings *settings.Service) http.Handler {
+	return &phase10AuthHandler{auth: a, network: network, protector: protector, settings: managerSettings}
 }
 func (h *phase10AuthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
@@ -34,7 +33,7 @@ func (h *phase10AuthHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	slog.Info("security event", "event", "user.created", "target_user_id", user.ID, "bootstrap", true); writeJSON(w, http.StatusCreated, user)
 }
 func (h *phase10AuthHandler) login(w http.ResponseWriter, r *http.Request) {
-	if h.settings != nil { enabled, err := h.settings.Bool(r.Context(), settings.LocalLoginEnabled); if err != nil { writeErr(w, http.StatusInternalServerError, err); return }; if !enabled { writeJSON(w, http.StatusForbidden, map[string]string{"error": "local login is disabled"}); return } }
+	enabled, err := h.settings.Bool(r.Context(), settings.LocalLoginEnabled); if err != nil { writeErr(w, http.StatusInternalServerError, err); return }; if !enabled { writeJSON(w, http.StatusForbidden, map[string]string{"error": "local login is disabled"}); return }
 	var in struct { Username string `json:"username"`; Password string `json:"password"` }; if !decode(w, r, &in) { return }
 	address := h.network.EffectiveRemoteAddress(r); delay, locked := h.protector.BeforeAttempt(r.Context(), in.Username, address)
 	if locked { retry := int(delay.Seconds()); if retry < 1 { retry = 1 }; w.Header().Set("Retry-After", strconv.Itoa(retry)); slog.Warn("security event", "event", "auth.login_rate_limited", "remote_address", address); writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "invalid username or password"}); return }

@@ -17,7 +17,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const signingKeyFilename = "management-jwt-ed25519.key"
+const (
+	signingKeyFilename          = "management-jwt-ed25519.key"
+	maxWebSocketTicketsPerSession = 8
+	maxWebSocketTicketsGlobal     = 1024
+)
 
 type managementClaims struct {
 	jwt.RegisteredClaims
@@ -265,14 +269,48 @@ func (s *Service) IssueWebSocketTicket(ctx context.Context, session Session) (st
 	}
 	expires := time.Now().Add(wsTicketLifetime)
 	s.ticketMu.Lock()
+	defer s.ticketMu.Unlock()
 	now := time.Now()
 	for key, item := range s.wsTickets {
 		if !item.ExpiresAt.After(now) {
 			delete(s.wsTickets, key)
 		}
 	}
+
+	for {
+		count := 0
+		oldestKey := ""
+		var oldestExpiry time.Time
+		for key, item := range s.wsTickets {
+			if item.SessionID != session.ID {
+				continue
+			}
+			count++
+			if oldestKey == "" || item.ExpiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = key, item.ExpiresAt
+			}
+		}
+		if count < maxWebSocketTicketsPerSession {
+			break
+		}
+		delete(s.wsTickets, oldestKey)
+	}
+
+	for len(s.wsTickets) >= maxWebSocketTicketsGlobal {
+		oldestKey := ""
+		var oldestExpiry time.Time
+		for key, item := range s.wsTickets {
+			if oldestKey == "" || item.ExpiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = key, item.ExpiresAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.wsTickets, oldestKey)
+	}
+
 	s.wsTickets[ticket] = wsTicket{SessionID: session.ID, JTI: session.JTI, ExpiresAt: expires}
-	s.ticketMu.Unlock()
 	return ticket, expires.Unix(), nil
 }
 

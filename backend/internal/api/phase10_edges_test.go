@@ -84,7 +84,7 @@ func TestPhase10APIKeyRouteEdges(t *testing.T) {
 
 func TestPhase10AuthHandlerRejectedInputsAndSecureCookies(t *testing.T) {
 	f := newPhase10SecurityFixture(t)
-	authHandler := NewPhase10AuthHandler(f.auth, f.network, f.protector)
+	authHandler := NewPhase10AuthHandler(f.auth, f.network, f.protector, f.settings)
 
 	w := phase10Request(t, authHandler, http.MethodPost, "/api/v1/auth/bootstrap", []string{"invalid"}, nil, nil)
 	if w.Code != http.StatusBadRequest {

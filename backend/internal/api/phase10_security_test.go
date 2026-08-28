@@ -34,7 +34,7 @@ func newPhase10SecurityFixture(t *testing.T) *phase10SecurityFixture {
 	authService := auth.New(db, time.Hour)
 	network := managersecurity.NewNetwork(managerSettings)
 	protector := managersecurity.NewLoginProtector(managerSettings)
-	authHandler := NewPhase10AuthHandler(authService, network, protector)
+	authHandler := NewPhase10AuthHandler(authService, network, protector, managerSettings)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authHandler)
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -98,6 +98,14 @@ func TestPhase10BootstrapLoginBearerAndLogout(t *testing.T) {
 	if w.Code != http.StatusNoContent { t.Fatalf("health status=%d", w.Code) }
 }
 
+func TestPhase10LocalLoginPolicyIsAlwaysEnforced(t *testing.T) {
+	f := newPhase10SecurityFixture(t)
+	if _, err := f.auth.Bootstrap(t.Context(), "admin", "correct-horse-battery"); err != nil { t.Fatal(err) }
+	if _, err := f.settings.Set(t.Context(), settings.LocalLoginEnabled, false); err != nil { t.Fatal(err) }
+	w := phase10Request(t, f.handler, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": "admin", "password": "correct-horse-battery"}, nil, nil)
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "local login is disabled") { t.Fatalf("disabled local login status=%d body=%s", w.Code, w.Body.String()) }
+}
+
 func TestPhase10LoginFailuresRateLimitAndRouteFallbacks(t *testing.T) {
 	f := newPhase10SecurityFixture(t)
 	if _, err := f.auth.Bootstrap(t.Context(), "admin", "correct-horse-battery"); err != nil { t.Fatal(err) }
@@ -111,7 +119,7 @@ func TestPhase10LoginFailuresRateLimitAndRouteFallbacks(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" { t.Fatalf("rate limited status=%d retry=%q body=%s", w.Code, w.Header().Get("Retry-After"), w.Body.String()) }
 	w = phase10Request(t, f.handler, http.MethodGet, "/api/v1/protected", nil, nil, nil)
 	if w.Code != http.StatusUnauthorized { t.Fatalf("missing bearer status=%d body=%s", w.Code, w.Body.String()) }
-	w = phase10Request(t, NewPhase10AuthHandler(f.auth, f.network, f.protector), http.MethodGet, "/api/v1/auth/nope", nil, nil, nil)
+	w = phase10Request(t, NewPhase10AuthHandler(f.auth, f.network, f.protector, f.settings), http.MethodGet, "/api/v1/auth/nope", nil, nil, nil)
 	if w.Code != http.StatusNotFound { t.Fatalf("auth route fallback status=%d body=%s", w.Code, w.Body.String()) }
 	for _, method := range []string{http.MethodGet, http.MethodOptions, http.MethodHead} { if isStateChanging(method) { t.Fatalf("%s should not be state-changing", method) } }
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} { if !isStateChanging(method) { t.Fatalf("%s should be state-changing", method) } }
