@@ -11,9 +11,10 @@ import (
 )
 
 func legacyPasswordHash(password string) string {
-	memory := argonMemory / 2
-	if memory < uint32(8*argonThreads) {
-		memory = uint32(8 * argonThreads)
+	memory := uint32(argonMemory / 2)
+	minimum := uint32(8) * uint32(argonThreads)
+	if memory < minimum {
+		memory = minimum
 	}
 	salt := []byte("0123456789abcdef")
 	hash := argon2.IDKey([]byte(password), salt, argonTime, memory, argonThreads, argonKeyLength)
