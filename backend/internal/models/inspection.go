@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
 
 // GGUFArtifactFile mirrors the provider artifact file shape for local GGUFs.
@@ -40,6 +42,7 @@ type GGUFInspection struct {
 	Files          []GGUFArtifactFile       `json:"files"`
 	Dependencies   []GGUFArtifactDependency `json:"dependencies,omitempty"`
 
+	ModelName        string            `json:"model_name,omitempty"`
 	Architecture     string            `json:"architecture,omitempty"`
 	ContextLength    int64             `json:"context_length,omitempty"`
 	GGUFVersion      uint32            `json:"gguf_version,omitempty"`
@@ -119,6 +122,12 @@ func (s *Service) InspectGGUFArtifact(ctx context.Context, path string) (GGUFIns
 	inspection.ContextLength = summary.Derived.ContextLength
 	inspection.GGUFVersion = summary.Version
 	inspection.MetadataCount = summary.MetadataCount
+	if metadataRel := mainGroup.firstRel(); metadataRel != "" {
+		namePage, nameErr := ggufmeta.ReadValuePage(filepath.Join(root, filepath.FromSlash(metadataRel)), "general.name", 0, 0)
+		if nameErr == nil && namePage.Type == "string" {
+			inspection.ModelName = strings.TrimSpace(namePage.Value)
+		}
+	}
 
 	options := map[string]string{}
 	if summary.Features.HasMTP && !summary.Features.MTPOnly {
