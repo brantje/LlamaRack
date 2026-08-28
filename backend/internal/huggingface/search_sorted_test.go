@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestSearchSortedUsesDiscoveryOrdering(t *testing.T) {
 	var seen url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +102,25 @@ func TestSearchSortedPageReturnsAndAcceptsProviderCursor(t *testing.T) {
 	}
 }
 
+func TestSearchSortedPropagatesProviderError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := client.SearchSorted(context.Background(), SearchOptions{})
+	if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("search error = %v", err)
+	}
+	if items != nil {
+		t.Fatalf("items = %+v, want nil", items)
+	}
+}
+
 func TestDiscoveryJSONErrors(t *testing.T) {
 	t.Run("invalid endpoint", func(t *testing.T) {
 		client, err := NewClient("https://huggingface.co", nil)
@@ -125,6 +150,42 @@ func TestDiscoveryJSONErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("authorization header", func(t *testing.T) {
+		var authorization string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authorization = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		}))
+		defer server.Close()
+		client, err := NewClientWithHTTP(server.URL, func(context.Context) (string, error) {
+			return "secret-token", nil
+		}, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst []map[string]any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err != nil {
+			t.Fatal(err)
+		}
+		if authorization != "Bearer secret-token" {
+			t.Fatalf("authorization = %q", authorization)
+		}
+	})
+
+	t.Run("transport", func(t *testing.T) {
+		httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("transport unavailable")
+		})}
+		client, err := NewClientWithHTTP("https://huggingface.co", nil, httpClient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "Hugging Face request failed") || !strings.Contains(err.Error(), "transport unavailable") {
+			t.Fatalf("transport error = %v", err)
+		}
+	})
+
 	t.Run("provider status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
@@ -137,6 +198,21 @@ func TestDiscoveryJSONErrors(t *testing.T) {
 		}
 		var dst any
 		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), "upstream exploded") {
+			t.Fatalf("status error = %v", err)
+		}
+	})
+
+	t.Run("provider status without body", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+		client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var dst any
+		if _, err := client.getDiscoveryJSON(context.Background(), "/api/models", &dst); err == nil || !strings.Contains(err.Error(), "Service Unavailable") {
 			t.Fatalf("status error = %v", err)
 		}
 	})
@@ -165,6 +241,8 @@ func TestNextCursorFromLink(t *testing.T) {
 		{"<https://huggingface.co/api/models?cursor=abc123&limit=30>; rel=next", "abc123"},
 		{"<https://huggingface.co/api/models?cursor=prev>; rel=prev, <https://huggingface.co/api/models?cursor=next>; rel=next", "next"},
 		{"<https://huggingface.co/api/models?limit=30>; rel=next", ""},
+		{"not-a-link; rel=next", ""},
+		{"<://bad>; rel=next", ""},
 		{"", ""},
 	}
 	for _, tc := range cases {
@@ -203,8 +281,11 @@ func TestSearchSortedDefaultsLimitSkipsEmptyIDsAndFallsBackToSafetensorsParamete
 	}
 }
 
-func TestParameterCountSkipsEmptyMetadata(t *testing.T) {
+func TestParameterCountFallbacks(t *testing.T) {
 	if got := parameterCount(nil, &parameterInfo{}, &parameterInfo{Parameters: map[string]int64{"none": 0}}); got != 0 {
 		t.Fatalf("parameter count = %d", got)
+	}
+	if got := parameterCount(&parameterInfo{Total: 42}); got != 42 {
+		t.Fatalf("total fallback = %d, want 42", got)
 	}
 }
