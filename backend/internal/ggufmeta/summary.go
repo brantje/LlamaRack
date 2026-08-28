@@ -20,9 +20,10 @@ type Summary struct {
 	Features      Features
 }
 
-// ReadSummary reads GGUF metadata once and, only for MTP-capable files,
-// continues directly into the tensor directory to distinguish native/bundled
-// MTP from an MTP-only helper. Tensor payloads are never read.
+// ReadSummary reads GGUF metadata once and, only for MTP-capable files whose
+// architecture does not already define them as standalone helpers, continues
+// directly into the tensor directory to distinguish native/bundled MTP from an
+// MTP-only helper. Tensor payloads are never read.
 func ReadSummary(path string) (Summary, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -86,7 +87,7 @@ func readSummary(r io.ReadSeeker) (Summary, error) {
 
 	derived := derive(values)
 	features := summaryFeatures(derived, values)
-	if features.HasMTP {
+	if features.HasMTP && !features.MTPOnly {
 		hasTrunk, err := tensorPrefixPresentCurrent(r, tensorCount, "blk.0.")
 		if err != nil {
 			return Summary{}, err
@@ -125,9 +126,12 @@ func summaryMetadataKey(key string) bool {
 
 func summaryFeatures(derived Derived, values map[string]string) Features {
 	architecture := strings.TrimSpace(derived.Architecture)
+	standaloneMTP := standaloneMTPArchitecture(architecture)
 	features := Features{
 		Architecture: architecture,
 		Projector:    strings.EqualFold(architecture, "clip"),
+		HasMTP:       standaloneMTP,
+		MTPOnly:      standaloneMTP,
 	}
 	if architecture == "" {
 		return features
