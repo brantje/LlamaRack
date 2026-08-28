@@ -3,12 +3,86 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
+
+type recordedLifecycleEvent struct {
+	event      string
+	instanceID string
+	duration   time.Duration
+}
+
+func collectLifecycleEvents(s *Service) (*[]recordedLifecycleEvent, *sync.Mutex) {
+	var mu sync.Mutex
+	events := []recordedLifecycleEvent{}
+	s.SetObservabilityRecorder(func(_ context.Context, event, instanceID string, duration time.Duration) error {
+		mu.Lock()
+		events = append(events, recordedLifecycleEvent{event: event, instanceID: instanceID, duration: duration})
+		mu.Unlock()
+		return nil
+	})
+	return &events, &mu
+}
+
+func hasLifecycleEvent(events *[]recordedLifecycleEvent, mu *sync.Mutex, event, instanceID string) (recordedLifecycleEvent, bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, item := range *events {
+		if item.event == event && item.instanceID == instanceID {
+			return item, true
+		}
+	}
+	return recordedLifecycleEvent{}, false
+}
+
+func TestInferenceAutoloadAndLoadRecordExactObservabilityEvents(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	s, ms, m, sup, _ := setupLifecycle(t, true, false)
+	instances, err := ms.Instances(ctx, m.ID)
+	if err != nil || len(instances) != 1 { t.Fatalf("instances=%+v err=%v", instances, err) }
+	instanceID := instances[0].ID
+	events, mu := collectLifecycleEvents(s)
+
+	endpoint, release, err := s.Acquire(ctx, instanceID)
+	if err != nil || endpoint == "" || release == nil { t.Fatalf("acquire endpoint=%q release=%v err=%v", endpoint, release != nil, err) }
+	release()
+	waitForRuntimeState(t, sup, instanceID, supervisor.Ready)
+
+	if _, ok := hasLifecycleEvent(events, mu, ObservabilityAutoload, instanceID); !ok { t.Fatalf("autoload event missing: %+v", *events) }
+	load, ok := hasLifecycleEvent(events, mu, ObservabilityLoad, instanceID)
+	if !ok || load.duration <= 0 { t.Fatalf("load event=%+v events=%+v", load, *events) }
+	logs := strings.Join(s.Logs(instanceID), "\n")
+	if !strings.Contains(logs, "[manager] autoload triggered by inference request") || !strings.Contains(logs, "[manager] worker ready after") {
+		t.Fatalf("logs=%q", logs)
+	}
+}
+
+func TestFailedStartRecordsExactObservabilityEvent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s, ms, m, _, _ := setupLifecycle(t, true, false)
+	instances, err := ms.Instances(ctx, m.ID)
+	if err != nil || len(instances) != 1 { t.Fatalf("instances=%+v err=%v", instances, err) }
+	instanceID := instances[0].ID
+	path, err := ms.ModelAbsolutePath(m)
+	if err != nil { t.Fatal(err) }
+	if err := os.Remove(path); err != nil { t.Fatal(err) }
+	events, mu := collectLifecycleEvents(s)
+
+	if _, err := s.EnsureReady(ctx, instanceID); err == nil { t.Fatal("expected missing model file to fail startup") }
+	failed, ok := hasLifecycleEvent(events, mu, ObservabilityFailedStart, instanceID)
+	if !ok || failed.duration < 0 { t.Fatalf("failed event=%+v events=%+v", failed, *events) }
+	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "[manager] worker failed to start:") {
+		t.Fatalf("logs=%q", logs)
+	}
+}
 
 func TestIdleUnloadRecordsExactObservabilityEvent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
