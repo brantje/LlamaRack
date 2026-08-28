@@ -14,7 +14,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
-func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) {
+func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/ws", NewRuntimeWebSocketHandler(f.auth, f.server.lifecycle, ""))
@@ -31,11 +31,20 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 	}
 
 	cookie := bootstrapAndLogin(t, f)
-	cookieHeader := cookie.Name + "=" + cookie.Value
+	login, err := f.auth.LoginBearerWithMetadata(t.Context(), "admin", "correct-horse-battery", "127.0.0.1", "ws-test")
+	if err != nil { t.Fatal(err) }
+	_, session, err := f.auth.AuthenticateBearer(t.Context(), login.AccessToken)
+	if err != nil { t.Fatal(err) }
+	issueTicket := func() string {
+		t.Helper()
+		ticket, _, err := f.auth.IssueWebSocketTicket(t.Context(), session)
+		if err != nil { t.Fatal(err) }
+		return ticket
+	}
+
 	badOriginHeaders := http.Header{}
-	badOriginHeaders.Set("Cookie", cookieHeader)
 	badOriginHeaders.Set("Origin", "https://evil.example")
-	if conn, response, err := websocket.DefaultDialer.Dial(wsURL, badOriginHeaders); err == nil {
+	if conn, response, err := websocket.DefaultDialer.Dial(wsURL+"?ticket="+issueTicket(), badOriginHeaders); err == nil {
 		_ = conn.Close()
 		t.Fatal("expected cross-host websocket origin to fail")
 	} else if response == nil || response.StatusCode != http.StatusForbidden {
@@ -46,13 +55,17 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 	instance, err := f.server.lifecycle.Instances().Create(context.Background(), instances.CreateInput{ModelID: model.ID, Name: "WS instance"})
 	if err != nil { t.Fatal(err) }
 	headers := http.Header{}
-	headers.Set("Cookie", cookieHeader)
 	headers.Set("Origin", server.URL)
-	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
-	if err != nil {
-		t.Fatalf("websocket dial failed: response=%v err=%v", response, err)
-	}
+	ticket := issueTicket()
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, headers)
+	if err != nil { t.Fatalf("websocket dial failed: response=%v err=%v", response, err) }
 	defer conn.Close()
+	if replay, replayResponse, replayErr := websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, headers); replayErr == nil {
+		_ = replay.Close()
+		t.Fatal("expected websocket ticket replay to fail")
+	} else if replayResponse == nil || replayResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("ticket replay response=%v err=%v", replayResponse, replayErr)
+	}
 	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil { t.Fatal(err) }
 
 	var snapshot runtimeSnapshotEvent
@@ -66,9 +79,7 @@ func TestRuntimeWebSocketRequiresSessionAndStreamsSupervisorState(t *testing.T) 
 	for _, want := range []supervisor.State{supervisor.Starting, supervisor.Failed} {
 		var event runtimeEvent
 		if err := conn.ReadJSON(&event); err != nil { t.Fatalf("read %s event: %v", want, err) }
-		if event.Type != "runtime" || event.Runtime.InstanceID != instance.ID || event.Runtime.ModelID != model.ID || event.Runtime.State != want {
-			t.Fatalf("event=%+v want state=%s instance=%s", event, want, instance.ID)
-		}
+		if event.Type != "runtime" || event.Runtime.InstanceID != instance.ID || event.Runtime.ModelID != model.ID || event.Runtime.State != want { t.Fatalf("event=%+v want state=%s instance=%s", event, want, instance.ID) }
 	}
 }
 
