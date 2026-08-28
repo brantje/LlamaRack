@@ -44,10 +44,21 @@ const form = reactive({
   }
 })
 
-const ggufItems = computed(() => availableGGUFs.value.map(file => ({
-  label: `${file.path}${file.quantization ? ` · ${file.quantization}` : ''}`,
-  value: file.path
-})))
+function ggufCapabilities(file: AvailableGGUF) {
+  const options = file.suggested_options || {}
+  const capabilities: string[] = []
+  if (options['spec-draft-model'] || options['spec-type'] === 'draft-mtp') capabilities.push('MTP')
+  if (options.mmproj) capabilities.push('Vision')
+  return capabilities
+}
+
+const ggufItems = computed(() => availableGGUFs.value.map(file => {
+  const details = [file.quantization, ...ggufCapabilities(file)].filter(Boolean)
+  return {
+    label: `${file.path}${details.length ? ` · ${details.join(' · ')}` : ''}`,
+    value: file.path
+  }
+}))
 const ggufPlaceholder = computed(() => scanning.value
   ? 'Scanning model folder…'
   : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
