@@ -18,7 +18,7 @@ func TestEstimateGenerationSpeedSingleGPU(t *testing.T) {
 	if !got.Estimated || got.MinTokensPerSecond <= 0 || got.MaxTokensPerSecond <= got.MinTokensPerSecond {
 		t.Fatalf("estimate=%+v", got)
 	}
-	if !strings.Contains(got.Label, "tok/s") || !strings.Contains(got.Reason, "288 GB/s") || !strings.Contains(got.Reason, "13.0 GiB") {
+	if !strings.Contains(got.Label, "tok/s") || !strings.Contains(got.Reason, "288 GB/s") || !strings.Contains(got.Reason, "12.0 GiB") || !strings.Contains(got.Reason, "1.0 GiB") {
 		t.Fatalf("estimate=%+v", got)
 	}
 }
@@ -59,12 +59,30 @@ func TestEstimateGenerationSpeedRequiresMeasuredBandwidthAndGPUOnlyPlacement(t *
 	}
 }
 
+func TestEstimateGenerationSpeedCoversInvalidInputs(t *testing.T) {
+	guide := ClassifyQuantization("Q4_K_M")
+	bandwidthGPU := hardware.GPU{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_000_000_000}
+	for name, got := range map[string]GenerationSpeedEstimate{
+		"mode": estimateGenerationSpeed(hardware.Snapshot{}, MemoryEstimate{WeightsBytes: 1}, Offload{}, guide),
+		"weights": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{}, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide),
+		"devices": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full"}, guide),
+		"missing device": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full", Devices: []string{"CUDA1"}}, guide),
+	} {
+		if got.Estimated || got.Label != "Estimate unavailable" {
+			t.Fatalf("%s=%+v", name, got)
+		}
+	}
+}
+
 func TestGenerationSpeedHelpers(t *testing.T) {
 	if low, high := quantizationBandwidthEfficiency("Q2_K"); low != 0.42 || high != 0.66 {
 		t.Fatalf("Q2 efficiency=%v %v", low, high)
 	}
 	if low, high := quantizationBandwidthEfficiency("4.2BPW"); low != 0.48 || high != 0.73 {
 		t.Fatalf("BPW efficiency=%v %v", low, high)
+	}
+	if low, high := quantizationBandwidthEfficiency("F16"); low != 0.58 || high != 0.82 {
+		t.Fatalf("F16 efficiency=%v %v", low, high)
 	}
 	for _, tc := range []struct {
 		value string
@@ -84,6 +102,9 @@ func TestGenerationSpeedHelpers(t *testing.T) {
 				t.Fatalf("split %q=%v", tc.value, got)
 			}
 		}
+	}
+	if got := tensorSplitFractions("", 0); got != nil {
+		t.Fatalf("zero devices=%v", got)
 	}
 	if got := formatTPSRange(4.2, 6.7); got != "~4.2–6.7 tok/s" {
 		t.Fatalf("range=%q", got)
