@@ -262,16 +262,18 @@ func (h *phase10Handler) generalSettings(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var in struct {
-		SessionLifetimeSeconds    *int    `json:"session_lifetime_seconds"`
-		LoginProtectionEnabled   *bool   `json:"login_protection_enabled"`
-		LoginFailureThreshold    *int    `json:"login_failure_threshold"`
-		LoginLockoutSeconds      *int    `json:"login_lockout_seconds"`
-		TrustedProxies           *string `json:"trusted_proxies"`
-		AllowedOrigins           *string `json:"allowed_origins"`
-		ExternalURL              *string `json:"external_url"`
-		StartupTimeoutSeconds    *int    `json:"startup_timeout_seconds"`
-		IdleUnloadSeconds        *int    `json:"idle_unload_seconds"`
-		AlwaysOnReconcileSeconds *int    `json:"always_on_reconcile_seconds"`
+		SessionLifetimeSeconds      *int    `json:"session_lifetime_seconds"`
+		LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
+		LoginFailureThreshold      *int    `json:"login_failure_threshold"`
+		LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
+		TrustedProxies             *string `json:"trusted_proxies"`
+		AllowedOrigins             *string `json:"allowed_origins"`
+		ExternalURL                *string `json:"external_url"`
+		StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
+		IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
+		AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
+		ObservabilityRetentionDays *int    `json:"observability_retention_days"`
+		PrometheusAuthToken        *string `json:"prometheus_auth_token"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -287,6 +289,8 @@ func (h *phase10Handler) generalSettings(w http.ResponseWriter, r *http.Request,
 	if in.StartupTimeoutSeconds != nil { updates[settings.StartupTimeoutSeconds] = *in.StartupTimeoutSeconds }
 	if in.IdleUnloadSeconds != nil { updates[settings.IdleUnloadSeconds] = *in.IdleUnloadSeconds }
 	if in.AlwaysOnReconcileSeconds != nil { updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds }
+	if in.ObservabilityRetentionDays != nil { updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays }
+	if in.PrometheusAuthToken != nil { updates[settings.PrometheusAuthToken] = *in.PrometheusAuthToken }
 	for key, value := range updates {
 		if _, err := h.settings.Set(r.Context(), key, value); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
