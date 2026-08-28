@@ -50,7 +50,7 @@ func TestDerivedMetadataPrefersProviderArchitectureAndContext(t *testing.T) {
 	if derived.Architecture != "qwen35" || derived.ContextLength != 262144 {
 		t.Fatalf("derived=%+v", derived)
 	}
-	if derived.BlockCount != 32 || derived.Embedding != 4096 || derived.HeadCount != 32 || derived.KVHeadCount != 8 {
+	if derived.BlockCount != 34 || derived.Embedding != 2560 || derived.HeadCount != 8 || derived.KVHeadCount != 4 {
 		t.Fatalf("missing ranged low-level metadata: %+v", derived)
 	}
 }
