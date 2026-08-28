@@ -50,6 +50,7 @@ type loadCall struct {
 	done     chan struct{}
 	endpoint string
 	err      error
+	autoload bool
 }
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
@@ -567,7 +568,7 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 	s.mu.Lock()
 	c := s.loads[i.ID]
 	if c == nil {
-		c = &loadCall{done: make(chan struct{})}
+		c = &loadCall{done: make(chan struct{}), autoload: requestedAutoload}
 		s.loads[i.ID] = c
 		created = true
 	}
@@ -575,7 +576,6 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 	if created {
 		if requestedAutoload {
 			s.recordObservabilityEvent(ctx, ObservabilityAutoload, i.ID, 0)
-			s.AddManagerLog(i.ID, "autoload triggered by inference request")
 		}
 		go s.runLoad(i.ID, c)
 	}
@@ -591,6 +591,9 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 func (s *Service) runLoad(id string, c *loadCall) {
 	release, err := s.acquireOperation(context.Background(), id)
 	if err != nil {
+		if c.autoload {
+			s.AddManagerLog(id, "autoload triggered by inference request")
+		}
 		s.completeLoad(id, c, "", err)
 		return
 	}
@@ -612,6 +615,9 @@ func (s *Service) runLoad(id string, c *loadCall) {
 				endpoint, err = s.startOne(context.Background(), i)
 			}
 		}
+	}
+	if c.autoload {
+		s.AddManagerLog(id, "autoload triggered by inference request")
 	}
 	s.completeLoad(id, c, endpoint, err)
 }
