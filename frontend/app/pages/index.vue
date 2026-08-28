@@ -29,7 +29,7 @@ type RequestRecord = {
 }
 type HardwareOverview = { hardware: HardwareSnapshot; telemetry: RuntimeTelemetry[] }
 type LifecycleSummary = { autoloads: number; failed_starts: number; load_duration_ms_total: number }
-type ManagementSummary = {
+type GatewaySummary = {
   since: number
   requests: number
   successes: number
@@ -40,6 +40,8 @@ type ManagementSummary = {
   prompt_tokens: number
   generated_tokens: number
   total_tokens: number
+}
+type ManagementSummary = GatewaySummary & {
   lifecycle: LifecycleSummary
   hardware: HardwareOverview
 }
@@ -57,6 +59,8 @@ const runtimeList = computed(() => Object.values(runtimes.value).flat())
 const readyCount = computed(() => runtimeList.value.filter(runtime => runtime.state === 'READY').length)
 const startingCount = computed(() => runtimeList.value.filter(runtime => runtime.state === 'STARTING' || runtime.state === 'LOADING').length)
 const failedCount = computed(() => runtimeList.value.filter(runtime => runtime.state === 'FAILED').length)
+const gatewaySummary = computed<GatewaySummary | null>(() => observabilityLive.value?.gateway || summary.value)
+const displayedRequests = computed<RequestRecord[]>(() => (observabilityLive.value?.requests as RequestRecord[] | undefined) ?? recentRequests.value)
 
 const emptyHardware = (): HardwareSnapshot => ({
   ram_total_bytes: 0,
@@ -150,7 +154,7 @@ const attention = computed<AttentionItem[]>(() => {
       to: `/instances/${encodeURIComponent(runtime.instance_id)}/detail`
     })
   }
-  for (const request of recentRequests.value.filter(request => request.result !== 'success').slice(0, 2)) {
+  for (const request of displayedRequests.value.filter(request => request.result !== 'success').slice(0, 2)) {
     items.push({
       key: `request-${request.id}`,
       title: `${request.instance_id} returned ${request.status_code || 'an error'}`,
@@ -224,7 +228,7 @@ onMounted(loadDashboard)
     <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <UCard data-testid="dashboard-running">
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-dimmed">Running</p>
-        <div class="mt-2 flex items-baseline gap-1.5"><strong class="text-3xl">{{ readyCount }}</strong><span class="text-sm text-muted">/ {{ instances.length }} Instances</span></div>
+        <div class="mt-2"><strong class="text-3xl">{{ `${readyCount} / ${instances.length} Instances` }}</strong></div>
         <p class="mt-1 text-xs text-muted">{{ startingCount }} starting · {{ failedCount }} error{{ failedCount === 1 ? '' : 's' }}</p>
       </UCard>
       <UCard data-testid="dashboard-vram">
@@ -234,8 +238,8 @@ onMounted(loadDashboard)
       </UCard>
       <UCard data-testid="dashboard-gateway">
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-dimmed">Gateway · 15 min</p>
-        <div class="mt-2 flex items-baseline gap-1.5"><strong class="text-3xl">{{ summary?.requests || 0 }}</strong><span class="text-sm text-muted">requests</span></div>
-        <p class="mt-1 text-xs text-muted">{{ summary?.active_api_keys || 0 }} active API key{{ summary?.active_api_keys === 1 ? '' : 's' }}</p>
+        <div class="mt-2 flex items-baseline gap-1.5"><strong class="text-3xl">{{ gatewaySummary?.requests || 0 }}</strong><span class="text-sm text-muted">requests</span></div>
+        <p class="mt-1 text-xs text-muted">{{ gatewaySummary?.active_api_keys || 0 }} active API key{{ gatewaySummary?.active_api_keys === 1 ? '' : 's' }}</p>
       </UCard>
       <UCard data-testid="dashboard-idle">
         <p class="text-xs font-semibold uppercase tracking-[0.16em] text-dimmed">Idle unload</p>
@@ -276,11 +280,11 @@ onMounted(loadDashboard)
         <template #header>
           <div class="flex items-center justify-between gap-3">
             <div><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">GATEWAY TRAFFIC · LAST 15 MIN</p><p class="mt-1 text-xs text-muted">Individual OpenAI-compatible requests with safe API-key attribution.</p></div>
-            <UBadge color="neutral" variant="soft">{{ recentRequests.length }} shown</UBadge>
+            <UBadge color="neutral" variant="soft">{{ displayedRequests.length }} shown</UBadge>
           </div>
         </template>
-        <UEmpty v-if="!recentRequests.length" variant="naked" title="No recent gateway traffic" description="Requests will appear here after inference traffic reaches an addressable Instance." />
-        <UTable v-else :data="recentRequests" :columns="gatewayColumns">
+        <UEmpty v-if="!displayedRequests.length" variant="naked" title="No recent gateway traffic" description="Requests will appear here after inference traffic reaches an addressable Instance." />
+        <UTable v-else :data="displayedRequests" :columns="gatewayColumns">
           <template #started_at-cell="{ row }"><span class="font-mono text-xs">{{ formatTime(row.original.started_at) }}</span></template>
           <template #instance_id-cell="{ row }"><NuxtLink class="font-mono text-xs font-semibold text-primary" :to="`/instances/${encodeURIComponent(row.original.instance_id)}/detail`">{{ row.original.instance_id }}</NuxtLink></template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
