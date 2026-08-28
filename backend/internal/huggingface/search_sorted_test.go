@@ -70,7 +70,7 @@ func TestSearchSortedPageReturnsAndAcceptsProviderCursor(t *testing.T) {
 	var seenCursor string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenCursor = r.URL.Query().Get("cursor")
-		w.Header().Set("Link", `</api/models?cursor=next-token>; rel="next"`)
+		w.Header().Set("Link", "</api/models?cursor=next-token>; rel=next")
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "acme/demo"}})
 	}))
 	defer server.Close()
@@ -99,9 +99,9 @@ func TestNextCursorFromLink(t *testing.T) {
 		header string
 		want   string
 	}{
-		{`<https://huggingface.co/api/models?cursor=abc123&limit=30>; rel="next"`, "abc123"},
-		{`<https://huggingface.co/api/models?cursor=prev>; rel="prev", <https://huggingface.co/api/models?cursor=next>; rel="next"`, "next"},
-		{`<https://huggingface.co/api/models?limit=30>; rel="next"`, ""},
+		{"<https://huggingface.co/api/models?cursor=abc123&limit=30>; rel=next", "abc123"},
+		{"<https://huggingface.co/api/models?cursor=prev>; rel=prev, <https://huggingface.co/api/models?cursor=next>; rel=next", "next"},
+		{"<https://huggingface.co/api/models?limit=30>; rel=next", ""},
 		{"", ""},
 	}
 	for _, tc := range cases {
