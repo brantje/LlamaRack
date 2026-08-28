@@ -1,9 +1,9 @@
 <script setup lang="ts">
 type LogSource = 'stdout' | 'stderr' | 'manager'
-type LogEntry = { source: LogSource; text: string }
+type LogEntry = { source: LogSource; timestamp: string; text: string }
 type LogResponse = { instance_id: string; entries: LogEntry[] }
 
-const props = defineProps<{ instanceId: string }>()
+const props = defineProps<{ instanceId: string; embedded?: boolean }>()
 const manager = useManager()
 const entries = ref<LogEntry[]>([])
 const source = ref<'all' | LogSource>('all')
@@ -35,10 +35,19 @@ function sourceColor(value: LogSource) {
   return 'neutral'
 }
 
+function formatTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toISOString().replace('T', ' ').replace('Z', ' UTC')
+}
+
 function validEntry(value: unknown): value is LogEntry {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<LogEntry>
-  return ['stdout', 'stderr', 'manager'].includes(String(candidate.source)) && typeof candidate.text === 'string'
+  return ['stdout', 'stderr', 'manager'].includes(String(candidate.source))
+    && typeof candidate.text === 'string'
+    && typeof candidate.timestamp === 'string'
+    && !Number.isNaN(Date.parse(candidate.timestamp))
 }
 
 function append(entry: LogEntry) {
@@ -115,7 +124,15 @@ onBeforeUnmount(closeStream)
 </script>
 
 <template>
-  <UCard id="logs" data-testid="instance-log-viewer">
+  <UCard
+    id="logs"
+    data-testid="instance-log-viewer"
+    :ui="props.embedded ? {
+      root: 'rounded-none bg-transparent shadow-none ring-0 divide-y-0',
+      header: 'px-0 pt-0 pb-4 sm:px-0',
+      body: 'p-0 sm:p-0'
+    } : undefined"
+  >
     <template #header>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -142,7 +159,8 @@ onBeforeUnmount(closeStream)
         data-testid="instance-log-output"
         class="max-h-[34rem] min-h-64 overflow-auto rounded-md bg-elevated p-3 font-mono text-xs"
       >
-        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.source}-${entry.text}`" class="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 border-b border-default py-1.5 last:border-b-0">
+        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.timestamp}-${entry.source}-${entry.text}`" class="grid grid-cols-[12rem_5rem_minmax(0,1fr)] gap-3 border-b border-default py-1.5 last:border-b-0">
+          <time :datetime="entry.timestamp" class="whitespace-nowrap text-muted">{{ formatTimestamp(entry.timestamp) }}</time>
           <div><UBadge :color="sourceColor(entry.source)" variant="soft" size="xs">{{ entry.source }}</UBadge></div>
           <pre class="whitespace-pre-wrap break-words text-highlighted">{{ entry.text }}</pre>
         </div>

@@ -15,8 +15,9 @@ type phase11LogSource interface {
 }
 
 type logEntry struct {
-	Source string `json:"source"`
-	Text   string `json:"text"`
+	Source    string `json:"source"`
+	Timestamp string `json:"timestamp"`
+	Text      string `json:"text"`
 }
 
 type phase11LogHandler struct{ source phase11LogSource }
@@ -87,8 +88,8 @@ func (h *phase11LogHandler) stream(w http.ResponseWriter, r *http.Request, insta
 		case <-r.Context().Done(): return
 		case line, open := <-events:
 			if !open { return }
-			entry := parseLogEntry(line)
-			if !logEntryMatches(entry, source, query) { continue }
+			entry, ok := parseLogEntry(line)
+			if !ok || !logEntryMatches(entry, source, query) { continue }
 			if !writeEntry(entry) { return }
 			flusher.Flush()
 		case <-keepAlive.C:
@@ -107,15 +108,13 @@ func normalizeLogSource(value string) (string, bool) {
 	}
 }
 
-func parseLogEntry(line string) logEntry {
-	trimmed := strings.TrimSpace(line)
-	for _, source := range []string{"stdout", "stderr", "manager"} {
-		prefix := "[" + source + "]"
-		if strings.HasPrefix(trimmed, prefix) {
-			return logEntry{Source: source, Text: strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))}
-		}
-	}
-	return logEntry{Source: "manager", Text: trimmed}
+func parseLogEntry(line string) (logEntry, bool) {
+	parts := strings.SplitN(line, "\t", 3)
+	if len(parts) != 3 { return logEntry{}, false }
+	source := strings.TrimSuffix(strings.TrimPrefix(parts[0], "["), "]")
+	if source != "stdout" && source != "stderr" && source != "manager" { return logEntry{}, false }
+	if _, err := time.Parse(time.RFC3339Nano, parts[1]); err != nil { return logEntry{}, false }
+	return logEntry{Source: source, Timestamp: parts[1], Text: parts[2]}, true
 }
 
 func logEntryMatches(entry logEntry, source, query string) bool {
@@ -128,8 +127,8 @@ func filterLogEntries(lines []string, source, query string, limit int) []logEntr
 	if limit <= 0 { return []logEntry{} }
 	entries := make([]logEntry, 0, min(len(lines), limit))
 	for _, line := range lines {
-		entry := parseLogEntry(line)
-		if logEntryMatches(entry, source, query) { entries = append(entries, entry) }
+		entry, ok := parseLogEntry(line)
+		if ok && logEntryMatches(entry, source, query) { entries = append(entries, entry) }
 	}
 	if len(entries) > limit { entries = entries[len(entries)-limit:] }
 	return entries

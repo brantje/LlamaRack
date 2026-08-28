@@ -6,6 +6,12 @@ import InstanceLogViewer from '~/components/InstanceLogViewer.vue'
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
+const timestamp = '2026-08-28T12:34:56.000Z'
+
+function entry(source: string, text: string) {
+  return { source, timestamp, text }
+}
+
 function component(wrapper: any, names: string[]) {
   for (const name of names) {
     const found = wrapper.findAllComponents({ name })[0]
@@ -60,16 +66,17 @@ afterEach(() => {
 })
 
 describe('InstanceLogViewer', () => {
-  it('loads a snapshot fallback, filters sources/search and resets the browser view', async () => {
+  it('loads a timestamped snapshot fallback, filters sources/search and resets the browser view', async () => {
     vi.stubGlobal('EventSource', undefined)
     mocks.request.mockResolvedValue({
       instance_id: 'gemma/4',
       entries: [
-        { source: 'stdout', text: 'server booted' },
-        { source: 'stderr', text: 'CUDA warning' },
-        { source: 'manager', text: 'worker ready' },
-        { source: 'bogus', text: 'ignore me' },
-        { source: 'stdout', text: 42 }
+        entry('stdout', 'server booted'),
+        entry('stderr', 'CUDA warning'),
+        entry('manager', 'worker ready'),
+        entry('bogus', 'ignore me'),
+        { source: 'stdout', text: 'untimestamped line' },
+        { source: 'stdout', timestamp, text: 42 }
       ]
     })
 
@@ -78,7 +85,9 @@ describe('InstanceLogViewer', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=gemma%2F4&limit=2000')
     expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('server booted')
     expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('CUDA warning')
+    expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('2026-08-28 12:34:56.000 UTC')
     expect(wrapper.text()).not.toContain('ignore me')
+    expect(wrapper.text()).not.toContain('untimestamped line')
 
     const select = component(wrapper, ['SelectMenu', 'USelectMenu'])
     select.vm.$emit('update:modelValue', 'stderr')
@@ -113,7 +122,7 @@ describe('InstanceLogViewer', () => {
     wrapper.unmount()
   })
 
-  it('tails SSE log events, ignores malformed frames and reconnects cleanly', async () => {
+  it('tails timestamped SSE log events, ignores malformed frames and reconnects cleanly', async () => {
     vi.stubGlobal('EventSource', FakeEventSource as any)
     const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
     await flushPromises()
@@ -124,22 +133,27 @@ describe('InstanceLogViewer', () => {
     expect(first.withCredentials).toBe(true)
 
     first.onopen?.(new Event('open'))
-    first.emit('log', JSON.stringify({ source: 'stdout', text: 'ready on port 9000' }))
-    first.emit('log', JSON.stringify({ source: 'stderr', text: 'recoverable warning' }))
-    first.emit('log', JSON.stringify({ source: 'manager', text: 'autoload triggered by inference request' }))
+    first.emit('log', JSON.stringify(entry('stdout', 'ready on port 9000')))
+    first.emit('log', JSON.stringify(entry('stderr', 'recoverable warning')))
+    first.emit('log', JSON.stringify(entry('manager', 'launch command: "llama-server" "--ctx-size" "8192"')))
+    first.emit('log', JSON.stringify(entry('manager', 'autoload triggered by inference request')))
     first.emit('log', '{bad json')
-    first.emit('log', JSON.stringify({ source: 'unknown', text: 'ignore' }))
+    first.emit('log', JSON.stringify({ source: 'stdout', text: 'missing timestamp' }))
+    first.emit('log', JSON.stringify(entry('unknown', 'ignore')))
     await flushPromises()
     expect(wrapper.text()).toContain('Live')
     const output = wrapper.get('[data-testid="instance-log-output"]').text()
+    expect(output).toContain('2026-08-28 12:34:56.000 UTC')
     expect(output).toContain('ready on port 9000')
     expect(output).toContain('recoverable warning')
+    expect(output).toContain('launch command: "llama-server" "--ctx-size" "8192"')
     expect(output).toContain('autoload triggered by inference request')
+    expect(output).not.toContain('missing timestamp')
     expect(output).not.toContain('ignore')
 
     await button(wrapper, 'Clear view').trigger('click')
     expect(wrapper.text()).toContain('No logs in the current view')
-    first.emit('log', JSON.stringify({ source: 'manager', text: 'future event' }))
+    first.emit('log', JSON.stringify(entry('manager', 'future event')))
     await flushPromises()
     expect(wrapper.get('[data-testid="instance-log-output"]').text()).toContain('future event')
 
@@ -147,7 +161,7 @@ describe('InstanceLogViewer', () => {
     await flushPromises()
     expect(first.closed).toBe(true)
     expect(wrapper.text()).toContain('Live log stream disconnected')
-    first.emit('log', JSON.stringify({ source: 'stdout', text: 'stale event' }))
+    first.emit('log', JSON.stringify(entry('stdout', 'stale event')))
     await flushPromises()
     expect(wrapper.text()).not.toContain('stale event')
 

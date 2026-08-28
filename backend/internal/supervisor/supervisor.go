@@ -94,6 +94,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	}
 	logRing := s.logRingLocked(instanceID)
 	logRing.reset()
+	logRing.add(formatStoredLogLine("manager", "launch command: "+formatLaunchCommand(s.binary, workerArgs)))
 	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: logRing, done: make(chan struct{})}
 	s.workers[instanceID] = w
 	s.emitRuntimeLocked(w.runtime)
@@ -434,7 +435,7 @@ func copyLogs(dst *ring, instanceID, modelID, source string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		dst.add("[" + source + "] " + line)
+		dst.add(formatStoredLogLine(source, line))
 		slog.Info("llama-server output", "instance_id", instanceID, "model_id", modelID, "stream", source, "line", line)
 	}
 }
