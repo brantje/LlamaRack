@@ -29,20 +29,21 @@ type Activity struct {
 }
 
 type Service struct {
-	models          *models.Service
-	instances       *instances.Service
-	sup             *supervisor.Supervisor
-	hardware        hardware.Snapshotter
-	profile         func() (llamacpp.Profile, error)
-	mu              sync.Mutex
-	loads           map[string]*loadCall
-	manuallyStopped map[string]bool
-	resourceBlocked map[string]string
-	resourceStarts  int
-	activities      map[string]Activity
-	idleLocks       map[string]*sync.Mutex
-	operationGates  map[string]chan struct{}
-	now             func() time.Time
+	models                *models.Service
+	instances             *instances.Service
+	sup                   *supervisor.Supervisor
+	hardware              hardware.Snapshotter
+	profile               func() (llamacpp.Profile, error)
+	observabilityRecorder ObservabilityRecorder
+	mu                    sync.Mutex
+	loads                 map[string]*loadCall
+	manuallyStopped       map[string]bool
+	resourceBlocked       map[string]string
+	resourceStarts        int
+	activities            map[string]Activity
+	idleLocks             map[string]*sync.Mutex
+	operationGates        map[string]chan struct{}
+	now                   func() time.Time
 }
 
 type loadCall struct {
@@ -160,6 +161,7 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 		}
 		return err
 	}
+	s.AddManagerLog(id, "worker stopped")
 	return nil
 }
 
@@ -182,7 +184,11 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	if err := s.sup.Stop(ctx, id); err != nil {
 		return "", err
 	}
-	return s.startOne(ctx, i)
+	endpoint, err := s.startOne(ctx, i)
+	if err == nil {
+		s.AddManagerLog(id, "restart completed")
+	}
+	return endpoint, err
 }
 
 func (s *Service) KillInstance(ctx context.Context, id string) error {
@@ -197,7 +203,11 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 	}
 	s.clearResourceBlock(id)
 	s.markManualStop(id)
-	return s.sup.Kill(id)
+	if err := s.sup.Kill(id); err != nil {
+		return err
+	}
+	s.AddManagerLog(id, "worker killed")
+	return nil
 }
 
 func (s *Service) RuntimeInstance(ctx context.Context, id string) (supervisor.Runtime, error) {
@@ -395,7 +405,10 @@ func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Dura
 		lock.Unlock()
 		if err != nil {
 			slog.Warn("idle unload failed", "instance_id", i.ID, "error", err)
+			continue
 		}
+		s.recordObservabilityEvent(ctx, ObservabilityIdleUnload, i.ID, 0)
+		s.AddManagerLog(i.ID, fmt.Sprintf("idle-unloaded after %s without active requests", idleTimeout))
 	}
 }
 
@@ -752,6 +765,8 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 		}
 		return err
 	}
+	s.recordObservabilityEvent(ctx, ObservabilityEviction, id, 0)
+	s.AddManagerLog(id, "evicted for resource pressure")
 	slog.Info("evicted instance for resource pressure", "instance_id", id, "always_on", i.AlwaysOn)
 	return nil
 }
