@@ -4,7 +4,7 @@ type CreateResponse = { model: { id: string }; instance?: { id: string }; start_
 type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
 type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
-type ModelInspection = HFArtifact & { architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string; suggested_options?: Record<string, string> }
+type ModelInspection = HFArtifact & { model_name?: string; architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string; suggested_options?: Record<string, string> }
 type HFDetail = { id: string; revision: string; artifacts: HFArtifact[] }
 
 const manager = useManager()
@@ -21,6 +21,7 @@ const contextEdited = ref(false)
 const availableGGUFs = ref<AvailableGGUF[]>([])
 const createFirstInstance = ref(true)
 const firstInstanceSlugEdited = ref(false)
+const autoSuggestedName = ref('')
 const autoSuggestedOptions = ref<Record<string, string>>({})
 const localInspection = ref<ModelInspection | null>(null)
 const remoteDetail = ref<HFDetail | null>(null)
@@ -92,6 +93,12 @@ function slugify(value: string) {
 function filename(value: string) {
   return value.split(/[\\/]/).pop() || value
 }
+function capitalizeFirst(value: string) {
+  const characters = Array.from(value.trim())
+  if (!characters.length) return ''
+  characters[0] = characters[0]!.toLocaleUpperCase()
+  return characters.join('')
+}
 function formatBytes(value: number) {
   if (!value) return 'Unknown size'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -103,6 +110,14 @@ function formatBytes(value: number) {
 function remoteDefaultName() {
   const repoName = remoteRepo.value.split('/').pop() || remoteRepo.value
   return remoteArtifact.value?.quantization ? `${repoName} ${remoteArtifact.value.quantization}` : repoName
+}
+function applyAutoSuggestedName(name: string) {
+  const suggested = capitalizeFirst(name)
+  if (!suggested) return
+  if (!form.name.trim() || form.name === autoSuggestedName.value) {
+    form.name = suggested
+    autoSuggestedName.value = suggested
+  }
 }
 function applyAutoSuggestedOptions(suggested: Record<string, string>) {
   const next = { ...form.options }
@@ -132,6 +147,8 @@ watch(() => form.first_instance.name, (name) => {
 watch(() => form.gguf_path, (path) => {
   if (remoteMode.value) return
   localInspection.value = null
+  if (form.name === autoSuggestedName.value) form.name = ''
+  autoSuggestedName.value = ''
   const suggested = availableGGUFs.value.find(file => file.path === path)?.suggested_options || {}
   applyAutoSuggestedOptions(suggested)
   void inspectSelectedGGUF(path)
@@ -154,6 +171,7 @@ async function inspectSelectedGGUF(path: string) {
     })
     if (form.gguf_path !== path) return
     localInspection.value = result
+    applyAutoSuggestedName(result.model_name || '')
     applyAutoSuggestedOptions(result.suggested_options || {})
     metadataWarning.value = result.warning || ''
     detectedArchitecture.value = result.architecture || ''
