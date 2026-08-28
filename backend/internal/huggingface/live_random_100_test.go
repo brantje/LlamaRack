@@ -171,24 +171,22 @@ func TestLiveRandom100GGUFModels(t *testing.T) {
 		if detail.GGUF != nil {
 			providerSummary = fmt.Sprintf("params=%d arch=%q ctx=%d", detail.ParameterCount, detail.GGUF.Architecture, detail.GGUF.ContextLength)
 		}
-		t.Logf("%03d OK   %-70s artifacts=%d provider=[%s] derivedErr=%v meta=%d/%d/%d recommended=%d", index+1, id, len(detail.Artifacts), providerSummary, derivedErr, derived.BlockCount, derived.Embedding, derived.HeadCount, recommended)
+		t.Logf("%03d %-4s %-70s artifacts=%d provider=[%s] derivedErr=%v meta=%d/%d/%d recommended=%d", index+1, "OK", id, len(detail.Artifacts), providerSummary, derivedErr, derived.BlockCount, derived.Embedding, derived.HeadCount, recommended)
 	}
 
 	t.Logf("RANDOM100 SUMMARY population=%d detail_ok=%d detail_failed=%d empty_artifacts=%d artifacts=%d provider_gguf=%d provider_params=%d provider_arch=%d provider_ctx=%d mixed_profiles=%d profile_failures=%d derived_ok=%d derived_failed=%d metadata_ready=%d recommended=%d no_recommendation=%d multiple_recommendations=%d",
 		len(population), s.detailOK, s.detailFailed, s.emptyArtifacts, s.artifacts, s.providerGGUF, s.providerParams, s.providerArchitecture, s.providerContext, s.mixedProfiles, s.profileFailures, s.derivedOK, s.derivedFailed, s.metadataReady, s.recommendations, s.noRecommendation, s.multipleRecommendations)
 	if len(providerMissing) > 0 {
-		t.Logf("provider metadata absent on %d/100 sampled repos (provider-side/incomplete-data category): %s", len(providerMissing), strings.Join(providerMissing, " | "))
+		t.Logf("PROVIDER MISSING (%d): %s", len(providerMissing), strings.Join(providerMissing, " | "))
 	}
 	if len(enrichmentFailures) > 0 {
-		t.Logf("bounded GGUF enrichment failures on %d/100 sampled repos: %s", len(enrichmentFailures), strings.Join(enrichmentFailures, " | "))
+		t.Logf("ENRICHMENT FAILURES (%d): %s", len(enrichmentFailures), strings.Join(enrichmentFailures, " | "))
 	}
 	if len(hardFailures) > 0 {
-		t.Fatalf("live sweep found %d implementation failures: %s", len(hardFailures), strings.Join(hardFailures, " | "))
+		t.Logf("HARD FAILURES (%d): %s", len(hardFailures), strings.Join(hardFailures, " | "))
 	}
-	if s.providerGGUF == 0 || s.providerParams == 0 {
-		t.Fatalf("provider-first implementation is not receiving Hugging Face GGUF metadata: %+v", s)
-	}
-	if s.multipleRecommendations != 0 {
-		t.Fatalf("recommendation invariant violated: %+v", s)
-	}
+
+	// Deliberately fail this temporary audit so non-verbose CI emits every t.Logf
+	// line. The file is removed after the report has been collected.
+	t.Fatalf("LIVE RANDOM100 AUDIT COMPLETE: hard=%d provider_missing=%d enrichment_failures=%d multiple_recommendations=%d", len(hardFailures), len(providerMissing), len(enrichmentFailures), s.multipleRecommendations)
 }
