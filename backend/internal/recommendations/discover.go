@@ -214,20 +214,10 @@ func markDiscoverRecommendation(artifacts []DiscoverArtifact, allowHybrid bool) 
 	if !allowHybrid && len(gpuCandidates) > 0 {
 		candidates = gpuCandidates
 	}
-	if len(candidates) == 0 {
-		return
+	best := selectDiscoverRecommendation(artifacts, candidates)
+	if best >= 0 {
+		artifacts[best].Recommended = true
 	}
-	best := candidates[0]
-	for _, index := range candidates[1:] {
-		if artifacts[index].Quantization.rank > artifacts[best].Quantization.rank {
-			best = index
-			continue
-		}
-		if artifacts[index].Quantization.rank == artifacts[best].Quantization.rank && artifacts[index].weightsBytes < artifacts[best].weightsBytes {
-			best = index
-		}
-	}
-	artifacts[best].Recommended = true
 }
 
 func ClassifyQuantization(value string) QuantizationGuide {
