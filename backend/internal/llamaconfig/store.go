@@ -9,6 +9,12 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 )
 
+const DefaultContextSize = "4096"
+
+var managerDefaults = map[string]string{
+	"ctx-size": DefaultContextSize,
+}
+
 type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
@@ -52,6 +58,8 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 		Global: map[string]string{}, Model: map[string]string{}, Instance: map[string]string{},
 		Values: map[string]string{}, Sources: map[string]string{},
 	}
+	apply(result.Values, result.Sources, managerDefaults, "manager-default")
+
 	var err error
 	result.Global, err = s.Global(ctx)
 	if err != nil {
@@ -82,30 +90,34 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 		}
 		apply(result.Values, result.Sources, result.Instance, "instance")
 	}
+
+	// GGUF-derived defaults are part of the canonical effective runtime
+	// configuration, not a launch-only hidden layer. They only fill keys that no
+	// manager/global/model/instance layer has already resolved.
+	if provider := detectedDefaultsProvider(s.db); provider != nil && strings.TrimSpace(modelID) != "" {
+		defaults, detectErr := provider(ctx, modelID)
+		if detectErr != nil {
+			return Effective{}, detectErr
+		}
+		for key, value := range defaults {
+			if _, resolved := result.Values[key]; resolved {
+				continue
+			}
+			result.Values[key] = value
+			result.Sources[key] = "detected"
+		}
+	}
 	return result, nil
 }
 
-// LaunchOptions returns only flags that the currently discovered llama-server
-// actually supports. Persisted options that disappeared after a binary change
-// remain visible/configured but are not passed to the process. Header-derived
-// defaults are injected only when no explicit effective value exists.
+// LaunchOptions filters the canonical effective configuration down to flags
+// supported by the currently discovered llama-server. Persisted options that
+// disappeared after a binary change remain visible/configured but are not
+// passed to the process.
 func (s *Store) LaunchOptions(ctx context.Context, profile llamacpp.Profile, modelID, instanceID string) (map[string]string, Effective, error) {
 	effective, err := s.Effective(ctx, modelID, instanceID)
 	if err != nil {
 		return nil, Effective{}, err
-	}
-	if provider := detectedDefaultsProvider(s.db); provider != nil && strings.TrimSpace(modelID) != "" {
-		defaults, detectErr := provider(ctx, modelID)
-		if detectErr != nil {
-			return nil, Effective{}, detectErr
-		}
-		for key, value := range defaults {
-			if _, explicit := effective.Values[key]; explicit {
-				continue
-			}
-			effective.Values[key] = value
-			effective.Sources[key] = "detected"
-		}
 	}
 	if len(profile.Options) == 0 {
 		return map[string]string{}, effective, nil
