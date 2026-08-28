@@ -16,6 +16,18 @@ func TestGemma4AssistantIsExcludedFromAvailableAndAttachedByInspect(t *testing.T
 		t.Fatal(err)
 	}
 
+	// Reproduce an index row created by the old classifier: the file fingerprint
+	// is unchanged and the architecture is known, but mtp_only was cached false.
+	mtpInfo, err := os.Stat(mtp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO gguf_index(path,size_bytes,mtime_ns,architecture,has_mtp,mtp_only)
+VALUES(?,?,?,?,1,0)`, filepath.Base(mtp), mtpInfo.Size(), mtpInfo.ModTime().UnixNano(), "gemma4-assistant"); err != nil {
+		t.Fatal(err)
+	}
+
 	available, err := s.AvailableGGUFs(ctx)
 	if err != nil {
 		t.Fatal(err)
