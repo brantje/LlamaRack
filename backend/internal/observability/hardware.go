@@ -51,14 +51,10 @@ func (s *Service) LatestHardware() HardwareOverview {
 func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot, samples []telemetry.Sample) error {
 	s.SetLatestHardware(snapshot, samples)
 	collectedAt := snapshot.CollectedAt.UTC()
-	if collectedAt.IsZero() {
-		collectedAt = time.Now().UTC()
-	}
+	if collectedAt.IsZero() { collectedAt = time.Now().UTC() }
 	timestamp := collectedAt.UnixMilli()
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	defer tx.Rollback()
 	insert := func(metric, deviceID, instanceID string, value float64) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO hardware_metric_samples(collected_at,metric,device_id,instance_id,value) VALUES(?,?,?,?,?)`, timestamp, metric, deviceID, instanceID, value)
@@ -110,9 +106,7 @@ func (s *Service) HardwareTimeseries(ctx context.Context, metric string, sinceMS
 		"ram_total_bytes": true, "ram_used_bytes": true, "vram_total_bytes": true, "vram_used_bytes": true,
 		"gpu_utilization_pct": true, "instance_vram_used_bytes": true, "instance_cpu_percent": true, "instance_memory_used_bytes": true,
 	}
-	if !allowed[metric] {
-		return nil, fmt.Errorf("unsupported hardware metric %q", metric)
-	}
+	if !allowed[metric] { return nil, fmt.Errorf("unsupported hardware metric %q", metric) }
 	if sinceMS <= 0 { sinceMS = time.Now().Add(-time.Hour).UnixMilli() }
 	if bucketSeconds <= 0 { bucketSeconds = 60 }
 	if bucketSeconds > 24*3600 { bucketSeconds = 24*3600 }
@@ -160,4 +154,23 @@ func (s *Service) PruneHardware(ctx context.Context, retentionDays int) error {
 	cutoff := time.Now().Add(-time.Duration(retentionDays)*24*time.Hour).UnixMilli()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM hardware_metric_samples WHERE collected_at<?`, cutoff)
 	return err
+}
+
+func (s *Service) RunHardwareRetention(ctx context.Context, retentionDays func(context.Context) int) {
+	prune := func() {
+		days := DefaultRetentionDays
+		if retentionDays != nil {
+			if value := retentionDays(ctx); value > 0 { days = value }
+		}
+		_ = s.PruneHardware(ctx, days)
+	}
+	prune()
+	ticker := time.NewTicker(6*time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done(): return
+		case <-ticker.C: prune()
+		}
+	}
 }
