@@ -182,6 +182,36 @@ CREATE TABLE IF NOT EXISTS observability_counters (
  value REAL NOT NULL DEFAULT 0,
  PRIMARY KEY(metric,instance_id,endpoint,status_code,result,streaming)
 );
+CREATE TRIGGER IF NOT EXISTS inference_requests_autoload_counter
+AFTER INSERT ON inference_requests WHEN NEW.autoloaded=1
+BEGIN
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('autoload_total',NEW.instance_id,1)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+1;
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('load_duration_ms_total',NEW.instance_id,NEW.load_duration_ms)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+excluded.value;
+END;
+CREATE TRIGGER IF NOT EXISTS inference_requests_failed_autoload_counter
+AFTER INSERT ON inference_requests WHEN NEW.autoloaded=1 AND NEW.result<>'success'
+BEGIN
+ INSERT INTO observability_counters(metric,instance_id,value)
+ VALUES('failed_start_total',NEW.instance_id,1)
+ ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
+ DO UPDATE SET value=value+1;
+END;
+CREATE TABLE IF NOT EXISTS hardware_metric_samples (
+ collected_at INTEGER NOT NULL,
+ metric TEXT NOT NULL,
+ device_id TEXT NOT NULL DEFAULT '',
+ instance_id TEXT NOT NULL DEFAULT '',
+ value REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_time_idx ON hardware_metric_samples(collected_at DESC);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_metric_time_idx ON hardware_metric_samples(metric,collected_at DESC);
+CREATE INDEX IF NOT EXISTS hardware_metric_samples_device_time_idx ON hardware_metric_samples(device_id,collected_at DESC);
 CREATE TABLE IF NOT EXISTS download_jobs (
  id TEXT PRIMARY KEY,
  provider TEXT NOT NULL,
