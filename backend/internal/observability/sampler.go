@@ -167,7 +167,6 @@ func (s *Sampler) Run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			s.observeLifecycle(ctx, current[runtime.InstanceID], runtime)
 			current[runtime.InstanceID] = runtime
 			s.refreshRuntimeStates(ctx, current)
 		case <-ticker.C:
@@ -194,30 +193,6 @@ func (s *Sampler) refreshRuntimeStates(ctx context.Context, current map[string]s
 	s.mu.Lock()
 	s.states = states
 	s.mu.Unlock()
-}
-
-func (s *Sampler) observeLifecycle(ctx context.Context, previous, next supervisor.Runtime) {
-	if next.InstanceID == "" || previous.State == next.State || s.lifecycle == nil || s.service == nil {
-		return
-	}
-	state := s.lifecycle.OperationalState(next.InstanceID)
-	for _, transition := range classifyLifecycle(previous, next, state) {
-		switch transition.Event {
-		case LifecycleAutoload:
-			s.lifecycle.AddManagerLog(next.InstanceID, "autoload triggered by inference request")
-		case LifecycleLoad:
-			s.lifecycle.AddManagerLog(next.InstanceID, "worker ready")
-		case LifecycleFailedStart:
-			message := "worker failed to start"
-			if next.LastError != "" {
-				message += ": " + next.LastError
-			}
-			s.lifecycle.AddManagerLog(next.InstanceID, message)
-		}
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		_ = s.service.RecordLifecycle(persistCtx, transition.Event, next.InstanceID, transition.Duration)
-		cancel()
-	}
 }
 
 func (s *Sampler) publish(snapshot LiveSnapshot) {
