@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestBearerValidationAndTicketErrorBranches(t *testing.T) {
 	}
 
 	s.mu.RLock()
-	privateKey := append([]byte(nil), s.jwtPrivate...)
+	privateKey := append(ed25519.PrivateKey(nil), s.jwtPrivate...)
 	s.mu.RUnlock()
 	sign := func(subject, sessionID, jti string) string {
 		t.Helper()
