@@ -206,10 +206,52 @@ func (s *Service) List(ctx context.Context) ([]Model, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range out {
-		out[i] = s.withLegacyPolicy(ctx, out[i])
-	}
+	s.applyLegacyPolicies(ctx, out)
 	return out, nil
+}
+
+// applyLegacyPolicies preserves the deprecated Model compatibility fields while
+// avoiding one SQL query per model. Query/scan failures are intentionally
+// ignored, matching withLegacyPolicy's historical best-effort behavior.
+func (s *Service) applyLegacyPolicies(ctx context.Context, models []Model) {
+	if len(models) == 0 {
+		return
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT model_id,id,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances ORDER BY model_id,created_at,id`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	indexes := make(map[string]int, len(models))
+	for i := range models {
+		indexes[models[i].ID] = i
+	}
+	previousModelID := ""
+	for rows.Next() {
+		var modelID, publicID, priority string
+		var enabled, autoload, alwaysOn, eviction, idleUnloadSeconds int
+		if err := rows.Scan(&modelID, &publicID, &enabled, &autoload, &alwaysOn, &priority, &eviction, &idleUnloadSeconds); err != nil {
+			return
+		}
+		if modelID == previousModelID {
+			continue
+		}
+		previousModelID = modelID
+		index, ok := indexes[modelID]
+		if !ok {
+			continue
+		}
+		m := &models[index]
+		m.PublicID = publicID
+		m.Enabled = enabled != 0
+		m.Autoload = autoload != 0
+		m.AlwaysOn = alwaysOn != 0
+		m.Priority = priority
+		m.EvictionEnabled = eviction != 0
+		m.IdleUnloadSeconds = idleUnloadSeconds
+		m.RoutingPolicy = "least_active"
+	}
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (Model, error) {
