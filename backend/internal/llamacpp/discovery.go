@@ -69,19 +69,31 @@ func parseHelp(text string) []Option {
 		if len(parts) == 2 {
 			description = strings.TrimSpace(parts[1])
 		}
-		match := longFlagRE.FindStringSubmatch(spec)
-		if len(match) != 2 || seen[match[1]] {
+
+		matches := longFlagRE.FindAllStringSubmatchIndex(spec, -1)
+		if len(matches) == 0 {
 			continue
 		}
-		key := match[1]
-		seen[key] = true
-		afterFlag := strings.TrimSpace(spec[len(match[0]):])
-		afterFlag = strings.TrimSpace(strings.TrimLeft(afterFlag, ","))
-		kind, choices := classifyValueHint(afterFlag)
-		out = append(out, Option{
-			Key: key, ValueHint: afterFlag, Description: description,
-			Kind: kind, Choices: choices, ManagerOwned: IsManagerOwnedOption(key),
-		})
+		last := matches[len(matches)-1]
+		valueHint := strings.TrimSpace(spec[last[1]:])
+		valueHint = strings.TrimSpace(strings.TrimLeft(valueHint, ","))
+		kind, choices := classifyValueHint(valueHint)
+
+		// llama.cpp commonly documents paired switches on one line, e.g.
+		// --kv-offload, --no-kv-offload. Every long flag is a real accepted
+		// spelling and must be discovered so explicit false can resolve to the
+		// inverse switch.
+		for _, match := range matches {
+			key := spec[match[2]:match[3]]
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, Option{
+				Key: key, ValueHint: valueHint, Description: description,
+				Kind: kind, Choices: choices, ManagerOwned: IsManagerOwnedOption(key),
+			})
+		}
 	}
 	return out
 }
@@ -99,7 +111,6 @@ func classifyValueHint(hint string) (string, []string) {
 			if part = strings.TrimSpace(part); part != "" {
 				choices = append(choices, part)
 			}
-		}
 		if len(choices) > 1 {
 			return "enum", choices
 		}
