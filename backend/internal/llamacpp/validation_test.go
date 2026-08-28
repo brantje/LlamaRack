@@ -10,6 +10,7 @@ func testProfile() Profile {
 		{Key: "ctx-size", ValueHint: "N", Kind: "integer"},
 		{Key: "temperature", ValueHint: "FLOAT", Kind: "number"},
 		{Key: "flash-attn", Kind: "boolean"},
+		{Key: "no-flash-attn", Kind: "boolean"},
 		{Key: "cache-type-k", ValueHint: "<f16|q8_0>", Kind: "enum", Choices: []string{"f16", "q8_0"}},
 		{Key: "chat-template", ValueHint: "STRING", Kind: "string"},
 		{Key: "tensor-split", ValueHint: "SPLIT", Kind: "string"},
@@ -27,6 +28,10 @@ func TestValidateOptionsCanonicalizesAndValidatesTypes(t *testing.T) {
 	}
 	if got["ctx-size"] != "8192" || got["temperature"] != "0.7" || got["flash-attn"] != "true" || got["cache-type-k"] != "q8_0" || got["tensor-split"] != "3,1" {
 		t.Fatalf("validated=%+v", got)
+	}
+	got, err = ValidateOptions(testProfile(), map[string]string{"flash-attn": "false"})
+	if err != nil || got["flash-attn"] != "false" {
+		t.Fatalf("explicit false validated=%+v err=%v", got, err)
 	}
 }
 
@@ -51,6 +56,13 @@ func TestValidateOptionsRejectsUnsupportedReservedAndInvalidValues(t *testing.T)
 				t.Fatalf("err=%v want text %q", err, tc.text)
 			}
 		})
+	}
+}
+
+func TestValidateOptionsRejectsFalseWithoutInverseFlag(t *testing.T) {
+	profile := Profile{Version: "test", Options: []Option{{Key: "embeddings", Kind: "boolean"}}}
+	if _, err := ValidateOptions(profile, map[string]string{"embeddings": "false"}); err == nil || !strings.Contains(err.Error(), "inverse flag --no-embeddings is unavailable") {
+		t.Fatalf("expected inverse flag error, got %v", err)
 	}
 }
 

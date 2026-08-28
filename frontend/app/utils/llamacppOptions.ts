@@ -1,8 +1,12 @@
 import type { Profile } from '~/composables/useManager'
 
-const managerOwnedOptions = new Set(['model', 'host', 'port', 'device'])
+const legacyManagerOwnedOptions = new Set([
+  'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
+  'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
+  'api-key', 'api-key-file'
+])
 
-type ProfileOption = Profile['options'][number] & { kind?: string; choices?: string[] }
+type ProfileOption = Profile['options'][number] & { kind?: string; choices?: string[]; manager_owned?: boolean }
 
 function inferredKind(option: ProfileOption) {
   if (option.kind) return option.kind
@@ -21,6 +25,10 @@ function choicesFor(option: ProfileOption) {
   if (option.choices?.length) return option.choices
   const hint = (option.value_hint || '').trim().replace(/^[\[<]|[\]>]$/g, '')
   return hint.includes('|') ? hint.split('|').map(value => value.trim()).filter(Boolean) : []
+}
+
+function inverseBooleanKey(key: string) {
+  return key.startsWith('no-') ? key.slice(3) : `no-${key}`
 }
 
 function validateValue(option: ProfileOption, value: string) {
@@ -58,12 +66,19 @@ export function parseLlamaCppOptions(text: string, profile: Profile | null) {
     const value = trimmed.slice(at + 1).trim()
     if (!key) throw new Error(`Invalid option “${trimmed}”; option key is required`)
     if (key in parsed) throw new Error(`Duplicate llama.cpp option “${key}”`)
-    if (managerOwnedOptions.has(key)) throw new Error(`llama.cpp option “${key}” is managed by LlamaCPP Manager and cannot be overridden here`)
-    if (!profile) throw new Error('Cannot validate llama.cpp overrides because the llama-server option schema is unavailable')
-
     const option = available.get(key)
+    if (legacyManagerOwnedOptions.has(key) || option?.manager_owned) {
+      throw new Error(`llama.cpp option “${key}” is managed by LlamaCPP Manager and cannot be overridden here`)
+    }
+    if (!profile) throw new Error('Cannot validate llama.cpp overrides because the llama-server option schema is unavailable')
     if (!option) throw new Error(`Unsupported llama.cpp option “${key}” for ${profile.version || profile.path}`)
     validateValue(option, value)
+    if (inferredKind(option) === 'boolean' && value === 'false') {
+      const inverse = available.get(inverseBooleanKey(key))
+      if (!inverse || inferredKind(inverse) !== 'boolean') {
+        throw new Error(`llama.cpp option “${key}” cannot express explicit false because inverse flag --${inverseBooleanKey(key)} is unavailable`)
+      }
+    }
     parsed[key] = value
   }
 

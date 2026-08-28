@@ -10,10 +10,12 @@ const profile = {
     { key: 'ctx-size', value_hint: 'N', kind: 'integer' },
     { key: 'temperature', value_hint: 'FLOAT', kind: 'number' },
     { key: 'flash-attn', kind: 'boolean' },
+    { key: 'no-flash-attn', kind: 'boolean' },
     { key: 'cache-type-k', value_hint: '<f16|q8_0>', kind: 'enum', choices: ['f16', 'q8_0'] },
     { key: 'chat-template', value_hint: 'STRING', kind: 'string' },
     { key: 'tensor-split', value_hint: 'SPLIT', kind: 'string' },
-    { key: 'prompt', kind: 'string' }
+    { key: 'prompt', kind: 'string' },
+    { key: 'server-owned', value_hint: 'STRING', kind: 'string', manager_owned: true }
   ]
 } as Profile
 
@@ -36,6 +38,7 @@ describe('llama.cpp option form validation', () => {
       ['made-up=1', 'Unsupported llama.cpp option'],
       ['ctx-size=1\n--ctx-size=2', 'Duplicate llama.cpp option'],
       ['port=8000', 'managed by LlamaCPP Manager'],
+      ['server-owned=value', 'managed by LlamaCPP Manager'],
       ['ctx-size=many', 'integer value'],
       ['temperature=warm', 'numeric value'],
       ['temperature=', 'numeric value'],
@@ -49,6 +52,14 @@ describe('llama.cpp option form validation', () => {
     for (const [value, message] of cases) {
       expect(() => parseLlamaCppOptions(value, profile)).toThrow(message)
     }
+  })
+
+  it('rejects explicit false when no inverse flag exists', () => {
+    const noInverse = {
+      path: '/app/llama-server', version: 'test', fingerprint: 'x',
+      options: [{ key: 'embeddings', kind: 'boolean' }]
+    } as Profile
+    expect(() => parseLlamaCppOptions('embeddings=false', noInverse)).toThrow('inverse flag --no-embeddings is unavailable')
   })
 
   it('requires the detected schema for non-empty overrides', () => {
@@ -74,10 +85,12 @@ describe('llama.cpp option form validation', () => {
         { key: 'ratio-float', value_hint: 'RATIO_FLOAT' },
         { key: 'enabled-bool', value_hint: 'BOOL' },
         { key: 'enabled-boolean', value_hint: 'BOOLEAN' },
+        { key: 'no-enabled-boolean' },
         { key: 'mode', value_hint: '<fast|safe>' },
         { key: 'mode-empty-choice', value_hint: '<fast||safe>' },
         { key: 'pipe-label', value_hint: 'fast | safe' },
         { key: 'verbose' },
+        { key: 'no-verbose' },
         { key: 'label', value_hint: 'STRING' }
       ]
     } satisfies Profile

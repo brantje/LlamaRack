@@ -3,6 +3,7 @@ package llamaconfig
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
@@ -24,6 +25,20 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	return New(db)
+}
+
+func TestEffectiveIncludesManagerContextDefault(t *testing.T) {
+	store := testStore(t)
+	effective, err := store.Effective(context.Background(), "m1", "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Values["ctx-size"] != DefaultContextSize || effective.Sources["ctx-size"] != "manager-default" {
+		t.Fatalf("manager context default missing: %+v", effective)
+	}
+	if len(effective.Global) != 0 || len(effective.Model) != 0 || len(effective.Instance) != 0 {
+		t.Fatalf("manager defaults must not be persisted as scoped overrides: %+v", effective)
+	}
 }
 
 func TestEffectiveConfigurationLayersAndSources(t *testing.T) {
@@ -95,6 +110,80 @@ func TestLaunchOptionsExcludeUnsupportedRetainedValues(t *testing.T) {
 	}
 	if effective.Values["removed-option"] != "legacy" {
 		t.Fatalf("unsupported option was not retained: %+v", effective)
+	}
+}
+
+func TestLaunchOptionsUsesManagerContextDefault(t *testing.T) {
+	store := testStore(t)
+	profile := llamacpp.Profile{Options: []llamacpp.Option{{Key: "ctx-size", Kind: "integer"}}}
+	launch, effective, err := store.LaunchOptions(context.Background(), profile, "m1", "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch["ctx-size"] != "4096" || effective.Sources["ctx-size"] != "manager-default" {
+		t.Fatalf("default launch=%+v effective=%+v", launch, effective)
+	}
+}
+
+func TestLaunchOptionsConvertsExplicitFalseToInverseFlag(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('i1','flash-attn','false')`); err != nil {
+		t.Fatal(err)
+	}
+	profile := llamacpp.Profile{Version: "test", Options: []llamacpp.Option{
+		{Key: "ctx-size", Kind: "integer"},
+		{Key: "flash-attn", Kind: "boolean"},
+		{Key: "no-flash-attn", Kind: "boolean"},
+	}}
+	launch, effective, err := store.LaunchOptions(ctx, profile, "m1", "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch["no-flash-attn"] != "true" {
+		t.Fatalf("false override did not use inverse flag: %+v", launch)
+	}
+	if _, ok := launch["flash-attn"]; ok {
+		t.Fatalf("positive flag leaked for false override: %+v", launch)
+	}
+	if effective.Values["flash-attn"] != "false" || effective.Sources["flash-attn"] != "instance" {
+		t.Fatalf("canonical effective value changed: %+v", effective)
+	}
+}
+
+func TestLaunchOptionsRejectsUnrepresentableFalse(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('i1','embeddings','false')`); err != nil {
+		t.Fatal(err)
+	}
+	profile := llamacpp.Profile{Version: "test", Options: []llamacpp.Option{
+		{Key: "ctx-size", Kind: "integer"},
+		{Key: "embeddings", Kind: "boolean"},
+	}}
+	if _, _, err := store.LaunchOptions(ctx, profile, "m1", "i1"); err == nil || !strings.Contains(err.Error(), "cannot express explicit false") {
+		t.Fatalf("expected explicit false error, got %v", err)
+	}
+}
+
+func TestLaunchResolverHelperBranches(t *testing.T) {
+	store := testStore(t)
+	launch, effective, err := store.LaunchOptions(context.Background(), llamacpp.Profile{}, "m1", "i1")
+	if err != nil || len(launch) != 0 || effective.Values["ctx-size"] != DefaultContextSize {
+		t.Fatalf("empty profile launch=%+v effective=%+v err=%v", launch, effective, err)
+	}
+
+	if !isBooleanOption(llamacpp.Option{ValueHint: ""}) || isBooleanOption(llamacpp.Option{ValueHint: "N"}) {
+		t.Fatal("legacy boolean option classification mismatch")
+	}
+	if got := inverseBooleanKey("no-mmap"); got != "mmap" {
+		t.Fatalf("inverse no-*=%q", got)
+	}
+	if got := launchProfileLabel(llamacpp.Profile{Path: "/tmp/llama-server"}); got != "/tmp/llama-server" {
+		t.Fatalf("path label=%q", got)
+	}
+	if got := launchProfileLabel(llamacpp.Profile{}); got != "llama-server" {
+		t.Fatalf("default label=%q", got)
 	}
 }
 

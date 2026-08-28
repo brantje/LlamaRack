@@ -55,17 +55,35 @@ func ValidateOptions(profile Profile, options map[string]string) (map[string]str
 		if err := validateOptionValue(option, value); err != nil {
 			return nil, err
 		}
+		if optionKind(option) == "boolean" && value == "false" {
+			inverse := inverseBooleanOptionKey(key)
+			inverseOption, ok := available[inverse]
+			if !ok || optionKind(inverseOption) != "boolean" {
+				return nil, fmt.Errorf("llama.cpp option %q cannot express explicit false with %s because inverse flag --%s is unavailable", key, profileLabel(profile), inverse)
+			}
+		}
 		out[key] = value
 	}
 	return out, nil
 }
 
-func validateOptionValue(option Option, value string) error {
-	kind := option.Kind
-	if kind == "" {
-		kind, _ = classifyValueHint(option.ValueHint)
+func optionKind(option Option) string {
+	if option.Kind != "" {
+		return option.Kind
 	}
-	switch kind {
+	kind, _ := classifyValueHint(option.ValueHint)
+	return kind
+}
+
+func inverseBooleanOptionKey(key string) string {
+	if strings.HasPrefix(key, "no-") {
+		return strings.TrimPrefix(key, "no-")
+	}
+	return "no-" + key
+}
+
+func validateOptionValue(option Option, value string) error {
+	switch optionKind(option) {
 	case "boolean":
 		if value != "true" && value != "false" {
 			return fmt.Errorf("llama.cpp option %q must be true or false", option.Key)
