@@ -196,10 +196,13 @@ describe('instance control plane', () => {
     expect(wrapper.text()).toContain('restart failed')
 
     logMode = 'error'
-    const reconnect = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Reconnect')
+    const reconnect = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .filter(button => button.textContent?.trim() === 'Reconnect')
+      .at(-1)
     if (!reconnect) throw new Error('Missing log reconnect button')
     reconnect.click()
     await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=protected&limit=2000')
     expect(document.body.textContent).toContain('log retrieval failed')
 
     mocks.request.mockClear()
