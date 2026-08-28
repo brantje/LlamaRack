@@ -24,6 +24,7 @@ type GPU struct {
 	UsedBytes                     int64   `json:"used_bytes"`
 	FreeBytes                     int64   `json:"free_bytes"`
 	MemoryBandwidthBytesPerSecond int64   `json:"memory_bandwidth_bytes_per_second,omitempty"`
+	PCIeBandwidthBytesPerSecond   int64   `json:"pcie_bandwidth_bytes_per_second,omitempty"`
 	UtilizationPct                float64 `json:"utilization_pct"`
 }
 
@@ -35,11 +36,12 @@ type GPUProcess struct {
 }
 
 type Snapshot struct {
-	RAMTotalBytes     int64        `json:"ram_total_bytes"`
-	RAMAvailableBytes int64        `json:"ram_available_bytes"`
-	GPUs              []GPU        `json:"gpus"`
-	Processes         []GPUProcess `json:"processes"`
-	CollectedAt       time.Time    `json:"collected_at"`
+	RAMTotalBytes                  int64        `json:"ram_total_bytes"`
+	RAMAvailableBytes              int64        `json:"ram_available_bytes"`
+	RAMBandwidthBytesPerSecond     int64        `json:"ram_bandwidth_bytes_per_second,omitempty"`
+	GPUs                           []GPU        `json:"gpus"`
+	Processes                      []GPUProcess `json:"processes"`
+	CollectedAt                    time.Time    `json:"collected_at"`
 }
 
 type Snapshotter interface {
@@ -68,6 +70,9 @@ func (d *Detector) Snapshot(ctx context.Context) (Snapshot, error) {
 	snapshot := Snapshot{CollectedAt: d.now().UTC(), GPUs: []GPU{}, Processes: []GPUProcess{}}
 	if data, err := d.readFile("/proc/meminfo"); err == nil {
 		snapshot.RAMTotalBytes, snapshot.RAMAvailableBytes = parseMemInfo(string(data))
+		if snapshot.RAMTotalBytes > 0 {
+			snapshot.RAMBandwidthBytesPerSecond = hostMemoryBandwidth()
+		}
 	}
 
 	var probeErrors []error
@@ -169,6 +174,7 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 				}
 			}
 		}
+		d.enrichNVIDIAPCIe(ctx, gpus)
 	}
 	return gpus, nil
 }
@@ -231,7 +237,8 @@ func (d *Detector) rocmGPUs(ctx context.Context) ([]GPU, error) {
 		uuid := stringValue(firstValue(card, "Unique ID", "Unique ID (Hex)", "GPU ID"))
 		util := float64Value(findValue(card, "GPU use (%)"))
 		bandwidth := int64Value(firstValue(card, "Memory Bandwidth (B/s)", "VRAM Memory Bandwidth (B/s)"))
-		gpus = append(gpus, GPU{ID: "ROCm" + strconv.Itoa(index), Backend: "rocm", Index: index, UUID: uuid, Name: name, TotalBytes: total, UsedBytes: used, FreeBytes: max64(0, total-used), MemoryBandwidthBytesPerSecond: bandwidth, UtilizationPct: util})
+		pcieBandwidth := d.rocmPCIeBandwidth(index)
+		gpus = append(gpus, GPU{ID: "ROCm" + strconv.Itoa(index), Backend: "rocm", Index: index, UUID: uuid, Name: name, TotalBytes: total, UsedBytes: used, FreeBytes: max64(0, total-used), MemoryBandwidthBytesPerSecond: bandwidth, PCIeBandwidthBytesPerSecond: pcieBandwidth, UtilizationPct: util})
 	}
 	return gpus, nil
 }
