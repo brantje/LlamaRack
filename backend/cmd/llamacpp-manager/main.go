@@ -73,7 +73,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	}()
 	lifecycleService := lifecycle.New(modelService, sup)
 	observabilityService := observability.New(db)
-	observabilitySampler := observability.NewSampler(lifecycleService, observabilityService)
+	observabilitySampler := observability.NewSampler(lifecycleService, observabilityService, idleUnloadTimeout)
 
 	var profileMu sync.RWMutex
 	var profile llamacpp.Profile
