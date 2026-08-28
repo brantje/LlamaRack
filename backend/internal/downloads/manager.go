@@ -174,6 +174,9 @@ func (m *Manager) ResumePending(ctx context.Context) error {
 }
 
 func (m *Manager) Retry(ctx context.Context, id string) (Job, error) {
+	if err := m.waitForLaunchSlot(ctx, id); err != nil {
+		return Job{}, err
+	}
 	result, err := m.db.ExecContext(ctx, `UPDATE download_jobs SET state=?,error='',speed_bps=0,updated_at=unixepoch() WHERE id=? AND state IN (?,?)`, StateQueued, id, StateFailed, StateCancelled)
 	if err != nil {
 		return Job{}, err
@@ -185,6 +188,24 @@ func (m *Manager) Retry(ctx context.Context, id string) (Job, error) {
 	_, _ = m.db.ExecContext(ctx, `UPDATE download_files SET state=CASE WHEN state=? THEN ? ELSE state END WHERE job_id=?`, StateFailed, StateQueued, id)
 	m.launch(id)
 	return m.Get(ctx, id)
+}
+
+func (m *Manager) waitForLaunchSlot(ctx context.Context, id string) error {
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		m.mu.Lock()
+		_, running := m.cancels[id]
+		m.mu.Unlock()
+		if !running {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *Manager) Cancel(ctx context.Context, id string) error {
