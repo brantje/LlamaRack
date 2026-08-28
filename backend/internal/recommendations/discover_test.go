@@ -135,7 +135,7 @@ func TestAnalyzeDiscoverEdgeOrderingAndBounds(t *testing.T) {
 	if !hardwareTelemetryAvailable(hardware.Snapshot{}, nil) {
 		t.Fatal("a successful zero-valued snapshot remains a valid telemetry response")
 	}
-	if contextUnavailableError{}.Error() != "hardware telemetry unavailable" {
+	if (contextUnavailableError{}).Error() != "hardware telemetry unavailable" {
 		t.Fatal("unexpected contextUnavailableError text")
 	}
 }
