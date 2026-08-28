@@ -2,9 +2,14 @@ package huggingface
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type parameterInfo struct {
@@ -23,10 +28,26 @@ type DiscoveryModel struct {
 	ParameterCount int64 `json:"parameter_count,omitempty"`
 }
 
+type DiscoverySearchPage struct {
+	Items      []DiscoveryModel `json:"items"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
 // SearchSorted exposes the discovery ordering and metadata supported by the
 // Hugging Face model API without leaking provider-specific field names into the
 // management API or frontend.
 func (c *Client) SearchSorted(ctx context.Context, opts SearchOptions) ([]DiscoveryModel, error) {
+	page, err := c.SearchSortedPage(ctx, opts, "")
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
+// SearchSortedPage returns one provider-backed page plus the opaque cursor for
+// the next page. The cursor is deliberately kept provider-specific and is only
+// intended to be handed back to a subsequent call unchanged.
+func (c *Client) SearchSortedPage(ctx context.Context, opts SearchOptions, cursor string) (DiscoverySearchPage, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 24
@@ -47,12 +68,16 @@ func (c *Client) SearchSorted(ctx context.Context, opts SearchOptions) ([]Discov
 	if value := strings.TrimSpace(opts.Author); value != "" {
 		q.Set("author", value)
 	}
+	if value := strings.TrimSpace(cursor); value != "" {
+		q.Set("cursor", value)
+	}
 	q.Set("sort", discoverySort(opts.Sort))
 	q.Set("direction", "-1")
 
 	var raw []discoveryRawModel
-	if err := c.getJSON(ctx, "/api/models?"+q.Encode(), &raw); err != nil {
-		return nil, err
+	headers, err := c.getDiscoveryJSON(ctx, "/api/models?"+q.Encode(), &raw)
+	if err != nil {
+		return DiscoverySearchPage{}, err
 	}
 	out := make([]DiscoveryModel, 0, len(raw))
 	for _, item := range raw {
@@ -69,7 +94,69 @@ func (c *Client) SearchSorted(ctx context.Context, opts SearchOptions) ([]Discov
 			ParameterCount: parameterCount(item.GGUF, item.Safetensors),
 		})
 	}
-	return out, nil
+	return DiscoverySearchPage{Items: out, NextCursor: nextCursorFromLink(headers.Get("Link"))}, nil
+}
+
+func (c *Client) getDiscoveryJSON(ctx context.Context, endpoint string, dst any) (http.Header, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	resolved := c.baseURL.ResolveReference(u)
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, resolved.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != nil {
+		token, err := c.token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Hugging Face request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		message := strings.TrimSpace(string(body))
+		if message == "" {
+			message = http.StatusText(resp.StatusCode)
+		}
+		return nil, fmt.Errorf("Hugging Face returned HTTP %d: %s", resp.StatusCode, message)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(dst); err != nil {
+		return nil, fmt.Errorf("decode Hugging Face response: %w", err)
+	}
+	return resp.Header.Clone(), nil
+}
+
+func nextCursorFromLink(header string) string {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if !strings.Contains(part, `rel="next"`) && !strings.Contains(part, "rel=next") {
+			continue
+		}
+		start := strings.IndexByte(part, '<')
+		end := strings.IndexByte(part, '>')
+		if start < 0 || end <= start+1 {
+			continue
+		}
+		next, err := url.Parse(part[start+1 : end])
+		if err != nil {
+			continue
+		}
+		if cursor := strings.TrimSpace(next.Query().Get("cursor")); cursor != "" {
+			return cursor
+		}
+	}
+	return ""
 }
 
 func parameterCount(values ...*parameterInfo) int64 {
