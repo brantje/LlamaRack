@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -114,13 +115,21 @@ func parseFilters(r *http.Request) (RequestFilters, error) {
 }
 
 type tokenProvider func(context.Context) string
+type stateProvider func() map[string]string
 
 type MetricsHandler struct {
 	service *Service
 	token   tokenProvider
+	states  stateProvider
 }
 
-func NewMetricsHandler(service *Service, token tokenProvider) http.Handler { return &MetricsHandler{service: service, token: token} }
+func NewMetricsHandler(service *Service, token tokenProvider, states ...stateProvider) http.Handler {
+	var provider stateProvider
+	if len(states) > 0 {
+		provider = states[0]
+	}
+	return &MetricsHandler{service: service, token: token, states: provider}
+}
 
 func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet { w.WriteHeader(http.StatusMethodNotAllowed); return }
@@ -170,6 +179,9 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeQuantiles(w, "llamacpp_manager_request_ttft_seconds", summary.TTFTMS)
 	}
 	writeHardwareMetrics(w, h.service.LatestHardware())
+	if h.states != nil {
+		writeInstanceStateMetrics(w, h.states())
+	}
 }
 
 func writeHardwareMetrics(w http.ResponseWriter, overview HardwareOverview) {
@@ -197,6 +209,26 @@ func writeHardwareMetrics(w http.ResponseWriter, overview HardwareOverview) {
 		if sample.MemoryUsedBytes != nil { fmt.Fprintf(w, "llamacpp_manager_instance_memory_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.MemoryUsedBytes) }
 		if sample.CPUPercent != nil { fmt.Fprintf(w, "llamacpp_manager_instance_cpu_percent{instance_id=\"%s\"} %s\n", instance, strconv.FormatFloat(*sample.CPUPercent, 'f', -1, 64)) }
 		if sample.VRAMUsedBytes != nil { fmt.Fprintf(w, "llamacpp_manager_instance_vram_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.VRAMUsedBytes) }
+	}
+}
+
+func writeInstanceStateMetrics(w http.ResponseWriter, states map[string]string) {
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_state gauge")
+	instanceIDs := make([]string, 0, len(states))
+	for instanceID := range states {
+		instanceIDs = append(instanceIDs, instanceID)
+	}
+	sort.Strings(instanceIDs)
+	knownStates := []string{"UNLOADED", "STARTING", "LOADING", "READY", "STOPPING", "FAILED"}
+	for _, instanceID := range instanceIDs {
+		current := strings.ToUpper(strings.TrimSpace(states[instanceID]))
+		for _, state := range knownStates {
+			value := 0
+			if current == state {
+				value = 1
+			}
+			fmt.Fprintf(w, "llamacpp_manager_instance_state{instance_id=\"%s\",state=\"%s\"} %d\n", promEscape(instanceID), state, value)
+		}
 	}
 }
 
