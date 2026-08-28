@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TableColumn } from '@nuxt/ui'
+import type { ProgressGroupItem, TableColumn } from '@nuxt/ui'
 import type { HardwareGPU, HardwareSnapshot, RuntimeTelemetry } from '~/composables/useManager'
 
 const manager = useManager()
@@ -94,6 +94,8 @@ const gatewayColumns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'result', header: 'Result' }
 ]
 
+const gpuProgressColors: NonNullable<ProgressGroupItem['color']>[] = ['primary', 'success', 'info', 'warning', 'secondary', 'error']
+
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return '—'
   if (value === 0) return '0 B'
@@ -142,6 +144,25 @@ function gpuAssignments(gpuID: string) {
     const used = observed?.vram_used_bytes ?? (sample.gpu_devices?.length === 1 ? sample.vram_used_bytes : undefined)
     return [{ instanceID: sample.instance_id, used }]
   })
+}
+
+function gpuProgressItems(gpu: HardwareGPU): ProgressGroupItem[] {
+  const items: ProgressGroupItem[] = gpuAssignments(gpu.id)
+    .filter(assignment => assignment.used !== undefined && assignment.used > 0)
+    .map((assignment, index) => ({
+      label: assignment.instanceID,
+      value: assignment.used,
+      color: gpuProgressColors[index % gpuProgressColors.length]
+    }))
+  const attributed = items.reduce((total, item) => total + (item.value || 0), 0)
+  const unattributed = Math.max(0, gpu.used_bytes - attributed)
+  if (unattributed > 0) {
+    items.push({ label: 'Unattributed', value: unattributed, color: 'neutral' })
+  }
+  if (!items.length && gpu.used_bytes > 0) {
+    items.push({ label: 'Used', value: gpu.used_bytes, color: 'neutral' })
+  }
+  return items
 }
 
 const attention = computed<AttentionItem[]>(() => {
@@ -262,15 +283,19 @@ onMounted(loadDashboard)
             <span class="font-mono text-muted">{{ gpu.id }} · {{ gpu.name }}</span>
             <span class="font-semibold text-highlighted">{{ formatBytes(gpu.used_bytes) }} / {{ formatBytes(gpu.total_bytes) }} · {{ Math.round(gpu.utilization_pct) }}% util</span>
           </div>
-          <div class="h-3 overflow-hidden rounded-full bg-elevated" role="progressbar" :aria-valuenow="gpuPercent(gpu)" aria-valuemin="0" aria-valuemax="100">
-            <div class="h-full rounded-full bg-primary transition-[width]" :style="{ width: `${gpuPercent(gpu)}%` }" />
-          </div>
-          <div class="flex min-h-5 flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-            <template v-if="gpuAssignments(gpu.id).length">
-              <span v-for="assignment in gpuAssignments(gpu.id)" :key="`${gpu.id}-${assignment.instanceID}`"><span class="font-mono text-highlighted">{{ assignment.instanceID }}</span><span v-if="assignment.used !== undefined"> · {{ formatBytes(assignment.used) }}</span></span>
+          <UProgressGroup
+            :data-testid="`gpu-progress-${gpu.id}`"
+            :items="gpuProgressItems(gpu)"
+            :max="gpu.total_bytes"
+            size="sm"
+          >
+            <template #item-label="{ item }">
+              <span class="font-mono text-xs">{{ item.label }}</span>
             </template>
-            <span v-else>free / unattributed process memory</span>
-          </div>
+            <template #item-trailing="{ item }">
+              <span class="text-xs text-muted">{{ formatBytes(item.value || 0) }}</span>
+            </template>
+          </UProgressGroup>
         </div>
       </div>
     </UCard>
