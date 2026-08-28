@@ -1,0 +1,29 @@
+name: Performance - model discovery
+
+on:
+  push:
+    branches:
+      - perf/main-model-discovery
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - name: Discovery benchmark samples
+        run: go test -run='^$' -bench='^BenchmarkAvailableGGUFs(20|Split16)$' -benchmem -count=10 ./internal/models
+      - name: CPU and allocation profile
+        run: go test -run='^$' -bench='^BenchmarkAvailableGGUFs20$' -benchtime=3s -cpuprofile=cpu.out -memprofile=mem.out ./internal/models
+      - name: CPU profile top
+        run: go tool pprof -top -nodecount=30 cpu.out
+      - name: Allocation profile top
+        run: go tool pprof -top -alloc_space -nodecount=30 mem.out
