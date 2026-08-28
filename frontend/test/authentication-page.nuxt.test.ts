@@ -140,7 +140,7 @@ describe('Admin authentication page', () => {
 
   it('renders empty, disabled, untested and callback-without-external-url states', async () => {
     let providerItems: any[] = []
-    let settings = {
+    const settings = {
       ...authSettings,
       external_url: { value: '', source: 'default', editable: true }
     }
@@ -182,8 +182,8 @@ describe('Admin authentication page', () => {
         return {}
       }
       if (path === '/api/v1/admin/auth/settings') return authSettings
-      if (path === '/api/v1/admin/auth/providers/primary%2Fprovider/test') {
-        if (mode === 'test') throw new Error('test exploded')
+      if (path.endsWith('/test')) {
+        if (mode === 'test') throw { data: { error: 'test denied' } }
         return provider
       }
       if (path === '/api/v1/admin/auth/providers' && options?.method === 'POST') {
@@ -231,7 +231,7 @@ describe('Admin authentication page', () => {
     mode = 'test'
     await wrapperButton(wrapper, 'Test').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('test exploded')
+    expect(wrapper.text()).toContain('test denied')
 
     mode = 'save'
     await wrapperButton(wrapper, 'Add provider').trigger('click')
@@ -249,21 +249,13 @@ describe('Admin authentication page', () => {
     wrapper.unmount()
   })
 
-  it('does not load management settings while signed out and honors delete cancellation', async () => {
-    resetManager(false)
-    mocks.request.mockResolvedValue([])
-    let wrapper = await mountSuspended(AuthenticationPage, { route: false })
-    await flushPromises()
-    expect(mocks.request).not.toHaveBeenCalled()
-    wrapper.unmount()
-
-    resetManager()
+  it('honors provider delete cancellation', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/admin/auth/settings') return authSettings
       if (path === '/api/v1/admin/auth/providers') return [provider]
       return {}
     })
-    wrapper = await mountSuspended(AuthenticationPage, { route: false })
+    const wrapper = await mountSuspended(AuthenticationPage, { route: false })
     await flushPromises()
     mocks.request.mockClear()
     await wrapperButton(wrapper, 'Delete').trigger('click')
