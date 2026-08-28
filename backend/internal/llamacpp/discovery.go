@@ -111,6 +111,7 @@ func classifyValueHint(hint string) (string, []string) {
 			if part = strings.TrimSpace(part); part != "" {
 				choices = append(choices, part)
 			}
+		}
 		if len(choices) > 1 {
 			return "enum", choices
 		}
