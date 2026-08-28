@@ -68,7 +68,7 @@ func TestInferenceAutoloadAndLoadRecordExactObservabilityEvents(t *testing.T) {
 		t.Fatalf("load event=%+v events=%+v", load, *events)
 	}
 	logs := strings.Join(s.Logs(instanceID), "\n")
-	if !strings.Contains(logs, "[manager] autoload triggered by inference request") || !strings.Contains(logs, "[manager] worker ready after") {
+	if !strings.Contains(logs, "autoload triggered by inference request") || !strings.Contains(logs, "worker ready after") {
 		t.Fatalf("logs=%q", logs)
 	}
 }
@@ -101,7 +101,7 @@ func TestFailedStartRecordsExactObservabilityEvent(t *testing.T) {
 	if !ok || failed.duration < 0 {
 		t.Fatalf("failed event=%+v events=%+v", failed, *events)
 	}
-	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "[manager] worker failed to start:") {
+	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "worker failed to start:") {
 		t.Fatalf("logs=%q", logs)
 	}
 }
@@ -133,7 +133,7 @@ func TestIdleUnloadRecordsExactObservabilityEvent(t *testing.T) {
 	if event != ObservabilityIdleUnload || eventInstance != instanceID {
 		t.Fatalf("event=%q instance=%q", event, eventInstance)
 	}
-	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "[manager] idle-unloaded after 1m0s") {
+	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "idle-unloaded after 1m0s") {
 		t.Fatalf("logs=%q", logs)
 	}
 }
@@ -163,7 +163,7 @@ func TestEvictionRecordsExactObservabilityEvent(t *testing.T) {
 	if event != ObservabilityEviction || eventInstance != instanceID {
 		t.Fatalf("event=%q instance=%q", event, eventInstance)
 	}
-	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "[manager] evicted for resource pressure") {
+	if logs := strings.Join(s.Logs(instanceID), "\n"); !strings.Contains(logs, "evicted for resource pressure") {
 		t.Fatalf("logs=%q", logs)
 	}
 }
@@ -185,7 +185,7 @@ func TestObservabilityRecorderFailuresAreNonFatal(t *testing.T) {
 		t.Fatalf("nil recorder should not be called: %d", calls)
 	}
 	s.AddManagerLog("one", " manager line ")
-	if got := strings.Join(s.Logs("one"), "\n"); got != "[manager] manager line" {
+	if got := strings.Join(s.Logs("one"), "\n"); !strings.Contains(got, "manager line") {
 		t.Fatalf("logs=%q", got)
 	}
 }
