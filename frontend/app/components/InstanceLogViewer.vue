@@ -1,6 +1,6 @@
 <script setup lang="ts">
 type LogSource = 'stdout' | 'stderr' | 'manager'
-type LogEntry = { source: LogSource; text: string }
+type LogEntry = { source: LogSource; timestamp?: string; text: string }
 type LogResponse = { instance_id: string; entries: LogEntry[] }
 
 const props = defineProps<{ instanceId: string }>()
@@ -35,10 +35,19 @@ function sourceColor(value: LogSource) {
   return 'neutral'
 }
 
+function formatTimestamp(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toISOString().replace('T', ' ').replace('Z', ' UTC')
+}
+
 function validEntry(value: unknown): value is LogEntry {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<LogEntry>
-  return ['stdout', 'stderr', 'manager'].includes(String(candidate.source)) && typeof candidate.text === 'string'
+  return ['stdout', 'stderr', 'manager'].includes(String(candidate.source))
+    && typeof candidate.text === 'string'
+    && (candidate.timestamp === undefined || typeof candidate.timestamp === 'string')
 }
 
 function append(entry: LogEntry) {
@@ -142,7 +151,8 @@ onBeforeUnmount(closeStream)
         data-testid="instance-log-output"
         class="max-h-[34rem] min-h-64 overflow-auto rounded-md bg-elevated p-3 font-mono text-xs"
       >
-        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.source}-${entry.text}`" class="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 border-b border-default py-1.5 last:border-b-0">
+        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.timestamp}-${entry.source}-${entry.text}`" class="grid grid-cols-[12rem_5rem_minmax(0,1fr)] gap-3 border-b border-default py-1.5 last:border-b-0">
+          <time :datetime="entry.timestamp" class="whitespace-nowrap text-muted">{{ formatTimestamp(entry.timestamp) }}</time>
           <div><UBadge :color="sourceColor(entry.source)" variant="soft" size="xs">{{ entry.source }}</UBadge></div>
           <pre class="whitespace-pre-wrap break-words text-highlighted">{{ entry.text }}</pre>
         </div>
