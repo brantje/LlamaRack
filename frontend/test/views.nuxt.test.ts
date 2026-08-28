@@ -7,6 +7,7 @@ import ModelsPage from '~/pages/models/index.vue'
 import APIPage from '~/pages/api.vue'
 import AdminSystemPage from '~/pages/admin/system.vue'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
+import { clearManagementToken } from '~/composables/useManagerApi'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -45,6 +46,7 @@ async function clickConfirmation(kind: 'confirm' | 'cancel') {
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockResolvedValue([])
+  clearManagementToken()
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn() } })
   resetState()
 })
@@ -66,9 +68,13 @@ describe('application shell', () => {
     await wrapper.find('input[type="password"]').setValue('correct-horse-battery')
     mocks.request.mockImplementation(async (path: string) => {
       if (path.endsWith('/auth/bootstrap')) return {}
-      if (path.endsWith('/auth/login')) return { id: 1, username: 'admin', enabled: true }
+      if (path.endsWith('/auth/login')) return {
+        access_token: 'view-login-jwt', token_type: 'Bearer', expires_at: 99,
+        user: { id: 1, username: 'admin', enabled: true }
+      }
       if (path.endsWith('/models') || path.endsWith('/instances')) return []
       if (path.endsWith('/llamacpp/profile')) throw new Error('unavailable')
+      if (path.endsWith('/auth/ws-ticket')) return { ticket: 'view-ticket' }
       return []
     })
     await wrapper.find('form').trigger('submit')
@@ -78,9 +84,10 @@ describe('application shell', () => {
     expect(wrapper.text()).toContain('Administration')
     wrapper.unmount()
 
+    clearManagementToken()
     manager.user.value = null
     manager.bootstrapRequired.value = false
-    mocks.request.mockRejectedValueOnce({ data: { error: 'bad credentials' } })
+    mocks.request.mockReset().mockRejectedValueOnce({ data: { error: 'bad credentials' } })
     wrapper = await mountSuspended(App, { route: false })
     expect(wrapper.text()).toContain('Welcome back')
     await wrapper.find('input[autocomplete="username"]').setValue('admin')

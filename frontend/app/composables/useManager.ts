@@ -199,12 +199,28 @@ export function useManager() {
     socket?.close()
   }
 
-  function openRuntimeSocket(ticket = '') {
-    if (!import.meta.client || !user.value || runtimeSocket || typeof WebSocket === 'undefined') return
+  async function connectRuntimeEvents() {
+    if (!import.meta.client || !user.value || runtimeSocket || runtimeConnecting || typeof WebSocket === 'undefined') return
+    if (runtimeReconnectTimer) {
+      clearTimeout(runtimeReconnectTimer)
+      runtimeReconnectTimer = undefined
+    }
+    runtimeConnecting = true
+    let ticket = ''
+    try {
+      const result = await request<{ ticket: string }>('/api/v1/auth/ws-ticket', { method: 'POST' })
+      ticket = result.ticket
+    } catch {
+      runtimeConnecting = false
+      return
+    }
+    if (!user.value || !ticket) {
+      runtimeConnecting = false
+      return
+    }
     let socket: WebSocket
     try {
-      const suffix = ticket ? `?ticket=${encodeURIComponent(ticket)}` : ''
-      socket = new WebSocket(`${apiBase.value.replace(/^http/, 'ws')}/api/v1/ws${suffix}`)
+      socket = new WebSocket(`${apiBase.value.replace(/^http/, 'ws')}/api/v1/ws?ticket=${encodeURIComponent(ticket)}`)
     } catch {
       runtimeConnecting = false
       return
@@ -227,31 +243,8 @@ export function useManager() {
       runtimeTelemetry.value = {}
       observabilityLive.value = null
       if (!user.value) return
-      runtimeReconnectTimer = setTimeout(() => { runtimeReconnectTimer = undefined; connectRuntimeEvents() }, 1000)
+      runtimeReconnectTimer = setTimeout(() => { runtimeReconnectTimer = undefined; void connectRuntimeEvents() }, 1000)
     }
-  }
-
-  function connectRuntimeEvents() {
-    if (!import.meta.client || !user.value || runtimeSocket || runtimeConnecting || typeof WebSocket === 'undefined') return
-    if (runtimeReconnectTimer) {
-      clearTimeout(runtimeReconnectTimer)
-      runtimeReconnectTimer = undefined
-    }
-    const token = readManagementToken()
-    if (!token) {
-      openRuntimeSocket()
-      return
-    }
-    runtimeConnecting = true
-    void request<{ ticket: string }>('/api/v1/auth/ws-ticket', { method: 'POST' })
-      .then(result => {
-        if (!user.value || !result?.ticket) {
-          runtimeConnecting = false
-          return
-        }
-        openRuntimeSocket(result.ticket)
-      })
-      .catch(() => { runtimeConnecting = false })
   }
 
   async function refreshAuthProviders() {
@@ -263,18 +256,20 @@ export function useManager() {
   async function initialize() {
     backendError.value = ''
     try {
-      const bootstrap = await request<{ required: boolean }>('/api/v1/auth/bootstrap')
+      const [bootstrap] = await Promise.all([
+        request<{ required: boolean }>('/api/v1/auth/bootstrap'),
+        refreshAuthProviders()
+      ])
       bootstrapRequired.value = bootstrap.required
-      if (!bootstrap.required) {
+      if (!bootstrap.required && readManagementToken()) {
         try {
           user.value = await request<User>('/api/v1/me')
           await refresh()
-          connectRuntimeEvents()
+          void connectRuntimeEvents()
         } catch {
           clearManagementToken()
           disconnectRuntimeEvents()
           user.value = null
-          try { await refreshAuthProviders() } catch { /* login remains locally usable by default */ }
         }
       } else {
         disconnectRuntimeEvents()
@@ -293,11 +288,11 @@ export function useManager() {
       await request('/api/v1/auth/bootstrap', { method: 'POST', body: { username, password } })
       bootstrapRequired.value = false
     }
-    const response = await request<LoginResult | User>('/api/v1/auth/login', { method: 'POST', body: { username, password } })
-    if ('access_token' in response && response.access_token) storeManagementToken(response.access_token, remember)
-    user.value = 'user' in response ? response.user : response
+    const result = await request<LoginResult>('/api/v1/auth/login', { method: 'POST', body: { username, password } })
+    storeManagementToken(result.access_token, remember)
+    user.value = result.user
     await refresh()
-    connectRuntimeEvents()
+    void connectRuntimeEvents()
   }
 
   function beginOIDC(providerID: string, remember = false) {
@@ -311,13 +306,13 @@ export function useManager() {
     storeManagementToken(result.access_token, Boolean(result.remember))
     user.value = result.user
     await refresh()
-    connectRuntimeEvents()
+    void connectRuntimeEvents()
     return result
   }
 
   async function logout() {
     try {
-      if (user.value) await request('/api/v1/auth/logout', { method: 'POST' })
+      if (readManagementToken()) await request('/api/v1/auth/logout', { method: 'POST' })
     } finally {
       clearManagementToken()
       disconnectRuntimeEvents()

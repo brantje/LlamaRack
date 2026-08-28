@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
+import { clearManagementToken, readManagementToken, storeManagementToken } from '~/composables/useManagerApi'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -41,6 +43,8 @@ function resetManager() {
   manager.user.value = null
   manager.initialized.value = false
   manager.bootstrapRequired.value = false
+  manager.localLoginEnabled.value = true
+  manager.authProviders.value = []
   manager.models.value = []
   manager.instances.value = []
   manager.runtimes.value = {}
@@ -58,6 +62,10 @@ function standardRequest(path: string) {
   throw new Error(`unexpected path ${path}`)
 }
 
+function authProviders() {
+  return { local_login_enabled: true, providers: [] }
+}
+
 describe('useManager', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -65,11 +73,16 @@ describe('useManager', () => {
     FakeWebSocket.instances = []
     FakeWebSocket.throwOnCreate = false
     vi.stubGlobal('WebSocket', FakeWebSocket as any)
+    clearManagementToken()
     resetManager()
   })
 
   it('initializes a first-run manager', async () => {
-    mocks.request.mockResolvedValueOnce({ required: true })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/bootstrap') return { required: true }
+      if (path === '/api/v1/auth/providers') return authProviders()
+      throw new Error(`unexpected path ${path}`)
+    })
     const manager = useManager()
     await manager.initialize()
     expect(manager.bootstrapRequired.value).toBe(true)
@@ -78,66 +91,90 @@ describe('useManager', () => {
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
 
-  it('restores an existing session and refreshes models, instances and exact runtime state', async () => {
+  it('restores a stored bearer session and refreshes models, instances and exact runtime state', async () => {
+    storeManagementToken('stored-jwt', false)
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return { required: false }
+      if (path === '/api/v1/auth/providers') return authProviders()
       if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true }
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'ticket-one' }
       return standardRequest(path)
     })
     const manager = useManager()
     await manager.initialize()
+    await flushPromises()
     expect(manager.user.value?.username).toBe('admin')
     expect(manager.models.value).toHaveLength(1)
     expect(manager.instances.value[0]?.id).toBe('coder')
     expect(manager.runtimeForInstance(instance()).state).toBe('READY')
     expect(manager.profile.value?.version).toBe('1')
-    expect(FakeWebSocket.instances[0]?.url).toBe('ws://manager.test:8888/api/v1/ws')
+    expect(FakeWebSocket.instances[0]?.url).toBe('ws://manager.test:8888/api/v1/ws?ticket=ticket-one')
   })
 
-  it('treats a failed session restore as signed out and surfaces backend initialization errors', async () => {
-    mocks.request.mockResolvedValueOnce({ required: false }).mockRejectedValueOnce(new Error('401'))
+  it('clears an invalid stored bearer token and surfaces backend initialization errors', async () => {
+    storeManagementToken('expired-jwt', false)
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/bootstrap') return { required: false }
+      if (path === '/api/v1/auth/providers') return authProviders()
+      if (path === '/api/v1/me') throw new Error('401')
+      throw new Error(path)
+    })
     const manager = useManager()
     await manager.initialize()
     expect(manager.user.value).toBeNull()
+    expect(readManagementToken()).toBe('')
+
     resetManager()
-    mocks.request.mockReset().mockRejectedValueOnce(new Error('connection refused'))
+    mocks.request.mockReset().mockRejectedValue(new Error('connection refused'))
     await manager.initialize()
     expect(manager.backendError.value).toBe('connection refused')
     expect(manager.initialized.value).toBe(true)
   })
 
-  it('bootstraps, logs in, refreshes and connects runtime events', async () => {
+  it('bootstraps, logs in with a bearer result, refreshes and connects runtime events', async () => {
     const manager = useManager()
     manager.bootstrapRequired.value = true
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return {}
-      if (path === '/api/v1/auth/login') return { id: 1, username: 'admin', enabled: true }
+      if (path === '/api/v1/auth/login') return {
+        access_token: 'login-jwt', token_type: 'Bearer', expires_at: 99,
+        user: { id: 1, username: 'admin', enabled: true }
+      }
       if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       if (path === '/api/v1/llamacpp/profile') throw new Error('not installed')
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'login-ticket' }
       throw new Error(`unexpected path ${path}`)
     })
     await manager.authenticate('admin', 'correct-horse-battery')
+    await flushPromises()
     expect(manager.bootstrapRequired.value).toBe(false)
     expect(manager.user.value?.username).toBe('admin')
+    expect(readManagementToken()).toBe('login-jwt')
     expect(manager.profile.value).toBeNull()
-    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(FakeWebSocket.instances[0]?.url).toContain('ticket=login-ticket')
   })
 
-  it('applies websocket snapshots/events and reconnects after disconnect', async () => {
+  it('applies websocket snapshots/events and reconnects with a fresh ticket after disconnect', async () => {
+    storeManagementToken('stored-jwt', false)
+    let ticket = 0
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/bootstrap') return { required: false }
+      if (path === '/api/v1/auth/providers') return authProviders()
       if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true }
       if (path === '/api/v1/models') return [model()]
       if (path === '/api/v1/instances') return [instance()]
       if (path === '/api/v1/instances/coder/runtime') return { instance_id: 'coder', model_id: 'm1', state: 'UNLOADED' }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: `ticket-${++ticket}` }
       throw new Error(path)
     })
     const manager = useManager()
     await manager.initialize()
+    await flushPromises()
     const socket = FakeWebSocket.instances[0]!
     socket.open()
     expect(manager.runtimeEventsConnected.value).toBe(true)
+    expect(socket.url).toContain('ticket=ticket-1')
 
     manager.runtimes.value.m1!.push({ instance_id: 'stale', model_id: 'm1', state: 'READY' })
     socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: 'coder', model_id: 'm1', state: 'UNLOADED' }] })
@@ -157,19 +194,25 @@ describe('useManager', () => {
     vi.useFakeTimers()
     socket.disconnect()
     expect(manager.runtimeEventsConnected.value).toBe(false)
-    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
     expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(FakeWebSocket.instances[1]?.url).toContain('ticket=ticket-2')
     manager.disconnectRuntimeEvents()
   })
 
-  it('ignores malformed runtime identities and handles websocket construction failure', () => {
+  it('requires a websocket ticket and handles websocket construction failure', async () => {
     const manager = useManager()
     manager.user.value = { id: 1, username: 'admin', enabled: true }
+    storeManagementToken('stored-jwt', false)
+    let ticket = 0
+    mocks.request.mockImplementation(async (path: string) => path === '/api/v1/auth/ws-ticket' ? { ticket: `ticket-${++ticket}` } : [])
+
     FakeWebSocket.throwOnCreate = true
-    manager.connectRuntimeEvents()
+    await manager.connectRuntimeEvents()
     expect(FakeWebSocket.instances).toHaveLength(0)
     FakeWebSocket.throwOnCreate = false
-    manager.connectRuntimeEvents()
+    await manager.connectRuntimeEvents()
     const socket = FakeWebSocket.instances[0]!
     socket.open()
     socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: '', model_id: 'm1', state: 'READY' }, { instance_id: 'i1', model_id: '', state: 'READY' }] })
@@ -178,18 +221,25 @@ describe('useManager', () => {
     expect(manager.runtimes.value).toEqual({})
   })
 
-  it('logs out, closes runtime events, and clears local state', async () => {
+  it('logs out the bearer session, closes runtime events, clears token and local state', async () => {
     const manager = useManager()
     manager.user.value = { id: 1, username: 'admin', enabled: true }
     manager.models.value = [model()]
     manager.instances.value = [instance()]
     manager.runtimes.value = { m1: [{ instance_id: 'coder', model_id: 'm1', state: 'READY' }] }
-    manager.connectRuntimeEvents()
+    storeManagementToken('stored-jwt', false)
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'logout-ticket' }
+      if (path === '/api/v1/auth/logout') return undefined
+      return []
+    })
+    await manager.connectRuntimeEvents()
     const socket = FakeWebSocket.instances[0]!
     socket.open()
-    mocks.request.mockResolvedValue(undefined)
     await manager.logout()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/logout', { method: 'POST' })
     expect(socket.closed).toBe(true)
+    expect(readManagementToken()).toBe('')
     expect(manager.user.value).toBeNull()
     expect(manager.models.value).toEqual([])
     expect(manager.instances.value).toEqual([])
