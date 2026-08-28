@@ -7,6 +7,13 @@ import { useManager } from '~/composables/useManager'
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
+const TooltipStub = { props: ['text'], template: '<span><slot /></span>' }
+const mountDiscover = (options: Record<string, any> = {}) => mountSuspended(ModelsDiscover, {
+  route: false,
+  ...options,
+  global: { ...(options.global || {}), stubs: { ...(options.global?.stubs || {}), UTooltip: TooltipStub } }
+})
+
 const gib = 1024 ** 3
 const artifacts = [
   { id: 'single', name: 'single-Q4_K_M.gguf', quantization: 'Q4_K_M', model_bytes: 4 * gib, total_bytes: 4 * gib, shard_count: 1, expected_shards: 1, complete: true, files: [{ path: 'single-Q4_K_M.gguf', size: 4 * gib }] },
@@ -81,13 +88,13 @@ describe('Hugging Face GGUF hardware recommendations', () => {
       return []
     })
 
-    const list = await mountSuspended(ModelsDiscover, { route: false })
+    const list = await mountDiscover()
     await list.find('form').trigger('submit')
     await flushPromises()
     expect(list.text()).toContain('Model size 27B params')
     list.unmount()
 
-    const wrapper = await mountSuspended(ModelsDiscover, { props: { repoId: 'acme/demo' }, route: false })
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Hugging Face GGUF metadata: 27B params')
@@ -118,7 +125,7 @@ describe('Hugging Face GGUF hardware recommendations', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ModelsDiscover, { props: { repoId: 'acme/demo' }, route: false })
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
     await flushPromises()
     expect(wrapper.text()).toContain('Hardware-aware recommendation unavailable')
     expect(wrapper.get('[data-testid="artifact-hardware-fit"]').text()).toContain('Fit unknown')
