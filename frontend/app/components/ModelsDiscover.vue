@@ -441,7 +441,7 @@ onBeforeUnmount(() => {
             :key="artifact.id"
             :class="[
               'grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_150px] xl:items-start',
-              artifactAdvice(artifact)?.recommended ? '-mx-3 border-l-2 border-primary bg-primary/5 px-3 sm:-mx-4 sm:px-4' : ''
+              artifactAdvice(artifact)?.recommended ? '-mx-3 bg-primary/5 px-3 sm:-mx-4 sm:px-4' : ''
             ]"
             :data-testid="`artifact-${artifact.id}`"
             :data-recommended="artifactAdvice(artifact)?.recommended ? 'true' : undefined"
