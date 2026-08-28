@@ -89,7 +89,7 @@ describe('Discover URL navigation and endless scrolling', () => {
     expect(list.text()).toContain('acme/one')
     expect(list.text()).toContain('acme/two')
     expect(mocks.request.mock.calls[0][0]).toContain('/api/v1/huggingface/search?')
-    expect(mocks.request.mock.calls[0][0]).toContain('paged=true')
+    expect(mocks.request.mock.calls[0][0]).not.toContain('cursor=')
 
     expect(FakeIntersectionObserver.instances).toHaveLength(1)
     FakeIntersectionObserver.instances[0]!.trigger()
