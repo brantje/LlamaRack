@@ -216,7 +216,7 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     slider.vm.$emit('update:modelValue', 3)
     await new Promise(resolve => setTimeout(resolve, 300))
     await flushPromises()
-    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('context_length=16384'))).toBe(true)
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('context_length=32768'))).toBe(true)
     expect(wrapper.text()).not.toContain('Temporary context assumption')
     wrapper.unmount()
   })
