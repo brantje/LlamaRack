@@ -79,9 +79,30 @@ func (d *Detector) enrichNVIDIAPCIe(ctx context.Context, gpus []GPU) {
 		}
 	}
 
+	// Some recent GeForce drivers reject the selective PCIe query even though
+	// `nvidia-smi -q` still reports max generation and link width. Consume that
+	// data before requiring host sysfs to be mounted into the container.
+	needsQueryFallback := false
+	for _, gpu := range gpus {
+		if gpu.PCIeBandwidthBytesPerSecond <= 0 {
+			needsQueryFallback = true
+			break
+		}
+	}
+	if needsQueryFallback {
+		if out, err := d.run(ctx, "nvidia-smi", "-q"); err == nil {
+			fallback := parseNVIDIAPCIeQuery(string(out))
+			for i := range gpus {
+				if gpus[i].PCIeBandwidthBytesPerSecond <= 0 {
+					gpus[i].PCIeBandwidthBytesPerSecond = fallback[gpus[i].Index]
+				}
+			}
+		}
+	}
+
 	// nvidia-smi can expose a GPU while hiding PCIe max-link properties inside a
 	// container. Linux sysfs normally still exposes the physical PCI function,
-	// so use it only for devices whose NVML PCIe query remained unavailable.
+	// so use it only for devices whose nvidia-smi PCIe probes remain unavailable.
 	busIDs := d.nvidiaPCIBusIDs(ctx)
 	for i := range gpus {
 		if gpus[i].PCIeBandwidthBytesPerSecond > 0 {
@@ -106,16 +127,20 @@ func (d *Detector) enrichNVIDIAMemoryBandwidth(ctx context.Context, gpus []GPU) 
 	}
 
 	// nvmlDeviceGetMemoryBusWidth has existed since the R510 driver family and
-	// modern nvidia-smi exposes it as memory.bus_width. Query it directly instead
-	// of relying on the human-readable `nvidia-smi -q` layout, which is not
-	// consistent across GeForce/container driver combinations.
+	// some nvidia-smi versions expose it as memory.bus_width. Query it directly
+	// first, but do not rely on the field being available: current GeForce drivers
+	// can reject it even while exposing all other required telemetry.
 	widths := d.nvidiaFloatMetric(ctx, "memory.bus_width")
 	clocks := d.nvidiaFloatMetric(ctx, "clocks.max.memory")
 	for i := range gpus {
 		if gpus[i].MemoryBandwidthBytesPerSecond > 0 {
 			continue
 		}
-		gpus[i].MemoryBandwidthBytesPerSecond = theoreticalMemoryBandwidth(clocks[gpus[i].Index], widths[gpus[i].Index])
+		width := widths[gpus[i].Index]
+		if width <= 0 {
+			width = knownNVIDIAMemoryBusWidth(gpus[i].Name)
+		}
+		gpus[i].MemoryBandwidthBytesPerSecond = theoreticalMemoryBandwidth(clocks[gpus[i].Index], width)
 	}
 }
 
