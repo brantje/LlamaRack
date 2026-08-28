@@ -3,6 +3,7 @@ package recommendations
 import (
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
@@ -57,15 +58,15 @@ type DiscoverArtifact struct {
 }
 
 type DiscoverAnalysis struct {
-	ContextLength              int64              `json:"context_length"`
-	ContextCapability          int64              `json:"context_capability"`
-	ContextAssumed             bool               `json:"context_assumed"`
-	Metadata                   Metadata            `json:"metadata"`
-	MetadataWarning            string              `json:"metadata_warning,omitempty"`
-	HardwareWarning            string              `json:"hardware_warning,omitempty"`
-	HardwareAvailable          bool                `json:"hardware_available"`
-	HybridRecommendations      bool                `json:"hybrid_recommendations_enabled"`
-	Artifacts                  []DiscoverArtifact  `json:"artifacts"`
+	ContextLength         int64             `json:"context_length"`
+	ContextCapability     int64             `json:"context_capability"`
+	ContextAssumed        bool              `json:"context_assumed"`
+	Metadata              Metadata          `json:"metadata"`
+	MetadataWarning       string            `json:"metadata_warning,omitempty"`
+	HardwareWarning       string            `json:"hardware_warning,omitempty"`
+	HardwareAvailable     bool              `json:"hardware_available"`
+	HybridRecommendations bool              `json:"hybrid_recommendations_enabled"`
+	Artifacts             []DiscoverArtifact `json:"artifacts"`
 }
 
 // AnalyzeDiscover evaluates remote GGUF artifacts using the same memory model
@@ -92,13 +93,13 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 	for _, input := range inputs {
 		guide := ClassifyQuantization(input.Quantization)
 		artifact := DiscoverArtifact{
-			ArtifactID: input.ID,
-			Quantization: guide,
-			Fit: FitUnknown,
-			FitLabel: "Fit unknown",
-			Confidence: confidence(metadata, metadataErr),
-			weightsBytes: input.WeightsBytes,
-			complete: input.Complete,
+			ArtifactID:    input.ID,
+			Quantization:  guide,
+			Fit:           FitUnknown,
+			FitLabel:      "Fit unknown",
+			Confidence:    confidence(metadata, metadataErr),
+			weightsBytes:  input.WeightsBytes,
+			complete:      input.Complete,
 		}
 		if guide.Warning != "" {
 			artifact.Warnings = append(artifact.Warnings, guide.Warning)
@@ -189,6 +190,7 @@ func hardwareTelemetryAvailable(snapshot hardware.Snapshot, err error) bool {
 // predicate explicit without treating a machine with zeroed fake test data as a
 // successfully detected hardware snapshot.
 type contextUnavailableError struct{}
+
 func (contextUnavailableError) Error() string { return "hardware telemetry unavailable" }
 
 func markDiscoverRecommendation(artifacts []DiscoverArtifact, allowHybrid bool) {
@@ -227,13 +229,25 @@ func ClassifyQuantization(value string) QuantizationGuide {
 	q := strings.ToUpper(strings.TrimSpace(value))
 	base := ExplainQuantization(q)
 	guide := QuantizationGuide{
-		Name: q,
-		Tier: "Unknown profile",
-		Quality: "Unknown",
-		Memory: "Unknown",
-		Speed: "Hardware-dependent",
-		Summary: base.Summary,
+		Name:     q,
+		Tier:     "Unknown profile",
+		Quality:  "Unknown",
+		Memory:   "Unknown",
+		Speed:    "Hardware-dependent",
+		Summary:  base.Summary,
 		Tradeoff: base.Tradeoff,
+	}
+	if bpw, ok := parseBPWQuantization(q); ok {
+		guide.Tier = "Mixed quantization"
+		guide.Quality = "Recipe-dependent"
+		guide.Memory = bpwMemoryLabel(bpw)
+		guide.Speed = "Hardware-dependent"
+		guide.Summary = "Mixed quantization averaging " + strings.TrimSuffix(q, "BPW") + " bits per weight; exact tensor formats vary by recipe."
+		guide.Tradeoff = "BPW describes average storage density, not a single quantization method or guaranteed quality level."
+		guide.Warning = "Mixed quantizations can vary substantially at the same BPW. Treat BPW as a size signal, not a guaranteed quality ranking."
+		guide.Known = true
+		guide.rank = bpwRank(bpw)
+		return guide
 	}
 	prefix := q
 	if strings.HasPrefix(prefix, "IQ") {
@@ -263,4 +277,55 @@ func ClassifyQuantization(value string) QuantizationGuide {
 		guide.Warning = "Full precision is rarely practical for local inference; quantized variants normally retain useful quality with far lower memory use."
 	}
 	return guide
+}
+
+func parseBPWQuantization(value string) (float64, bool) {
+	if !strings.HasSuffix(value, "BPW") {
+		return 0, false
+	}
+	raw := strings.TrimSpace(strings.TrimSuffix(value, "BPW"))
+	if raw == "" {
+		return 0, false
+	}
+	bpw, err := strconv.ParseFloat(raw, 64)
+	if err != nil || bpw <= 0 || bpw > 32 {
+		return 0, false
+	}
+	return bpw, true
+}
+
+func bpwMemoryLabel(bpw float64) string {
+	switch {
+	case bpw < 3:
+		return "Very low"
+	case bpw < 4:
+		return "Low"
+	case bpw < 5:
+		return "Moderate"
+	case bpw < 7:
+		return "Moderate-high"
+	case bpw < 10:
+		return "Very high"
+	default:
+		return "Extreme"
+	}
+}
+
+func bpwRank(bpw float64) int {
+	switch {
+	case bpw < 3:
+		return 25
+	case bpw < 4:
+		return 35
+	case bpw < 5:
+		return 45
+	case bpw < 6:
+		return 55
+	case bpw < 7:
+		return 65
+	case bpw < 9:
+		return 80
+	default:
+		return 90
+	}
 }
