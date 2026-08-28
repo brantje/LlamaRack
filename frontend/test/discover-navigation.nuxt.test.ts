@@ -6,8 +6,9 @@ import DiscoverPage from '~/components/ModelsDiscover.vue'
 import DiscoverDetailPage from '~/pages/models/discover/[owner]/[repo].vue'
 import { useManager } from '~/composables/useManager'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn() }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), navigateTo: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
+mockNuxtImport('navigateTo', () => mocks.navigateTo)
 
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = []
@@ -54,6 +55,7 @@ function resetManager() {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  mocks.navigateTo.mockReset()
   FakeIntersectionObserver.instances = []
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver as any)
   resetManager()
@@ -101,7 +103,7 @@ describe('Discover URL navigation and endless scrolling', () => {
     expect(firstCard).toBeTruthy()
     await firstCard!.trigger('click')
     await flushPromises()
-    expect(list.vm.$route.path).toBe('/models/discover/acme/one')
+    expect(mocks.navigateTo).toHaveBeenCalledWith('/models/discover/acme/one')
     expect(useState<number>('models-discover-scroll-position').value).toBe(777)
     scrollY.mockRestore()
     list.unmount()
