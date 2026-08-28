@@ -13,6 +13,12 @@ import (
 
 type ManagementHandler struct{ service *Service }
 
+type ManagementSummary struct {
+	Summary
+	Lifecycle LifecycleSummary `json:"lifecycle"`
+	Hardware  HardwareOverview `json:"hardware"`
+}
+
 func NewManagementHandler(service *Service) http.Handler { return &ManagementHandler{service: service} }
 
 func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +33,9 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil { writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()}); return }
 		value, err := h.service.Summary(r.Context(), since)
 		if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}); return }
-		writeJSON(w, http.StatusOK, value)
+		lifecycle, err := h.service.LifecycleSummary(r.Context())
+		if err != nil { writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()}); return }
+		writeJSON(w, http.StatusOK, ManagementSummary{Summary: value, Lifecycle: lifecycle, Hardware: h.service.LatestHardware()})
 	case "/api/v1/observability/requests":
 		filters, err := parseFilters(r)
 		if err != nil { writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()}); return }
@@ -43,11 +51,26 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil || bucket <= 0 { writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bucket_seconds must be a positive integer"}); return }
 		}
 		metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+		if isHardwareMetric(metric) {
+			items, err := h.service.HardwareTimeseries(r.Context(), metric, since, bucket, strings.TrimSpace(r.URL.Query().Get("device_id")), strings.TrimSpace(r.URL.Query().Get("instance_id")))
+			if err != nil { writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()}); return }
+			writeJSON(w, http.StatusOK, map[string]any{"metric": metric, "bucket_seconds": bucket, "items": items})
+			return
+		}
 		items, err := h.service.Timeseries(r.Context(), metric, since, bucket)
 		if err != nil { writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()}); return }
 		writeJSON(w, http.StatusOK, map[string]any{"metric": metricOrDefault(metric), "bucket_seconds": bucket, "items": items})
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+func isHardwareMetric(metric string) bool {
+	switch metric {
+	case "ram_total_bytes", "ram_used_bytes", "vram_total_bytes", "vram_used_bytes", "gpu_utilization_pct", "instance_vram_used_bytes", "instance_cpu_percent", "instance_memory_used_bytes":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -117,18 +140,24 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	fmt.Fprintln(w, "# HELP llamacpp_manager_gateway_requests_total OpenAI-compatible gateway requests.")
 	fmt.Fprintln(w, "# TYPE llamacpp_manager_gateway_requests_total counter")
-	declaredTokenMetric := map[string]bool{}
+	declaredMetric := map[string]bool{}
 	for _, counter := range counters {
 		name := "llamacpp_manager_" + counter.Metric
-		if counter.Metric != "gateway_requests_total" && !declaredTokenMetric[counter.Metric] {
+		if counter.Metric != "gateway_requests_total" && !declaredMetric[counter.Metric] {
 			fmt.Fprintf(w, "# TYPE %s counter\n", name)
-			declaredTokenMetric[counter.Metric] = true
+			declaredMetric[counter.Metric] = true
 		}
-		labels := []string{`instance_id="`+promEscape(counter.InstanceID)+`"`, `endpoint="`+promEscape(counter.Endpoint)+`"`, `streaming="`+strconv.FormatBool(counter.Streaming)+`"`}
+		var labels []string
+		if counter.InstanceID != "" { labels = append(labels, `instance_id="`+promEscape(counter.InstanceID)+`"`) }
+		if counter.Metric == "gateway_requests_total" || strings.Contains(counter.Metric, "tokens") {
+			labels = append(labels, `endpoint="`+promEscape(counter.Endpoint)+`"`, `streaming="`+strconv.FormatBool(counter.Streaming)+`"`)
+		}
 		if counter.Metric == "gateway_requests_total" {
 			labels = append(labels, `status_code="`+strconv.Itoa(counter.StatusCode)+`"`, `result="`+promEscape(counter.Result)+`"`)
 		}
-		fmt.Fprintf(w, "%s{%s} %s\n", name, strings.Join(labels, ","), strconv.FormatFloat(counter.Value, 'f', -1, 64))
+		labelText := ""
+		if len(labels) > 0 { labelText = "{" + strings.Join(labels, ",") + "}" }
+		fmt.Fprintf(w, "%s%s %s\n", name, labelText, strconv.FormatFloat(counter.Value, 'f', -1, 64))
 	}
 	active, queued := h.service.Activity()
 	fmt.Fprintln(w, "# TYPE llamacpp_manager_gateway_active_requests gauge")
@@ -139,6 +168,35 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		writeQuantiles(w, "llamacpp_manager_request_latency_seconds", summary.LatencyMS)
 		writeQuantiles(w, "llamacpp_manager_request_ttft_seconds", summary.TTFTMS)
+	}
+	writeHardwareMetrics(w, h.service.LatestHardware())
+}
+
+func writeHardwareMetrics(w http.ResponseWriter, overview HardwareOverview) {
+	hardware := overview.Hardware
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_ram_total_bytes gauge")
+	fmt.Fprintf(w, "llamacpp_manager_ram_total_bytes %d\n", hardware.RAMTotalBytes)
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_ram_used_bytes gauge")
+	ramUsed := hardware.RAMTotalBytes - hardware.RAMAvailableBytes
+	if ramUsed < 0 { ramUsed = 0 }
+	fmt.Fprintf(w, "llamacpp_manager_ram_used_bytes %d\n", ramUsed)
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_vram_total_bytes gauge")
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_vram_used_bytes gauge")
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_utilization_percent gauge")
+	for _, gpu := range hardware.GPUs {
+		label := promEscape(gpu.ID)
+		fmt.Fprintf(w, "llamacpp_manager_gpu_vram_total_bytes{device_id=\"%s\"} %d\n", label, gpu.TotalBytes)
+		fmt.Fprintf(w, "llamacpp_manager_gpu_vram_used_bytes{device_id=\"%s\"} %d\n", label, gpu.UsedBytes)
+		fmt.Fprintf(w, "llamacpp_manager_gpu_utilization_percent{device_id=\"%s\"} %s\n", label, strconv.FormatFloat(gpu.UtilizationPct, 'f', -1, 64))
+	}
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_memory_used_bytes gauge")
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_cpu_percent gauge")
+	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_vram_used_bytes gauge")
+	for _, sample := range overview.Telemetry {
+		instance := promEscape(sample.InstanceID)
+		if sample.MemoryUsedBytes != nil { fmt.Fprintf(w, "llamacpp_manager_instance_memory_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.MemoryUsedBytes) }
+		if sample.CPUPercent != nil { fmt.Fprintf(w, "llamacpp_manager_instance_cpu_percent{instance_id=\"%s\"} %s\n", instance, strconv.FormatFloat(*sample.CPUPercent, 'f', -1, 64)) }
+		if sample.VRAMUsedBytes != nil { fmt.Fprintf(w, "llamacpp_manager_instance_vram_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.VRAMUsedBytes) }
 	}
 }
 
