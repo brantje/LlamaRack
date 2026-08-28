@@ -1,0 +1,92 @@
+package recommendations
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+)
+
+func TestClassifyQuantizationForNoviceGuidance(t *testing.T) {
+	cases := []struct {
+		quantization string
+		tier         string
+		quality      string
+		memory       string
+		warning      bool
+		known        bool
+	}{
+		{"Q2_K", "Very compact", "Very low", "Very low", true, true},
+		{"IQ3_XS", "Compact", "Low", "Low", true, true},
+		{"Q4_K_M", "Balanced", "Balanced", "Moderate", false, true},
+		{"Q5_K_M", "High quality", "High", "Moderate-high", false, true},
+		{"Q6_K_P", "High quality", "High", "High", false, true},
+		{"Q8_0", "Maximum quality", "Maximum", "Very high", true, true},
+		{"BF16", "Maximum quality", "Maximum", "Extreme", true, true},
+		{"F32", "Maximum quality", "Maximum", "Extreme", true, true},
+		{"EXPERIMENTAL", "Unknown profile", "Unknown", "Unknown", false, false},
+	}
+	for _, tc := range cases {
+		guide := ClassifyQuantization(tc.quantization)
+		if guide.Tier != tc.tier || guide.Quality != tc.quality || guide.Memory != tc.memory || guide.Known != tc.known || (guide.Warning != "") != tc.warning {
+			t.Fatalf("%s => %+v", tc.quantization, guide)
+		}
+	}
+}
+
+func TestAnalyzeDiscoverContextAndHybridPolicy(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	metadata := Metadata{Architecture: "qwen2", ContextLength: 131072, BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8}
+	inputs := []ArtifactInput{
+		{ID: "q4", Quantization: "Q4_K_M", WeightsBytes: 4 * gib, Complete: true},
+		{ID: "q6", Quantization: "Q6_K_P", WeightsBytes: 6 * gib, Complete: true},
+		{ID: "q8", Quantization: "Q8_0", WeightsBytes: 8 * gib, Complete: true},
+	}
+	snapshot := hardware.Snapshot{RAMAvailableBytes: 32 * gib, RAMTotalBytes: 48 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib, TotalBytes: 8 * gib}}}
+
+	allowed := AnalyzeDiscover(inputs, metadata, nil, snapshot, 4096, nil, true)
+	if allowed.ContextAssumed || allowed.ContextLength != 4096 || allowed.ContextCapability != 131072 || !allowed.HardwareAvailable {
+		t.Fatalf("analysis=%+v", allowed)
+	}
+	if len(allowed.Artifacts) != 3 || allowed.Artifacts[0].ArtifactID != "q8" || !allowed.Artifacts[0].Recommended || allowed.Artifacts[0].Fit != FitHybrid {
+		t.Fatalf("hybrid-enabled=%+v", allowed.Artifacts)
+	}
+
+	gpuPreferred := AnalyzeDiscover(inputs, metadata, nil, snapshot, 4096, nil, false)
+	if gpuPreferred.Artifacts[0].ArtifactID != "q6" || !gpuPreferred.Artifacts[0].Recommended || gpuPreferred.Artifacts[0].Fit != FitGPU {
+		t.Fatalf("hybrid-disabled=%+v", gpuPreferred.Artifacts)
+	}
+
+	largeContext := AnalyzeDiscover(inputs, metadata, nil, snapshot, 65536, nil, false)
+	var q6 DiscoverArtifact
+	for _, artifact := range largeContext.Artifacts {
+		if artifact.ArtifactID == "q6" { q6 = artifact }
+	}
+	if q6.Memory.KVCacheBytes <= allowed.Artifacts[1].Memory.KVCacheBytes || q6.Fit == FitGPU {
+		t.Fatalf("large-context q6=%+v", q6)
+	}
+}
+
+func TestAnalyzeDiscoverFitStatesAndUnknowns(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	metadata := Metadata{Architecture: "llama", ContextLength: 32768, BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8}
+	input := []ArtifactInput{{ID: "q4", Quantization: "Q4_K_M", WeightsBytes: 4 * gib, Complete: true}}
+
+	multi := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * gib}, {ID: "CUDA1", FreeBytes: 3 * gib}}}, 4096, nil, true)
+	if multi.Artifacts[0].Fit != FitMultiGPU { t.Fatalf("multi=%+v", multi.Artifacts[0]) }
+
+	cpu := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib, RAMTotalBytes: 32 * gib}, 4096, nil, true)
+	if cpu.Artifacts[0].Fit != FitCPU || !cpu.Artifacts[0].Runnable { t.Fatalf("cpu=%+v", cpu.Artifacts[0]) }
+
+	noFit := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 2 * gib, RAMTotalBytes: 2 * gib}, 4096, nil, true)
+	if noFit.Artifacts[0].Fit != FitNo || noFit.Artifacts[0].Runnable { t.Fatalf("no-fit=%+v", noFit.Artifacts[0]) }
+
+	noHardware := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{}, 4096, errors.New("telemetry failed"), true)
+	if noHardware.HardwareAvailable || noHardware.Artifacts[0].Fit != FitUnknown { t.Fatalf("no-hardware=%+v", noHardware) }
+
+	missingMetadata := AnalyzeDiscover(input, Metadata{}, errors.New("metadata unavailable"), hardware.Snapshot{RAMAvailableBytes: 16 * gib}, 0, nil, true)
+	if !missingMetadata.ContextAssumed || missingMetadata.Artifacts[0].Fit != FitUnknown || missingMetadata.Artifacts[0].Recommended { t.Fatalf("missing-metadata=%+v", missingMetadata) }
+
+	incomplete := AnalyzeDiscover([]ArtifactInput{{ID: "split", Quantization: "Q6_K", WeightsBytes: 4 * gib, Complete: false}}, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib}, 4096, nil, true)
+	if incomplete.Artifacts[0].Fit != FitUnknown || incomplete.Artifacts[0].Runnable { t.Fatalf("incomplete=%+v", incomplete.Artifacts[0]) }
+}
