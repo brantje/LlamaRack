@@ -32,12 +32,26 @@ type LifecycleSummary struct {
 
 var latestHardware sync.Map // map[*Service]HardwareOverview
 
+func cloneTelemetrySamples(samples []telemetry.Sample) []telemetry.Sample {
+	out := make([]telemetry.Sample, len(samples))
+	for index := range samples {
+		out[index] = samples[index]
+		out[index].GPUDevices = append([]string(nil), samples[index].GPUDevices...)
+		out[index].GPUs = append([]telemetry.GPUUsage(nil), samples[index].GPUs...)
+	}
+	return out
+}
+
+func cloneHardwareOverview(value HardwareOverview) HardwareOverview {
+	out := value
+	out.Hardware.GPUs = append([]hardware.GPU(nil), value.Hardware.GPUs...)
+	out.Hardware.Processes = append([]hardware.GPUProcess(nil), value.Hardware.Processes...)
+	out.Telemetry = cloneTelemetrySamples(value.Telemetry)
+	return out
+}
+
 func (s *Service) SetLatestHardware(snapshot hardware.Snapshot, samples []telemetry.Sample) {
-	copySamples := append([]telemetry.Sample(nil), samples...)
-	copySnapshot := snapshot
-	copySnapshot.GPUs = append([]hardware.GPU(nil), snapshot.GPUs...)
-	copySnapshot.Processes = append([]hardware.GPUProcess(nil), snapshot.Processes...)
-	latestHardware.Store(s, HardwareOverview{Hardware: copySnapshot, Telemetry: copySamples})
+	latestHardware.Store(s, cloneHardwareOverview(HardwareOverview{Hardware: snapshot, Telemetry: samples}))
 }
 
 func (s *Service) LatestHardware() HardwareOverview {
@@ -45,7 +59,7 @@ func (s *Service) LatestHardware() HardwareOverview {
 	if !ok {
 		return HardwareOverview{Hardware: hardware.Snapshot{GPUs: []hardware.GPU{}, Processes: []hardware.GPUProcess{}}, Telemetry: []telemetry.Sample{}}
 	}
-	return value.(HardwareOverview)
+	return cloneHardwareOverview(value.(HardwareOverview))
 }
 
 func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot, samples []telemetry.Sample) error {
