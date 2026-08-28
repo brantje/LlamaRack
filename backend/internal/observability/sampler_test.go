@@ -2,6 +2,8 @@ package observability
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -46,6 +48,41 @@ func TestSamplerPublishSubscribeCopiesAndFallback(t *testing.T) {
 
 	attached := attachNativeMetrics(context.Background(), result, []supervisor.Runtime{{InstanceID:"one", PID:1, State:supervisor.Loading}}, nil)
 	if len(attached) != 2 || attached[0].LlamaMetrics != nil { t.Fatalf("attached=%+v", attached) }
+}
+
+func TestAttachNativeMetricsForReadyRuntime(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" { http.NotFound(w, r); return }
+		_, _ = w.Write([]byte("llamacpp:tokens_predicted_total 42\nllamacpp:predicted_tokens_seconds 21\n"))
+	}))
+	defer server.Close()
+
+	samples := []telemetry.Sample{
+		{InstanceID:"ready", PID:7},
+		{InstanceID:"mismatch", PID:8},
+		{InstanceID:"missing", PID:9},
+	}
+	runtimes := []supervisor.Runtime{
+		{InstanceID:"ready", PID:7, State:supervisor.Ready},
+		{InstanceID:"mismatch", PID:99, State:supervisor.Ready},
+	}
+	resolved := 0
+	attached := attachNativeMetrics(context.Background(), samples, runtimes, func(instanceID string) (string, bool) {
+		resolved++
+		if instanceID == "ready" { return server.URL, true }
+		return "", false
+	})
+	if len(attached) != 3 { t.Fatalf("attached=%+v", attached) }
+	if attached[0].LlamaMetrics == nil || attached[0].LlamaMetrics.PredictedTokensTotal == nil || *attached[0].LlamaMetrics.PredictedTokensTotal != 42 {
+		t.Fatalf("ready metrics=%+v", attached[0])
+	}
+	if attached[1].LlamaMetrics != nil || attached[2].LlamaMetrics != nil { t.Fatalf("unexpected metrics=%+v", attached) }
+	if resolved != 1 { t.Fatalf("resolver calls=%d", resolved) }
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "nope", http.StatusServiceUnavailable) }))
+	defer bad.Close()
+	attached = attachNativeMetrics(context.Background(), []telemetry.Sample{{InstanceID:"ready", PID:7}}, []supervisor.Runtime{{InstanceID:"ready", PID:7, State:supervisor.Ready}}, func(string) (string, bool) { return bad.URL, true })
+	if attached[0].LlamaMetrics != nil { t.Fatalf("failed fetch must not populate metrics: %+v", attached[0]) }
 }
 
 func TestSamplerRunPublishesManagerOwnedHardware(t *testing.T) {
