@@ -91,6 +91,9 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
+		if sessionID == "" {
+			sessionID = newTraceID()
+		}
 		requestID := strings.TrimSpace(w.Header().Get(headerRequestID))
 		if requestID == "" {
 			return
