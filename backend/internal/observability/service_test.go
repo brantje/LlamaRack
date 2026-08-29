@@ -68,7 +68,7 @@ func TestRecordSummaryListCountersTimeseriesAndPrune(t *testing.T) {
 	streaming := true
 	items, err := s.ListRequests(ctx, RequestFilters{InstanceID:"coder", APIKeyID:"key-1", Result:"success", StatusCode:200, Streaming:&streaming, Limit:10})
 	if err != nil || len(items) != 1 { t.Fatalf("items=%+v err=%v", items, err) }
-	if items[0].RequestBody == nil || items[0].ResponseBody == nil || items[0].APIKey == nil || items[0].APIKey.Prefix != "abc123" || !items[0].Autoloaded { t.Fatalf("record=%+v", items[0]) }
+	if items[0].RequestBody != nil || items[0].ResponseBody != nil || items[0].APIKey == nil || items[0].APIKey.Prefix != "abc123" || !items[0].Autoloaded { t.Fatalf("record=%+v", items[0]) }
 	items, err = s.ListRequests(ctx, RequestFilters{Endpoint:"/v1/embeddings", BeforeMS:now.UnixMilli(), SinceMS:now.Add(-5*time.Minute).UnixMilli(), Limit:1000})
 	if err != nil || len(items) != 1 || items[0].Error == "" { t.Fatalf("filtered=%+v err=%v", items, err) }
 
