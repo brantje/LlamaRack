@@ -49,9 +49,9 @@ func (b *sessionCaptureBody) Close() error {
 }
 
 // WithRequestLogContext mirrors LiteLLM's session grouping inputs without
-// changing the OpenAI-compatible payload forwarded to llama-server. The body is
-// observed as the gateway reads it, so session metadata does not require a
-// second full request-body allocation.
+// changing the OpenAI-compatible payload. Session identity is consumed here so
+// the gateway's trace resolver cannot accidentally treat X-LiteLLM-Session-ID
+// as a trace ID; LiteLLM keeps those identities distinct.
 func WithRequestLogContext(next http.Handler, service *observability.Service) http.Handler {
 	if service == nil {
 		return next
@@ -80,6 +80,7 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 
 		if sessionFromHeader != "" {
 			w.Header().Set(headerSessionID, sessionFromHeader)
+			r.Header.Del(headerSessionID)
 		}
 		next.ServeHTTP(w, r)
 
