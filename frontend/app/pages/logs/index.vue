@@ -363,7 +363,7 @@ watch(liveRequestFingerprint, (next, previous) => {
 <template>
   <div class="space-y-5" data-testid="request-logs-page">
     <div class="flex flex-wrap items-start justify-between gap-4">
-      <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent inference request history with LiteLLM-compatible session grouping, correlation and performance metadata." />
+      <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent inference request history with LiteLLM-compatible session-aware navigation, correlation and performance metadata." />
       <div class="flex flex-wrap items-center justify-end gap-2">
         <UBadge data-testid="request-logs-live-state" :color="liveState.color" variant="subtle">{{ liveState.label }}</UBadge>
         <UButton data-testid="request-logs-live-toggle" color="neutral" variant="soft" :icon="liveStreamingEnabled ? 'i-lucide-pause' : 'i-lucide-play'" @click="toggleLiveStreaming">{{ liveStreamingEnabled ? 'Pause live' : 'Enable live' }}</UButton>
@@ -377,7 +377,7 @@ watch(liveRequestFingerprint, (next, previous) => {
     <UAlert v-if="error" color="error" variant="subtle" title="Request history unavailable" :description="error" />
 
     <UCard data-testid="request-log-filters">
-      <template #header><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">FILTERS</p><p class="mt-1 text-xs text-muted">Filters are applied server-side to retained request history. Multi-request sessions collapse to one representative row.</p></template>
+      <template #header><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">FILTERS</p><p class="mt-1 text-xs text-muted">Filters are applied server-side to retained request history. Each request remains a separate row; shared sessions are grouped only in the request sidepanel.</p></template>
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <UFormField label="Time window"><USelectMenu v-model="filters.window" :items="windowItems" label-key="label" value-key="value" class="w-full" /></UFormField>
         <UFormField label="Instance"><USelectMenu v-model="filters.instance_id" :items="instanceItems" label-key="label" value-key="value" class="w-full" /></UFormField>
