@@ -13,7 +13,10 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/observability"
 )
 
-const headerSessionID = "X-LiteLLM-Session-ID"
+const (
+	headerSessionID            = "X-LiteLLM-Session-ID"
+	preAuthRequestBodyBytes    = 64 << 10
+)
 
 var genericSessionHeader = regexp.MustCompile(`(?i)^x-.+-session-id$`)
 
@@ -48,15 +51,27 @@ func (b *sessionCaptureBody) Close() error {
 	return b.source.Close()
 }
 
+func shouldPreAuthenticateRequestBody(r *http.Request) bool {
+	return r.Body != nil && (r.ContentLength < 0 || r.ContentLength > preAuthRequestBodyBytes)
+}
+
 // WithRequestLogContext mirrors LiteLLM's session grouping inputs without
-// changing the OpenAI-compatible payload. Session identity is consumed here so
-// the gateway's trace resolver cannot accidentally treat X-LiteLLM-Session-ID
-// as a trace ID; LiteLLM keeps those identities distinct.
+// changing the OpenAI-compatible payload. Potentially large or chunked request
+// bodies are authenticated before the gateway can buffer them. Invalid callers
+// keep a small metadata budget so the normal gateway path can still create and
+// finalize the failed request log without allocating the full request body.
 func WithRequestLogContext(next http.Handler, service *observability.Service) http.Handler {
 	if service == nil {
 		return next
 	}
+	gateway, _ := next.(*Gateway)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gateway != nil && shouldPreAuthenticateRequestBody(r) {
+			if _, err := gateway.authenticateKey(r.Context(), r.Header.Get("Authorization")); err != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, preAuthRequestBodyBytes)
+			}
+		}
+
 		sessionFromHeader := sessionIDFromHeaders(r)
 		bodySessionID := make(chan string, 1)
 		if r.Body == nil {
