@@ -150,7 +150,8 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("GET /api/v1/models/{id}/details", api.NewPhase9ModelDetailsHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewPhase9RecommendationHandler(authService, modelService, hardwareDetector))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
-	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewCorrelatedRequestHandler(observabilityService))
+	managementAPI.Handle("GET /api/v1/observability/requests", observability.NewRequestLogsHandler(observabilityService))
+	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewRequestLogDetailHandler(observabilityService))
 	managementAPI.Handle("/api/v1/observability/", observability.NewManagementHandler(observabilityService))
 	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", phase8)
@@ -181,7 +182,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/", apiServer)
 
 	securedManagement := api.ManagementSecurity(authService, network, managementAPI)
-	openAI := gateway.New(authService, modelService, lifecycleService, observabilityService)
+	openAI := gateway.WithRequestLogContext(gateway.New(authService, modelService, lifecycleService, observabilityService), observabilityService)
 	metrics := observability.NewMetricsHandler(observabilityService, func(requestCtx context.Context) string {
 		value, resolveErr := managerSettings.String(requestCtx, settings.PrometheusAuthToken)
 		if resolveErr != nil {
@@ -265,9 +266,9 @@ func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handl
 		if origin != "" && network.OriginAllowed(r, origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Expose-Headers", "X-LlamaCPP-Manager-Request-ID, X-LiteLLM-Trace-ID, X-LlamaCPP-Manager-Instance, X-LlamaCPP-Manager-Autoloaded, X-LlamaCPP-Manager-Queue-MS, X-LlamaCPP-Manager-Load-MS, X-LlamaCPP-Manager-TTFT-MS, X-LlamaCPP-Manager-Prompt-Tokens-Per-Second, X-LlamaCPP-Manager-Generation-Tokens-Per-Second, X-LlamaCPP-Manager-Prompt-Tokens, X-LlamaCPP-Manager-Generated-Tokens, X-LlamaCPP-Manager-Total-Tokens")
+			w.Header().Set("Access-Control-Expose-Headers", "X-LlamaCPP-Manager-Request-ID, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID, X-LlamaCPP-Manager-Instance, X-LlamaCPP-Manager-Autoloaded, X-LlamaCPP-Manager-Queue-MS, X-LlamaCPP-Manager-Load-MS, X-LlamaCPP-Manager-TTFT-MS, X-LlamaCPP-Manager-Prompt-Tokens-Per-Second, X-LlamaCPP-Manager-Generation-Tokens-Per-Second, X-LlamaCPP-Manager-Prompt-Tokens, X-LlamaCPP-Manager-Generated-Tokens, X-LlamaCPP-Manager-Total-Tokens")
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
