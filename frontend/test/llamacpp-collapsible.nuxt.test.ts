@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
+import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import NewInstancePage from '~/pages/instances/new.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -33,8 +34,8 @@ beforeEach(() => {
   manager.profile.value = null
 })
 
-describe('collapsible llama.cpp overrides', () => {
-  it('keeps instance overrides compact until the user expands them', async () => {
+describe('llama.cpp override editors', () => {
+  it('keeps the legacy editor compact until the user expands it', async () => {
     const wrapper = await mountSuspended(LlamaCppOptionsEditor, {
       route: false,
       props: {
@@ -59,13 +60,13 @@ describe('collapsible llama.cpp overrides', () => {
     expect(wrapper.text()).toContain('No overrides configured · inheriting all values')
   })
 
-  it('makes the new Instance form use the collapsed default', async () => {
+  it('uses the flat redesign editor on the shared New Instance form', async () => {
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await flushPromises()
-    const editor = wrapper.findComponent(LlamaCppOptionsEditor)
+    const editor = wrapper.findComponent(InstanceOverridesEditor)
     expect(editor.exists()).toBe(true)
-    expect(editor.props('defaultOpen')).toBe(false)
-    expect(wrapper.text()).toContain('Instance llama.cpp configuration')
-    expect(wrapper.text()).not.toContain('--ctx-size')
+    expect(wrapper.text()).toContain('Instance llama.cpp overrides')
+    expect(wrapper.text()).toContain('Applied over the Model defaults, which are applied over the global defaults.')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Add option')).toBe(true)
   })
 })
