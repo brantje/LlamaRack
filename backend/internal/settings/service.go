@@ -22,6 +22,7 @@ const (
 	TrustedProxies              = "trusted_proxies"
 	AllowedOrigins              = "allowed_origins"
 	ExternalURL                 = "external_url"
+	FrontendURL                 = "frontend_url"
 	StartupTimeoutSeconds       = "startup_timeout_seconds"
 	IdleUnloadSeconds           = "idle_unload_seconds"
 	AlwaysOnReconcileSeconds    = "always_on_reconcile_seconds"
@@ -66,6 +67,7 @@ type General struct {
 	TrustedProxies         Value       `json:"trusted_proxies"`
 	AllowedOrigins         Value       `json:"allowed_origins"`
 	ExternalURL            Value       `json:"external_url"`
+	FrontendURL            Value       `json:"frontend_url"`
 	StartupTimeout         Value       `json:"startup_timeout_seconds"`
 	IdleUnloadTimeout      Value       `json:"idle_unload_seconds"`
 	AlwaysOnReconcile      Value       `json:"always_on_reconcile_seconds"`
@@ -103,6 +105,7 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			TrustedProxies:              {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
 			AllowedOrigins:              {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
 			ExternalURL:                 {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
+			FrontendURL:                 {defaultValue: "", kind: "string"},
 			StartupTimeoutSeconds:       {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
 			IdleUnloadSeconds:           {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
 			AlwaysOnReconcileSeconds:    {env: "LCM_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
@@ -173,7 +176,7 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 }
 
 func (s *Service) General(ctx context.Context) (General, error) {
-	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, LocalLoginEnabled, OIDCJITProvisioningEnabled, OIDCAutoLinkEnabled, TrustedProxies, AllowedOrigins, ExternalURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, ObservabilityRetentionDays, PrometheusAuthToken}
+	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, LocalLoginEnabled, OIDCJITProvisioningEnabled, OIDCAutoLinkEnabled, TrustedProxies, AllowedOrigins, ExternalURL, FrontendURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, ObservabilityRetentionDays, PrometheusAuthToken}
 	values := make(map[string]Value, len(keys))
 	for _, key := range keys {
 		value, err := s.Resolve(ctx, key)
@@ -183,7 +186,7 @@ func (s *Service) General(ctx context.Context) (General, error) {
 	return General{
 		SessionLifetime: values[SessionLifetimeSeconds], LoginProtection: values[LoginProtectionEnabled], LoginFailureThreshold: values[LoginFailureThreshold], LoginLockout: values[LoginLockoutSeconds],
 		LocalLogin: values[LocalLoginEnabled], OIDCJITProvisioning: values[OIDCJITProvisioningEnabled], OIDCAutoLink: values[OIDCAutoLinkEnabled],
-		TrustedProxies: values[TrustedProxies], AllowedOrigins: values[AllowedOrigins], ExternalURL: values[ExternalURL], StartupTimeout: values[StartupTimeoutSeconds], IdleUnloadTimeout: values[IdleUnloadSeconds], AlwaysOnReconcile: values[AlwaysOnReconcileSeconds],
+		TrustedProxies: values[TrustedProxies], AllowedOrigins: values[AllowedOrigins], ExternalURL: values[ExternalURL], FrontendURL: values[FrontendURL], StartupTimeout: values[StartupTimeoutSeconds], IdleUnloadTimeout: values[IdleUnloadSeconds], AlwaysOnReconcile: values[AlwaysOnReconcileSeconds],
 		ObservabilityRetention: values[ObservabilityRetentionDays], PrometheusToken: values[PrometheusAuthToken], Runtime: s.runtime,
 	}, nil
 }
