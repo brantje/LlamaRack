@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
@@ -16,6 +17,7 @@ type GGUFFile struct {
 	Path             string            `json:"path"`
 	Name             string            `json:"name"`
 	TotalBytes       int64             `json:"total_bytes"`
+	ModifiedAt       string            `json:"modified_at,omitempty"`
 	Quantization     string            `json:"quantization,omitempty"`
 	Architecture     string            `json:"architecture,omitempty"`
 	ContextLength    int64             `json:"context_length,omitempty"`
@@ -157,6 +159,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 			continue
 		}
 		var total int64
+		latestModified := first.mtimeNS
 		complete := true
 		for part := 1; part <= group.expected; part++ {
 			file, exists := group.files[part]
@@ -165,6 +168,9 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 				break
 			}
 			total += file.size
+			if file.mtimeNS > latestModified {
+				latestModified = file.mtimeNS
+			}
 		}
 		if !complete {
 			continue
@@ -182,6 +188,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if err != nil {
 			return nil, err
 		}
+		first.mtimeNS = latestModified
 		files = append(files, discoveredGGUFFile(first, total, summary, warning, suggested))
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -189,10 +196,15 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 }
 
 func discoveredGGUFFile(file discoveredGGUF, total int64, summary ggufmeta.Summary, warning string, suggested map[string]string) GGUFFile {
+	modifiedAt := ""
+	if file.mtimeNS > 0 {
+		modifiedAt = time.Unix(0, file.mtimeNS).UTC().Format(time.RFC3339Nano)
+	}
 	return GGUFFile{
 		Path:             filepath.ToSlash(file.path),
 		Name:             file.name,
 		TotalBytes:       total,
+		ModifiedAt:       modifiedAt,
 		Quantization:     quantFromName(file.name),
 		Architecture:     summary.Derived.Architecture,
 		ContextLength:    summary.Derived.ContextLength,
