@@ -122,15 +122,21 @@ describe('InstanceLogViewer', () => {
     wrapper.unmount()
   })
 
-  it('tails timestamped SSE log events, ignores malformed frames and reconnects cleanly', async () => {
+  it('tails timestamped SSE log events with a one-time auth ticket and reconnects cleanly', async () => {
     vi.stubGlobal('EventSource', FakeEventSource as any)
+    let ticketCounter = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: `ticket-${++ticketCounter}` }
+      return {}
+    })
+
     const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
     await flushPromises()
-    expect(mocks.request).not.toHaveBeenCalled()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     expect(FakeEventSource.instances).toHaveLength(1)
     const first = FakeEventSource.instances[0]!
-    expect(first.url).toBe('http://manager.test:8888/api/v1/logs/stream?instance_id=coder&limit=2000')
-    expect(first.withCredentials).toBe(true)
+    expect(first.url).toBe('http://manager.test:8888/api/v1/logs/stream?instance_id=coder&limit=2000&ticket=ticket-1')
+    expect(first.withCredentials).toBe(false)
 
     first.onopen?.(new Event('open'))
     first.emit('log', JSON.stringify(entry('stdout', 'ready on port 9000')))
@@ -166,15 +172,30 @@ describe('InstanceLogViewer', () => {
     expect(wrapper.text()).not.toContain('stale event')
 
     await button(wrapper, 'Reconnect').trigger('click')
+    await flushPromises()
     expect(FakeEventSource.instances).toHaveLength(2)
     const second = FakeEventSource.instances[1]!
+    expect(second.url).toContain('ticket=ticket-2')
     second.onopen?.(new Event('open'))
     await wrapper.setProps({ instanceId: 'coder-v2' })
     await flushPromises()
     expect(second.closed).toBe(true)
     expect(FakeEventSource.instances).toHaveLength(3)
     expect(FakeEventSource.instances[2]!.url).toContain('instance_id=coder-v2')
+    expect(FakeEventSource.instances[2]!.url).toContain('ticket=ticket-3')
     wrapper.unmount()
     expect(FakeEventSource.instances[2]!.closed).toBe(true)
+  })
+
+  it('does not open an EventSource when the stream ticket cannot be issued', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    mocks.request.mockRejectedValueOnce({ data: { error: 'authentication required' } })
+
+    const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
+    await flushPromises()
+
+    expect(FakeEventSource.instances).toHaveLength(0)
+    expect(wrapper.text()).toContain('authentication required')
+    wrapper.unmount()
   })
 })
