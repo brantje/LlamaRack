@@ -52,6 +52,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}-cuda
             type=semver,pattern={{major}}.{{minor}}-cuda
