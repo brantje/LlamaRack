@@ -20,6 +20,8 @@ RUN go mod tidy && \
 FROM ${LLAMA_IMAGE}
 COPY --from=backend-build /out/llamacpp-manager /usr/local/bin/llamacpp-manager
 COPY --from=frontend-build /src/frontend/.output/public /app/frontend
+RUN mkdir -p /config /models && \
+    chown -R 1000:1000 /config /models
 ENV LCM_LISTEN_ADDR=:8000 \
     LCM_DATA_DIR=/config \
     LCM_MODELS_DIR=/models \
@@ -27,4 +29,5 @@ ENV LCM_LISTEN_ADDR=:8000 \
     LCM_FRONTEND_DIR=/app/frontend
 VOLUME ["/config", "/models"]
 EXPOSE 8000
+USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/llamacpp-manager"]
