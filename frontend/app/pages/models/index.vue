@@ -10,7 +10,7 @@ const deleteModal = ref<{
 } | null>(null)
 
 function formatBytes(value: number) {
-  if (!value) return '—'
+  if (!value) return '0 B'
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let size = value
   let unit = 0
@@ -50,47 +50,67 @@ async function remove(id: string) {
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-6">
-      <UPageHeader class="min-w-0 flex-1" headline="MODEL REGISTRY" title="Models" description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances." />
+    <div class="flex flex-wrap items-start justify-between gap-5">
+      <UPageHeader
+        class="min-w-0 flex-1"
+        headline="MODEL REGISTRY"
+        title="Models"
+        description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances."
+      />
       <div class="flex flex-wrap justify-end gap-2">
-        <UButton color="neutral" variant="soft" @click="manager.refresh">Refresh</UButton>
-        <UButton to="/models/discover" color="neutral" variant="soft" icon="i-lucide-search">Discover</UButton>
-        <UButton to="/models/new">Add model</UButton>
+        <AppButton type="button" intent="secondary" @click="manager.refresh">Refresh</AppButton>
+        <AppButton to="/models/discover" intent="secondary" icon="i-lucide-search">Discover</AppButton>
+        <AppButton to="/models/new" intent="primary">Add model</AppButton>
       </div>
     </div>
 
     <UAlert v-if="message" color="error" variant="subtle" :description="message" />
-    <UEmpty v-if="!models.length" title="No models registered" description="Register a local GGUF file to get started.">
-      <template #actions><UButton to="/models/new" size="sm">Add model</UButton></template>
-    </UEmpty>
 
-    <UCard v-else :ui="{ body: 'p-0 sm:p-0' }">
+    <Frame v-if="!models.length" class="p-8 text-center" data-testid="models-empty-state">
+      <h2 class="text-base font-semibold">No models registered</h2>
+      <p class="mt-2 text-sm text-[var(--neutral-700)]">Register a local GGUF file to get started.</p>
+      <div class="mt-4 flex justify-center">
+        <AppButton to="/models/new" intent="primary" size="sm">Add model</AppButton>
+      </div>
+    </Frame>
+
+    <Frame v-else class="overflow-hidden p-0">
       <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm" data-testid="models-table">
-          <thead class="border-b border-default bg-elevated/40 text-xs uppercase tracking-wide text-dimmed">
+        <table class="w-full border-collapse text-left" data-testid="models-table">
+          <thead class="border-b border-[var(--color-divider)] bg-[var(--neutral-100)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
             <tr>
-              <th class="px-4 py-3 font-semibold">Name</th><th class="px-4 py-3 font-semibold">Path</th><th class="px-4 py-3 font-semibold">Size</th><th class="px-4 py-3 font-semibold">Quantization</th><th class="px-4 py-3 font-semibold">Context capability</th><th class="px-4 py-3 text-right font-semibold">Actions</th>
+              <th class="px-4 py-3 font-semibold">Name</th>
+              <th class="px-4 py-3 font-semibold">Path</th>
+              <th class="px-4 py-3 font-semibold">Size</th>
+              <th class="px-4 py-3 font-semibold">Quantization</th>
+              <th class="px-4 py-3 font-semibold">Context capability</th>
+              <th class="px-4 py-3 text-right font-semibold">Actions</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-default">
+          <tbody class="divide-y divide-[var(--color-divider)]">
             <tr v-for="model in models" :key="model.id" data-testid="model-row">
-              <td class="px-4 py-3 font-semibold text-highlighted">{{ model.name }}</td>
-              <td class="max-w-md px-4 py-3 font-mono text-xs text-muted"><span class="break-all">{{ model.gguf_path }}</span></td>
-              <td class="whitespace-nowrap px-4 py-3">{{ formatBytes(model.total_bytes) }}</td>
-              <td class="whitespace-nowrap px-4 py-3">{{ model.quantization || '—' }}</td>
-              <td class="whitespace-nowrap px-4 py-3">{{ contextLabel(model.context_length) }}</td>
               <td class="px-4 py-3">
-                <div class="flex justify-end gap-2">
-                  <UButton :to="`/models/${model.id}/details`" color="neutral" variant="soft" size="xs">Details</UButton>
-                  <UButton :to="`/models/${model.id}/edit`" color="neutral" variant="soft" size="xs">Edit</UButton>
-                  <UButton color="error" variant="soft" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</UButton>
+                <NuxtLink :to="`/models/${model.id}/details`" class="text-[13.5px] font-semibold text-[var(--color-text)] hover:underline">
+                  {{ model.name }}
+                </NuxtLink>
+              </td>
+              <td class="max-w-[340px] break-all px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">{{ model.gguf_path }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-sm">{{ formatBytes(model.total_bytes) }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-sm">{{ model.quantization || '—' }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-sm">{{ contextLabel(model.context_length) }}</td>
+              <td class="px-4 py-3">
+                <div class="flex justify-end gap-1">
+                  <AppButton :to="`/models/${model.id}/details`" intent="ghost" size="xs">Details</AppButton>
+                  <AppButton :to="`/models/${model.id}/edit`" intent="ghost" size="xs">Edit</AppButton>
+                  <AppButton type="button" intent="ghost" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</AppButton>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-    </UCard>
+    </Frame>
+
     <ModelDeleteModal ref="deleteModal" />
   </div>
 </template>
