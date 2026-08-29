@@ -94,6 +94,14 @@ describe('Dashboard redesign', () => {
     expect(traffic).toContain('autoload')
     expect(traffic).toContain('250 ms')
     expect(traffic).toContain('42.5')
+
+    mocks.request.mockClear()
+    const refresh = wrapper.findAll('button').find(button => button.text().includes('Refresh'))
+    expect(refresh).toBeTruthy()
+    await refresh!.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/settings/general')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/summary?window_seconds=900')
   })
 
   it('refreshes summary and request history immediately when the range changes', async () => {
