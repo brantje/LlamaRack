@@ -1,439 +1,179 @@
-# 009 — Authentication, API Keys and Secret Storage
+# Authentication and Management Security
 
-Status: Draft
+## Status
 
-Related issue: #1
+This specification defines the v1 management-plane authentication model. It covers local accounts, OpenID Connect (OIDC), manager-issued bearer JWTs, revocable sessions, external identities and inference API keys.
 
-## 1. Purpose
+SAML and RBAC are explicitly out of scope for v1.
 
-This specification defines authentication for the llamacpp-manager web UI and management REST API, bearer API keys for the inference API, and secure provider-secret storage.
+## Security domains
 
-V1 uses local username/password authentication for the management plane and manager-generated bearer API keys for `/v1/*` inference access.
+llamacpp-manager has two independent credential domains:
 
-**Role-based access control is explicitly out of scope for v1.**
+- **Management plane** — the Nuxt UI and `/api/v1/*` use manager-issued JWT bearer credentials backed by server-side sessions.
+- **Inference plane** — `/v1/*` uses inference API keys.
 
-## 2. Goals
+A management JWT MUST NOT authenticate inference requests. An inference API key MUST NOT authenticate management requests. OIDC provider tokens are never management API credentials; successful OIDC authentication always terminates in the same manager session/JWT model used by local login.
 
-The security model must:
+## Management JWTs
 
-- require authenticated management access from day one;
-- provide a secure first-user bootstrap flow;
-- use one flat management permission level in v1;
-- issue independent inference API keys;
-- store only hashes of inference API keys;
-- store provider secrets encrypted at rest;
-- support API-key revocation/rotation;
-- avoid exposing internal worker credentials or ports;
-- provide safe session expiration/logout behavior;
-- prevent unauthenticated direct API access even if the UI hides or exposes actions incorrectly.
+Protected management requests use:
 
-## 3. Authentication domains
+```http
+Authorization: Bearer <management-jwt>
+```
 
-There are two intentionally separate credential domains.
+JWT requirements:
 
-### 3.1 Management authentication
+- Ed25519 signatures;
+- signing key persisted under the manager data directory and reused across restarts;
+- one JWT per management session;
+- no refresh-token pair;
+- issuer `llamacpp-manager`;
+- claims include `sub` (user ID), `sid` (server-side session ID), `iat`, `exp` and `jti`;
+- no passwords, provider tokens, provider claims or other unnecessary personal information.
 
-Used by:
+JWT verification is only the first authentication step. Every protected request MUST resolve the JWT's `sid`/`jti` against the authoritative session store and verify that the session has not expired and the user is still enabled. Session revocation therefore takes effect immediately even when the JWT's cryptographic expiry is later.
 
-- Nuxt web UI;
-- `/api/v1/*` management API.
+The server does not need to store plaintext management JWTs. The session record stores a one-way binding for the JWT identifier.
 
-Credential type:
+## Browser storage
 
-- local username/password producing an authenticated session.
+Management JWTs are never stored in authentication cookies.
 
-### 3.2 Inference authentication
+- **Remember me enabled:** `localStorage`.
+- **Remember me disabled:** `sessionStorage`.
+- Sign-out removes both possible stored copies.
+- Startup restores the token from browser storage and validates it through `/api/v1/me` before considering the browser authenticated.
 
-Used by:
+Management CSRF cookies/tokens are not used because management credentials are no longer ambient browser cookies. Origin checks remain where independently required, including local login/bootstrap and OIDC transaction protection.
 
-- `/v1/*` OpenAI-compatible API.
+## Server-side sessions
 
-Credential type:
+Every successful local or OIDC login creates a normal management session. Sessions remain authoritative and support:
 
-- manager-generated bearer API key.
+- expiration;
+- current-session logout;
+- revoke one session;
+- revoke all other sessions;
+- revoke all sessions;
+- invalidation when a user is disabled;
+- password reset/change invalidation semantics;
+- remote address, user agent, creation time and expiry in session listings.
 
-A dashboard session is not an inference API key, and an inference API key does not grant management access.
+## Bootstrap and local login
 
-## 4. V1 authorization model
+First-run bootstrap is local-account-only. No OIDC provider can create the initial management account and there is no default credential.
 
-V1 intentionally has **no RBAC, roles, permission matrix, custom roles, scopes or differentiated management capabilities**.
+Local username/password login is enabled by default and configurable under **Administration → Authentication**. Local login may be disabled only if at least one OIDC provider is both enabled and has a persisted successful configuration test. Provider deletion, disabling or security-relevant edits MUST preserve the same lockout invariant while local login is disabled.
 
-Rules:
+## OIDC providers
 
-- every authenticated management user has the same full management access;
-- every unauthenticated management request is rejected, except the narrowly scoped bootstrap/login endpoints;
-- the backend still enforces authentication server-side for every protected management endpoint;
-- the frontend must not contain role-based navigation, role badges, capability gating or role-specific controls;
-- user records do not need a role field for the v1 product contract;
-- if an implementation retains a role column internally for forward compatibility, it must not affect v1 behavior or be exposed as a configurable v1 feature.
+Multiple OIDC providers can be configured simultaneously. Each provider has a stable internal ID and includes:
 
-RBAC may be designed later without changing the separation between management sessions and inference API keys.
+- display name and enabled state;
+- issuer;
+- optional discovery URL;
+- client ID;
+- encrypted client secret;
+- scopes;
+- username claim;
+- optional manual authorization, token and JWKS endpoints;
+- last configuration-test state.
 
-## 5. First-user bootstrap
+Standard discovery uses the issuer's `/.well-known/openid-configuration` endpoint unless an explicit discovery URL is configured. Manual endpoints may fill or replace discovered endpoints when required by the deployment.
 
-On first start with no management users:
+Client secrets use the manager's existing encrypted provider-secret store. Plaintext is accepted only while creating/replacing a secret and is never returned by provider APIs. Provider responses expose only `secret_configured`.
 
-- manager enters bootstrap state;
-- normal authenticated management operations are unavailable until the first user exists;
-- UI shows a one-time setup flow to create the first management account;
-- bootstrap creation is allowed only while the configured bootstrap condition is true, normally while no user exists;
-- immediately after successful creation, the bootstrap endpoint becomes unavailable unless a documented recovery flow is explicitly invoked out of band.
+### Provider testing
 
-Do not ship a default username/password.
+The Admin UI exposes **Test configuration**. Testing resolves discovery/manual endpoints, validates issuer consistency, checks the configured secret exists and verifies that the JWKS endpoint is reachable and contains keys. Testing does not provision a user or create a management session. A successful result is persisted and is used by the local-login lockout safeguard.
 
-If bootstrap is exposed over the network, the UI must clearly encourage initial setup before exposing the service broadly.
+## OIDC browser flow
 
-## 6. Password handling
+OIDC uses Authorization Code with state, nonce and PKCE S256.
 
-Requirements:
+1. Browser requests `/api/v1/auth/oidc/{provider}/start` with its Remember-me choice.
+2. Manager creates a short-lived transaction containing state, nonce and PKCE verifier.
+3. State is additionally bound to the initiating browser with a short-lived HttpOnly SameSite transaction cookie. This cookie is not a management credential.
+4. Browser is redirected to the provider with state, nonce and PKCE challenge.
+5. Provider returns to `/api/v1/auth/oidc/{provider}/callback`.
+6. Manager consumes the browser transaction, exchanges the authorization code with the PKCE verifier, and validates the ID token signature, issuer, audience, expiry/time claims and nonce.
+7. The external identity is resolved or provisioned and a normal manager session/JWT is created.
+8. The JWT is **not** placed in the redirect URL. Manager creates a cryptographically random, very short-lived, single-use exchange code.
+9. Browser returns to the configured frontend URL with only that exchange code. If no frontend URL is configured, the external URL is used for backward-compatible same-origin deployments.
+10. Frontend POSTs the code to `/api/v1/auth/oidc/exchange`; successful consumption returns the manager JWT, expiry, user and Remember-me choice.
 
-- use a modern adaptive password hashing algorithm such as Argon2id or another current Go-supported equivalent chosen during implementation;
-- store only salted password hashes;
-- never log passwords;
-- enforce a reasonable minimum password length;
-- allow long passphrases;
-- do not impose arbitrary composition rules such as mandatory punctuation unless required later;
-- compare hashes using a timing-safe library implementation;
-- rehash on successful login when password-hash parameters are upgraded.
+Exchange codes are deleted on first consumption and cannot be replayed.
 
-## 7. Login
+## External and frontend URLs
 
-Login accepts username and password and creates a management session.
+OIDC callback generation uses the explicit `external_url` manager setting. Security-sensitive callback URLs are not inferred by blindly trusting arbitrary forwarded headers. The setting is intended for direct and reverse-proxy deployments, including local development with providers such as Authentik.
 
-Security behavior:
+`frontend_url` is a separate optional manager setting used only as the browser destination after a successful OIDC callback. It defaults to an empty string. When empty, the final exchange-code redirect uses `external_url`, preserving the existing same-origin behavior. When set, the provider callback still targets the backend `external_url`, while the manager redirects the browser to `frontend_url` with the single-use `oidc_exchange` code after provider validation succeeds.
 
-- generic invalid-credentials message regardless of whether username exists;
-- bounded/rate-limited repeated failures to reduce brute-force risk;
-- disabled accounts cannot log in;
-- successful login updates `last_login_at`;
-- session identifier is unpredictable and protected as a secret;
-- authentication cookies use appropriate HttpOnly/Secure/SameSite settings when cookie-based sessions are used.
+This separation allows development deployments such as a Nuxt frontend on `http://192.168.60.5:3000` with the manager API on `http://192.168.60.5:8888` without exposing the provider authorization code or provider tokens to the frontend.
 
-## 8. Session model
+## External identities
 
-Preferred v1 approach: server-side sessions referenced by an opaque secure cookie.
+OIDC accounts are identified by immutable provider identity rather than usernames or email addresses. Stored identity data includes:
 
-Advantages:
+- provider ID;
+- issuer;
+- OIDC `sub`;
+- linked management user ID;
+- creation timestamp.
 
-- immediate revocation;
-- straightforward logout/all-sessions revocation;
-- no long-lived self-contained management token;
-- simple future extension if differentiated authorization is added after v1.
+The `(provider, issuer, sub)` tuple is authoritative for subsequent login. A management user may link identities from multiple providers.
 
-Requirements:
+## JIT provisioning and linking
 
-- session expiration;
-- rolling/idle expiration may be used but must have a hard maximum if configured;
-- logout invalidates the server-side session;
-- password change can invalidate other sessions;
-- disabling a user invalidates or blocks existing sessions promptly.
+JIT provisioning is enabled by default and configurable globally.
 
-## 9. CSRF
+When JIT is enabled and an unknown identity authenticates, username resolution uses the configured username claim and then sensible fallbacks such as `preferred_username`, `email`, `name`, and a deterministic subject-derived fallback.
 
-If management authentication uses cookies, state-changing `/api/v1/*` operations require CSRF protection appropriate to the frontend architecture.
+Automatic matching to an existing management username is a separate setting and defaults to disabled. When disabled, an OIDC username collision fails safely and requires explicit linking; the manager does not silently create `alice2`-style names and does not take over the local account.
 
-Options include:
+When JIT is disabled, unknown identities fail until an identity is explicitly pre-linked through management endpoints. Disabled users remain disabled regardless of successful provider authentication.
 
-- SameSite cookies plus an anti-CSRF token;
-- another proven framework pattern.
+## WebSocket authentication
 
-Do not rely solely on the fact that the API returns JSON.
+Native browser WebSockets do not expose a reliable standard way to set an `Authorization` header. Long-lived management JWTs therefore MUST NOT be placed in WebSocket URLs.
 
-`/v1/*` bearer-key API is not cookie-authenticated and therefore uses a different CSRF threat model.
+Flow:
 
-## 10. Management endpoint enforcement
+1. Authenticated browser POSTs `/api/v1/auth/ws-ticket` with its Bearer JWT.
+2. Manager verifies the JWT and authoritative session and issues a short-lived, single-use ticket bound to that session/JTI.
+3. Browser connects to `/api/v1/ws?ticket=...`.
+4. Server atomically consumes the ticket before upgrading the connection.
+5. Reuse, expiry, revoked sessions and disabled users are rejected.
 
-Authentication is enforced in backend handlers/services, not only in frontend navigation.
+Runtime, log and observability streams continue over the authenticated WebSocket after upgrade.
 
-Requirements:
+## Logout
 
-- every protected management endpoint requires a valid session;
-- unauthenticated protected requests return 401;
-- authenticated users have full v1 management access and must not receive role/capability-based 403 responses;
-- direct HTTP calls must not bypass authentication;
-- bootstrap endpoints must stop working after initial setup.
+Initial logout is manager-local only. `POST /api/v1/auth/logout` revokes the current authoritative manager session. The frontend removes the stored JWT and closes runtime WebSockets. OIDC RP-initiated logout is not part of this phase.
 
-A future RBAC implementation may add authorization checks, but those are not part of the v1 acceptance criteria.
+## API surface
 
-## 11. User management
+Public/pre-auth endpoints:
 
-V1 may support multiple local management users, but all users are equivalent in permissions.
+- `GET /api/v1/auth/bootstrap`
+- `POST /api/v1/auth/bootstrap`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/providers`
+- `GET /api/v1/auth/oidc/{provider}/start`
+- `GET /api/v1/auth/oidc/{provider}/callback`
+- `POST /api/v1/auth/oidc/exchange`
 
-Authenticated management users may:
+Bearer-protected endpoints include:
 
-- list users;
-- create users;
-- enable/disable users;
-- reset/change another user's password through an explicit secure workflow;
-- remove users if product policy allows.
+- `POST /api/v1/auth/logout`
+- `POST /api/v1/auth/ws-ticket`
+- `/api/v1/me` and session/password management
+- `/api/v1/admin/auth/settings`
+- `/api/v1/admin/auth/providers` and provider CRUD/test routes
+- `/api/v1/admin/auth/identities` and unlink routes
+- all other protected management APIs.
 
-Recommended safeguards:
-
-- prevent accidentally leaving the system with zero enabled management users unless a documented recovery path exists;
-- require current-password reauthentication for changing one's own password or particularly sensitive actions if practical;
-- clearly warn before disabling/deleting the current account.
-
-Self-service password change is allowed for authenticated users.
-
-There is no role selector or role-management API in v1.
-
-## 12. Inference API keys
-
-API keys are generated by the manager using cryptographically secure randomness.
-
-Suggested display format can use a recognizable prefix such as `sk-lcm-`, but the prefix is a UX choice, not a security control.
-
-Store:
-
-- key ID;
-- name;
-- safe prefix/fingerprint;
-- cryptographic hash of the full key;
-- enabled/revoked state;
-- creator;
-- created time;
-- last-used time.
-
-Return plaintext only once immediately after creation/rotation.
-
-Any authenticated management user may manage inference API keys in v1.
-
-## 13. API key verification
-
-For each `/v1/*` request:
-
-1. parse Bearer token;
-2. validate syntax/size;
-3. find candidate by safe prefix/index strategy if used;
-4. verify hash in timing-safe manner;
-5. check enabled/revoked state;
-6. update last-used metadata asynchronously/bounded so every token request does not create excessive SQLite contention;
-7. proceed to model resolution only after success.
-
-Do not log the token or full Authorization header.
-
-## 14. API key lifecycle
-
-Authenticated management users can:
-
-- create;
-- name/rename metadata;
-- revoke/disable;
-- rotate;
-- delete historical metadata if desired.
-
-Rotation should produce a new secret rather than attempt to reveal/recover the old one.
-
-Immediate revocation is required for subsequent requests.
-
-V1 does not require per-key model allowlists, rate limits, user ownership or permission scopes. Those can be added later by extending key policy.
-
-## 15. Provider secrets
-
-Initial provider secret:
-
-- global Hugging Face access token.
-
-Requirements:
-
-- writable/deletable by authenticated management users in v1;
-- encrypted before database storage;
-- decrypted only inside the provider service when required;
-- never returned after save;
-- never embedded into frontend state;
-- never included in logs, metrics, errors or crash reports;
-- never forwarded to non-Hugging-Face download hosts.
-
-The UI displays status such as `Configured` and optional safe metadata, not the secret.
-
-## 16. Secret encryption key
-
-The encryption-at-rest design requires a manager master key.
-
-V1 should support a deployment-safe mechanism such as:
-
-- externally supplied secret/file mounted into the container; or
-- generated persistent key stored with restrictive permissions in the config directory.
-
-Requirements:
-
-- key must survive container restart when using the same persistent configuration volume;
-- loss of key makes encrypted provider secrets unrecoverable but must not expose them;
-- key is not stored in the same SQLite row as ciphertext as if that provided meaningful encryption;
-- key never appears in UI/API.
-
-## 17. Password reset/recovery
-
-V1 does not have email-based recovery.
-
-A documented local recovery path is required for self-hosted operation, for example a CLI/startup recovery command requiring direct access to the persistent config/container host.
-
-Recovery must not become an unauthenticated HTTP endpoint available during normal operation.
-
-## 18. Management API security
-
-Baseline protections:
-
-- authenticate every non-bootstrap protected endpoint;
-- validate JSON/body sizes;
-- use CSRF protection if cookie sessions are used;
-- set secure headers appropriate to same-origin web app deployment;
-- avoid returning stack traces/internal worker addresses;
-- log security-relevant changes without recording secrets.
-
-Management API and UI are expected to be same-origin in standard deployment.
-
-## 19. Security events
-
-A full immutable audit log is not a v1 requirement, but security-sensitive actions should at least produce structured application events/logs, including:
-
-- login success/failure without passwords;
-- user create/disable/password reset;
-- API key create/revoke/rotate;
-- provider token set/remove;
-- destructive artifact deletion;
-- global settings change.
-
-If durable audit history is later required, these event points provide a foundation.
-
-## 20. Sensitive diagnostics
-
-Worker logs can contain upstream content or accidentally echo arguments/environment.
-
-Therefore:
-
-- redact known manager secrets before storage/display where feasible;
-- never launch workers with provider tokens in command-line arguments;
-- restrict full logs to authenticated management users;
-- warn that logs may contain model/application content produced by upstream llama.cpp;
-- manager should not intentionally log inference prompts by default.
-
-## 21. Brute-force protection
-
-Implement basic login protection using a bounded strategy such as:
-
-- per-source and/or per-account attempt counters;
-- exponential delay or temporary lockout;
-- global safeguards to prevent memory abuse.
-
-Avoid permanent lockout that requires database edits after trivial attacks.
-
-Inference API keys are high-entropy and do not require the same password-style lockout, but repeated invalid keys may be rate-limited for abuse protection.
-
-## 22. Network assumptions
-
-The manager may be deployed on LAN or behind a reverse proxy.
-
-Requirements:
-
-- work correctly behind a reverse proxy when trusted-proxy settings are explicitly configured;
-- do not automatically trust arbitrary `X-Forwarded-*` headers from the internet;
-- allow TLS termination at a reverse proxy;
-- mark cookies Secure when effective external scheme is HTTPS;
-- document that exposing plain HTTP management login on an untrusted network is unsafe.
-
-Built-in TLS is optional/not required for v1 if reverse-proxy deployment is documented.
-
-## 23. CORS
-
-Default deployment serves UI and API same-origin, so permissive CORS is unnecessary.
-
-Recommended default:
-
-- no broad cross-origin management access;
-- `/v1` CORS should also be restrictive unless browser-based inference clients explicitly require configured origins;
-- never default to credentialed wildcard origins.
-
-A configurable allowed-origin list can be added if needed.
-
-## 24. Error behavior
-
-Management auth errors:
-
-- unauthenticated: 401;
-- invalid CSRF/session: safe 401/403 depending on framework semantics.
-
-Inference auth errors use the OpenAI-compatible envelope defined in `006-openai-api.md`.
-
-Errors must not reveal:
-
-- password hashes;
-- key hashes;
-- provider tokens;
-- whether a supplied invalid username exists during login;
-- internal crypto keys.
-
-## 25. Security-related configuration
-
-Potential settings include:
-
-- session lifetime;
-- login protection thresholds;
-- trusted reverse proxies;
-- allowed origins if needed;
-- secure-cookie/external URL behavior;
-- direct-download LAN/SSRF policy from provider spec.
-
-Do not expose low-level crypto parameters casually in UI unless there is a concrete operational use.
-
-## 26. Testing requirements
-
-Automated tests must cover:
-
-- bootstrap only when no management user exists;
-- valid/invalid login;
-- disabled account behavior;
-- session expiration and logout;
-- CSRF rejection for protected cookie-auth mutations;
-- all protected management endpoints reject unauthenticated requests;
-- authenticated management users can perform all management operations without role checks;
-- no role/capability-based behavior is required for v1;
-- API key creation returns plaintext once;
-- stored API-key record cannot recover plaintext;
-- revoked API key immediately fails;
-- invalid inference key cannot trigger autoload;
-- Hugging Face token API never returns stored plaintext;
-- secret encryption/decryption across manager restart with persistent master key;
-- logs redact known credential patterns.
-
-## 27. Invariants
-
-1. No default management password exists.
-2. Passwords are never stored reversibly.
-3. Inference API key plaintext is not stored.
-4. Management sessions and inference API keys are separate credential domains.
-5. Every protected management operation requires authentication server-side.
-6. Invalid inference authentication cannot cause model startup/resource consumption.
-7. Provider tokens are encrypted at rest and never returned after save.
-8. V1 has no RBAC or differentiated management permissions.
-9. Bootstrap HTTP functionality is disabled after initial account creation.
-10. Secret values never appear in metrics.
-
-## 28. Deferred authorization scope
-
-Explicitly deferred until after v1:
-
-- Admin / Operator / Read-only roles;
-- custom roles;
-- per-endpoint capability matrices;
-- role-specific frontend controls;
-- per-user model permissions;
-- per-key permission scopes or model allowlists.
-
-Adding RBAC later requires a separate design/update to this specification and the data/UI contracts.
-
-## 29. Acceptance criteria
-
-Authentication/security is complete for v1 when:
-
-- first-run setup creates the first management user without a default credential;
-- subsequent management access requires login;
-- every authenticated management user has the same full management access;
-- sessions can be revoked and expire;
-- inference clients authenticate with independent generated keys;
-- key revocation works without manager restart;
-- Hugging Face token survives restart encrypted and is usable by the provider while remaining unreadable through management APIs;
-- direct unauthenticated calls receive correct 401 results;
-- a lost-access scenario has a documented local recovery path;
-- security-sensitive logs contain safe metadata but no plaintext credentials;
-- no RBAC implementation or role-specific UI is required for v1.
+The v1 product intentionally remains flat-authorized: no roles, group mapping or provider-driven permission mapping are introduced by OIDC.

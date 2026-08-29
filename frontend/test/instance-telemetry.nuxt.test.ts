@@ -68,16 +68,18 @@ function resetManager() {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  mocks.request.mockImplementation(async (path: string) => path === '/api/v1/auth/ws-ticket' ? { ticket: 'telemetry-ticket' } : [])
   FakeWebSocket.instances = []
   vi.stubGlobal('WebSocket', FakeWebSocket as any)
   resetManager()
 })
 
 describe('per-Instance runtime telemetry', () => {
-  it('accepts only telemetry matching the active Instance PID and clears stale samples', () => {
+  it('accepts only telemetry matching the active Instance PID and clears stale samples', async () => {
     const manager = resetManager()
-    manager.connectRuntimeEvents()
+    await manager.connectRuntimeEvents()
     const socket = FakeWebSocket.instances[0]!
+    expect(socket.url).toContain('ticket=telemetry-ticket')
     socket.open()
     socket.emit({ type: 'runtime_snapshot', runtimes: [{ instance_id: 'coder', model_id: 'm1', state: 'READY', pid: 42 }] })
 

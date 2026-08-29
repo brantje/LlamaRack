@@ -8,6 +8,7 @@ import AdminGeneralPage from '~/pages/admin/general.vue'
 import ProfilePage from '~/pages/profile.vue'
 import AdminUsersPage from '~/pages/admin/users.vue'
 import { useManager } from '~/composables/useManager'
+import { storeManagementToken } from '~/composables/useManagerApi'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -274,6 +275,7 @@ describe('Phase 10 branch coverage', () => {
     expect(wrapper.text()).toContain('Unable to revoke session')
     failPath = ''
 
+    storeManagementToken('profile-token', false)
     await button(wrapper, 'Sign out').trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/logout', { method: 'POST' })

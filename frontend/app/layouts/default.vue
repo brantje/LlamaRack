@@ -4,21 +4,34 @@ import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 
 const route = useRoute()
 const manager = useManager()
-const { user, initialized, bootstrapRequired, backendError, apiBase } = manager
+const { user, initialized, bootstrapRequired, backendError, apiBase, localLoginEnabled, authProviders } = manager
 const credentials = reactive({ username: '', password: '' })
+const remember = ref(false)
 const authError = ref('')
 const authenticating = ref(false)
 const isAdmin = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'))
 
-onMounted(() => {
-  if (!initialized.value) manager.initialize()
+onMounted(async () => {
+  if (!initialized.value) await manager.initialize()
+  const exchange = typeof route.query.oidc_exchange === 'string' ? route.query.oidc_exchange : ''
+  if (exchange && !user.value) {
+    authenticating.value = true
+    try {
+      await manager.exchangeOIDC(exchange)
+      await navigateTo({ path: route.path, query: {} }, { replace: true })
+    } catch (error: any) {
+      authError.value = error?.data?.error || error?.message || 'External authentication failed'
+    } finally {
+      authenticating.value = false
+    }
+  }
 })
 
 async function submitAuth() {
   authenticating.value = true
   authError.value = ''
   try {
-    await manager.authenticate(credentials.username, credentials.password)
+    await manager.authenticate(credentials.username, credentials.password, remember.value)
     credentials.password = ''
   } catch (error: any) {
     authError.value = error?.data?.error || error?.message || 'Authentication failed'
@@ -59,24 +72,28 @@ async function submitAuth() {
       <p class="mt-2 leading-6 text-muted">{{ bootstrapRequired ? 'Create the first local management account.' : 'Sign in to manage local inference.' }}</p>
       <UAlert v-if="authError" class="mt-5" color="error" variant="subtle" :description="authError" />
 
-      <UForm :state="credentials" class="mt-6 space-y-4" @submit="submitAuth">
+      <UForm v-if="bootstrapRequired || localLoginEnabled" :state="credentials" class="mt-6 space-y-4" @submit="submitAuth">
         <UFormField label="Username" name="username" required>
           <UInput v-model="credentials.username" class="w-full" autocomplete="username" required />
         </UFormField>
         <UFormField label="Password" name="password" required>
-          <UInput
-            v-model="credentials.password"
-            class="w-full"
-            type="password"
-            :autocomplete="bootstrapRequired ? 'new-password' : 'current-password'"
-            minlength="10"
-            required
-          />
+          <UInput v-model="credentials.password" class="w-full" type="password" :autocomplete="bootstrapRequired ? 'new-password' : 'current-password'" minlength="10" required />
         </UFormField>
+        <UCheckbox v-if="!bootstrapRequired" v-model="remember" label="Remember me on this device" />
         <UButton class="w-full justify-center" type="submit" :loading="authenticating">
           {{ bootstrapRequired ? 'Create account' : 'Sign in' }}
         </UButton>
       </UForm>
+
+      <template v-if="!bootstrapRequired && authProviders.length">
+        <USeparator v-if="localLoginEnabled" class="my-6" label="or" />
+        <div class="space-y-3">
+          <UButton v-for="provider in authProviders" :key="provider.id" class="w-full justify-center" color="neutral" variant="outline" :disabled="authenticating" @click="manager.beginOIDC(provider.id, remember)">
+            Continue with {{ provider.name }}
+          </UButton>
+          <UCheckbox v-if="!localLoginEnabled" v-model="remember" label="Remember me on this device" />
+        </div>
+      </template>
     </UCard>
   </UMain>
 
@@ -87,15 +104,11 @@ async function submitAuth() {
     <UDashboardPanel id="manager-main">
       <template #header>
         <UDashboardNavbar :title="isAdmin ? 'Administration' : 'llamacpp-manager'" class="lg:hidden">
-          <template #leading>
-            <UDashboardSidebarToggle />
-          </template>
+          <template #leading><UDashboardSidebarToggle /></template>
         </UDashboardNavbar>
       </template>
       <template #body>
-        <div class="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-10">
-          <slot />
-        </div>
+        <div class="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-10"><slot /></div>
       </template>
     </UDashboardPanel>
   </UDashboardGroup>

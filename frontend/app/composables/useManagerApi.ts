@@ -1,12 +1,23 @@
-const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const managementTokenKey = 'lcm_management_token'
 
-function csrfTokenFromCookie() {
-  if (!import.meta.client || typeof document === 'undefined') return ''
-  for (const item of document.cookie.split(';')) {
-    const [name, ...rest] = item.trim().split('=')
-    if (name === 'lcm_csrf') return decodeURIComponent(rest.join('='))
-  }
-  return ''
+export function readManagementToken() {
+  if (typeof window === 'undefined') return ''
+  return window.sessionStorage.getItem(managementTokenKey) || window.localStorage.getItem(managementTokenKey) || ''
+}
+
+export function storeManagementToken(token: string, remember: boolean) {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(managementTokenKey)
+  window.localStorage.removeItem(managementTokenKey)
+  if (!token) return
+  const storage = remember ? window.localStorage : window.sessionStorage
+  storage.setItem(managementTokenKey, token)
+}
+
+export function clearManagementToken() {
+  if (typeof window === 'undefined') return
+  window.sessionStorage.removeItem(managementTokenKey)
+  window.localStorage.removeItem(managementTokenKey)
 }
 
 export function useManagerApi(fetcher: typeof $fetch = $fetch) {
@@ -19,17 +30,10 @@ export function useManagerApi(fetcher: typeof $fetch = $fetch) {
   })
 
   async function request<T = unknown>(path: string, options: any = {}): Promise<T> {
-    const method = String(options.method || 'GET').toUpperCase()
     const headers = new Headers(options.headers || {})
-    if (mutationMethods.has(method)) {
-      const csrfToken = csrfTokenFromCookie()
-      if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
-    }
-    return await fetcher<T>(`${apiBase.value}${path}`, {
-      credentials: 'include',
-      ...options,
-      headers
-    })
+    const token = readManagementToken()
+    if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+    return await fetcher<T>(`${apiBase.value}${path}`, { ...options, headers })
   }
 
   return { apiBase, request }

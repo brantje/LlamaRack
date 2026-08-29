@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRequestURL, useRuntimeConfig } from '#app'
-import { useManagerApi } from '~/composables/useManagerApi'
+import { clearManagementToken, readManagementToken, storeManagementToken, useManagerApi } from '~/composables/useManagerApi'
 
 const fetchMock = vi.fn()
 
@@ -8,7 +8,7 @@ beforeEach(() => {
   const config = useRuntimeConfig()
   ;(config.public as any).apiBase = ''
   fetchMock.mockReset()
-  document.cookie = 'lcm_csrf=; Max-Age=0; path=/'
+  clearManagementToken()
 })
 
 describe('useManagerApi', () => {
@@ -25,7 +25,7 @@ describe('useManagerApi', () => {
     expect(apiBase.value).toBe('https://manager.example.test')
   })
 
-  it('sends credentialed requests and preserves caller headers in a Headers object', async () => {
+  it('preserves request options and caller headers in a Headers object', async () => {
     fetchMock.mockResolvedValue({ ok: true })
     const { apiBase, request } = useManagerApi(fetchMock as any)
     const result = await request('/api/v1/models', {
@@ -37,25 +37,45 @@ describe('useManagerApi', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, options] = fetchMock.mock.calls[0]!
     expect(url).toBe(`${apiBase.value}/api/v1/models`)
-    expect(options.credentials).toBe('include')
+    expect(options.credentials).toBeUndefined()
     expect(options.method).toBe('POST')
     expect(options.body).toEqual({ model_id: 'coder' })
     expect(options.headers).toBeInstanceOf(Headers)
     expect(options.headers.get('X-Test')).toBe('yes')
   })
 
-  it('adds the CSRF cookie value to management mutations but not reads', async () => {
+  it('adds the management bearer token to reads and mutations without CSRF headers', async () => {
     fetchMock.mockResolvedValue({ ok: true })
-    document.cookie = 'lcm_csrf=csrf%20token; path=/'
+    storeManagementToken('session-jwt', false)
     const { request } = useManagerApi(fetchMock as any)
 
     await request('/api/v1/models', { method: 'POST' })
     let options = fetchMock.mock.calls[0]![1]
-    expect(options.headers.get('X-CSRF-Token')).toBe('csrf token')
+    expect(options.headers.get('Authorization')).toBe('Bearer session-jwt')
+    expect(options.headers.get('X-CSRF-Token')).toBeNull()
 
     await request('/api/v1/models')
     options = fetchMock.mock.calls[1]![1]
-    expect(options.headers.get('X-CSRF-Token')).toBeNull()
+    expect(options.headers.get('Authorization')).toBe('Bearer session-jwt')
+  })
+
+  it('preserves an explicit Authorization header and switches storage by remember-me choice', async () => {
+    fetchMock.mockResolvedValue({ ok: true })
+    storeManagementToken('remembered', true)
+    expect(readManagementToken()).toBe('remembered')
+    expect(window.localStorage.getItem('lcm_management_token')).toBe('remembered')
+    expect(window.sessionStorage.getItem('lcm_management_token')).toBeNull()
+
+    const { request } = useManagerApi(fetchMock as any)
+    await request('/api/v1/me', { headers: { Authorization: 'Bearer explicit' } })
+    expect(fetchMock.mock.calls[0]![1].headers.get('Authorization')).toBe('Bearer explicit')
+
+    storeManagementToken('temporary', false)
+    expect(readManagementToken()).toBe('temporary')
+    expect(window.sessionStorage.getItem('lcm_management_token')).toBe('temporary')
+    expect(window.localStorage.getItem('lcm_management_token')).toBeNull()
+    clearManagementToken()
+    expect(readManagementToken()).toBe('')
   })
 
   it('propagates request failures', async () => {

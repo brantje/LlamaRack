@@ -7,6 +7,7 @@ const { user } = manager
 const navigation: NavigationMenuItem[] = [
   { label: 'Dashboard', icon: 'i-lucide-gauge', to: '/admin' },
   { label: 'Users', icon: 'i-lucide-users', to: '/admin/users' },
+  { label: 'Authentication', icon: 'i-lucide-shield-check', to: '/admin/authentication' },
   { label: 'Hugging Face', icon: 'i-lucide-sparkles', to: '/admin/huggingface' },
   { label: 'General', icon: 'i-lucide-sliders-horizontal', to: '/admin/general' },
   { label: 'llama.cpp', icon: 'i-lucide-terminal-square', to: '/admin/llamacpp' },

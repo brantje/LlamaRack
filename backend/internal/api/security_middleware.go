@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -33,12 +31,8 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 		if isStateChanging(r.Method) {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		}
-		if path == "/api/v1/health" || path == "/health" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if path == "/api/v1/auth/bootstrap" || path == "/api/v1/auth/login" {
-			if isStateChanging(r.Method) && !network.OriginAllowed(r, r.Header.Get("Origin")) {
+		if publicManagementRequest(path, r.Method) {
+			if (path == "/api/v1/auth/bootstrap" || path == "/api/v1/auth/login") && isStateChanging(r.Method) && !network.OriginAllowed(r, r.Header.Get("Origin")) {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
 				return
 			}
@@ -46,28 +40,43 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 			return
 		}
 
-		sessionCookieValue, err := r.Cookie(sessionCookie)
-		if err != nil || sessionCookieValue.Value == "" {
+		token := bearerToken(r.Header.Get("Authorization"))
+		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
 		}
-		user, session, err := a.SessionUserWithSession(r.Context(), sessionCookieValue.Value)
+		user, session, err := a.AuthenticateBearer(r.Context(), token)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
 		}
-		if isStateChanging(r.Method) {
-			csrfHeader := strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
-			csrfCookieValue, cookieErr := r.Cookie(csrfCookie)
-			if cookieErr != nil || csrfHeader == "" || subtle.ConstantTimeCompare([]byte(csrfCookieValue.Value), []byte(csrfHeader)) != 1 || a.ValidateCSRF(r.Context(), sessionCookieValue.Value, csrfHeader) != nil {
-				slog.Warn("security event", "event", "csrf.rejected", "user_id", user.ID, "path", path)
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "csrf validation failed"})
-				return
-			}
-		}
 		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, managementAuthContext{User: user, Session: session})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func publicManagementRequest(path, method string) bool {
+	if path == "/api/v1/health" || path == "/health" || path == "/api/v1/ws" {
+		return true
+	}
+	if path == "/api/v1/auth/bootstrap" || path == "/api/v1/auth/login" || path == "/api/v1/auth/providers" {
+		return true
+	}
+	if path == "/api/v1/auth/oidc/exchange" {
+		return method == http.MethodPost
+	}
+	if strings.HasPrefix(path, "/api/v1/auth/oidc/") {
+		return method == http.MethodGet && (strings.HasSuffix(path, "/start") || strings.HasSuffix(path, "/callback"))
+	}
+	return false
+}
+
+func bearerToken(value string) string {
+	parts := strings.Fields(value)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return parts[1]
 }
 
 func managementAuthFromRequest(r *http.Request) (auth.User, auth.Session, bool) {
@@ -75,6 +84,18 @@ func managementAuthFromRequest(r *http.Request) (auth.User, auth.Session, bool) 
 	return value.User, value.Session, ok
 }
 
+func isStateChanging(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// SetSessionCookies and ClearSessionCookies are retained only for legacy unit-test
+// fixtures while the management transport migrates to bearer JWTs. Production
+// authentication does not read these cookies.
 func SetSessionCookies(w http.ResponseWriter, token, csrf string, lifetime time.Duration, secure bool) {
 	maxAge := int(lifetime.Seconds())
 	if maxAge < 1 {
@@ -87,13 +108,4 @@ func SetSessionCookies(w http.ResponseWriter, token, csrf string, lifetime time.
 func ClearSessionCookies(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	http.SetCookie(w, &http.Cookie{Name: csrfCookie, Value: "", Path: "/", HttpOnly: false, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-}
-
-func isStateChanging(method string) bool {
-	switch method {
-	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-		return true
-	default:
-		return false
-	}
 }
