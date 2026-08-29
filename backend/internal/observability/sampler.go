@@ -162,6 +162,7 @@ func (s *Sampler) Run(ctx context.Context) {
 		if lastPersist.IsZero() || time.Since(lastPersist) >= s.persist {
 			persistCtx, persistCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = s.service.RecordHardware(persistCtx, snapshot, plain)
+			_ = s.service.RecordContextMetrics(persistCtx, snapshot.CollectedAt, withMetrics)
 			persistCancel()
 			lastPersist = time.Now()
 		}
