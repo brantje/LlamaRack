@@ -1,10 +1,15 @@
 <script setup lang="ts">
 type ProfileUser = { id: number; username: string; enabled: boolean; created_at: number; last_login_at?: number }
 type Session = { id: string; user_id: number; created_at: number; expires_at: number; remote_address: string; user_agent: string; current?: boolean }
+type ExternalIdentity = { id: string; provider_id: string; issuer: string; subject: string; user_id: number; created_at: number }
+type PublicOIDCProvider = { id: string; name: string }
+type AuthProvidersResponse = { providers?: PublicOIDCProvider[] }
 
 const manager = useManager()
 const profile = ref<ProfileUser | null>(null)
 const sessions = ref<Session[]>([])
+const identities = ref<ExternalIdentity[]>([])
+const authProviders = ref<PublicOIDCProvider[]>([])
 const error = ref('')
 const success = ref('')
 const busy = ref(false)
@@ -28,16 +33,24 @@ function clientLabel(userAgent: string) {
   return platform && browser !== 'Unknown client' ? `${browser} on ${platform}` : browser
 }
 
+function providerName(identity: ExternalIdentity) {
+  return authProviders.value.find(provider => provider.id === identity.provider_id)?.name || identity.issuer
+}
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    const [user, activeSessions] = await Promise.all([
+    const [user, activeSessions, linkedIdentities, providers] = await Promise.all([
       manager.request<ProfileUser>('/api/v1/me'),
-      manager.request<Session[]>('/api/v1/me/sessions')
+      manager.request<Session[]>('/api/v1/me/sessions'),
+      manager.request<ExternalIdentity[]>('/api/v1/me/identities'),
+      manager.request<AuthProvidersResponse>('/api/v1/auth/providers')
     ])
     profile.value = user
     sessions.value = activeSessions || []
+    identities.value = linkedIdentities || []
+    authProviders.value = providers?.providers || []
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load profile'
   }
@@ -69,6 +82,26 @@ async function changePassword() {
     error.value = value?.data?.error || value?.message || 'Unable to change password'
   } finally {
     busy.value = false
+  }
+}
+
+async function unlinkIdentity(identity: ExternalIdentity) {
+  error.value = ''
+  success.value = ''
+  const name = providerName(identity)
+  const confirmed = await confirmation.value?.request({
+    title: 'Unlink authentication source',
+    description: `Unlink ${name} from this account? You will no longer be able to sign in with this source unless it is linked again.`,
+    confirmLabel: 'Unlink source',
+    color: 'error'
+  })
+  if (!confirmed) return
+  try {
+    await manager.request(`/api/v1/admin/auth/identities/${encodeURIComponent(identity.id)}`, { method: 'DELETE' })
+    success.value = `${name} unlinked.`
+    await load()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to unlink authentication source'
   }
 }
 
@@ -151,6 +184,31 @@ async function revokeAll() {
         <UFormField label="Confirm new password" required><UInput v-model="password.confirmation" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
         <AppButton type="submit" intent="primary" :loading="busy">Change password</AppButton>
       </UForm>
+    </Frame>
+
+    <Frame class="p-5" data-testid="profile-authentication-sources">
+      <div>
+        <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">SIGN-IN</p>
+        <h2 class="mt-1 text-base font-semibold">Authentication sources</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account.</p>
+      </div>
+      <div v-if="identities.length" class="mt-4 divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
+        <div v-for="identity in identities" :key="identity.id" class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-[13.5px] font-semibold">{{ providerName(identity) }}</span>
+              <StatusTag variant="neutral">OIDC</StatusTag>
+            </div>
+            <p class="mt-1 truncate font-mono text-[10.5px] text-[var(--neutral-700)]">{{ identity.issuer }}</p>
+            <p class="mt-1 text-[10.5px] text-[var(--neutral-700)]">Linked {{ dateTime(identity.created_at) }}</p>
+          </div>
+          <AppButton intent="ghost" size="sm" @click="unlinkIdentity(identity)">Unlink</AppButton>
+        </div>
+      </div>
+      <div v-else class="mt-4 border-t border-[var(--color-divider)] px-2 py-8 text-center">
+        <p class="text-sm font-semibold">No linked authentication sources</p>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">This account is not linked to an external sign-in provider.</p>
+      </div>
     </Frame>
 
     <Frame class="p-5" data-testid="profile-sessions">
