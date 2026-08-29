@@ -118,4 +118,41 @@ describe('frontend design rules', () => {
     expect(layoutViolations).toEqual([])
     expect(configSource).not.toMatch(/\bpages\s*:\s*false\b/)
   })
+
+  it('keeps redesign colors in complete registered theme files', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const themeRoot = resolve(appRoot, 'themes')
+    const registry = readFileSync(resolve(themeRoot, 'index.ts'), 'utf8')
+    const requiredVariables = [
+      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-divider',
+      '--neutral-100', '--neutral-200', '--neutral-300', '--neutral-400', '--neutral-500', '--neutral-600', '--neutral-700', '--neutral-800', '--neutral-900',
+      '--accent-100', '--accent-200', '--accent-300', '--accent-400', '--accent-500', '--accent-600', '--accent-700', '--accent-800', '--accent-900',
+      '--shadow-sm', '--shadow-md', '--shadow-lg'
+    ]
+
+    expect(registry).toContain("DEFAULT_THEME_ID = 'dark'")
+    expect(registry).toContain("id: 'dark'")
+    expect(registry).toContain("id: 'light'")
+
+    for (const name of ['dark.css', 'light.css']) {
+      const theme = readFileSync(resolve(themeRoot, name), 'utf8')
+      for (const variable of requiredVariables) expect(theme, `${name} missing ${variable}`).toContain(variable)
+    }
+
+    const rawThemeColors = /(?:^|[\s:'"(])#[0-9a-fA-F]{3,8}\b/gm
+    const violations = sourceFiles(appRoot, ['.vue', '.ts', '.css'])
+      .filter(file => !file.startsWith(themeRoot))
+      .flatMap(file => (readFileSync(file, 'utf8').match(rawThemeColors) || []).map(value => `${relative(appRoot, file)}: ${value.trim()}`))
+    expect(violations).toEqual([])
+  })
+
+  it('prohibits gradients and decorative blur effects in application UI', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const forbidden = /linear-gradient\s*\(|radial-gradient\s*\(|conic-gradient\s*\(|\bbg-gradient-[^\s"']+|\bbackdrop-blur-[^\s"']+/g
+    const violations = sourceFiles(appRoot, ['.vue', '.ts', '.css']).flatMap(file => {
+      const matches = readFileSync(file, 'utf8').match(forbidden) || []
+      return matches.map(match => `${relative(appRoot, file)}: ${match}`)
+    })
+    expect(violations).toEqual([])
+  })
 })
