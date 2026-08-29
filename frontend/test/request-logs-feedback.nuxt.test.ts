@@ -62,7 +62,7 @@ describe('Request logs review edge cases', () => {
     expect(wrapper.get('[data-testid="request-log-table"]').text()).toContain('pending')
     expect(wrapper.findAll('[data-testid="request-detail-trigger"]')).toHaveLength(1)
 
-    ;(wrapper.vm as any).filters.status_code = 503
+    await wrapper.get('[data-testid="request-log-filters"] input[placeholder="Any status"]').setValue('503')
     await wrapper.get('[data-testid="apply-request-log-filters"]').trigger('click')
     await flushPromises()
     expect(mocks.request.mock.calls.some(call => String(call[0]).includes('status_code=503'))).toBe(true)
