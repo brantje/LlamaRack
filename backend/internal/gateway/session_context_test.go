@@ -117,6 +117,74 @@ func TestWithRequestLogContextPersistsBodyAndHeaderSessions(t *testing.T) {
 	}
 }
 
+func TestHomeAssistantMetadataSessionGroupsRequests(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service := observability.New(db)
+
+	requestIDs := []string{"lcm_ha_1", "lcm_ha_2"}
+	traceIDs := []string{
+		"11111111-2222-4333-8444-555555555555",
+		"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+	}
+	for i, requestID := range requestIDs {
+		if err := service.RecordCorrelatedRequest(ctx, requestID, nil, observability.RequestRecord{
+			StartedAt:  int64(i + 1),
+			FinishedAt: int64(i + 2),
+			InstanceID: "test-instance",
+			Endpoint:   "/v1/chat/completions",
+			StatusCode: http.StatusOK,
+			Result:     "success",
+			TraceID:    traceIDs[i],
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set(headerRequestID, r.Header.Get("X-Test-Request-ID"))
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := WithRequestLogContext(downstream, service)
+	const sessionID = "ha-conversation-test"
+	for i, requestID := range requestIDs {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coder","metadata":{"session_id":"`+sessionID+`"}}`))
+		req.Header.Set("X-Test-Request-ID", requestID)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %s status=%d", requestID, w.Code)
+		}
+		detail, err := service.GetRequestLogByRequestID(ctx, requestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.SessionID != sessionID || detail.TraceID != traceIDs[i] {
+			t.Fatalf("request %s detail=%+v", requestID, detail)
+		}
+	}
+
+	grouped, err := service.ListRequestLogs(ctx, observability.RequestFilters{Limit: 10}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(grouped) != 1 || grouped[0].SessionID != sessionID || grouped[0].SessionTotalCount != 2 {
+		t.Fatalf("grouped=%+v", grouped)
+	}
+	sessionRows, err := service.ListRequestLogs(ctx, observability.RequestFilters{Limit: 10}, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessionRows) != 2 || sessionRows[0].TraceID == sessionRows[1].TraceID {
+		t.Fatalf("session rows=%+v", sessionRows)
+	}
+}
+
 func TestWithRequestLogContextNilService(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
