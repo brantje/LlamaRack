@@ -26,9 +26,11 @@ function resetManager() {
   return manager
 }
 
-function selects(wrapper: any) {
-  const found = wrapper.findAllComponents({ name: 'SelectMenu' })
-  return found.length ? found : wrapper.findAllComponents({ name: 'USelectMenu' })
+async function selectGGUF(wrapper: any, path: string) {
+  const input = wrapper.findAll('input[type="radio"][name="gguf_path"]').find((item: any) => item.attributes('value') === path)
+  if (!input) throw new Error(`Missing GGUF option ${path}`)
+  await input.setValue()
+  await flushPromises()
 }
 
 function numbers(wrapper: any) {
@@ -50,8 +52,7 @@ describe('Model GGUF metadata', () => {
     })
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selects(wrapper)[0]!.vm.$emit('update:modelValue', model.gguf_path)
-    await flushPromises()
+    await selectGGUF(wrapper, model.gguf_path)
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: model.gguf_path } })
     const context = numbers(wrapper).find((item: any) => item.attributes('data-testid') === 'context-capability') || numbers(wrapper)[0]!
@@ -71,8 +72,7 @@ describe('Model GGUF metadata', () => {
     })
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selects(wrapper)[0]!.vm.$emit('update:modelValue', model.gguf_path)
-    await flushPromises()
+    await selectGGUF(wrapper, model.gguf_path)
     expect(wrapper.get('[data-testid="metadata-warning"]').text()).toContain('invalid magic')
     expect(numbers(wrapper)[0]!.props('modelValue')).toBe(0)
   })
