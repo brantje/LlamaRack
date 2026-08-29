@@ -128,11 +128,11 @@ describe('shared Instance form redesign', () => {
     expect(Object.values(state.options)).toContain('/custom/projector.gguf')
   })
 
-  it('keeps unavailable or non-model companion sources neutral and tolerates optional inspection failures', async () => {
+  it('keeps unavailable or non-model companion sources neutral, isolates probe failures and tolerates inspection errors', async () => {
     let detected = false
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') throw new Error('settings unavailable')
-      if (path === '/api/v1/hardware') return { gpus: [] }
+      if (path === '/api/v1/hardware') return { gpus: [{ id: 'CUDA7', backend: 'cuda', index: 7, name: 'Fallback GPU', total_bytes: 4096, used_bytes: 1024, free_bytes: 3072, utilization_pct: 25 }] }
       if (path.startsWith('/api/v1/llamacpp/config')) {
         if (!detected) return { effective: { values: { mmproj: '/global/mmproj.gguf' }, sources: { mmproj: 'global' } } }
         return { effective: { values: { mmproj: '/models/mmproj.gguf' }, sources: { mmproj: 'model' } } }
@@ -140,11 +140,12 @@ describe('shared Instance form redesign', () => {
       if (path === '/api/v1/models/inspect') throw new Error('inspection unavailable')
       return {}
     })
-    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model' })
+    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual' })
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save' } })
     await flushPromises()
     expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('None found')
     expect(wrapper.get('[data-testid="companion-spec-draft-model"]').text()).toContain('None found')
+    expect(wrapper.get('[data-testid="manual-placement-controls"]').text()).toContain('CUDA7')
 
     detected = true
     await wrapper.get('input[type="radio"][value="m2"]').trigger('change')
@@ -218,7 +219,7 @@ describe('flat Instance overrides editor', () => {
     expect(wrapper.text()).toContain('Instance override')
     expect(wrapper.text()).not.toContain('mmproj')
 
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-testid="add-instance-option"]').trigger('click')
     const inputs = controls(wrapper, 'Input', 'UInput')
     expect(inputs.length).toBeGreaterThanOrEqual(6)
     const emptyKey = inputs.find((item: any) => item.props('modelValue') === '')!
@@ -231,8 +232,8 @@ describe('flat Instance overrides editor', () => {
     expect(emitted.mmproj).toBe('')
     expect(emitted['ctx-size']).toBe('8192')
 
-    const removeButtons = wrapper.findAll('button').filter(button => button.text() === 'Remove')
-    await removeButtons[0]!.trigger('click')
+    const threadsRow = wrapper.findAll('[data-testid="instance-override-row"]').find(row => row.text().includes('CPU threads'))!
+    await threadsRow.findAll('button').find(button => button.text() === 'Remove')!.trigger('click')
     await flushPromises()
     const afterRemove = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Record<string, string>
     expect(afterRemove.mmproj).toBe('')
