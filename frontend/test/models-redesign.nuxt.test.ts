@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import ModelsPage from '~/pages/models/index.vue'
 import AppButton from '~/components/AppButton.vue'
 import { useManager } from '~/composables/useManager'
