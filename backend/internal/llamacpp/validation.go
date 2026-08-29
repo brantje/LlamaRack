@@ -23,6 +23,11 @@ var managerOwnedOptions = map[string]bool{
 	"api-key-file":        true,
 }
 
+var companionOptions = map[string]bool{
+	"mmproj":           true,
+	"spec-draft-model": true,
+}
+
 // ValidateOptions validates and canonicalizes free-form llama.cpp overrides
 // against the option schema discovered from the configured llama-server binary.
 func ValidateOptions(profile Profile, options map[string]string) (map[string]string, error) {
@@ -52,6 +57,10 @@ func ValidateOptions(profile Profile, options map[string]string) (map[string]str
 			return nil, fmt.Errorf("unsupported llama.cpp option %q for %s", key, profileLabel(profile))
 		}
 		value := strings.TrimSpace(rawValue)
+		if companionOptions[key] && value == "" {
+			out[key] = ""
+			continue
+		}
 		if err := validateOptionValue(option, value); err != nil {
 			return nil, err
 		}
