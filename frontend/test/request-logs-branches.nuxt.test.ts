@@ -85,7 +85,7 @@ describe('Request logs branch coverage', () => {
     await wrapper.findAll('[data-testid="request-detail-trigger"]')[0]!.trigger('click')
     await flushPromises()
     const body = document.body.textContent || ''
-    expect(body).toContain('HTTP error')
+    expect(body).toContain('Request failed')
     expect(body).toContain('The request failed.')
     expect(body).toContain('Unresolved')
     expect(body).toContain('not-json request')
