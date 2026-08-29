@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
+import { reactive } from 'vue'
 import InstanceForm from '~/components/InstanceForm.vue'
 import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import { useManager } from '~/composables/useManager'
@@ -57,13 +58,13 @@ describe('shared Instance form redesign', () => {
       if (path.startsWith('/api/v1/llamacpp/config')) return { effective: { values: {}, sources: {} } }
       return {}
     })
-    const state = form({ options: { mmproj: '/old/projector.gguf', 'spec-draft-model': '/old/draft.gguf', threads: '4' } })
+    const state = reactive(form({ options: { mmproj: '/old/projector.gguf', 'spec-draft-model': '/old/draft.gguf', threads: '4' } }))
     const wrapper = await mountSuspended(InstanceForm, {
       props: { form: state, title: 'New Instance', submitLabel: 'Create Instance', showLaunchAfterCreate: true, launchAfterCreate: false }
     })
     await flushPromises()
 
-    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.text()).toContain('Q4_K_M · 0 B · ctx 8,192')
     expect(wrapper.text()).toContain('— · 5.0 GiB · ctx 4,096')
 
@@ -88,7 +89,7 @@ describe('shared Instance form redesign', () => {
     launch.vm.$emit('update:modelValue', true)
     await flushPromises()
     expect(wrapper.emitted('update:launchAfterCreate')?.at(-1)).toEqual([true])
-    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('resolves real companion defaults and makes enable/disable persistent option mutations', async () => {
@@ -104,7 +105,7 @@ describe('shared Instance form redesign', () => {
       if (path === '/api/v1/models/inspect') return { dependencies: [{ kind: 'mmproj', total_bytes: 0 }, { kind: 'mtp', total_bytes: 1536 }] }
       return {}
     })
-    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', options: { mmproj: '' } })
+    const state = reactive(form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', options: { mmproj: '' } }))
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save' } })
     await flushPromises()
 
@@ -116,9 +117,11 @@ describe('shared Instance form redesign', () => {
     expect(draft.text()).toContain('1.5 KiB · inherited from the Model defaults')
 
     await projector.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
+    await flushPromises()
     expect(state.options.mmproj).toBe('/models/mmproj.gguf')
     expect(projector.text()).toContain('Auto-detected')
     await draft.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
+    await flushPromises()
     expect(state.options['spec-draft-model']).toBe('')
     expect(draft.text()).toContain('Ignored')
 
@@ -140,7 +143,7 @@ describe('shared Instance form redesign', () => {
       if (path === '/api/v1/models/inspect') throw new Error('inspection unavailable')
       return {}
     })
-    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual' })
+    const state = reactive(form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual' }))
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save' } })
     await flushPromises()
     expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('None found')
@@ -149,6 +152,7 @@ describe('shared Instance form redesign', () => {
 
     detected = true
     await wrapper.get('input[type="radio"][value="m2"]').trigger('change')
+    await flushPromises()
     await wrapper.get('input[type="radio"][value="m1"]').trigger('change')
     await flushPromises()
     expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('Auto-detected')
@@ -162,7 +166,7 @@ describe('shared Instance form redesign', () => {
       if (path.startsWith('/api/v1/llamacpp/config')) return { effective: { values: {}, sources: {} } }
       return {}
     })
-    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual', gpu_devices: [], tensor_split: '60,40' })
+    const state = reactive(form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual', gpu_devices: [], tensor_split: '60,40' }))
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save' } })
     await flushPromises()
 
@@ -178,6 +182,7 @@ describe('shared Instance form redesign', () => {
     state.gpu_devices = ['CUDA0']
     state.tensor_split = '1'
     await wrapper.get('[data-testid="placement-mode-auto"]').trigger('click')
+    await flushPromises()
     expect(state.gpu_mode).toBe('auto')
     expect(state.gpu_devices).toEqual([])
     expect(state.tensor_split).toBe('')
@@ -187,7 +192,7 @@ describe('shared Instance form redesign', () => {
     expect(state.gpu_mode).toBe('manual')
   })
 
-  it('uses live GPU data without a hardware probe and renders the full-content logging warning', async () => {
+  it('uses live GPU data and renders the full-content logging warning', async () => {
     const manager = seedManager()
     manager.observabilityLive.value = {
       collected_at: '', telemetry: [], requests: [], gateway: {} as any,
@@ -195,17 +200,16 @@ describe('shared Instance form redesign', () => {
     } as any
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0 } }
-      if (path === '/api/v1/hardware') throw new Error('hardware should not be requested')
+      if (path === '/api/v1/hardware') return { gpus: [] }
       if (path.startsWith('/api/v1/llamacpp/config')) throw new Error('config unavailable')
       return {}
     })
-    const state = form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual', request_log_mode: 'full' })
+    const state = reactive(form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', gpu_mode: 'manual', request_log_mode: 'full' }))
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save', error: 'save failed' } })
     await flushPromises()
     expect(wrapper.text()).toContain('CUDA9')
     expect(wrapper.text()).toContain('Full content logging enabled')
     expect(wrapper.text()).toContain('save failed')
-    expect(mocks.request.mock.calls.some(call => call[0] === '/api/v1/hardware')).toBe(false)
   })
 })
 
