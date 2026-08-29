@@ -60,13 +60,13 @@ func TestUnauthenticatedLargeRequestBodyUsesMetadataBudget(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer invalid")
 	w := httptest.NewRecorder()
 
-	WithRequestLogContext(f.gateway, f.observability).ServeHTTP(w, r)
+	f.gateway.ServeHTTP(w, r)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	if body.read > preAuthRequestBodyBytes+1 {
-		t.Fatalf("unauthenticated request read %d bytes; want <= %d", body.read, preAuthRequestBodyBytes+1)
+	if body.read > preAuthRequestBodyBytes {
+		t.Fatalf("unauthenticated request read %d bytes; want <= %d", body.read, preAuthRequestBodyBytes)
 	}
 	requestID := w.Header().Get(headerRequestID)
 	if requestID == "" {
@@ -77,6 +77,30 @@ func TestUnauthenticatedLargeRequestBodyUsesMetadataBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if record.StatusCode != http.StatusUnauthorized || record.Result != "error" {
+		t.Fatalf("record=%+v", record)
+	}
+}
+
+func TestAuthenticatedLargeRequestRecoversBodyTraceAfterAuthentication(t *testing.T) {
+	f := newGatewayFixture(t, false)
+	body := `{"model":"missing-model","padding":"` + strings.Repeat("x", preAuthRequestBodyBytes+1024) + `","litellm_metadata":{"trace_id":"` + testTraceBody + `"}}`
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("Authorization", "Bearer "+f.secret)
+	w := httptest.NewRecorder()
+
+	f.gateway.ServeHTTP(w, r)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get(headerTraceID); got != testTraceBody {
+		t.Fatalf("trace header=%q want=%q", got, testTraceBody)
+	}
+	record, err := f.observability.GetRequestByRequestID(context.Background(), w.Header().Get(headerRequestID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.TraceID != testTraceBody || record.InstanceID != "missing-model" {
 		t.Fatalf("record=%+v", record)
 	}
 }
