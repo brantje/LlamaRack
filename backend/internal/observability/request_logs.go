@@ -110,7 +110,8 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 	if err := s.EnsureRequestLogSchema(ctx); err != nil {
 		return nil, err
 	}
-	query := `SELECT COALESCE(c.request_id,''),
+
+	selectSQL := `SELECT COALESCE(c.request_id,''),
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
@@ -118,10 +119,10 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
 		FROM inference_requests r
 		LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
-		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id
-		WHERE 1=1`
+		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id`
+	whereSQL := " WHERE 1=1"
 	var args []any
-	add := func(clause string, value any) { query += clause; args = append(args, value) }
+	add := func(clause string, value any) { whereSQL += clause; args = append(args, value) }
 	if filters.SinceMS > 0 {
 		add(" AND r.started_at>=?", filters.SinceMS)
 	}
@@ -152,22 +153,45 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 	if filters.TraceID != "" {
 		add(" AND r.trace_id=?", filters.TraceID)
 	}
-	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		add(" AND x.session_id=?", sessionID)
-	}
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		like := "%" + search + "%"
-		query += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		whereSQL += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
 		for i := 0; i < 12; i++ {
 			args = append(args, like)
 		}
 	}
+
+	order := "DESC"
 	if filters.TraceID != "" {
-		query += " ORDER BY r.started_at ASC,r.id ASC"
-	} else {
-		query += " ORDER BY r.started_at DESC,r.id DESC"
+		order = "ASC"
 	}
-	query += " LIMIT ? OFFSET ?"
+	sessionID = strings.TrimSpace(sessionID)
+	var query string
+	if sessionID != "" {
+		whereSQL += " AND x.session_id=?"
+		args = append(args, sessionID)
+		query = selectSQL + whereSQL + " ORDER BY r.started_at " + order + ",r.id " + order + " LIMIT ? OFFSET ?"
+	} else {
+		query = `WITH filtered AS (
+			SELECT r.id,COALESCE(x.session_id,'') AS session_id,r.started_at
+			FROM inference_requests r
+			LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
+			LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id` + whereSQL + `
+		), ranked AS (
+			SELECT id,started_at,ROW_NUMBER() OVER (
+				PARTITION BY CASE WHEN session_id<>'' THEN 'session:' || session_id ELSE 'request:' || id END
+				ORDER BY started_at ` + order + `,id ` + order + `
+			) AS session_rank
+			FROM filtered
+		), representatives AS (
+			SELECT id,started_at FROM ranked WHERE session_rank=1
+			ORDER BY started_at ` + order + `,id ` + order + `
+			LIMIT ? OFFSET ?
+		)
+		` + selectSQL + `
+		JOIN representatives p ON p.id=r.id
+		ORDER BY r.started_at ` + order + `,r.id ` + order
+	}
 	args = append(args, filters.Limit, filters.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
