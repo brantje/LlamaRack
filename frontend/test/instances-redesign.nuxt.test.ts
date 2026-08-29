@@ -178,12 +178,15 @@ describe('Instances redesign', () => {
     expect(text).toContain('512 MiB')
     expect(text).toContain('0 B')
     expect(text).toContain('CUDA9')
-    expect(text).toContain('On demand · idle 1.5 min')
     expect(text).toContain('Never launched since the last manager restart. Launch it manually when needed.')
     expect(text).toContain('llama-server exited unexpectedly.')
     expect(text).toContain('PAUSED — runtime telemetry is not available.')
     expect(text).toContain('Open Downloads to retry or inspect this import.')
     expect(text).toContain('Model is downloading. The Instance will become launchable when the verified GGUF download completes.')
+
+    await wrapper.get('[data-testid="instances-view-table"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('tr[data-instance-state="READY"]').text()).toContain('On demand · idle 1.5 min')
   })
 
   it('covers empty filters, failed optional reads and direct launch without eviction confirmation', async () => {
