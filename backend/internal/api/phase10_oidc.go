@@ -82,11 +82,14 @@ func (h *phase10OIDCHandler) writeAuthSettings(w http.ResponseWriter, r *http.Re
 	if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
 	externalURL, err := h.settings.Resolve(r.Context(), settings.ExternalURL)
 	if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
+	frontendURL, err := h.settings.Resolve(r.Context(), settings.FrontendURL)
+	if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
 	writeJSON(w, http.StatusOK, map[string]settings.Value{
 		"local_login_enabled": local,
 		"oidc_jit_provisioning_enabled": jit,
 		"oidc_auto_link_enabled": autoLink,
 		"external_url": externalURL,
+		"frontend_url": frontendURL,
 	})
 }
 
@@ -98,8 +101,15 @@ func (h *phase10OIDCHandler) authSettings(w http.ResponseWriter, r *http.Request
 		OIDCJITProvisioningEnabled *bool   `json:"oidc_jit_provisioning_enabled"`
 		OIDCAutoLinkEnabled        *bool   `json:"oidc_auto_link_enabled"`
 		ExternalURL                *string `json:"external_url"`
+		FrontendURL                *string `json:"frontend_url"`
 	}
 	if !decode(w, r, &in) { return }
+	if in.FrontendURL != nil {
+		if err := validateOIDCFrontendURL(*in.FrontendURL); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 
 	// Serialize the lockout-sensitive check with provider test/update/delete
 	// operations so another request cannot invalidate the last usable OIDC
@@ -116,6 +126,7 @@ func (h *phase10OIDCHandler) authSettings(w http.ResponseWriter, r *http.Request
 	if in.OIDCJITProvisioningEnabled != nil { updates[settings.OIDCJITProvisioningEnabled] = *in.OIDCJITProvisioningEnabled }
 	if in.OIDCAutoLinkEnabled != nil { updates[settings.OIDCAutoLinkEnabled] = *in.OIDCAutoLinkEnabled }
 	if in.ExternalURL != nil { updates[settings.ExternalURL] = *in.ExternalURL }
+	if in.FrontendURL != nil { updates[settings.FrontendURL] = *in.FrontendURL }
 	for key, value := range updates {
 		if _, err := h.settings.Set(r.Context(), key, value); err != nil { writeErr(w, http.StatusBadRequest, err); return }
 		slog.Info("security event", "event", "settings.changed", "setting", key)
@@ -128,6 +139,8 @@ func (h *phase10OIDCHandler) oidcFlow(w http.ResponseWriter, r *http.Request, re
 	if len(parts) != 2 || parts[0] == "" { writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"}); return }
 	providerID := parts[0]
 	externalURL, err := h.settings.String(r.Context(), settings.ExternalURL)
+	if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
+	frontendURL, err := h.settings.String(r.Context(), settings.FrontendURL)
 	if err != nil { writeErr(w, http.StatusInternalServerError, err); return }
 	switch parts[1] {
 	case "start":
@@ -148,8 +161,14 @@ func (h *phase10OIDCHandler) oidcFlow(w http.ResponseWriter, r *http.Request, re
 			slog.Warn("security event", "event", "auth.oidc_failure", "provider_id", providerID, "error", "browser state mismatch")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "OIDC authentication failed"}); return
 		}
+		if err := validateOIDCFrontendURL(frontendURL); err != nil {
+			slog.Error("OIDC frontend redirect configuration is invalid", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "OIDC authentication failed"}); return
+		}
 		redirectURL, err := h.oidc.CompleteCallback(r.Context(), providerID, state, r.URL.Query().Get("code"), externalURL)
 		if err != nil { slog.Warn("security event", "event", "auth.oidc_failure", "provider_id", providerID, "error", err); writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "OIDC authentication failed"}); return }
+		redirectURL, err = oidcFrontendExchangeURL(redirectURL, frontendURL)
+		if err != nil { slog.Error("OIDC frontend redirect failed", "error", err); writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "OIDC authentication failed"}); return }
 		slog.Info("security event", "event", "auth.oidc_success", "provider_id", providerID)
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 	default:
