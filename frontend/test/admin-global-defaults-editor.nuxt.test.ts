@@ -39,6 +39,7 @@ describe('Administration global defaults editor', () => {
         modelValue: { batch: '128', custom: 'yes' },
         profile: {
           path: '/llama-server',
+          fingerprint: 'fp',
           options: [{ key: 'batch', value_hint: 'N' }]
         }
       }
