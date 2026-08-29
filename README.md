@@ -25,6 +25,10 @@ Open:
 
 On first load, create the bootstrap administrator account. GGUF files placed anywhere under `data/models/` are visible inside the backend models directory. **Models → Add model** (or `/models/new`) scans that directory recursively and lists only GGUF files that have not already been added. Paths in the UI are relative to the models directory, so the `/models` container prefix is hidden. Model registration and GGUF registration are a single step; there is no separate artifact registry.
 
+### Home Assistant Local OpenAI LLM
+
+Home Assistant's Local OpenAI LLM integration can group Assist requests into one `/logs` session without a llamacpp-manager-specific mode. Enable **Pass conversation session ID to LiteLLM server**; the integration sends the Assist conversation ID as `metadata.session_id`, which llamacpp-manager uses as `session_id` while keeping each request's `trace_id` separate.
+
 Always-On models are reconciled once when the backend starts. Periodic reconciliation defaults to every 15 seconds and can be changed with `LCM_ALWAYS_ON_RECONCILE_SECONDS`; set it to `0` to disable periodic reconciliation after the startup pass. When a user manually stops an Always-On model, periodic Always-On reconciliation will leave it stopped for the rest of the current backend runtime. An explicit Start clears the suppression. If autoload is enabled, an inference request also clears the suppression and starts the model on demand. Restarting the backend clears all manual-stop suppressions so Always-On models are started again.
 
 Non-Always-On models are automatically unloaded after five minutes without inference activity by default. The global idle unload timeout is configured under **Administration → General** and persisted by the manager; set it to `0` to disable the global idle timeout. The Add Model form can override the timeout per model with `idle_unload_seconds`; `0` on the model means inherit the global value. Active inference requests, including streaming responses, keep the model active until the proxied response completes.
