@@ -31,6 +31,7 @@ async function clickConfirmation(kind: 'confirm' | 'cancel') {
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.writeText.mockReset().mockResolvedValue(undefined)
+  sessionStorage.setItem('llamacpp-manager.instances.view', 'cards')
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.writeText } })
   seed()
 })
