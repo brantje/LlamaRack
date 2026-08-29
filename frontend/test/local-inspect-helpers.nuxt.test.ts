@@ -20,9 +20,11 @@ function resetManager() {
   manager.profile.value = null
 }
 
-function selects(wrapper: any) {
-  const found = wrapper.findAllComponents({ name: 'SelectMenu' })
-  return found.length ? found : wrapper.findAllComponents({ name: 'USelectMenu' })
+async function selectGGUF(wrapper: any, path: string) {
+  const input = wrapper.findAll('input[type="radio"][name="gguf_path"]').find((item: any) => item.attributes('value') === path)
+  if (!input) throw new Error(`Missing GGUF option ${path}`)
+  await input.setValue()
+  await flushPromises()
 }
 
 beforeEach(() => {
@@ -74,14 +76,13 @@ describe('local GGUF inspection helpers', () => {
 
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selects(wrapper)[0]!.vm.$emit('update:modelValue', ggufPath)
-    await flushPromises()
+    await selectGGUF(wrapper, ggufPath)
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: ggufPath } })
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: vision-F16.gguf')
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('MTP draft model: draft-Q4_0.gguf')
 
-    const options = wrapper.findComponent({ name: 'LlamaCppOptionsEditor' })
+    const options = wrapper.findComponent({ name: 'ModelOverridesEditor' })
     expect(options.exists()).toBe(true)
     expect(options.props('modelValue')).toMatchObject({
       mmproj: '/models/local/vision-F16.gguf',
