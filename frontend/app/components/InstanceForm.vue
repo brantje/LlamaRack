@@ -166,16 +166,21 @@ async function loadCompanions() {
 async function loadSupportingData() {
   const liveGPUs = manager.observabilityLive.value?.hardware.gpus || []
   if (liveGPUs.length) hardwareGPUs.value = liveGPUs
+
   try {
-    const [settings, hardware] = await Promise.all([
-      manager.request<GeneralSettings>('/api/v1/settings/general'),
-      liveGPUs.length ? Promise.resolve(undefined) : manager.request<{ gpus?: HardwareGPU[] }>('/api/v1/hardware')
-    ])
+    const settings = await manager.request<GeneralSettings>('/api/v1/settings/general')
     const idle = Number(settings?.idle_unload_seconds?.value)
     if (Number.isFinite(idle) && idle >= 0) globalIdleSeconds.value = idle
+  } catch {
+    // Global lifecycle defaults are optional context; the form remains usable without them.
+  }
+
+  if (liveGPUs.length) return
+  try {
+    const hardware = await manager.request<{ gpus?: HardwareGPU[] }>('/api/v1/hardware')
     if (hardware?.gpus) hardwareGPUs.value = hardware.gpus
   } catch {
-    // Form remains fully usable when optional settings/hardware probes are unavailable.
+    // Hardware discovery is optional; manual placement can remain empty if unavailable.
   }
 }
 
@@ -285,7 +290,7 @@ onMounted(() => {
           <div>
             <p class="mb-2 text-xs font-semibold">Priority</p>
             <div class="inline-flex border border-[var(--color-divider)]" data-testid="instance-priority">
-              <button v-for="priority in ['low', 'normal', 'high']" :key="priority" type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold last:border-r-0" :class="form.priority === priority ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent'" :data-testid="`priority-${priority}`" @click="form.priority = priority">{{ priority[0]!.toUpperCase() + priority.slice(1) }}</button>
+              <button v-for="priority in ['low', 'normal', 'high']" :key="priority" type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold last:border-r-0" :class="form.priority === priority ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent'" :data-testid="`priority-${priority}`" @click="form.priority = priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</button>
             </div>
           </div>
           <UFormField :label="`Idle unload timeout (seconds · 0 inherits the global ${globalIdleSeconds} s)`" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
