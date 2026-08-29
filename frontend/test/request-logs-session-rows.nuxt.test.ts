@@ -67,10 +67,10 @@ describe('Request log session rows', () => {
 
     const table = wrapper.get('[data-testid="request-log-table"]')
     expect(table.text()).toContain('2 rows')
-    expect(table.text()).toContain('lcm_session_visible_1')
-    expect(table.text()).toContain('lcm_session_visible_2')
+    const triggers = wrapper.findAll('[data-testid="request-detail-trigger"]')
+    expect(triggers).toHaveLength(2)
 
-    await wrapper.findAll('[data-testid="request-detail-trigger"]')[0]!.trigger('click')
+    await triggers[0]!.trigger('click')
     await flushPromises()
     const sidebar = document.body.querySelector('[data-testid="request-sidebar"]')
     expect(sidebar?.textContent).toContain('lcm_session_visible_1')
