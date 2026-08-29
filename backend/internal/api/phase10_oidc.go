@@ -44,6 +44,8 @@ func (h *phase10OIDCHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.oidcFlow(w, r, strings.TrimPrefix(path, "/api/v1/auth/oidc/"))
 	case path == "/api/v1/admin/auth/settings":
 		h.authSettings(w, r)
+	case path == "/api/v1/admin/auth/providers/test":
+		h.providerDraftTest(w, r)
 	case path == "/api/v1/admin/auth/providers":
 		h.providers(w, r)
 	case strings.HasPrefix(path, "/api/v1/admin/auth/providers/"):
@@ -169,6 +171,18 @@ func (h *phase10OIDCHandler) wsTicket(w http.ResponseWriter, r *http.Request) {
 	ticket, expiresAt, err := h.auth.IssueWebSocketTicket(r.Context(), session)
 	if err != nil { writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"}); return }
 	writeJSON(w, http.StatusCreated, map[string]any{"ticket": ticket, "expires_at": expiresAt})
+}
+
+func (h *phase10OIDCHandler) providerDraftTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { w.WriteHeader(http.StatusMethodNotAllowed); return }
+	var in auth.OIDCProviderInput
+	if !decode(w, r, &in) { return }
+	if err := h.oidc.TestProviderInput(r.Context(), in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	slog.Info("security event", "event", "auth.oidc_provider_configuration_tested", "success", true)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *phase10OIDCHandler) providers(w http.ResponseWriter, r *http.Request) {
