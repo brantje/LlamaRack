@@ -1,0 +1,143 @@
+package systemlog
+
+import (
+	"strings"
+	"sync"
+	"time"
+)
+
+type Level string
+
+const (
+	Info  Level = "INFO"
+	Warn  Level = "WARN"
+	Debug Level = "DEBUG"
+	Error Level = "ERROR"
+)
+
+type Entry struct {
+	Timestamp string `json:"timestamp"`
+	Level     Level  `json:"level"`
+	Source    string `json:"source"`
+	Message   string `json:"message"`
+}
+
+type Store struct {
+	mu   sync.Mutex
+	max  int
+	data []Entry
+	subs map[chan Entry]struct{}
+	now  func() time.Time
+}
+
+func New(max int) *Store {
+	if max < 1 {
+		max = 4000
+	}
+	return &Store{max: max, subs: map[chan Entry]struct{}{}, now: time.Now}
+}
+
+// Default is the manager-wide in-memory diagnostic stream. It deliberately
+// shares process lifetime with the manager and contains no persisted secrets.
+var Default = New(4000)
+
+func (s *Store) Add(level Level, source, message string) {
+	if s == nil {
+		return
+	}
+	source = strings.TrimSpace(source)
+	message = strings.TrimSpace(message)
+	if source == "" || message == "" || !validLevel(level) {
+		return
+	}
+	entry := Entry{
+		Timestamp: s.now().UTC().Truncate(time.Second).Format(time.RFC3339),
+		Level:     level,
+		Source:    source,
+		Message:   message,
+	}
+	s.mu.Lock()
+	if len(s.data) >= s.max {
+		copy(s.data, s.data[1:])
+		s.data[len(s.data)-1] = entry
+	} else {
+		s.data = append(s.data, entry)
+	}
+	for ch := range s.subs {
+		select {
+		case ch <- entry:
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Store) Snapshot(limit int) []Entry {
+	if s == nil || limit <= 0 {
+		return []Entry{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start := 0
+	if len(s.data) > limit {
+		start = len(s.data) - limit
+	}
+	out := make([]Entry, len(s.data)-start)
+	copy(out, s.data[start:])
+	return out
+}
+
+func (s *Store) Subscribe(limit int) ([]Entry, <-chan Entry, func()) {
+	if s == nil {
+		ch := make(chan Entry)
+		close(ch)
+		return []Entry{}, ch, func() {}
+	}
+	s.mu.Lock()
+	start := 0
+	if limit > 0 && len(s.data) > limit {
+		start = len(s.data) - limit
+	}
+	snapshot := make([]Entry, len(s.data)-start)
+	copy(snapshot, s.data[start:])
+	ch := make(chan Entry, 256)
+	s.subs[ch] = struct{}{}
+	s.mu.Unlock()
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() {
+			s.mu.Lock()
+			delete(s.subs, ch)
+			close(ch)
+			s.mu.Unlock()
+		})
+	}
+	return snapshot, ch, cancel
+}
+
+func (s *Store) Reset() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.data = nil
+	s.mu.Unlock()
+}
+
+func validLevel(level Level) bool {
+	switch level {
+	case Info, Warn, Debug, Error:
+		return true
+	default:
+		return false
+	}
+}
+
+func Log(level Level, source, message string) { Default.Add(level, source, message) }
+
+func FormatDuration(duration time.Duration) string {
+	if duration < time.Second {
+		return time.Duration(duration.Milliseconds()).String()
+	}
+	return duration.Round(10 * time.Millisecond).String()
+}
