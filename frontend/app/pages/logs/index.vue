@@ -44,6 +44,7 @@ const loading = ref(false)
 const error = ref('')
 const traceID = ref(String(route.query.trace_id || '').trim())
 const routeReady = ref(false)
+const liveStreamingEnabled = ref(true)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
@@ -81,6 +82,7 @@ const liveRequestFingerprint = computed(() => {
   ].join(':')).join('|')
 })
 const liveState = computed(() => {
+  if (!liveStreamingEnabled.value) return { label: 'Live off', color: 'neutral' as const }
   if (!manager.runtimeEventsConnected.value) return { label: 'Disconnected', color: 'neutral' as const }
   if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }
   return { label: 'Live', color: 'success' as const }
@@ -139,6 +141,10 @@ async function clearTrace() {
   await router.replace({ path: '/logs', query: {} })
   await loadRequests()
 }
+async function toggleLiveStreaming() {
+  liveStreamingEnabled.value = !liveStreamingEnabled.value
+  if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
+}
 async function selectRequest(requestID: string) {
   detailOpen.value = true
   detailLoading.value = true
@@ -189,7 +195,7 @@ watch(
   { immediate: true }
 )
 watch(liveRequestFingerprint, (next, previous) => {
-  if (!routeReady.value || !manager.user.value || offset.value !== 0 || !next || next === previous) return
+  if (!liveStreamingEnabled.value || !routeReady.value || !manager.user.value || offset.value !== 0 || !next || next === previous) return
   void loadRequests()
 })
 </script>
@@ -198,8 +204,9 @@ watch(liveRequestFingerprint, (next, previous) => {
   <div class="space-y-5" data-testid="request-logs-page">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent OpenAI-compatible inference request history, correlation IDs, traces and performance metadata." />
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
         <UBadge data-testid="request-logs-live-state" :color="liveState.color" variant="subtle">{{ liveState.label }}</UBadge>
+        <UButton data-testid="request-logs-live-toggle" color="neutral" variant="soft" :icon="liveStreamingEnabled ? 'i-lucide-pause' : 'i-lucide-play'" @click="toggleLiveStreaming">{{ liveStreamingEnabled ? 'Pause live' : 'Enable live' }}</UButton>
         <UButton color="neutral" variant="soft" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</UButton>
       </div>
     </div>
