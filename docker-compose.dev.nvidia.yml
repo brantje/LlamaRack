@@ -1,6 +1,8 @@
 services:
-  llamacpp-manager:
-    image: ghcr.io/brantje/llamacpp-manager:${LCM_NVIDIA_IMAGE_TAG:-latest-cuda}
+  backend:
+    build:
+      args:
+        LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
     environment:
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}

@@ -1,0 +1,222 @@
+name: llama.cpp runtime update
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: llama.cpp-runtime-update
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  UPSTREAM_REPOSITORY: ggml-org/llama.cpp
+
+jobs:
+  detect:
+    name: Detect llama.cpp release
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.detect.outputs.should_build }}
+      release_tag: ${{ steps.detect.outputs.release_tag }}
+      build_tag: ${{ steps.detect.outputs.build_tag }}
+      image_tag: ${{ steps.detect.outputs.image_tag }}
+      cpu_image: ${{ steps.detect.outputs.cpu_image }}
+      cuda_image: ${{ steps.detect.outputs.cuda_image }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect latest stable llama.cpp release
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_json="$(curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            https://api.github.com/repos/${UPSTREAM_REPOSITORY}/releases/latest)"
+
+          release_tag="$(jq -r '.tag_name' <<<"${release_json}")"
+          asset_url="$(jq -r '.assets[] | select(.name == "nightly-tag.txt") | .browser_download_url' <<<"${release_json}" | head -n1)"
+
+          if [[ -z "${release_tag}" || "${release_tag}" == "null" ]]; then
+            echo 'Unable to determine latest stable llama.cpp release tag.' >&2
+            exit 1
+          fi
+          if [[ ! "${release_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Unsupported llama.cpp release tag for container publication." >&2
+            exit 1
+          fi
+          if [[ -z "${asset_url}" || "${asset_url}" == "null" ]]; then
+            echo "llama.cpp ${release_tag} does not expose nightly-tag.txt; cannot resolve an immutable build image." >&2
+            exit 1
+          fi
+
+          build_tag="$(curl --fail --silent --show-error --location "${asset_url}" | tr -d '\r\n[:space:]')"
+          if [[ ! "${build_tag}" =~ ^b[0-9]+$ ]]; then
+            echo "Unexpected llama.cpp build tag: ${build_tag}" >&2
+            exit 1
+          fi
+
+          cpu_image="ghcr.io/ggml-org/llama.cpp:server-${build_tag}"
+          if ! docker buildx imagetools inspect "${cpu_image}" >/dev/null 2>&1; then
+            echo "Missing llama.cpp CPU runtime image: ${cpu_image}" >&2
+            exit 1
+          fi
+
+          cuda_image=''
+          for candidate in \
+            "ghcr.io/ggml-org/llama.cpp:server-cuda-${build_tag}" \
+            "ghcr.io/ggml-org/llama.cpp:server-cuda13-${build_tag}" \
+            "ghcr.io/ggml-org/llama.cpp:server-cuda12-${build_tag}"; do
+            if docker buildx imagetools inspect "${candidate}" >/dev/null 2>&1; then
+              cuda_image="${candidate}"
+              break
+            fi
+          done
+          if [[ -z "${cuda_image}" ]]; then
+            echo "No supported llama.cpp CUDA runtime image found for ${build_tag}." >&2
+            exit 1
+          fi
+
+          image_tag="llama.cpp-${release_tag}"
+          if [[ ! "${image_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo 'Derived llama.cpp image tag exceeds Docker tag constraints.' >&2
+            exit 1
+          fi
+          target="${REGISTRY}/${IMAGE_NAME}:${image_tag}"
+          cuda_target="${REGISTRY}/${IMAGE_NAME}:${image_tag}-cuda"
+
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "build_tag=${build_tag}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "cpu_image=${cpu_image}" >> "${GITHUB_OUTPUT}"
+          echo "cuda_image=${cuda_image}" >> "${GITHUB_OUTPUT}"
+
+          if docker buildx imagetools inspect "${target}" >/dev/null 2>&1 && \
+            docker buildx imagetools inspect "${cuda_target}" >/dev/null 2>&1; then
+            echo 'should_build=false' >> "${GITHUB_OUTPUT}"
+            echo "llama.cpp ${release_tag} (${build_tag}) CPU and CUDA images are already published."
+          else
+            echo 'should_build=true' >> "${GITHUB_OUTPUT}"
+            echo "New or incomplete llama.cpp release publication detected: ${release_tag} (${build_tag})."
+          fi
+
+      - name: Summary
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.detect.outputs.release_tag }}
+          BUILD_TAG: ${{ steps.detect.outputs.build_tag }}
+          CPU_IMAGE: ${{ steps.detect.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ steps.detect.outputs.cuda_image }}
+          SHOULD_BUILD: ${{ steps.detect.outputs.should_build }}
+        run: |
+          {
+            echo '## 🦙 llama.cpp runtime update'
+            echo
+            echo "- llama.cpp release: \`${RELEASE_TAG}\`"
+            echo "- llama.cpp build: \`${BUILD_TAG}\`"
+            echo "- CPU runtime: \`${CPU_IMAGE}\`"
+            echo "- CUDA runtime: \`${CUDA_IMAGE}\`"
+            echo "- Manager source: \`${GITHUB_SHA}\`"
+            if [[ "${SHOULD_BUILD}" == 'true' ]]; then
+              echo '- Result: new upstream release detected; images will be built.'
+            else
+              echo '- Result: already published; no rebuild required.'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  publish:
+    name: Publish llama.cpp update images
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manager source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          build-args: |
+            LLAMA_IMAGE=${{ needs.detect.outputs.cpu_image }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}
+            ghcr.io/${{ github.repository }}:llama.cpp-latest
+          labels: |
+            org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}
+            io.llamacpp-manager.build.reason=llama.cpp-update
+            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cpu_image }}
+          cache-from: type=gha,scope=llama.cpp-update-cpu
+          cache-to: type=gha,mode=max,scope=llama.cpp-update-cpu
+
+      - name: Build and push CUDA image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          build-args: |
+            LLAMA_IMAGE=${{ needs.detect.outputs.cuda_image }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}-cuda
+            ghcr.io/${{ github.repository }}:llama.cpp-latest-cuda
+          labels: |
+            org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}-cuda
+            io.llamacpp-manager.build.reason=llama.cpp-update
+            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cuda_image }}
+          cache-from: type=gha,scope=llama.cpp-update-cuda
+          cache-to: type=gha,mode=max,scope=llama.cpp-update-cuda
+
+      - name: Publish summary
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.detect.outputs.release_tag }}
+          BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
+          IMAGE_TAG: ${{ needs.detect.outputs.image_tag }}
+        run: |
+          {
+            echo '## 🦙 llama.cpp update published'
+            echo
+            echo "Rebuilt LlamaCPP Manager because llama.cpp released \`${RELEASE_TAG}\` (build \`${BUILD_TAG}\`)."
+            echo
+            echo 'Published tags:'
+            echo "- \`${IMAGE_TAG}\`"
+            echo "- \`${IMAGE_TAG}-cuda\`"
+            echo "- \`llama.cpp-latest\`"
+            echo "- \`llama.cpp-latest-cuda\`"
+            echo
+            echo "The normal \`latest\` and \`latest-cuda\` manager-release tags were not changed."
+          } >> "${GITHUB_STEP_SUMMARY}"

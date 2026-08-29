@@ -17,14 +17,15 @@ import (
 func TestMuxRoutingDoesNotConflict(t *testing.T) {
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) })
 	openAIHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
-	mux := newMux(apiHandler, openAIHandler)
+	frontendHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux := newMux(apiHandler, openAIHandler, frontendHandler)
 	cases := []struct { method, path string; want int }{
 		{http.MethodGet, "/", http.StatusOK},
-		{http.MethodPost, "/", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/models", http.StatusOK},
+		{http.MethodGet, "/models/discover/example", http.StatusOK},
 		{http.MethodGet, "/health", http.StatusOK},
 		{http.MethodGet, "/api/v1/health", http.StatusCreated},
 		{http.MethodPost, "/v1/chat/completions", http.StatusAccepted},
-		{http.MethodGet, "/missing", http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {

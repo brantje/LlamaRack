@@ -90,6 +90,12 @@ func waitRunStopped(t *testing.T, done <-chan error, label string) {
 }
 
 func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
+	frontendDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(frontendDir, "index.html"), []byte("<html>integration frontend</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LCM_FRONTEND_DIR", frontendDir)
+
 	cfg := testConfig(t, fakeDiscoveryBinary(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
