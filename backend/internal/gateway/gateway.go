@@ -26,7 +26,10 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
 )
 
-const metadataResponseCaptureLimit = 8 << 20
+const (
+	metadataResponseCaptureLimit = 8 << 20
+	maxRequestBodyBytes          = 32 << 20
+)
 
 const (
 	headerRequestID       = "X-LlamaCPP-Manager-Request-ID"
@@ -79,8 +82,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var body []byte
 	var bodyReadErr error
+	bodyTooLarge := false
 	if r.Body != nil {
-		body, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, 32<<20))
+		body, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, maxRequestBodyBytes+1))
+		if len(body) > maxRequestBodyBytes {
+			bodyTooLarge = true
+			body = nil
+		}
 	}
 	var envelope requestEnvelope
 	parseErr := error(nil)
@@ -128,7 +136,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if ctxErr := r.Context().Err(); ctxErr != nil {
 			record.Result = "error"
-			record.Error = sanitizeError("client disconnected: " + ctxErr.Error())
+			if record.Error == "" {
+				record.Error = sanitizeError("client disconnected: " + ctxErr.Error())
+			}
 		}
 		if record.Result == "" {
 			if record.StatusCode >= 200 && record.StatusCode < 400 {
@@ -168,6 +178,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if bodyReadErr != nil {
 		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
+		return
+	}
+	if bodyTooLarge {
+		writeError(observed, http.StatusRequestEntityTooLarge, "invalid_request_error", "body_too_large", "Request body is too large")
 		return
 	}
 	if parseErr != nil || strings.TrimSpace(envelope.Model) == "" {
