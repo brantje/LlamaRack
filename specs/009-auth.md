@@ -101,14 +101,18 @@ OIDC uses Authorization Code with state, nonce and PKCE S256.
 6. Manager consumes the browser transaction, exchanges the authorization code with the PKCE verifier, and validates the ID token signature, issuer, audience, expiry/time claims and nonce.
 7. The external identity is resolved or provisioned and a normal manager session/JWT is created.
 8. The JWT is **not** placed in the redirect URL. Manager creates a cryptographically random, very short-lived, single-use exchange code.
-9. Browser returns to the frontend with only that exchange code.
+9. Browser returns to the configured frontend URL with only that exchange code. If no frontend URL is configured, the external URL is used for backward-compatible same-origin deployments.
 10. Frontend POSTs the code to `/api/v1/auth/oidc/exchange`; successful consumption returns the manager JWT, expiry, user and Remember-me choice.
 
 Exchange codes are deleted on first consumption and cannot be replayed.
 
-## External/base URL
+## External and frontend URLs
 
 OIDC callback generation uses the explicit `external_url` manager setting. Security-sensitive callback URLs are not inferred by blindly trusting arbitrary forwarded headers. The setting is intended for direct and reverse-proxy deployments, including local development with providers such as Authentik.
+
+`frontend_url` is a separate optional manager setting used only as the browser destination after a successful OIDC callback. It defaults to an empty string. When empty, the final exchange-code redirect uses `external_url`, preserving the existing same-origin behavior. When set, the provider callback still targets the backend `external_url`, while the manager redirects the browser to `frontend_url` with the single-use `oidc_exchange` code after provider validation succeeds.
+
+This separation allows development deployments such as a Nuxt frontend on `http://192.168.60.5:3000` with the manager API on `http://192.168.60.5:8888` without exposing the provider authorization code or provider tokens to the frontend.
 
 ## External identities
 
