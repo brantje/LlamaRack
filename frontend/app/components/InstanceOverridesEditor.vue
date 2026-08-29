@@ -1,7 +1,7 @@
 <script setup lang="ts">
 type OverrideRow = { id: number; key: string; value: string }
 
-const props = withDefaults(defineProps<{ excludeKeys?: string[] }>(), { excludeKeys: () => [] })
+const props = withDefaults(defineProps<{ excludeKeys?: string[]; showAddButton?: boolean }>(), { excludeKeys: () => [], showAddButton: true })
 const options = defineModel<Record<string, string>>({ required: true })
 const manager = useManager()
 const rows = ref<OverrideRow[]>([])
@@ -47,6 +47,7 @@ function removeOption(id: number) {
   commitRows()
 }
 
+defineExpose({ addOption })
 watch(options, syncRows, { deep: true, immediate: true })
 watch(() => props.excludeKeys.join('\u0000'), syncRows)
 </script>
@@ -79,6 +80,6 @@ watch(() => props.excludeKeys.join('\u0000'), syncRows)
       </div>
     </div>
     <p v-else class="text-xs text-[var(--neutral-700)]">No Instance-specific overrides.</p>
-    <AppButton intent="secondary" size="xs" type="button" data-testid="add-instance-option" @click="addOption">Add option</AppButton>
+    <AppButton v-if="showAddButton" intent="secondary" size="xs" type="button" data-testid="add-instance-option" @click="addOption">Add option</AppButton>
   </div>
 </template>
