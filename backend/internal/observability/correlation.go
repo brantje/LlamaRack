@@ -23,33 +23,16 @@ func (s *Service) EnsureCorrelationSchema(ctx context.Context) error {
 	if s.correlationReady {
 		return nil
 	}
+	// The complete development schema is defined by database.initializeSchema.
+	// Keep this idempotent table/index guard for focused service tests, but never
+	// ALTER or backfill an existing development database: incompatible DBs must be
+	// recreated instead of being silently migrated at runtime.
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS inference_request_correlations (
 		request_id TEXT PRIMARY KEY,
 		inference_request_id INTEGER NOT NULL UNIQUE REFERENCES inference_requests(id) ON DELETE CASCADE,
 		prompt_tokens_per_second REAL
 	)`); err != nil {
 		return err
-	}
-	columns, err := tableColumns(ctx, s.db, "inference_requests")
-	if err != nil {
-		return err
-	}
-	additions := []struct {
-		name string
-		ddl  string
-	}{
-		{"trace_id", `ALTER TABLE inference_requests ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
-		{"call_type", `ALTER TABLE inference_requests ADD COLUMN call_type TEXT NOT NULL DEFAULT ''`},
-		{"client_ip", `ALTER TABLE inference_requests ADD COLUMN client_ip TEXT NOT NULL DEFAULT ''`},
-		{"user_agent", `ALTER TABLE inference_requests ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`},
-	}
-	for _, addition := range additions {
-		if columns[addition.name] {
-			continue
-		}
-		if _, err := s.db.ExecContext(ctx, addition.ddl); err != nil {
-			return fmt.Errorf("add inference request column %s: %w", addition.name, err)
-		}
 	}
 	for _, index := range []string{
 		`CREATE INDEX IF NOT EXISTS inference_requests_trace_started_idx ON inference_requests(trace_id,started_at)`,
@@ -61,25 +44,6 @@ func (s *Service) EnsureCorrelationSchema(ctx context.Context) error {
 	}
 	s.correlationReady = true
 	return nil
-}
-
-func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, typ string
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
-			return nil, err
-		}
-		out[name] = true
-	}
-	return out, rows.Err()
 }
 
 func requestValues(record RequestRecord) (keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody any) {
