@@ -118,7 +118,7 @@ describe('Instance detail edge branches', () => {
     await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('Instance GPU usage')
-    expect(text).toContain('3h 1m')
+    expect(text).toContain('1h 1m')
     expect(text).toContain('12.3 s')
     expect(text).toContain('123.5 tok/s')
     expect(text).toContain('Vision projector')
