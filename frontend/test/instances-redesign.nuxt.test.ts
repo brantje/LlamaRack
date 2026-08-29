@@ -128,4 +128,90 @@ describe('Instances redesign', () => {
     expect(second.get('[data-testid="instances-card-view"]').exists()).toBe(true)
     second.unmount()
   })
+
+  it('covers card telemetry aggregation and non-running message edge states', async () => {
+    const manager = seed()
+    manager.observabilityLive.value = null
+    manager.models.value = []
+    manager.instances.value = [
+      instance('aggregate', { model_id: 'missing', gpu_devices: ['CUDA9'], idle_unload_seconds: 90, eviction_enabled: false }),
+      instance('manual', { autoload_enabled: false }),
+      instance('runtime-failed'),
+      instance('paused'),
+      instance('cancelled'),
+      instance('downloading', { autoload_enabled: false })
+    ]
+    manager.runtimes.value = {
+      missing: [{ instance_id: 'aggregate', model_id: 'missing', state: 'READY', pid: 42 }],
+      m1: [
+        { instance_id: 'runtime-failed', model_id: 'm1', state: 'FAILED' },
+        { instance_id: 'paused', model_id: 'm1', state: 'PAUSED' }
+      ]
+    }
+    manager.runtimeTelemetry.value = {
+      aggregate: telemetry('aggregate', {
+        gpu_devices: [],
+        gpus: [{ device_id: 'CUDA9', vram_used_bytes: 512 * 1024 ** 2, utilization_pct: 5.5 }],
+        vram_used_bytes: undefined,
+        gpu_utilization_pct: undefined,
+        cpu_percent: -1,
+        memory_used_bytes: 0,
+        collected_at: 'not-a-date'
+      })
+    }
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/imports') return [
+        { id: 'imp-c', job_id: 'job-c', model_id: 'm1', instance_id: 'cancelled', state: 'CANCELLED', start_when_ready: false },
+        { id: 'imp-d', job_id: 'job-d', model_id: 'm1', instance_id: 'downloading', state: 'DOWNLOADING', start_when_ready: false }
+      ]
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: -5 } }
+      return []
+    })
+    sessionStorage.setItem('llamacpp-manager.instances.view', 'cards')
+
+    const wrapper = await mountSuspended(InstancesPage, { route: '/instances' })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(wrapper.get('[data-testid="instances-telemetry-snapshot"]').text()).toContain('not-a-date')
+    expect(text).toContain('missing')
+    expect(text).toContain('5.5%')
+    expect(text).toContain('512 MiB')
+    expect(text).toContain('0 B')
+    expect(text).toContain('CUDA9')
+    expect(text).toContain('On demand · idle 1.5 min')
+    expect(text).toContain('Never launched since the last manager restart. Launch it manually when needed.')
+    expect(text).toContain('llama-server exited unexpectedly.')
+    expect(text).toContain('PAUSED — runtime telemetry is not available.')
+    expect(text).toContain('Open Downloads to retry or inspect this import.')
+    expect(text).toContain('Model is downloading. The Instance will become launchable when the verified GGUF download completes.')
+  })
+
+  it('covers empty filters, failed optional reads and direct launch without eviction confirmation', async () => {
+    const manager = seed()
+    manager.instances.value = [instance('manual-launch', { eviction_enabled: false })]
+    manager.runtimes.value = { m1: [] }
+    manager.observabilityLive.value = null
+    manager.runtimeTelemetry.value = {}
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/imports') throw new Error('imports unavailable')
+      if (path === '/api/v1/settings/general') throw new Error('settings unavailable')
+      if (path === '/api/v1/instances/manual-launch/start' && options?.method === 'POST') return {}
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances') return manager.instances.value
+      if (path === '/api/v1/instances/manual-launch/runtime') return { instance_id: 'manual-launch', model_id: 'm1', state: 'UNLOADED' }
+      if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
+      return []
+    })
+
+    const wrapper = await mountSuspended(InstancesPage, { route: '/instances' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instances-telemetry-snapshot"]').text()).toContain('awaiting data')
+    await wrapper.get('[data-testid="instances-filter-ready"]').trigger('click')
+    expect(wrapper.text()).toContain('No Instances match this filter')
+    await wrapper.get('[data-testid="instances-filter-all"]').trigger('click')
+    const launch = wrapper.findAll('button').find(button => button.text() === 'Launch')!
+    await launch.trigger('click')
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/manual-launch/start', { method: 'POST' })
+  })
 })
