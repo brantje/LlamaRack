@@ -28,7 +28,8 @@ import (
 
 const (
 	metadataResponseCaptureLimit = 8 << 20
-	maxRequestBodyBytes          = 32 << 20
+	preAuthRequestBodyBytes       = 64 << 10
+	maxRequestBodyBytes           = 32 << 20
 )
 
 const (
@@ -80,20 +81,18 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := newRequestID()
 	w.Header().Set(headerRequestID, requestID)
 
-	var body []byte
+	// Read only a small metadata budget before authentication. This preserves
+	// useful body-derived metadata for normal/small failed-auth requests without
+	// allowing an unauthenticated caller to allocate the full request-body limit.
+	var prefix []byte
 	var bodyReadErr error
-	bodyTooLarge := false
 	if r.Body != nil {
-		body, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, maxRequestBodyBytes+1))
-		if len(body) > maxRequestBodyBytes {
-			bodyTooLarge = true
-			body = nil
-		}
+		prefix, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, preAuthRequestBodyBytes))
 	}
 	var envelope requestEnvelope
 	parseErr := error(nil)
-	if len(bytes.TrimSpace(body)) > 0 {
-		parseErr = json.Unmarshal(body, &envelope)
+	if len(bytes.TrimSpace(prefix)) > 0 {
+		parseErr = json.Unmarshal(prefix, &envelope)
 	}
 	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
 	w.Header().Set(headerTraceID, traceID)
@@ -166,6 +165,38 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record.APIKey = &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix}
+
+	// Authentication succeeded. Read the remainder up to one byte beyond the
+	// normal limit so oversized bodies are rejected instead of truncated.
+	body := append([]byte(nil), prefix...)
+	bodyTooLarge := false
+	if bodyReadErr == nil && r.Body != nil {
+		remaining := int64(maxRequestBodyBytes + 1 - len(body))
+		if remaining > 0 {
+			rest, readErr := io.ReadAll(io.LimitReader(r.Body, remaining))
+			body = append(body, rest...)
+			bodyReadErr = readErr
+		}
+	}
+	if len(body) > maxRequestBodyBytes {
+		bodyTooLarge = true
+		body = nil
+	}
+	if bodyReadErr == nil && !bodyTooLarge {
+		var fullEnvelope requestEnvelope
+		parseErr = nil
+		if len(bytes.TrimSpace(body)) > 0 {
+			parseErr = json.Unmarshal(body, &fullEnvelope)
+		}
+		envelope = fullEnvelope
+		record.InstanceID = strings.TrimSpace(envelope.Model)
+		record.Streaming = envelope.Stream
+		if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
+			traceID = suppliedTraceID
+			record.TraceID = suppliedTraceID
+			w.Header().Set(headerTraceID, suppliedTraceID)
+		}
+	}
 	g.update(r.Context(), requestID, record)
 
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
@@ -435,11 +466,18 @@ func callType(path string) string {
 	}
 }
 
-func resolveTraceID(r *http.Request, bodyTraceID string) string {
-	for _, value := range []string{r.Header.Get("X-LiteLLM-Trace-ID"), bodyTraceID} {
+func suppliedTraceID(r *http.Request, bodyTraceID string) (string, bool) {
+	for _, value := range []string{r.Header.Get(headerTraceID), bodyTraceID} {
 		if traceID, ok := normalizeUUID(value); ok {
-			return traceID
+			return traceID, true
 		}
+	}
+	return "", false
+}
+
+func resolveTraceID(r *http.Request, bodyTraceID string) string {
+	if traceID, ok := suppliedTraceID(r, bodyTraceID); ok {
+		return traceID
 	}
 	return newTraceID()
 }
@@ -752,6 +790,7 @@ func responseError(status int, body []byte) string {
 			if message, ok := errorValue["message"].(string); ok {
 				return sanitizeError(message)
 			}
+		}
 	}
 	return fmt.Sprintf("HTTP %d", status)
 }
