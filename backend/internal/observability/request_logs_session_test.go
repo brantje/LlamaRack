@@ -70,12 +70,12 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	}
 
 	searched, err := s.ListRequestLogs(ctx, RequestFilters{Search: "Qwen Coder", Limit: 25}, "")
-	if err != nil || len(searched) != 1 || searched[0].RequestID != "lcm_session_2" {
-		t.Fatalf("grouped model search=%+v err=%v", searched, err)
+	if err != nil || len(searched) != 2 {
+		t.Fatalf("model search=%+v err=%v", searched, err)
 	}
 	searched, err = s.ListRequestLogs(ctx, RequestFilters{Search: "session-abc", Limit: 25}, "")
-	if err != nil || len(searched) != 1 || searched[0].SessionTotalCount != 2 {
-		t.Fatalf("grouped session search=%+v err=%v", searched, err)
+	if err != nil || len(searched) != 2 || searched[0].SessionTotalCount != 2 || searched[1].SessionTotalCount != 2 {
+		t.Fatalf("session search=%+v err=%v", searched, err)
 	}
 	streaming := true
 	filtered, err := s.ListRequestLogs(ctx, RequestFilters{
@@ -104,7 +104,7 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	}
 }
 
-func TestRequestLogHistoryPaginatesSessionRepresentatives(t *testing.T) {
+func TestRequestLogHistoryPaginatesIndividualSessionRequests(t *testing.T) {
 	s, ctx := seedSessionRequestLogs(t)
 	record := RequestRecord{
 		StartedAt: 1300, FinishedAt: 1400, InstanceID: "coder", Endpoint: "/v1/chat/completions",
@@ -126,8 +126,12 @@ func TestRequestLogHistoryPaginatesSessionRepresentatives(t *testing.T) {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
 	third, err := s.ListRequestLogs(ctx, RequestFilters{Limit: 1, Offset: 2}, "")
-	if err != nil || len(third) != 0 {
+	if err != nil || len(third) != 1 || third[0].SessionID != "session-abc" || third[0].RequestID != "lcm_session_1" {
 		t.Fatalf("third=%+v err=%v", third, err)
+	}
+	fourth, err := s.ListRequestLogs(ctx, RequestFilters{Limit: 1, Offset: 3}, "")
+	if err != nil || len(fourth) != 0 {
+		t.Fatalf("fourth=%+v err=%v", fourth, err)
 	}
 }
 
