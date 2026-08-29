@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import LogsPage from '~/pages/logs/index.vue'
 import DashboardPage from '~/pages/index.vue'
 import { useManager } from '~/composables/useManager'
+
+enableAutoUnmount(afterEach)
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -56,7 +58,6 @@ function seedManager() {
 beforeEach(() => {
   mocks.request.mockReset()
   seedManager()
-  document.body.innerHTML = ''
 })
 
 describe('Request logs', () => {
@@ -98,14 +99,14 @@ describe('Request logs', () => {
     expect(wrapper.find('[data-testid="trace-filter"]').exists()).toBe(false)
   })
 
-  it('collapses a multi-request session and navigates its requests in the drawer', async () => {
+  it('opens a grouped session row and navigates its requests in the drawer', async () => {
     const sessionID = 'session-abc-123'
     const first = { ...request, session_id: sessionID, session_total_count: 2, request_id: 'lcm_session_1', id: 11, duration_ms: 1200 }
     const second = { ...request, session_id: sessionID, session_total_count: 2, request_id: 'lcm_session_2', id: 12, started_at: request.started_at + 100, duration_ms: 400, total_tokens: 12 }
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/observability/requests?')) {
         if (path.includes(`session_id=${encodeURIComponent(sessionID)}`)) return { items: [first, second], limit: 100, offset: 0, has_more: false }
-        return { items: [first, second], limit: 25, offset: 0, has_more: false }
+        return { items: [first], limit: 25, offset: 0, has_more: false }
       }
       if (path === '/api/v1/observability/requests/lcm_session_1') return first
       if (path === '/api/v1/observability/requests/lcm_session_2') return second
@@ -115,7 +116,7 @@ describe('Request logs', () => {
     const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
     await flushPromises()
     const table = wrapper.get('[data-testid="request-log-table"]')
-    expect(table.text()).toContain('1 rows · 2 requests')
+    expect(table.text()).toContain('1 rows')
     expect(table.text()).toContain('2 requests')
 
     await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
@@ -127,6 +128,52 @@ describe('Request logs', () => {
     expect(body).toContain('Qwen Coder 7B')
     expect(body).toContain(traceID)
     expect(mocks.request.mock.calls.some(call => String(call[0]).includes(`session_id=${encodeURIComponent(sessionID)}`))).toBe(true)
+  })
+
+  it('discovers the session for a request-only deep link', async () => {
+    const sessionID = 'session-deep-link'
+    const first = { ...request, request_id: 'lcm_deep_1', id: 21, session_id: sessionID, session_total_count: 2 }
+    const second = { ...request, request_id: 'lcm_deep_2', id: 22, session_id: sessionID, session_total_count: 2, started_at: request.started_at + 50 }
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) {
+        if (path.includes(`session_id=${encodeURIComponent(sessionID)}`)) return { items: [first, second], limit: 100, offset: 0, has_more: false }
+        return { items: [], limit: 25, offset: 0, has_more: false }
+      }
+      if (path === '/api/v1/observability/requests/lcm_deep_1') return first
+      return {}
+    })
+
+    await mountSuspended(LogsPage, { route: '/logs?request_id=lcm_deep_1' })
+    await flushPromises()
+
+    expect(mocks.request.mock.calls.some(call => String(call[0]).includes(`session_id=${encodeURIComponent(sessionID)}`))).toBe(true)
+    expect(document.body.textContent).toContain(sessionID)
+    expect(document.body.textContent).toContain('lcm_deep_2')
+  })
+
+  it('keeps the latest request selected when an older detail response finishes later', async () => {
+    const first = { ...request, request_id: 'lcm_slow', id: 31, client_ip: '198.51.100.31' }
+    const second = { ...request, request_id: 'lcm_fast', id: 32, client_ip: '198.51.100.32' }
+    let resolveSlow!: (value: typeof first) => void
+    const slowDetail = new Promise<typeof first>(resolve => { resolveSlow = resolve })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: [first, second], limit: 25, offset: 0, has_more: false }
+      if (path === '/api/v1/observability/requests/lcm_slow') return slowDetail
+      if (path === '/api/v1/observability/requests/lcm_fast') return second
+      return {}
+    })
+
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const triggers = wrapper.findAll('[data-testid="request-detail-trigger"]')
+    void triggers[0]!.trigger('click')
+    await triggers[1]!.trigger('click')
+    await flushPromises()
+    resolveSlow(first)
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('198.51.100.32')
+    expect(document.body.textContent).not.toContain('198.51.100.31')
   })
 
   it('paginates bounded history and handles empty and API error states', async () => {
