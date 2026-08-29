@@ -5,6 +5,7 @@ const router = useRouter()
 const originalID = computed(() => String(route.params.id || ''))
 const busy = ref(false)
 const loading = ref(true)
+const loaded = ref(false)
 const error = ref('')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 const form = reactive({
@@ -29,6 +30,7 @@ onMounted(async () => {
       request_log_mode: instance.request_log_mode || 'metadata',
       options: { ...(options || {}) }
     })
+    loaded.value = true
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Instance'
   } finally {
@@ -88,13 +90,21 @@ async function submit() {
 </script>
 
 <template>
+  <div v-if="loading" class="space-y-4"><USkeleton class="h-12 w-full" /><USkeleton class="h-56 w-full" /></div>
+  <div v-else-if="!loaded" class="space-y-5">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <UPageHeader headline="CONTROL PLANE" title="Edit Instance" description="Configure one durable llama-server process. The slug is the exact OpenAI model ID and defaults from the Instance name." />
+      <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
+    </div>
+    <UAlert color="error" variant="subtle" :description="error" />
+  </div>
   <InstanceForm
+    v-else
     :form="form"
     title="Edit Instance"
     submit-label="Save Instance"
     :busy="busy"
     :error="error"
-    :loading="loading"
     @submit="submit"
   />
   <AppConfirmationModal ref="confirmation" />
