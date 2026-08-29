@@ -435,9 +435,13 @@ func (m *OIDCManager) resolveProvider(ctx context.Context, provider OIDCProvider
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&document); err != nil {
 			return resolvedOIDCProvider{}, fmt.Errorf("decode OIDC discovery: %w", err)
 		}
-		if document.Issuer != provider.Issuer {
+		if strings.TrimSuffix(document.Issuer, "/") != strings.TrimSuffix(provider.Issuer, "/") {
 			return resolvedOIDCProvider{}, errors.New("OIDC discovery issuer does not match configured issuer")
 		}
+		// OIDC issuer validation is exact. If discovery differs only by the
+		// optional trailing slash, trust the discovery document's canonical
+		// issuer so ID-token verification uses the exact value emitted by the IdP.
+		resolved.Issuer = document.Issuer
 		if resolved.AuthorizationEndpoint == "" { resolved.AuthorizationEndpoint = document.AuthorizationEndpoint }
 		if resolved.TokenEndpoint == "" { resolved.TokenEndpoint = document.TokenEndpoint }
 		if resolved.JWKSURL == "" { resolved.JWKSURL = document.JWKSURL }
