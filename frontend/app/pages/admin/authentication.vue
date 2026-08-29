@@ -43,6 +43,8 @@ const manager = useManager()
 const loading = ref(true)
 const savingSettings = ref(false)
 const providerBusy = ref('')
+const providerTestMessage = ref('')
+const providerTestError = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
 const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, external_url: '' })
@@ -58,6 +60,8 @@ function emptyProvider(): ProviderForm {
 
 function setProviderForm(provider?: Provider) {
   editingProvider.value = provider || null
+  providerTestMessage.value = ''
+  providerTestError.value = ''
   Object.assign(providerForm, provider ? {
     name: provider.name,
     enabled: provider.enabled,
@@ -123,6 +127,20 @@ function providerPayload() {
     authorization_endpoint: providerForm.authorization_endpoint,
     token_endpoint: providerForm.token_endpoint,
     jwks_url: providerForm.jwks_url
+  }
+}
+
+async function testProviderForm() {
+  providerBusy.value = 'draft-test'
+  providerTestMessage.value = ''
+  providerTestError.value = ''
+  try {
+    await manager.request('/api/v1/admin/auth/providers/test', { method: 'POST', body: providerPayload() })
+    providerTestMessage.value = 'Provider configuration test passed.'
+  } catch (error: any) {
+    providerTestError.value = error?.data?.error || error?.message || 'Provider configuration test failed'
+  } finally {
+    providerBusy.value = ''
   }
 }
 
@@ -244,6 +262,8 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
     <UModal v-model:open="providerModalOpen" :title="editingProvider ? 'Edit OIDC provider' : 'Add OIDC provider'">
       <template #body>
         <div class="space-y-4">
+          <UAlert v-if="providerTestError" color="error" variant="subtle" :description="providerTestError" />
+          <UAlert v-else-if="providerTestMessage" color="success" variant="subtle" :description="providerTestMessage" />
           <UFormField label="Display name"><UInput v-model="providerForm.name" class="w-full" /></UFormField>
           <USwitch v-model="providerForm.enabled" label="Enabled" />
           <UFormField label="Issuer URL"><UInput v-model="providerForm.issuer" class="w-full" placeholder="https://id.example.com/application/o/manager/" /></UFormField>
@@ -261,6 +281,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
       <template #footer>
         <div class="flex w-full justify-end gap-2">
           <UButton color="neutral" variant="soft" @click="providerModalOpen = false">Cancel</UButton>
+          <UButton v-if="!editingProvider" color="neutral" variant="soft" :loading="providerBusy === 'draft-test'" @click="testProviderForm">Test configuration</UButton>
           <UButton :loading="providerBusy === (editingProvider?.id || 'new')" @click="saveProvider">Save provider</UButton>
         </div>
       </template>
