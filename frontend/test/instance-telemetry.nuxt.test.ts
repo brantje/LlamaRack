@@ -138,6 +138,7 @@ describe('per-Instance runtime telemetry', () => {
     const manager = resetManager()
     manager.runtimes.value = { m1: [{ instance_id: 'coder', model_id: 'm1', state: 'READY', pid: 42 }] }
     manager.runtimeTelemetry.value = { coder: telemetry() }
+    sessionStorage.setItem('llamacpp-manager.instances.view', 'cards')
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await flushPromises()
     const card = wrapper.get('[data-testid="instance-card"]')
