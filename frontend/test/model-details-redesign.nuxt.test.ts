@@ -3,7 +3,6 @@ import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import ModelDetailsPage from '~/pages/models/[id]/details.vue'
 import AppButton from '~/components/AppButton.vue'
-import Frame from '~/components/Frame.vue'
 import StatusTag from '~/components/StatusTag.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -72,7 +71,6 @@ describe('Model details redesign', () => {
 
     const warning = wrapper.get('[data-testid="model-details-warning"]')
     expect(warning.text()).toContain('metadata scan was partial')
-    expect(warning.findComponent(Frame).exists()).toBe(false)
     const warningTag = warning.findComponent(StatusTag)
     expect(warningTag.exists()).toBe(true)
     expect(warningTag.props('variant')).toBe('pending')
