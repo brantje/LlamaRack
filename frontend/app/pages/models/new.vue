@@ -1,11 +1,46 @@
 <script setup lang="ts">
-type AvailableGGUF = { path: string; name: string; total_bytes: number; quantization?: string; suggested_options?: Record<string, string> }
+type AvailableGGUF = {
+  path: string
+  name: string
+  total_bytes: number
+  modified_at?: string
+  quantization?: string
+  suggested_options?: Record<string, string>
+}
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
 type HFFile = { path: string; size: number; oid?: string }
-type HFDependency = { kind: string; name: string; quantization?: string; total_bytes: number; files: HFFile[] }
-type HFArtifact = { id: string; name: string; quantization?: string; model_bytes: number; total_bytes: number; shard_count: number; expected_shards: number; complete: boolean; files: HFFile[]; dependencies?: HFDependency[] }
-type ModelInspection = HFArtifact & { model_name?: string; architecture?: string; context_length?: number; gguf_version?: number; metadata_count?: number; warning?: string; suggested_options?: Record<string, string> }
+type HFDependency = {
+  kind: string
+  name: string
+  quantization?: string
+  total_bytes: number
+  files: HFFile[]
+  option_path?: string
+}
+type HFArtifact = {
+  id: string
+  name: string
+  quantization?: string
+  model_bytes: number
+  total_bytes: number
+  shard_count: number
+  expected_shards: number
+  complete: boolean
+  files: HFFile[]
+  dependencies?: HFDependency[]
+}
+type ModelInspection = HFArtifact & {
+  model_name?: string
+  architecture?: string
+  context_length?: number
+  gguf_version?: number
+  metadata_count?: number
+  warning?: string
+  suggested_options?: Record<string, string>
+  dependency_candidates?: HFDependency[]
+}
 type HFDetail = { id: string; revision: string; artifacts: HFArtifact[] }
+type CompanionDefinition = { key: 'mmproj' | 'spec-draft-model'; kind: 'mmproj' | 'mtp'; title: string; flag: string }
 
 const manager = useManager()
 const router = useRouter()
@@ -26,9 +61,16 @@ const autoSuggestedOptions = ref<Record<string, string>>({})
 const localInspection = ref<ModelInspection | null>(null)
 const remoteDetail = ref<HFDetail | null>(null)
 const remoteArtifact = ref<HFArtifact | null>(null)
+const overridesEditor = ref<{ addOption: () => void } | null>(null)
 const remoteRepo = computed(() => typeof route.query.repo === 'string' ? route.query.repo.trim() : '')
 const remoteArtifactID = computed(() => typeof route.query.artifact === 'string' ? route.query.artifact.trim() : '')
 const remoteMode = computed(() => Boolean(remoteRepo.value && remoteArtifactID.value))
+
+const companionDefinitions: CompanionDefinition[] = [
+  { key: 'mmproj', kind: 'mmproj', title: 'Vision projector', flag: '--mmproj' },
+  { key: 'spec-draft-model', kind: 'mtp', title: 'MTP draft model', flag: '--spec-draft-model' }
+]
+const companionOptionKeys = ['mmproj', 'spec-draft-model', 'spec-type']
 
 const form = reactive({
   gguf_path: '',
@@ -53,33 +95,7 @@ function ggufCapabilities(file: AvailableGGUF) {
   return capabilities
 }
 
-const ggufItems = computed(() => availableGGUFs.value.map(file => {
-  const details = [file.quantization, ...ggufCapabilities(file)].filter(Boolean)
-  return {
-    label: `${file.path}${details.length ? ` · ${details.join(' · ')}` : ''}`,
-    value: file.path
-  }
-}))
-const ggufPlaceholder = computed(() => scanning.value
-  ? 'Scanning model folder…'
-  : availableGGUFs.value.length ? 'Select GGUF' : 'No unregistered GGUF files found')
 const selectedGGUF = computed(() => availableGGUFs.value.find(file => file.path === form.gguf_path) || null)
-const detectedHelpers = computed(() => {
-  const dependencies = remoteMode.value
-    ? (remoteArtifact.value?.dependencies || [])
-    : (localInspection.value?.dependencies || [])
-  if (dependencies.length) {
-    return dependencies.map(dependency => {
-      const label = dependency.kind === 'mmproj' ? 'Vision projector' : dependency.kind === 'mtp' ? 'MTP draft model' : dependency.kind
-      return `${label}: ${dependency.name}`
-    })
-  }
-  const options = localInspection.value?.suggested_options || selectedGGUF.value?.suggested_options || {}
-  const helpers: string[] = []
-  if (options.mmproj) helpers.push(`Vision projector: ${filename(options.mmproj)}`)
-  if (options['spec-draft-model']) helpers.push(`MTP draft model: ${filename(options['spec-draft-model'])}`)
-  return helpers
-})
 const submitDisabled = computed(() => {
   if (busy.value || scanning.value || remoteLoading.value) return true
   if (remoteMode.value ? !remoteArtifact.value : !form.gguf_path) return true
@@ -101,11 +117,25 @@ function capitalizeFirst(value: string) {
 }
 function formatBytes(value: number) {
   if (!value) return 'Unknown size'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
   let amount = value
   let index = 0
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++ }
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
+}
+function formatModified(value?: string) {
+  if (!value) return 'Unknown'
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return 'Unknown'
+  const delta = Math.max(0, Date.now() - timestamp)
+  const minutes = Math.floor(delta / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(timestamp).toLocaleDateString()
 }
 function remoteDefaultName() {
   const repoName = remoteRepo.value.split('/').pop() || remoteRepo.value
@@ -133,6 +163,97 @@ function applyAutoSuggestedOptions(suggested: Record<string, string>) {
   }
   form.options = next
   autoSuggestedOptions.value = applied
+}
+
+function dependencyFor(definition: CompanionDefinition) {
+  const dependencies = remoteMode.value ? (remoteArtifact.value?.dependencies || []) : (localInspection.value?.dependencies || [])
+  return dependencies.find(dependency => dependency.kind === definition.kind) || null
+}
+
+function candidateList(definition: CompanionDefinition) {
+  if (remoteMode.value) return []
+  const candidates = (localInspection.value?.dependency_candidates || []).filter(candidate => candidate.kind === definition.kind)
+  if (candidates.length) return candidates
+  const selected = dependencyFor(definition)
+  const optionPath = localInspection.value?.suggested_options?.[definition.key] || selectedGGUF.value?.suggested_options?.[definition.key]
+  if (!selected || !optionPath) return []
+  return [{ ...selected, option_path: optionPath }]
+}
+
+function detectedCompanionPath(definition: CompanionDefinition) {
+  if (remoteMode.value) return ''
+  return localInspection.value?.suggested_options?.[definition.key]
+    || selectedGGUF.value?.suggested_options?.[definition.key]
+    || dependencyFor(definition)?.option_path
+    || ''
+}
+
+function companionAvailable(definition: CompanionDefinition) {
+  if (remoteMode.value) return Boolean(dependencyFor(definition))
+  return Boolean(detectedCompanionPath(definition) || candidateList(definition).length)
+}
+
+function companionState(definition: CompanionDefinition): 'detected' | 'disabled' | 'none' {
+  if (!companionAvailable(definition)) return 'none'
+  if (Object.prototype.hasOwnProperty.call(form.options, definition.key) && form.options[definition.key] === '') return 'disabled'
+  return 'detected'
+}
+
+function companionValue(definition: CompanionDefinition) {
+  if (Object.prototype.hasOwnProperty.call(form.options, definition.key)) return form.options[definition.key] || ''
+  if (remoteMode.value) return dependencyFor(definition)?.files?.[0]?.path || dependencyFor(definition)?.name || ''
+  return detectedCompanionPath(definition)
+}
+
+function activeCandidate(definition: CompanionDefinition) {
+  const value = companionValue(definition)
+  return candidateList(definition).find(candidate => candidate.option_path === value) || null
+}
+
+function companionDisplayName(definition: CompanionDefinition) {
+  return activeCandidate(definition)?.name
+    || dependencyFor(definition)?.name
+    || filename(companionValue(definition))
+}
+
+function companionSize(definition: CompanionDefinition) {
+  return activeCandidate(definition)?.total_bytes || dependencyFor(definition)?.total_bytes || 0
+}
+
+function disableCompanion(definition: CompanionDefinition) {
+  const next = { ...form.options, [definition.key]: '' }
+  if (definition.kind === 'mtp') next['spec-type'] = ''
+  form.options = next
+}
+
+function enableCompanion(definition: CompanionDefinition) {
+  const next = { ...form.options }
+  if (remoteMode.value) {
+    delete next[definition.key]
+    if (definition.kind === 'mtp') delete next['spec-type']
+  } else {
+    const selected = dependencyFor(definition)
+    const candidate = candidateList(definition).find(item => item.name === selected?.name) || candidateList(definition)[0]
+    const path = candidate?.option_path || detectedCompanionPath(definition)
+    if (path) next[definition.key] = path
+    else delete next[definition.key]
+    if (definition.kind === 'mtp') next['spec-type'] = 'draft-mtp'
+  }
+  form.options = next
+}
+
+function chooseCompanionCandidate(definition: CompanionDefinition, candidate: HFDependency) {
+  if (!candidate.option_path) return
+  const next = { ...form.options, [definition.key]: candidate.option_path }
+  if (definition.kind === 'mtp') next['spec-type'] = 'draft-mtp'
+  form.options = next
+}
+
+function setCompanionValue(definition: CompanionDefinition, value: unknown) {
+  if (remoteMode.value) return
+  const next = { ...form.options, [definition.key]: String(value || '') }
+  if (definition.kind === 'mtp' && next[definition.key]) next['spec-type'] = 'draft-mtp'
+  form.options = next
 }
 
 watch(() => form.name, (name) => {
@@ -277,73 +398,192 @@ async function createModel() {
         :title="remoteMode ? 'Launch Hugging Face model' : 'Add model'"
         :description="remoteMode ? 'Configure the Model and its first Instance now. The Instance stays in Downloading state until the selected GGUF is ready.' : 'Register a GGUF model and optionally bootstrap its first addressable Instance.'"
       />
-      <UButton :to="remoteMode ? '/discover' : '/models'" color="neutral" variant="soft">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</UButton>
+      <AppButton :to="remoteMode ? '/discover' : '/models'" intent="secondary">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</AppButton>
     </div>
 
-    <UCard class="max-w-4xl">
-      <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
-      <UForm :state="form" class="space-y-6" @submit="createModel">
+    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+
+    <UForm :state="form" class="space-y-5" @submit="createModel">
+      <Frame class="p-5" data-testid="model-form-gguf">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">ARTIFACT</p>
+            <h2 class="mt-1 text-base font-semibold">GGUF file</h2>
+          </div>
+          <AppButton v-if="!remoteMode" type="button" intent="secondary" size="xs" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
+        </div>
+
         <template v-if="remoteMode">
-          <UFormField label="Hugging Face artifact">
-            <div class="rounded-lg border border-default p-4">
-              <div v-if="remoteLoading" class="space-y-2"><USkeleton class="h-5 w-2/3" /><USkeleton class="h-4 w-1/3" /></div>
-              <div v-else-if="remoteArtifact" class="space-y-1">
-                <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ remoteRepo }}</span><UBadge v-if="remoteArtifact.quantization" color="primary" variant="subtle">{{ remoteArtifact.quantization }}</UBadge></div>
-                <p class="font-mono text-xs text-muted">{{ remoteArtifact.name }}</p>
-                <p class="text-xs text-muted">{{ formatBytes(remoteArtifact.total_bytes) }} total<span v-if="remoteArtifact.dependencies?.length"> including detected helpers</span></p>
+          <div class="border border-[var(--color-divider)] p-4" data-testid="remote-artifact-summary">
+            <div v-if="remoteLoading" class="space-y-2"><USkeleton class="h-5 w-2/3" /><USkeleton class="h-4 w-1/3" /></div>
+            <div v-else-if="remoteArtifact" class="space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold">{{ remoteRepo }}</span>
+                <StatusTag v-if="remoteArtifact.quantization" variant="neutral">{{ remoteArtifact.quantization }}</StatusTag>
+              </div>
+              <p class="break-all font-mono text-[12.5px]">{{ remoteArtifact.name }}</p>
+              <p class="text-[10.5px] text-[var(--neutral-700)]">{{ formatBytes(remoteArtifact.total_bytes) }} total<span v-if="remoteArtifact.dependencies?.length"> · including detected helpers</span></p>
+            </div>
+          </div>
+        </template>
+
+        <div v-else data-testid="gguf-select" class="border border-[var(--color-divider)]">
+          <div v-if="scanning" class="px-4 py-6 text-sm text-[var(--neutral-700)]">Scanning model folder…</div>
+          <div v-else-if="!availableGGUFs.length" class="px-4 py-6 text-sm text-[var(--neutral-700)]">No unregistered GGUF files found</div>
+          <label
+            v-for="file in availableGGUFs"
+            v-else
+            :key="file.path"
+            class="flex cursor-pointer items-start gap-3 border-b border-[var(--color-divider)] px-4 py-3 last:border-b-0"
+            :class="form.gguf_path === file.path ? 'bg-[var(--accent-100)]' : 'bg-transparent'"
+            data-testid="gguf-option"
+          >
+            <input v-model="form.gguf_path" type="radio" name="gguf_path" :value="file.path" class="mt-1">
+            <span class="min-w-0 flex-1">
+              <span class="block break-all font-mono text-[12.5px]">{{ file.path }}</span>
+              <span class="mt-1 block text-[10.5px] text-[var(--neutral-700)]">{{ formatBytes(file.total_bytes) }} · modified {{ formatModified(file.modified_at) }}</span>
+            </span>
+            <span v-if="ggufCapabilities(file).length" class="flex shrink-0 flex-wrap justify-end gap-1">
+              <span v-for="capability in ggufCapabilities(file)" :key="capability" class="border border-[var(--color-divider)] px-2 py-1 text-[9.5px] font-semibold">{{ capability }}</span>
+            </span>
+          </label>
+        </div>
+        <p v-if="!remoteMode" class="mt-2 text-xs text-[var(--neutral-700)]">Already-registered GGUF files and detected helper GGUFs are hidden.</p>
+      </Frame>
+
+      <Frame class="p-5" data-testid="detected-gguf-helpers">
+        <div class="mb-4">
+          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">COMPANIONS</p>
+          <h2 class="mt-1 text-base font-semibold">Companion files</h2>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Scanned alongside the selected GGUF · options filled automatically.</p>
+        </div>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div
+            v-for="definition in companionDefinitions"
+            :key="definition.key"
+            class="border p-4"
+            :class="companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'"
+            :data-testid="`companion-${definition.kind}`"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="font-semibold">{{ definition.title }}</p>
+                <p class="mt-1 font-mono text-[11px] text-[var(--neutral-700)]">{{ definition.flag }}</p>
+              </div>
+              <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">Auto-detected</StatusTag>
+              <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">Ignored</StatusTag>
+              <StatusTag v-else variant="neutral">None found</StatusTag>
+            </div>
+
+            <template v-if="companionState(definition) === 'detected'">
+              <div class="mt-4 flex items-center gap-2">
+                <UInput
+                  :model-value="companionValue(definition)"
+                  class="min-w-0 flex-1 font-mono"
+                  :readonly="remoteMode"
+                  :aria-label="`${definition.title} path`"
+                  @update:model-value="setCompanionValue(definition, $event)"
+                />
+                <AppButton type="button" intent="ghost" size="xs" @click="disableCompanion(definition)">Disable</AppButton>
+              </div>
+              <p class="mt-2 text-[10.5px] text-[var(--neutral-700)]">{{ definition.title }}: {{ companionDisplayName(definition) }}<span v-if="companionSize(definition)"> · {{ formatBytes(companionSize(definition)) }}</span></p>
+            </template>
+
+            <template v-else-if="companionState(definition) === 'disabled'">
+              <div class="mt-4 flex items-center gap-2">
+                <UInput model-value="" class="min-w-0 flex-1 font-mono" placeholder="value cleared" readonly />
+                <AppButton type="button" intent="ghost" size="xs" @click="enableCompanion(definition)">Enable</AppButton>
+              </div>
+              <p class="mt-2 text-[10.5px] text-[var(--neutral-700)]">value cleared — the flag is not passed</p>
+            </template>
+
+            <p v-else class="mt-4 text-xs text-[var(--neutral-700)]">No compatible {{ definition.title.toLowerCase() }} was detected in this artifact scope.</p>
+
+            <div v-if="candidateList(definition).length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-3">
+              <p class="mb-2 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  v-for="candidate in candidateList(definition)"
+                  :key="candidate.option_path || candidate.name"
+                  type="button"
+                  class="border border-[var(--color-divider)] px-2 py-1 font-mono text-[10.5px]"
+                  :class="activeCandidate(definition)?.option_path === candidate.option_path ? 'bg-[var(--accent-100)]' : 'bg-transparent'"
+                  :data-testid="`companion-candidate-${definition.kind}`"
+                  @click="chooseCompanionCandidate(definition, candidate)"
+                >{{ candidate.quantization || candidate.name }}</button>
               </div>
             </div>
+          </div>
+        </div>
+      </Frame>
+
+      <Frame class="p-5" data-testid="model-form-identity">
+        <div class="mb-4">
+          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">IDENTITY</p>
+          <h2 class="mt-1 text-base font-semibold">Model identity</h2>
+        </div>
+        <div class="grid gap-5 md:grid-cols-2">
+          <UFormField label="Model name" name="name" required>
+            <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
           </UFormField>
-        </template>
-        <UFormField v-else label="GGUF file" name="gguf_path" description="Already-registered GGUF files and detected helper GGUFs are hidden." required>
-          <USelectMenu v-model="form.gguf_path" data-testid="gguf-select" class="w-full" :items="ggufItems" label-key="label" value-key="value" :placeholder="ggufPlaceholder" :disabled="scanning || !availableGGUFs.length" required />
-        </UFormField>
-        <UAlert
-          v-if="detectedHelpers.length"
-          data-testid="detected-gguf-helpers"
-          color="success"
-          variant="subtle"
-          title="Detected llama.cpp helpers"
-          :description="remoteMode ? `${detectedHelpers.join(' · ')}. These helpers will be downloaded and attached automatically.` : `${detectedHelpers.join(' · ')}. Their model-level llama.cpp options were filled automatically.`"
-        />
-        <UFormField label="Model name" name="name" required>
-          <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
-        </UFormField>
-        <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact. GGUF metadata is used automatically when available; the value remains editable.">
-          <UInputNumber v-model="form.context_length" data-testid="context-capability" class="w-full" :min="0" :step="1" @update:model-value="contextEdited = true" />
-          <p v-if="inspectingMetadata" class="mt-1 text-xs text-muted">Reading GGUF metadata…</p>
-          <p v-else-if="detectedArchitecture && form.context_length > 0 && !metadataWarning" class="mt-1 text-xs text-muted">Detected from {{ detectedArchitecture }} GGUF metadata.</p>
-        </UFormField>
-        <UAlert v-if="metadataWarning" data-testid="metadata-warning" color="warning" variant="subtle" title="GGUF metadata could not be detected" :description="metadataWarning" />
+          <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact. The value remains editable.">
+            <UInputNumber v-model="form.context_length" data-testid="context-capability" class="w-full" :min="0" :step="1" @update:model-value="contextEdited = true" />
+            <p v-if="inspectingMetadata" class="mt-1 text-xs text-[var(--neutral-700)]">Reading GGUF metadata…</p>
+            <p v-else-if="detectedArchitecture && form.context_length > 0 && !metadataWarning" class="mt-1 text-xs text-[var(--neutral-700)]">Detected from {{ detectedArchitecture }} GGUF metadata.</p>
+          </UFormField>
+        </div>
+        <div v-if="metadataWarning" data-testid="metadata-warning" class="mt-4 flex flex-wrap items-start gap-3 border border-[var(--color-divider)] p-3">
+          <StatusTag variant="pending">Metadata warning</StatusTag>
+          <p class="min-w-0 flex-1 text-sm text-[var(--neutral-800)]">{{ metadataWarning }}</p>
+        </div>
+      </Frame>
 
-        <USeparator label="Model llama.cpp defaults" />
-        <LlamaCppOptionsEditor v-model="form.options" scope="model" />
+      <Frame class="p-5" data-testid="model-form-defaults">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
+            <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>
+            <p class="mt-1 text-xs text-[var(--neutral-700)]">Reusable across every Instance of this Model.</p>
+          </div>
+          <AppButton type="button" intent="secondary" size="xs" @click="overridesEditor?.addOption()">Add option</AppButton>
+        </div>
+        <ModelOverridesEditor ref="overridesEditor" v-model="form.options" :exclude-keys="companionOptionKeys" :show-add-button="false" />
+      </Frame>
 
-        <USeparator label="First Instance" />
-        <UAlert v-if="remoteMode" color="primary" variant="subtle" title="Instance is created immediately" description="It is kept disabled internally while downloading, shown as Downloading in Instances, then enabled as soon as the GGUF is complete." />
+      <Frame class="p-5" data-testid="model-form-first-instance">
+        <div class="mb-4">
+          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BOOTSTRAP</p>
+          <h2 class="mt-1 text-base font-semibold">First Instance</h2>
+        </div>
+        <div v-if="remoteMode" class="mb-4 border border-[var(--color-divider)] p-3 text-sm text-[var(--neutral-800)]">
+          The Instance is created immediately and shown as Downloading until the GGUF completes.
+        </div>
         <UCheckbox v-else v-model="createFirstInstance" data-testid="create-first-instance" label="Create a first Instance" />
-        <div v-if="createFirstInstance" class="space-y-4 rounded-lg border border-default p-4">
-          <UFormField label="Instance name" name="first_instance.name" description="Defaults from the Model name while first-Instance creation is enabled." required>
-            <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
-          </UFormField>
-          <UFormField label="Instance slug" name="first_instance.slug" description="Exact OpenAI model ID. Defaults from the Instance name but can be customized." required>
-            <UInput v-model="form.first_instance.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="firstInstanceSlugEdited = true" />
-          </UFormField>
-          <div class="space-y-3">
+
+        <div v-if="createFirstInstance" class="mt-4 space-y-4 border border-[var(--color-divider)] p-4">
+          <div class="grid gap-4 md:grid-cols-2">
+            <UFormField label="Instance name" name="first_instance.name" description="Defaults from the Model name while first-Instance creation is enabled." required>
+              <UInput v-model="form.first_instance.name" data-testid="instance-name" class="w-full" placeholder="Qwen Coding 32B" required />
+            </UFormField>
+            <UFormField label="Instance slug" name="first_instance.slug" description="Exact OpenAI model ID. Defaults from the Instance name but can be customized." required>
+              <UInput v-model="form.first_instance.slug" data-testid="instance-slug" class="w-full font-mono" required @update:model-value="firstInstanceSlugEdited = true" />
+            </UFormField>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
             <UCheckbox v-model="form.first_instance.always_on" data-testid="always-on" label="Always On" description="Keep this Instance running whenever resources permit." />
             <UCheckbox v-model="form.first_instance.autoload_enabled" data-testid="autoload-enabled" label="Autoload on request" />
             <UCheckbox v-model="form.first_instance.eviction_enabled" data-testid="eviction-enabled" label="Allow resource-pressure eviction" description="Allow the manager to stop this Instance when RAM/VRAM is needed for another Instance." />
+            <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" :label="remoteMode ? 'Launch this Instance when the download completes' : 'Launch this Instance after creation'" />
           </div>
-          <UCheckbox v-model="form.first_instance.start" data-testid="start-instance" :label="remoteMode ? 'Launch this Instance when the download completes' : 'Launch this Instance after creation'" />
-          <p class="text-xs text-muted">Advanced Instance settings such as priority, GPU placement, tensor split, idle timeout and instance-level llama.cpp overrides are configured from Instances.</p>
+          <p class="text-xs text-[var(--neutral-700)]">Advanced Instance settings such as priority, GPU placement, tensor split, idle timeout and instance-level llama.cpp overrides are configured from Instances.</p>
         </div>
+      </Frame>
 
-        <div class="flex flex-wrap justify-end gap-2 pt-2">
-          <UButton v-if="!remoteMode" type="button" color="neutral" variant="soft" :loading="scanning" @click="scanGGUFs">Rescan</UButton>
-          <UButton :to="remoteMode ? '/discover' : '/models'" color="neutral" variant="soft">Cancel</UButton>
-          <UButton type="submit" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</UButton>
-        </div>
-      </UForm>
-    </UCard>
+      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-divider)] pt-5">
+        <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
+        <AppButton :to="remoteMode ? '/discover' : '/models'" intent="secondary">Cancel</AppButton>
+        <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
+      </div>
+    </UForm>
   </div>
 </template>
