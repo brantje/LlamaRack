@@ -77,6 +77,8 @@ function callTypeLabel(value?: string) {
   return ({ chat_completion: 'Chat Completion', completion: 'Completion', response: 'Responses', embedding: 'Embedding' } as Record<string, string>)[value || ''] || '—'
 }
 function requestKey(item: RequestRecord) { return item.api_key ? item.api_key.name || item.api_key.prefix || item.api_key.id || 'API key' : '—' }
+function isPending(item: RequestRecord) { return item.finished_at === 0 || !item.result || item.result === 'pending' }
+function resultLabel(item: RequestRecord) { return isPending(item) ? 'pending' : String(item.status_code || item.result) }
 function formatDuration(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '—'
   return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(value >= 10_000 ? 1 : 2)} s`
@@ -92,7 +94,7 @@ function listPath() {
   if (since) query.set('since', String(since))
   if (traceID.value) query.set('trace_id', traceID.value)
   for (const key of ['instance_id', 'endpoint', 'api_key_id', 'result', 'status_code', 'streaming', 'search'] as const) {
-    const value = filters[key].trim()
+    const value = String(filters[key] ?? '').trim()
     if (value) query.set(key, value)
   }
   return `/api/v1/observability/requests?${query}`
@@ -191,9 +193,9 @@ onMounted(async () => {
       <div v-else class="overflow-x-auto">
         <UTable :data="requests" :columns="columns" class="min-w-[1200px]">
           <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs">{{ formatTime(row.original.started_at) }}</span></template>
-          <template #result-cell="{ row }"><UBadge :color="row.original.result === 'success' ? 'success' : 'error'" variant="subtle" size="sm">{{ row.original.status_code || row.original.result }}</UBadge></template>
+          <template #result-cell="{ row }"><UBadge :color="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'success' : 'error'" variant="subtle" size="sm">{{ resultLabel(row.original) }}</UBadge></template>
           <template #call_type-cell="{ row }"><span class="text-xs">{{ callTypeLabel(row.original.call_type) }}</span></template>
-          <template #request_id-cell="{ row }"><UButton data-testid="request-detail-trigger" color="neutral" variant="link" size="xs" class="font-mono" @click="selectRequest(row.original.request_id)">{{ row.original.request_id }}</UButton></template>
+          <template #request_id-cell="{ row }"><UButton v-if="row.original.request_id" data-testid="request-detail-trigger" color="neutral" variant="link" size="xs" class="font-mono" @click="selectRequest(row.original.request_id)">{{ row.original.request_id }}</UButton><span v-else>—</span></template>
           <template #trace_id-cell="{ row }"><NuxtLink v-if="row.original.trace_id" class="font-mono text-xs text-primary" :to="`/logs?trace_id=${encodeURIComponent(row.original.trace_id)}`">{{ row.original.trace_id }}</NuxtLink><span v-else>—</span></template>
           <template #instance_id-cell="{ row }"><span class="font-mono text-xs">{{ row.original.instance_id || '—' }}</span></template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
@@ -212,7 +214,12 @@ onMounted(async () => {
           <USkeleton v-if="detailLoading" class="h-40 w-full" />
           <UAlert v-else-if="detailError" color="error" variant="subtle" title="Request details unavailable" :description="detailError" />
           <template v-else-if="detail">
-            <UAlert :color="detail.result === 'error' ? 'error' : 'success'" variant="subtle" :title="`HTTP ${detail.status_code || 'error'}`" :description="detail.result === 'error' ? (detail.error || 'The request failed.') : 'The request completed successfully.'" />
+            <UAlert
+              :color="isPending(detail) ? 'neutral' : detail.result === 'error' ? 'error' : 'success'"
+              variant="subtle"
+              :title="isPending(detail) ? 'Request pending' : detail.status_code ? `HTTP ${detail.status_code}` : detail.result === 'error' ? 'Request failed' : 'Request completed'"
+              :description="isPending(detail) ? 'The request is still in progress.' : detail.result === 'error' ? (detail.error || 'The request failed.') : 'The request completed successfully.'"
+            />
             <section><h3 class="mb-2 text-sm font-semibold">Request identity</h3><dl class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2 text-sm"><dt class="text-muted">Request ID</dt><dd class="break-all font-mono text-xs">{{ detail.request_id }}</dd><dt class="text-muted">Trace ID</dt><dd class="break-all font-mono text-xs">{{ detail.trace_id || '—' }}</dd><dt class="text-muted">Call type</dt><dd>{{ callTypeLabel(detail.call_type) }}</dd><dt class="text-muted">Instance</dt><dd class="font-mono text-xs">{{ detail.instance_id || 'Unresolved' }}</dd><dt class="text-muted">Endpoint</dt><dd class="font-mono text-xs">{{ detail.endpoint }}</dd></dl></section>
             <USeparator />
             <section><h3 class="mb-2 text-sm font-semibold">Timings & tokens</h3><div class="grid grid-cols-2 gap-3 text-sm"><div>Duration <strong>{{ formatDuration(detail.duration_ms) }}</strong></div><div>TTFT <strong>{{ formatDuration(detail.ttft_ms) }}</strong></div><div>Tokens <strong>{{ detail.total_tokens }}</strong></div><div>Generation <strong>{{ detail.generation_tokens_per_second ? `${detail.generation_tokens_per_second.toFixed(1)} tok/s` : '—' }}</strong></div></div></section>
