@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-type UserRow = { id: number; username: string; enabled: boolean; created_at: number; last_login_at?: number; active_sessions: number }
-type SessionRow = { id: string; user_id: number; created_at: number; expires_at: number; remote_address: string; user_agent: string; current?: boolean }
+type UserRow = { id: number; username: string; enabled: boolean; created_at: number; last_login_at?: number; bootstrap_admin?: boolean }
 
 const manager = useManager()
 const users = ref<UserRow[]>([])
-const sessions = ref<SessionRow[]>([])
 const error = ref('')
 const success = ref('')
 const creating = ref(false)
+const createOpen = ref(false)
 const newUser = reactive({ username: '', password: '', passwordConfirmation: '' })
 const resetOpen = ref(false)
-const sessionsOpen = ref(false)
 const selectedUser = ref<UserRow | null>(null)
 const resetPassword = ref('')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
@@ -22,36 +20,27 @@ const columns: TableColumn<UserRow>[] = [
   { accessorKey: 'enabled', header: 'Status' },
   { accessorKey: 'created_at', header: 'Created' },
   { accessorKey: 'last_login_at', header: 'Last login' },
-  { accessorKey: 'active_sessions', header: 'Sessions' },
-  { id: 'actions', header: '' }
+  { id: 'actions', header: 'Actions' }
 ]
 
 const canCreate = computed(() => newUser.username.trim().length >= 2 && newUser.password.length >= 10 && newUser.password === newUser.passwordConfirmation)
 
-function dateTime(value?: number) {
-  return value ? new Date(value * 1000).toLocaleString() : 'Never'
-}
-
-function clientLabel(userAgent: string) {
-  const ua = userAgent || ''
-  const browser = /Firefox\//.test(ua) ? 'Firefox' : /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Unknown client'
-  const platform = /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : ''
-  return platform && browser !== 'Unknown client' ? `${browser} on ${platform}` : browser
-}
+function dateTime(value?: number) { return value ? new Date(value * 1000).toLocaleString() : 'Never' }
 
 async function load() {
   if (!manager.user.value) return
   error.value = ''
-  try {
-    users.value = (await manager.request<UserRow[]>('/api/v1/users')) || []
-  } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to load users'
-  }
+  try { users.value = (await manager.request<UserRow[]>('/api/v1/users')) || [] }
+  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load users' }
 }
+watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
-watch(manager.user, user => {
-  if (user) void load()
-}, { immediate: true })
+function openCreate() {
+  newUser.username = ''
+  newUser.password = ''
+  newUser.passwordConfirmation = ''
+  createOpen.value = true
+}
 
 async function createUser() {
   error.value = ''
@@ -63,9 +52,7 @@ async function createUser() {
   creating.value = true
   try {
     await manager.request('/api/v1/users', { method: 'POST', body: { username: newUser.username, password: newUser.password } })
-    newUser.username = ''
-    newUser.password = ''
-    newUser.passwordConfirmation = ''
+    createOpen.value = false
     success.value = 'Management user created.'
     await load()
   } catch (value: any) {
@@ -93,22 +80,6 @@ async function toggleUser(user: UserRow) {
   }
 }
 
-async function deleteUser(user: UserRow) {
-  const confirmed = await confirmation.value?.request({
-    title: 'Delete user',
-    description: `Delete “${user.username}” and all of their sessions? This cannot be undone.`,
-    confirmLabel: 'Delete user',
-    color: 'error'
-  })
-  if (!confirmed) return
-  try {
-    await manager.request(`/api/v1/users/${user.id}`, { method: 'DELETE' })
-    await load()
-  } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to delete user'
-  }
-}
-
 function openReset(user: UserRow) {
   selectedUser.value = user
   resetPassword.value = ''
@@ -127,90 +98,54 @@ async function submitReset() {
     error.value = value?.data?.error || value?.message || 'Unable to reset password'
   }
 }
-
-async function openSessions(user: UserRow) {
-  selectedUser.value = user
-  error.value = ''
-  try {
-    sessions.value = (await manager.request<SessionRow[]>(`/api/v1/users/${user.id}/sessions`)) || []
-    sessionsOpen.value = true
-  } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to load sessions'
-  }
-}
-
-async function revokeSession(session: SessionRow) {
-  error.value = ''
-  try {
-    await manager.request(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
-    if (selectedUser.value) sessions.value = (await manager.request<SessionRow[]>(`/api/v1/users/${selectedUser.value.id}/sessions`)) || []
-    if (session.current) await manager.initialize()
-    else await load()
-  } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to revoke session'
-  }
-}
 </script>
 
 <template>
-  <div class="space-y-5">
-    <UPageHeader headline="ADMINISTRATION" title="Users" description="All local management users have the same full management access in v1. There are no roles or permission tiers." />
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="success" color="success" variant="subtle" :description="success" />
+  <AdminShell title="Users" description="Local management accounts with equivalent manager access.">
+    <template #actions><AppButton intent="primary" @click="openCreate">Add user</AppButton></template>
 
-    <UCard class="max-w-4xl">
-      <template #header><h2 class="text-xl font-bold">Create user</h2></template>
-      <UForm :state="newUser" class="grid gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_auto] xl:items-end" @submit="createUser">
-        <UFormField label="Username" required><UInput v-model="newUser.username" class="w-full" autocomplete="off" minlength="2" required /></UFormField>
-        <UFormField label="Password" required><UInput v-model="newUser.password" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField>
-        <UFormField label="Confirm password" required><UInput v-model="newUser.passwordConfirmation" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField>
-        <UButton type="submit" :loading="creating" :disabled="!canCreate">Create user</UButton>
-      </UForm>
-    </UCard>
+    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
+    <UAlert v-if="success" class="mb-5" color="success" variant="subtle" :description="success" />
 
-    <UCard>
-      <template #header><h2 class="text-xl font-bold">Management users</h2></template>
+    <Frame data-testid="admin-users-table">
       <UTable :data="users" :columns="columns">
         <template #username-cell="{ row }">
-          <div class="flex items-center gap-2"><span class="font-semibold">{{ row.original.username }}</span><UBadge v-if="row.original.id === manager.user.value?.id" color="primary" variant="subtle">You</UBadge></div>
+          <div>
+            <span class="text-[13.5px] font-semibold">{{ row.original.username }}</span>
+            <span v-if="row.original.bootstrap_admin" class="mt-0.5 block text-[10.5px] text-[var(--neutral-700)]">bootstrap admin</span>
+          </div>
         </template>
-        <template #enabled-cell="{ row }"><UBadge :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</UBadge></template>
-        <template #created_at-cell="{ row }">{{ dateTime(row.original.created_at) }}</template>
-        <template #last_login_at-cell="{ row }">{{ dateTime(row.original.last_login_at) }}</template>
-        <template #active_sessions-cell="{ row }">{{ row.original.active_sessions || 0 }}</template>
+        <template #enabled-cell="{ row }"><StatusTag :variant="row.original.enabled ? 'ready' : 'neutral'">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</StatusTag></template>
+        <template #created_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ dateTime(row.original.created_at) }}</span></template>
+        <template #last_login_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ dateTime(row.original.last_login_at) }}</span></template>
         <template #actions-cell="{ row }">
-          <div class="flex justify-end"><UFieldGroup>
-            <UButton color="neutral" variant="soft" size="sm" @click="openSessions(row.original)">Sessions</UButton>
-            <UButton color="neutral" variant="soft" size="sm" @click="openReset(row.original)">Reset password</UButton>
-            <UButton :color="row.original.enabled ? 'warning' : 'primary'" variant="soft" size="sm" @click="toggleUser(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</UButton>
-            <UButton color="error" variant="soft" size="sm" :disabled="row.original.id === manager.user.value?.id" @click="deleteUser(row.original)">Delete</UButton>
-          </UFieldGroup></div>
+          <div class="flex justify-end gap-1">
+            <AppButton intent="ghost" size="xs" @click="openReset(row.original)">Reset password</AppButton>
+            <AppButton intent="ghost" size="xs" @click="toggleUser(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
+          </div>
         </template>
       </UTable>
-      <UEmpty v-if="!users.length" variant="naked" title="No users" />
-    </UCard>
+      <div v-if="!users.length" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">No users</div>
+    </Frame>
 
-    <UModal v-model:open="resetOpen" :title="`Reset password${selectedUser ? ` for ${selectedUser.username}` : ''}`">
-      <template #body><UFormField label="New password" required><UInput v-model="resetPassword" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField><p class="mt-3 text-sm text-muted">Resetting a password revokes all sessions for that user.</p></template>
-      <template #footer><div class="flex w-full justify-end gap-2"><UButton color="neutral" variant="soft" @click="resetOpen = false">Cancel</UButton><UButton color="warning" :disabled="resetPassword.length < 10" @click="submitReset">Reset password</UButton></div></template>
-    </UModal>
+    <p class="mt-4 text-xs leading-5 text-[var(--neutral-700)]">Accounts are equivalent local management users. Inference API keys are managed separately under <NuxtLink to="/api" class="font-semibold text-[var(--accent-700)] hover:underline">API</NuxtLink> and are not owned by a user.</p>
 
-    <UModal v-model:open="sessionsOpen" :title="`Sessions${selectedUser ? ` for ${selectedUser.username}` : ''}`">
+    <UModal v-model:open="createOpen" title="Add user">
       <template #body>
-        <div v-if="sessions.length" class="divide-y divide-default">
-          <div v-for="session in sessions" :key="session.id" class="flex items-start justify-between gap-4 py-3">
-            <div class="min-w-0 text-sm">
-              <div class="flex flex-wrap items-center gap-2"><p class="font-semibold">{{ clientLabel(session.user_agent) }}</p><UBadge v-if="session.current" color="primary" variant="subtle">Current session</UBadge></div>
-              <p class="text-muted">{{ session.remote_address || 'Unknown address' }}</p>
-              <p class="text-muted">Created {{ dateTime(session.created_at) }} · expires {{ dateTime(session.expires_at) }}</p>
-            </div>
-            <UButton color="error" variant="soft" size="sm" @click="revokeSession(session)">Revoke</UButton>
-          </div>
-        </div>
-        <UEmpty v-else variant="naked" title="No active sessions" />
+        <UForm :state="newUser" class="space-y-4" @submit="createUser">
+          <UFormField label="Username" required><UInput v-model="newUser.username" class="w-full" autocomplete="off" minlength="2" required /></UFormField>
+          <UFormField label="Password" required><UInput v-model="newUser.password" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField>
+          <UFormField label="Confirm password" required><UInput v-model="newUser.passwordConfirmation" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField>
+          <div class="flex justify-end gap-2"><AppButton type="button" intent="secondary" @click="createOpen = false">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="creating" :disabled="!canCreate">Add user</AppButton></div>
+        </UForm>
       </template>
     </UModal>
 
+    <UModal v-model:open="resetOpen" :title="`Reset password${selectedUser ? ` for ${selectedUser.username}` : ''}`">
+      <template #body><UFormField label="New password" required><UInput v-model="resetPassword" class="w-full" type="password" minlength="10" autocomplete="new-password" required /></UFormField><p class="mt-3 text-sm text-[var(--neutral-700)]">Resetting a password revokes all sessions for that user.</p></template>
+      <template #footer><div class="flex w-full justify-end gap-2"><AppButton intent="secondary" @click="resetOpen = false">Cancel</AppButton><AppButton intent="primary" :disabled="resetPassword.length < 10" @click="submitReset">Reset password</AppButton></div></template>
+    </UModal>
+
     <AppConfirmationModal ref="confirmation" />
-  </div>
+  </AdminShell>
 </template>
