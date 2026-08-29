@@ -436,7 +436,7 @@ func callType(path string) string {
 }
 
 func resolveTraceID(r *http.Request, bodyTraceID string) string {
-	for _, value := range []string{r.Header.Get("X-LiteLLM-Trace-ID"), r.Header.Get("X-LiteLLM-Session-ID"), bodyTraceID} {
+	for _, value := range []string{r.Header.Get("X-LiteLLM-Trace-ID"), bodyTraceID} {
 		if traceID, ok := normalizeUUID(value); ok {
 			return traceID
 		}
@@ -752,7 +752,6 @@ func responseError(status int, body []byte) string {
 			if message, ok := errorValue["message"].(string); ok {
 				return sanitizeError(message)
 			}
-		}
 	}
 	return fmt.Sprintf("HTTP %d", status)
 }
