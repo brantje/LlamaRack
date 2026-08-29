@@ -9,9 +9,10 @@ import (
 	"sync"
 )
 
-const maxSessionRequestPages = 50
-
-var requestLogSchemaReady sync.Map
+var (
+	requestLogSchemaReady sync.Map
+	requestLogSchemaMu    sync.Mutex
+)
 
 // RequestLogRecord is the management/UI view of an inference request. It keeps
 // the existing request metrics while adding the LiteLLM-compatible session
@@ -36,6 +37,11 @@ type RequestLogDetail struct {
 // development, so this remains part of schema initialization instead of a
 // migration series.
 func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
+	if _, ok := requestLogSchemaReady.Load(s.db); ok {
+		return nil
+	}
+	requestLogSchemaMu.Lock()
+	defer requestLogSchemaMu.Unlock()
 	if _, ok := requestLogSchemaReady.Load(s.db); ok {
 		return nil
 	}
@@ -75,10 +81,8 @@ func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 }
 
 // UpdateRequestLogContext records grouping and model identity independently
-// from request completion. Calling it immediately after BeginCorrelatedRequest
-// lets failed requests retain a supplied session id; calling it again after
-// Instance resolution captures the model identity before the request can fail
-// during autoload/acquisition.
+// from request completion. Calling it after the gateway response retains a
+// supplied session id and captures the model identity that served the request.
 func (s *Service) UpdateRequestLogContext(ctx context.Context, requestID, sessionID, instanceID string) error {
 	if err := s.EnsureRequestLogSchema(ctx); err != nil {
 		return err
@@ -126,8 +130,8 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
-		c.session_id,c.model_id,c.model_name,
-		CASE WHEN c.session_id<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
+		COALESCE(c.session_id,''),COALESCE(c.model_id,''),COALESCE(c.model_name,''),
+		CASE WHEN COALESCE(c.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
 		FROM inference_requests r LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE 1=1`
 	var args []any
 	add := func(clause string, value any) { query += clause; args = append(args, value) }
@@ -252,8 +256,8 @@ func (s *Service) GetRequestLogByRequestID(ctx context.Context, requestID string
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body,
-		c.session_id,c.model_id,c.model_name,
-		CASE WHEN c.session_id<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
+		COALESCE(c.session_id,''),COALESCE(c.model_id,''),COALESCE(c.model_name,''),
+		CASE WHEN COALESCE(c.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
 		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE c.request_id=?`, requestID)
 	record, err := scanRequestLog(row)
 	if err != nil {
