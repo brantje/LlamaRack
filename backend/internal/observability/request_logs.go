@@ -1,0 +1,331 @@
+package observability
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+)
+
+const maxSessionRequestPages = 50
+
+var requestLogSchemaReady sync.Map
+
+// RequestLogRecord is the management/UI view of an inference request. It keeps
+// the existing request metrics while adding the LiteLLM-compatible session
+// grouping metadata and the model identity captured for the request.
+type RequestLogRecord struct {
+	RequestRecord
+	SessionID         string `json:"session_id,omitempty"`
+	SessionTotalCount int    `json:"session_total_count,omitempty"`
+	ModelID           string `json:"model_id,omitempty"`
+	ModelName         string `json:"model_name,omitempty"`
+}
+
+// RequestLogDetail exposes retained payloads only for the selected request.
+type RequestLogDetail struct {
+	RequestLogRecord
+	RequestBody  *string `json:"request_body,omitempty"`
+	ResponseBody *string `json:"response_body,omitempty"`
+}
+
+// EnsureRequestLogSchema extends the one-to-one request correlation table with
+// session and model-at-request-time metadata. The project is still in
+// development, so this remains part of schema initialization instead of a
+// migration series.
+func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
+	if _, ok := requestLogSchemaReady.Load(s.db); ok {
+		return nil
+	}
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return err
+	}
+	columns, err := tableColumns(ctx, s.db, "inference_request_correlations")
+	if err != nil {
+		return err
+	}
+	additions := []struct {
+		name string
+		ddl  string
+	}{
+		{"session_id", `ALTER TABLE inference_request_correlations ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"model_id", `ALTER TABLE inference_request_correlations ADD COLUMN model_id TEXT NOT NULL DEFAULT ''`},
+		{"model_name", `ALTER TABLE inference_request_correlations ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, addition := range additions {
+		if columns[addition.name] {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, addition.ddl); err != nil {
+			return fmt.Errorf("add inference request correlation column %s: %w", addition.name, err)
+		}
+	}
+	for _, index := range []string{
+		`CREATE INDEX IF NOT EXISTS inference_request_correlations_session_idx ON inference_request_correlations(session_id)`,
+		`CREATE INDEX IF NOT EXISTS inference_request_correlations_model_idx ON inference_request_correlations(model_id)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, index); err != nil {
+			return err
+		}
+	}
+	requestLogSchemaReady.Store(s.db, struct{}{})
+	return nil
+}
+
+// UpdateRequestLogContext records grouping and model identity independently
+// from request completion. Calling it immediately after BeginCorrelatedRequest
+// lets failed requests retain a supplied session id; calling it again after
+// Instance resolution captures the model identity before the request can fail
+// during autoload/acquisition.
+func (s *Service) UpdateRequestLogContext(ctx context.Context, requestID, sessionID, instanceID string) error {
+	if err := s.EnsureRequestLogSchema(ctx); err != nil {
+		return err
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	var modelID, modelName string
+	if instanceID = strings.TrimSpace(instanceID); instanceID != "" {
+		err := s.db.QueryRowContext(ctx, `SELECT i.model_id,m.name FROM instances i JOIN models m ON m.id=i.model_id WHERE i.id=?`, instanceID).Scan(&modelID, &modelName)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE inference_request_correlations SET
+		session_id=CASE WHEN ?<>'' THEN ? ELSE session_id END,
+		model_id=CASE WHEN ?<>'' THEN ? ELSE model_id END,
+		model_name=CASE WHEN ?<>'' THEN ? ELSE model_name END
+		WHERE request_id=?`,
+		sessionID, sessionID, modelID, modelID, modelName, modelName, requestID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, sessionID string) ([]RequestLogRecord, error) {
+	if filters.Limit <= 0 || filters.Limit > 500 {
+		filters.Limit = 100
+	}
+	if filters.Offset < 0 {
+		filters.Offset = 0
+	}
+	if err := s.EnsureRequestLogSchema(ctx); err != nil {
+		return nil, err
+	}
+	query := `SELECT COALESCE(c.request_id,''),
+		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
+		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
+		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
+		c.session_id,c.model_id,c.model_name,
+		CASE WHEN c.session_id<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
+		FROM inference_requests r LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE 1=1`
+	var args []any
+	add := func(clause string, value any) { query += clause; args = append(args, value) }
+	if filters.SinceMS > 0 {
+		add(" AND r.started_at>=?", filters.SinceMS)
+	}
+	if filters.BeforeMS > 0 {
+		add(" AND r.started_at<?", filters.BeforeMS)
+	}
+	if filters.InstanceID != "" {
+		add(" AND r.instance_id=?", filters.InstanceID)
+	}
+	if filters.Endpoint != "" {
+		add(" AND r.endpoint=?", filters.Endpoint)
+	}
+	if filters.APIKeyID != "" {
+		add(" AND r.api_key_id=?", filters.APIKeyID)
+	}
+	if filters.Result != "" {
+		add(" AND r.result=?", filters.Result)
+	}
+	if filters.StatusCode > 0 {
+		add(" AND r.status_code=?", filters.StatusCode)
+	}
+	if filters.Streaming != nil {
+		add(" AND r.streaming=?", boolInt(*filters.Streaming))
+	}
+	if filters.RequestID != "" {
+		add(" AND c.request_id=?", filters.RequestID)
+	}
+	if filters.TraceID != "" {
+		add(" AND r.trace_id=?", filters.TraceID)
+	}
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		add(" AND c.session_id=?", sessionID)
+	}
+	if search := strings.TrimSpace(filters.Search); search != "" {
+		like := "%" + search + "%"
+		query += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR c.session_id LIKE ? OR r.instance_id LIKE ? OR c.model_id LIKE ? OR c.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		for i := 0; i < 12; i++ {
+			args = append(args, like)
+		}
+	}
+	if filters.TraceID != "" {
+		query += " ORDER BY r.started_at ASC,r.id ASC"
+	} else {
+		query += " ORDER BY r.started_at DESC,r.id DESC"
+	}
+	query += " LIMIT ? OFFSET ?"
+	args = append(args, filters.Limit, filters.Offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RequestLogRecord
+	for rows.Next() {
+		item, err := scanRequestLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func scanRequestLog(row interface{ Scan(...any) error }) (RequestLogRecord, error) {
+	var item RequestLogRecord
+	var keyID, keyName, keyPrefix, errText, requestBody, responseBody sql.NullString
+	var streaming, autoloaded int
+	var ttft, tps, promptTPS sql.NullFloat64
+	if err := row.Scan(
+		&item.RequestID, &item.ID, &item.TraceID, &item.CallType, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint,
+		&keyID, &keyName, &keyPrefix, &item.ClientIP, &item.UserAgent, &streaming, &item.StatusCode, &item.Result, &item.DurationMS,
+		&ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &promptTPS, &item.QueueDurationMS, &item.LoadDurationMS,
+		&autoloaded, &errText, &requestBody, &responseBody, &item.SessionID, &item.ModelID, &item.ModelName, &item.SessionTotalCount,
+	); err != nil {
+		return RequestLogRecord{}, err
+	}
+	item.Streaming = streaming != 0
+	item.Autoloaded = autoloaded != 0
+	if keyID.Valid || keyName.Valid || keyPrefix.Valid {
+		item.APIKey = &APIKeyRef{ID: keyID.String, Name: keyName.String, Prefix: keyPrefix.String}
+	}
+	if ttft.Valid {
+		value := ttft.Float64
+		item.TTFTMS = &value
+	}
+	if tps.Valid {
+		value := tps.Float64
+		item.TokensPerSecond = &value
+		generation := value
+		item.GenerationTokensPerSecond = &generation
+	}
+	if promptTPS.Valid {
+		value := promptTPS.Float64
+		item.PromptTokensPerSecond = &value
+	}
+	if errText.Valid {
+		item.Error = errText.String
+	}
+	if requestBody.Valid {
+		value := requestBody.String
+		item.RequestBody = &value
+	}
+	if responseBody.Valid {
+		value := responseBody.String
+		item.ResponseBody = &value
+	}
+	return item, nil
+}
+
+func (s *Service) GetRequestLogByRequestID(ctx context.Context, requestID string) (RequestLogDetail, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return RequestLogDetail{}, fmt.Errorf("request_id is required")
+	}
+	if err := s.EnsureRequestLogSchema(ctx); err != nil {
+		return RequestLogDetail{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT COALESCE(c.request_id,''),
+		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
+		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
+		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body,
+		c.session_id,c.model_id,c.model_name,
+		CASE WHEN c.session_id<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
+		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE c.request_id=?`, requestID)
+	record, err := scanRequestLog(row)
+	if err != nil {
+		return RequestLogDetail{}, err
+	}
+	return RequestLogDetail{RequestLogRecord: record, RequestBody: record.RequestBody, ResponseBody: record.ResponseBody}, nil
+}
+
+func NewRequestLogsHandler(service *Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		filters, err := parseFilters(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		limit := filters.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+		queryFilters := filters
+		queryFilters.Limit = limit
+		if limit < 500 {
+			queryFilters.Limit++
+		}
+		items, err := service.ListRequestLogs(r.Context(), queryFilters, sessionID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		hasMore := len(items) > limit
+		if hasMore {
+			items = items[:limit]
+		} else if limit == 500 && len(items) == limit {
+			probeFilters := filters
+			probeFilters.Offset = filters.Offset + limit
+			probeFilters.Limit = 1
+			probe, probeErr := service.ListRequestLogs(r.Context(), probeFilters, sessionID)
+			if probeErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": probeErr.Error()})
+				return
+			}
+			hasMore = len(probe) > 0
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": filters.Offset, "has_more": hasMore})
+	})
+}
+
+func NewRequestLogDetailHandler(service *Service) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		requestID := strings.TrimSpace(r.PathValue("request_id"))
+		if requestID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request_id is required"})
+			return
+		}
+		record, err := service.GetRequestLogByRequestID(r.Context(), requestID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, record)
+	})
+}
