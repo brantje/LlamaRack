@@ -242,6 +242,7 @@ async function loadDashboard() {
 }
 
 async function refreshDashboard() {
+  if (!manager.initialized.value || !manager.user.value) return
   await Promise.allSettled([manager.refresh(), loadDashboard()])
 }
 
