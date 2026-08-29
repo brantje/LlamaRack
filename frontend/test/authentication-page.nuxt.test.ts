@@ -11,7 +11,8 @@ const authSettings = {
   local_login_enabled: { value: true, source: 'default', editable: true },
   oidc_jit_provisioning_enabled: { value: true, source: 'default', editable: true },
   oidc_auto_link_enabled: { value: false, source: 'default', editable: true },
-  external_url: { value: 'https://manager.example.test/', source: 'database', editable: true }
+  external_url: { value: 'https://manager.example.test/', source: 'database', editable: true },
+  frontend_url: { value: 'http://192.168.60.5:3000', source: 'database', editable: true }
 }
 
 const provider = {
@@ -85,6 +86,8 @@ describe('Admin authentication page', () => {
     const wrapper = await mountSuspended(AuthenticationPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('Authentication')
+    expect(wrapper.text()).toContain('Frontend URL')
+    expect(wrapper.text()).toContain('Leave empty to use External URL')
     expect(wrapper.text()).toContain('Authentik')
     expect(wrapper.text()).toContain('Enabled')
     expect(wrapper.text()).toContain('Tested')
@@ -98,7 +101,8 @@ describe('Admin authentication page', () => {
         local_login_enabled: true,
         oidc_jit_provisioning_enabled: true,
         oidc_auto_link_enabled: false,
-        external_url: 'https://manager.example.test/'
+        external_url: 'https://manager.example.test/',
+        frontend_url: 'http://192.168.60.5:3000'
       }
     })
     expect(wrapper.text()).toContain('Authentication settings saved.')
@@ -142,7 +146,8 @@ describe('Admin authentication page', () => {
     let providerItems: any[] = []
     const settings = {
       ...authSettings,
-      external_url: { value: '', source: 'default', editable: true }
+      external_url: { value: '', source: 'default', editable: true },
+      frontend_url: { value: '', source: 'default', editable: true }
     }
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/admin/auth/settings') return settings
