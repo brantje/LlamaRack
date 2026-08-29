@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -29,6 +30,7 @@ const metadataResponseCaptureLimit = 8 << 20
 
 const (
 	headerRequestID       = "X-LlamaCPP-Manager-Request-ID"
+	headerTraceID         = "X-LiteLLM-Trace-ID"
 	headerInstance        = "X-LlamaCPP-Manager-Instance"
 	headerAutoloaded      = "X-LlamaCPP-Manager-Autoloaded"
 	headerQueueMS         = "X-LlamaCPP-Manager-Queue-MS"
@@ -49,6 +51,14 @@ type Gateway struct {
 	observability *observability.Service
 }
 
+type requestEnvelope struct {
+	Model           string `json:"model"`
+	Stream          bool   `json:"stream"`
+	LiteLLMMetadata struct {
+		TraceID string `json:"trace_id"`
+	} `json:"litellm_metadata"`
+}
+
 func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*observability.Service) *Gateway {
 	g := &Gateway{auth: a, lifecycle: l}
 	if len(services) > 0 {
@@ -63,50 +73,112 @@ func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	requestID := newRequestID()
+	w.Header().Set(headerRequestID, requestID)
+
+	var body []byte
+	var bodyReadErr error
+	if r.Body != nil {
+		body, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	}
+	var envelope requestEnvelope
+	parseErr := error(nil)
+	if len(bytes.TrimSpace(body)) > 0 {
+		parseErr = json.Unmarshal(body, &envelope)
+	}
+	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
+	w.Header().Set(headerTraceID, traceID)
+
+	record := observability.RequestRecord{
+		StartedAt:  started.UnixMilli(),
+		InstanceID: strings.TrimSpace(envelope.Model),
+		Endpoint:   r.URL.Path,
+		TraceID:    traceID,
+		CallType:   callType(r.URL.Path),
+		ClientIP:   clientIP(r),
+		UserAgent:  boundedMetadata(r.UserAgent(), 2048),
+		Streaming:  envelope.Stream,
+	}
+	observed := newResponseObserver(w, false)
+	g.begin(r.Context(), requestID, record)
+
+	var promptTPS *float64
+	var proxyPanic any
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			proxyPanic = recovered
+		}
+		finished := time.Now()
+		if record.FinishedAt == 0 {
+			record.FinishedAt = finished.UnixMilli()
+		}
+		if record.DurationMS == 0 {
+			record.DurationMS = milliseconds(finished.Sub(started))
+		}
+		if record.StatusCode == 0 {
+			record.StatusCode = observed.StatusCode()
+		}
+		if proxyPanic != nil {
+			record.StatusCode = http.StatusInternalServerError
+			record.Result = "error"
+			if record.Error == "" {
+				record.Error = "Proxy stream aborted"
+			}
+		}
+		if ctxErr := r.Context().Err(); ctxErr != nil {
+			record.Result = "error"
+			record.Error = sanitizeError("client disconnected: " + ctxErr.Error())
+		}
+		if record.Result == "" {
+			if record.StatusCode >= 200 && record.StatusCode < 400 {
+				record.Result = "success"
+			} else {
+				record.Result = "error"
+			}
+		}
+		if record.Result == "error" && record.Error == "" {
+			record.Error = responseError(record.StatusCode, observed.Bytes())
+		}
+		if observed.captureAll && record.ResponseBody == nil {
+			value := string(observed.Bytes())
+			record.ResponseBody = &value
+		}
+		g.finalize(r.Context(), requestID, promptTPS, record)
+		if proxyPanic != nil {
+			panic(proxyPanic)
+		}
+	}()
+
 	key, err := g.authenticateKey(r.Context(), r.Header.Get("Authorization"))
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "authentication_error", "invalid_api_key", "Invalid API key")
+		writeError(observed, http.StatusUnauthorized, "authentication_error", "invalid_api_key", "Invalid API key")
 		return
 	}
+	record.APIKey = &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix}
+	g.update(r.Context(), requestID, record)
+
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
-		g.listModels(w, r)
+		g.listModels(observed, r)
 		return
 	}
 	if r.Method != http.MethodPost || !supported(r.URL.Path) {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
+		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
+	if bodyReadErr != nil {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
 		return
 	}
-	var envelope struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil || strings.TrimSpace(envelope.Model) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
+	if parseErr != nil || strings.TrimSpace(envelope.Model) == "" {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
 		return
 	}
 
-	requestID := newRequestID()
-	w.Header().Set(headerRequestID, requestID)
-	started := time.Now()
-	instanceID := strings.TrimSpace(envelope.Model)
-	record := observability.RequestRecord{
-		StartedAt: started.UnixMilli(), InstanceID: instanceID, Endpoint: r.URL.Path, Streaming: envelope.Stream,
-		APIKey: &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix},
-	}
-	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
+	instance, err := g.lifecycle.Instances().Get(r.Context(), record.InstanceID)
 	if err != nil {
-		record.StatusCode = http.StatusServiceUnavailable
-		record.Result = "error"
 		record.Error = sanitizeError(err.Error())
-		record.FinishedAt = time.Now().UnixMilli()
-		record.DurationMS = milliseconds(time.Since(started))
-		g.persist(r.Context(), requestID, nil, record)
-		writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}
 	record.InstanceID = instance.ID
@@ -114,11 +186,16 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if instance.RequestLogMode == "full" {
 		value := string(body)
 		record.RequestBody = &value
+		observed.captureAll = true
 	}
 
 	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
 	record.Autoloaded = preRuntime.State != supervisor.Ready
 	w.Header().Set(headerAutoloaded, strconv.FormatBool(record.Autoloaded))
+	// Store the canonical Instance and opt-in request body before worker
+	// acquisition so acquire/autoload failures still have useful detail.
+	g.update(r.Context(), requestID, record)
+
 	if g.observability != nil {
 		g.observability.Queue(instance.ID)
 	}
@@ -134,16 +211,21 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if g.observability != nil {
 			g.observability.EndQueued(instance.ID)
 		}
-		record.StatusCode = http.StatusServiceUnavailable
-		record.Result = "error"
 		record.Error = sanitizeError(err.Error())
-		record.FinishedAt = time.Now().UnixMilli()
-		record.DurationMS = milliseconds(time.Since(started))
-		g.persist(r.Context(), requestID, nil, record)
-		writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}
 	defer release()
+
+	target, err := url.Parse(endpoint)
+	if err != nil {
+		if g.observability != nil {
+			g.observability.EndQueued(instance.ID)
+		}
+		record.Error = "Invalid worker endpoint"
+		writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
+		return
+	}
 	if g.observability != nil {
 		g.observability.Activate(instance.ID)
 	}
@@ -154,23 +236,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	target, err := url.Parse(endpoint)
-	if err != nil {
-		record.StatusCode = http.StatusInternalServerError
-		record.Result = "error"
-		record.Error = "Invalid worker endpoint"
-		record.FinishedAt = time.Now().UnixMilli()
-		record.DurationMS = milliseconds(time.Since(started))
-		g.persist(r.Context(), requestID, nil, record)
-		writeError(w, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
-		return
-	}
+	workerStarted := time.Now()
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 	r.Header.Del("Authorization")
 
-	captureAll := instance.RequestLogMode == "full"
-	observed := newResponseObserver(w, captureAll)
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	original := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -181,6 +251,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
 		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)
+		record.Error = sanitizeError(proxyErr.Error())
 		writeError(writer, http.StatusServiceUnavailable, "server_error", "backend_unavailable", "Model worker unavailable")
 	}
 
@@ -199,14 +270,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			resp.Body = io.NopCloser(bytes.NewReader(payload))
 			resp.ContentLength = int64(len(payload))
 			resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
-			metrics := calculateResponseMetrics(started, tracked.firstRead, time.Now(), parseUsage(payload))
+			metrics := calculateResponseMetrics(workerStarted, tracked.firstRead, time.Now(), parseUsage(payload))
 			completed = &metrics
 			addFinalMetricHeaders(resp.Header, r.URL.Path, metrics)
 			return nil
 		}
 	}
 
-	proxy.ServeHTTP(observed, r)
+	func() {
+		defer func() {
+			proxyPanic = recover()
+		}()
+		proxy.ServeHTTP(observed, r)
+	}()
 	finished := time.Now()
 	active = false
 	if g.observability != nil {
@@ -226,32 +302,67 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if completed != nil {
 		metrics = *completed
 	} else {
-		metrics = calculateResponseMetrics(started, observed.FirstByte(), finished, parseUsage(responseSample))
+		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
 	}
 	record.TTFTMS = metrics.ttftMS
 	record.PromptTokens = metrics.promptTokens
 	record.GeneratedTokens = metrics.generatedTokens
 	record.TotalTokens = metrics.totalTokens
 	record.TokensPerSecond = metrics.generationTPS
-	if record.Result == "error" {
+	promptTPS = metrics.promptTPS
+	if record.Result == "error" && record.Error == "" {
 		record.Error = responseError(record.StatusCode, responseSample)
 	}
-	if captureAll {
+	if observed.captureAll {
 		value := string(responseSample)
 		record.ResponseBody = &value
 	}
-	g.persist(r.Context(), requestID, metrics.promptTPS, record)
+	if proxyPanic != nil {
+		panic(proxyPanic)
+	}
 }
 
-func (g *Gateway) persist(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
+func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+func (g *Gateway) begin(ctx context.Context, requestID string, record observability.RequestRecord) {
 	if g.observability == nil {
 		return
 	}
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	persistCtx, cancel := g.persistenceContext(ctx)
 	defer cancel()
-	if err := g.observability.RecordCorrelatedRequest(persistCtx, requestID, promptTPS, record); err != nil {
-		slog.Warn("persist inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
+	if err := g.observability.BeginCorrelatedRequest(persistCtx, requestID, record); err != nil {
+		slog.Warn("begin inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
+}
+
+func (g *Gateway) update(ctx context.Context, requestID string, record observability.RequestRecord) {
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
+	if err := g.observability.UpdateCorrelatedRequest(persistCtx, requestID, record); err != nil {
+		slog.Warn("update inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
+	}
+}
+
+func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
+	if err := g.observability.FinalizeCorrelatedRequest(persistCtx, requestID, promptTPS, record); err != nil {
+		slog.Warn("finalize inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
+	}
+}
+
+// persist preserves the completion-only helper used by focused tests and older
+// internal call sites. Finalization recovers atomically if the early row is absent.
+func (g *Gateway) persist(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
+	g.finalize(ctx, requestID, promptTPS, record)
 }
 
 func (g *Gateway) authenticate(ctx context.Context, header string) error {
@@ -293,6 +404,112 @@ func supported(path string) bool {
 		return true
 	}
 	return false
+}
+
+func callType(path string) string {
+	switch path {
+	case "/v1/chat/completions":
+		return "chat_completion"
+	case "/v1/completions":
+		return "completion"
+	case "/v1/responses":
+		return "response"
+	case "/v1/embeddings":
+		return "embedding"
+	default:
+		return ""
+	}
+}
+
+func resolveTraceID(r *http.Request, bodyTraceID string) string {
+	for _, value := range []string{r.Header.Get("X-LiteLLM-Trace-ID"), r.Header.Get("X-LiteLLM-Session-ID"), bodyTraceID} {
+		if traceID, ok := normalizeUUID(value); ok {
+			return traceID
+		}
+	}
+	return newTraceID()
+}
+
+func normalizeUUID(value string) (string, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+		return "", false
+	}
+	for index, r := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			continue
+		}
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return "", false
+		}
+	}
+	return value, true
+}
+
+func newTraceID() string {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		fallback := fmt.Sprintf("%032x", uint64(time.Now().UnixNano())^requestIDFallback.Add(1))
+		return fmt.Sprintf("%s-%s-%s-%s-%s", fallback[0:8], fallback[8:12], fallback[12:16], fallback[16:20], fallback[20:32])
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	hexValue := hex.EncodeToString(value[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hexValue[0:8], hexValue[8:12], hexValue[12:16], hexValue[16:20], hexValue[20:32])
+}
+
+func clientIP(r *http.Request) string {
+	if value := forwardedClientIP(r.Header.Values("Forwarded")); value != "" {
+		return value
+	}
+	for _, part := range strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",") {
+		if value := canonicalIP(part); value != "" {
+			return value
+		}
+	}
+	if value := canonicalIP(r.Header.Get("X-Real-IP")); value != "" {
+		return value
+	}
+	return canonicalIP(r.RemoteAddr)
+}
+
+func forwardedClientIP(values []string) string {
+	raw := strings.Join(values, ",")
+	for _, element := range strings.Split(raw, ",") {
+		for _, parameter := range strings.Split(element, ";") {
+			key, value, ok := strings.Cut(parameter, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "for") {
+				continue
+			}
+			if ip := canonicalIP(strings.Trim(strings.TrimSpace(value), `"`)); ip != "" {
+				return ip
+			}
+		}
+	}
+	return ""
+}
+
+func canonicalIP(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), `"`)
+	if value == "" || strings.EqualFold(value, "unknown") || strings.HasPrefix(value, "_") {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	value = strings.Trim(value, "[]")
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+func boundedMetadata(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit > 0 && len(value) > limit {
+		value = value[:limit]
+	}
+	return value
 }
 
 type responseObserver struct {

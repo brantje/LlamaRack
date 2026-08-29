@@ -2,74 +2,131 @@
 
 ## Status
 
-Approved implementation contract for Phase 11.
+Approved implementation contract for Phase 11, including the dedicated inference request-log explorer added by issue #60.
 
-This phase adds persistent request/inference observability, historical hardware telemetry, improved in-memory per-Instance logs, Prometheus exposition and a real-time Dashboard. It builds on the existing runtime WebSocket, hardware telemetry, llama.cpp metrics scraping, supervisor log stream and exact `instance.id` gateway routing.
+Phase 11 provides persistent inference/request observability, historical hardware telemetry, session-only structured Instance logs, Prometheus exposition, the operational Dashboard, and a dedicated `/logs` request-history surface. It reuses the existing SQLite observability store, runtime WebSocket, hardware/telemetry pipeline, llama.cpp metrics scraping, supervisor log stream, and exact `instance.id` gateway routing.
 
-Phase 11 does not add OpenTelemetry or a separate observability application/page.
+Phase 11 does not add OpenTelemetry span export or a second request-log database.
 
 ## Product goals
 
-Phase 11 must make the manager answer, from one operational Dashboard:
+The manager must make it possible to answer:
 
-- which Instances are running, starting, failed or unloaded;
-- how much RAM/VRAM is committed and which Instances are using each GPU;
-- what inference traffic has passed through the gateway recently;
-- request latency, TTFT, token usage and generation throughput;
-- which API keys are actively using the gateway;
-- whether autoloading, scheduling, eviction or idle-unload activity is occurring;
+- which Instances are running, starting, failed, or unloaded;
+- current and historical RAM/VRAM/GPU usage and Instance attribution;
+- what OpenAI-compatible traffic passed through the gateway;
+- request result/status, duration, queue/load time, TTFT, token usage, and throughput;
+- which API keys are using the gateway without exposing secrets;
+- which requests belong to the same flat multi-request trace;
+- the client IP/User-Agent associated with a request for operational debugging;
+- whether autoloading, scheduling, eviction, or idle-unload activity is occurring;
 - what currently needs operator attention;
-- live per-Instance llama-server output with useful source filtering;
+- live per-Instance llama-server output;
 - Prometheus-compatible metrics for external monitoring.
 
 ## Persistence and retention
 
-Observability history survives manager restarts.
+Observability request and hardware history survives manager restarts and uses the existing SQLite database. During active development, update the current schema directly; do not introduce a migration framework solely for Phase 11.
 
-Use the existing SQLite database. During active development the current schema is updated directly; do not introduce migration files solely for Phase 11.
+Persist individual inference request records rather than only aggregate buckets. Retention is configurable and defaults to **30 days**. Retention applies to request history, request network metadata, and historical hardware samples. Cleanup runs incrementally in the background and must not block inference traffic.
 
-Persist individual inference request records rather than only aggregate buckets.
+Long-lived cumulative Prometheus counters must remain monotonic when retained request/history rows are pruned. Keep cumulative state separately where required.
 
-Persist historical hardware telemetry used by the Dashboard, including RAM/VRAM and GPU utilization/allocation data that is available from the existing hardware/telemetry pipeline.
+## Gateway request records
 
-Retention is configurable and defaults to **30 days**. Retention applies to historical request and hardware samples. Cleanup runs incrementally in the background and must not block inference traffic.
+Every attempted OpenAI-compatible `/v1/...` gateway request must receive a stable manager request ID and produce one request-log record, including failures before Instance resolution.
 
-Long-lived cumulative Prometheus counters must not become non-monotonic merely because retained history is pruned. If persisted counter state is required for correct Prometheus counter semantics, keep that state separately from retention-limited history.
+This includes, at minimum:
 
-## Inference request records
+- invalid or missing API keys;
+- malformed JSON;
+- missing model IDs;
+- unsupported `/v1/...` endpoints;
+- Instance/model resolution failures;
+- autoload/acquire failures;
+- worker/proxy failures;
+- non-success llama-server responses;
+- other manager-side gateway errors.
 
-Every authenticated OpenAI-compatible inference request that resolves an Instance should produce one request record, including failed/unavailable requests once the target Instance is known.
+Request identity and durable request logging begin before authentication/body validation can return. The gateway centralizes finalization so every outcome is finalized once. Observability persistence is best-effort relative to inference: persistence failures are logged but do not turn an otherwise successful inference into an inference failure. If the early insert fails and persistence recovers before completion, finalization may create the completed row as a recovery path.
 
-Metadata fields include, where applicable:
+A request record contains, where available:
 
+- stable manager request ID;
+- trace ID;
+- normalized call type;
 - request start and finish timestamps;
-- target `instance.id`;
-- OpenAI-compatible endpoint;
-- API key identity suitable for management display (ID/name/prefix, never the secret);
-- streaming vs non-streaming;
-- request result and HTTP status;
-- active/queued state contribution;
-- end-to-end duration;
-- queue/wait duration;
-- load/autoload duration when an unloaded Instance had to be started;
-- TTFT (time to first response byte/token where measurable);
-- prompt/input tokens;
-- generated/output tokens;
-- total tokens;
-- generation tokens/second;
-- sanitized error detail;
-- whether autoload was required.
+- requested/canonical `instance.id` (may be unavailable for early failures);
+- endpoint;
+- safe API-key identity (ID/name/prefix, never the secret; may be unavailable);
+- streaming mode;
+- HTTP status and success/error result;
+- end-to-end, queue, load/autoload, and TTFT timing;
+- prompt/input, generated/output, and total tokens;
+- prompt and generation throughput where measurable;
+- autoload state;
+- sanitized bounded error detail;
+- client IP;
+- User-Agent.
 
-The manager should use request/response usage information where available and may supplement it with llama.cpp-native metrics/timings. Missing metrics are nullable; absence of a worker-provided value must not make an otherwise successful request fail.
+The stable request ID is returned in:
 
-### Percentiles
+```text
+X-LlamaCPP-Manager-Request-ID
+```
 
-Dashboard/API summaries expose at least p50, p95 and p99 for:
+The resolved trace ID is returned in:
 
-- request latency;
-- TTFT.
+```text
+X-LiteLLM-Trace-ID
+```
 
-Percentiles are computed for the requested reporting window from equivalent request records. Null TTFT samples are excluded from TTFT percentiles.
+Both headers must be present on successful and failed gateway responses once the request reaches the gateway handler.
+
+### Call type
+
+Persist a normalized `call_type` for supported endpoints:
+
+| Endpoint | Call type | UI label |
+| --- | --- | --- |
+| `/v1/chat/completions` | `chat_completion` | Chat Completion |
+| `/v1/completions` | `completion` | Completion |
+| `/v1/responses` | `response` | Responses |
+| `/v1/embeddings` | `embedding` | Embedding |
+
+Unsupported endpoints are still logged but have an empty/null call type. Do not invent a generic `other` call type.
+
+## Flat multi-request tracing
+
+Tracing is first-class flat grouping: related requests share one UUID `trace_id`. There is no parent/child request tree in this feature.
+
+Trace resolution precedence is:
+
+1. `X-LiteLLM-Trace-ID`;
+2. `X-LiteLLM-Session-ID`;
+3. `litellm_metadata.trace_id` from the request JSON body;
+4. a newly generated UUID.
+
+Header values take precedence over body metadata. A valid supplied trace ID is preserved on failures. If no valid trace ID is supplied, the manager generates a UUID.
+
+Issue #60 intentionally does **not** add W3C `traceparent`/`tracestate` support or parent-request headers.
+
+`GET /api/v1/observability/requests` supports `trace_id` filtering. Normal history is newest-first. A trace-filtered result is oldest-first/chronological so chained requests are understandable.
+
+## Client network metadata
+
+Persist `client_ip` and `user_agent` for request debugging.
+
+Resolve client IP in this precedence order:
+
+1. `Forwarded`;
+2. `X-Forwarded-For` (first/leftmost address);
+3. `X-Real-IP`;
+4. direct TCP peer address.
+
+Strip source ports and store valid IPv6 in canonical parsed form. Forwarding headers are accepted without a configured trusted-proxy list for this observability feature.
+
+Forwarding metadata is **not a security boundary**. A directly connected client can spoof forwarding headers, so `client_ip` must never be used by this feature to authorize requests or change routing decisions.
 
 ## Request-content logging policy
 
@@ -77,299 +134,190 @@ Request content is sensitive and is **not stored by default**.
 
 Each Instance has a request logging mode:
 
-- `metadata` — default; persist request metadata/metrics only;
-- `full` — additionally persist request and response content needed for debugging, including prompts/messages, generated content, embedding request payloads, tool arguments and other OpenAI-compatible request/response fields.
+- `metadata` — default; persist metadata/metrics only;
+- `full` — additionally persist request and response content needed for debugging, including prompts/messages, generated content, embedding payloads, tool definitions/arguments, and other OpenAI-compatible fields.
 
-The setting belongs to the Instance because inference is Instance-targeted. New and edited Instances must expose this choice with clear copy explaining the privacy/storage impact of `full` logging.
+The setting remains Instance-scoped because inference is Instance-targeted. New/edit Instance UI must explain the privacy/storage impact of `full` logging.
 
-The manager must never persist API key secrets, management session tokens, provider secrets or worker-internal credentials in observability records.
+When `full` mode is enabled, persist the request body after the Instance/logging policy is resolved and before worker acquisition where possible, so acquire/load failures can still retain the input. Persist response content at finalization when available.
 
-## API-key usage
+Never persist API-key secrets, Authorization headers, management bearer tokens, provider secrets, session secrets, or worker-internal credentials.
 
-Phase 11 includes API-key usage observability.
+### Summary vs detail payloads
 
-Management APIs/Dashboard may show safe key identity such as key name and configured prefix. Never display or persist the raw API-key secret.
+Full request/response bodies are returned **only** by the individual request-detail endpoint.
 
-Prometheus labels must **not** include API key ID, key prefix, request ID, prompt text or other high-cardinality/sensitive request values.
+Request-history lists and periodic WebSocket observability snapshots must contain metadata only, even when the underlying record was captured in full mode. This prevents repeated broadcast of large/sensitive payloads.
 
-## Lifecycle and scheduler metrics
+## Percentiles and counters
 
-Track at least:
+Dashboard/API summaries expose at least p50, p95, and p99 for completed request latency and TTFT. Incomplete/pending rows do not contribute. Null TTFT values are excluded.
 
-- autoload count;
-- request queue/wait duration;
-- model/Instance load duration;
-- eviction count;
-- idle-unload count;
-- failed start count.
+Track cumulative gateway/token metrics and lifecycle/scheduler activity including autoload, load duration, eviction, idle-unload, and failed starts. Completion/finalization counter updates must be exactly-once/idempotent.
 
-These events are Instance-scoped where possible and survive manager restarts when used for historical reporting/cumulative counters.
+Prometheus labels must not contain request IDs, trace IDs, API-key IDs/prefixes, client IPs, User-Agent strings, prompt text, arbitrary errors, or other unbounded/high-cardinality values.
 
-## Hardware history
+## Hardware history and llama.cpp metrics
 
-Persist hardware telemetry so the Dashboard can show historical/current resource usage across restarts.
+Persist manager-owned hardware telemetry from the existing hardware/telemetry pipeline, including host RAM, per-GPU VRAM/utilization, per-Instance/process VRAM attribution, and process CPU/RAM where available.
 
-Use the existing hardware/telemetry implementation as the source of truth. Do not create a competing GPU detector.
-
-Record, where available:
-
-- host RAM usage;
-- per-GPU total/used/free VRAM;
-- per-GPU utilization;
-- per-Instance/process VRAM attribution;
-- per-Instance CPU/RAM process telemetry;
-- timestamp and device identity.
-
-Sampling must be bounded and must not create one hardware probe per connected browser. Collection is manager-owned; WebSocket clients consume shared current state.
-
-## llama.cpp native metrics
-
-Use llama.cpp native metrics whenever the running worker exposes them. Existing `FetchLlamaMetrics`/runtime telemetry is the integration point.
-
-Manager-side metrics remain authoritative for gateway request counts, routing/autoload/scheduler events, API-key attribution and request persistence. llama.cpp metrics supplement rather than replace them.
-
-A native metrics scrape failure is non-fatal and must not break the Dashboard or inference.
+Use llama.cpp native metrics opportunistically through the existing runtime telemetry integration. Manager-side request counts, routing/autoload/scheduler events, API-key attribution, and request persistence remain authoritative. Native metric scrape failures are non-fatal.
 
 ## Management API
 
-Provide authenticated management APIs under `/api/v1/observability` for the Dashboard and external management clients.
+Authenticated management APIs under `/api/v1/observability` include:
 
-Minimum resources:
+- `GET /api/v1/observability/summary`;
+- `GET /api/v1/observability/requests`;
+- `GET /api/v1/observability/requests/{request_id}`;
+- `GET /api/v1/observability/timeseries`.
 
-- `GET /api/v1/observability/summary` — current/windowed KPI summary, percentiles, key activity and lifecycle counters;
-- `GET /api/v1/observability/requests` — paginated/filterable individual request history;
-- `GET /api/v1/observability/timeseries` — bounded historical series/buckets for supported request and hardware metrics.
+Request-history filters include, where applicable:
 
-Supported request-history filters should include time range and, where applicable:
-
+- time range (`since`/`before`);
 - `instance_id`;
 - endpoint;
-- API key;
-- result/status;
-- streaming mode.
+- API key ID;
+- result;
+- HTTP status;
+- streaming mode;
+- exact request ID lookup;
+- trace ID;
+- bounded text search across useful request metadata.
 
-Do not require the frontend to query the Prometheus endpoint for its own Dashboard.
+History queries are bounded and paginated. The list API returns metadata summaries only. The detail API returns retained request/response bodies when full logging captured them.
+
+## Request logs UI (`/logs`)
+
+`/logs` is the dedicated persistent inference/API request-history explorer and appears in the main navigation. It is separate from raw Instance/llama-server logs and admin/system logs.
+
+The main request table exposes:
+
+- Time;
+- Status;
+- Call Type;
+- Request ID;
+- Trace ID;
+- Instance / Model (`instance.id`);
+- Endpoint;
+- API Key (safe identity only);
+- Tokens;
+- Duration;
+- TTFT.
+
+Normal history is newest-first. Clicking a trace ID navigates to:
+
+```text
+/logs?trace_id=<uuid>
+```
+
+That view shows only requests matching the trace and orders them chronologically. Do not add a separate trace summary panel.
+
+The page exposes server-side filters for the management API fields and bounded pagination; it must not load all retained history into the browser.
+
+Selecting a request opens a **right-side Nuxt UI `USlideover`** while keeping the logs page in place. A deep link may use `request_id` in the `/logs` query string to open the same slideover.
+
+Request detail shows:
+
+1. status/error summary;
+2. request identity/details;
+3. timings and metrics;
+4. token usage/throughput;
+5. request/response content when retained;
+6. metadata including request ID, trace ID, call type, client IP, and User-Agent.
+
+Failures get prominent HTTP status + sanitized error treatment. Metadata-only requests explicitly state that request/response content was not recorded.
+
+For full logging, the UI fetches content only from the detail endpoint and offers structured/pretty and JSON representations. Messages, tools, and tool calls should be rendered readably where the stored JSON shape allows it. Do not create duplicate normalized message/tool tables solely for this UI.
+
+Do not add API Base, cost/accounting, teams, providers, environment, end-user accounting, or arbitrary LiteLLM tags to the request-log UI.
+
+## Dashboard integration
+
+The Dashboard remains the compact live operational overview. It provides an **Open logs** action to `/logs`.
+
+Recent gateway traffic and request-error attention items deep-link into `/logs?request_id=<request_id>` when a stable request ID is available. The dedicated logs explorer does not replace Dashboard KPIs or resource telemetry.
 
 ## Live updates
 
-Use the existing authenticated runtime WebSocket at `/api/v1/ws`.
+Continue using the authenticated `/api/v1/ws` runtime WebSocket for shared live observability/dashboard snapshots. Adding browser clients must not multiply hardware/process/llama.cpp probes.
 
-Extend that socket with observability/dashboard messages rather than adding a second polling loop for live state.
+WebSocket request summaries must never serialize full request/response bodies. `/logs` may use bounded on-demand HTTP refresh/pagination because it is a historical/debugging surface, not a second high-frequency telemetry collector.
 
-The Dashboard may use management HTTP APIs for its initial/historical snapshot, then receive near-real-time changes over the WebSocket.
+## Per-Instance raw logs
 
-WebSocket fan-out must use shared manager-side collection/state; adding browser clients must not multiply expensive GPU/process/llama.cpp probes.
+Raw llama-server logs remain in memory only and do not survive manager restart. The bounded supervisor ring remains the retention basis for a manager session. Entries distinguish stdout, stderr, and manager lifecycle events and support live tail, source filtering, and text search.
+
+These raw process logs are distinct from persistent inference request records in `/logs`.
 
 ## Prometheus
 
-Expose Prometheus text exposition at:
+Expose Prometheus text exposition at `GET /metrics` using the `llamacpp_manager_` prefix. The endpoint remains unauthenticated by default and may be protected by the configurable Prometheus bearer token.
 
-```text
-GET /metrics
-```
+Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-state metrics without high-cardinality request/log metadata labels.
 
-Metric names use the prefix:
+## Performance and privacy constraints
 
-```text
-llamacpp_manager_
-```
-
-The endpoint is unauthenticated by default.
-
-A configurable Prometheus auth token may be set. When configured, `/metrics` requires the token; a Bearer token is the canonical HTTP mechanism. The default token is empty/no authentication.
-
-Prometheus dimensions may include bounded labels such as:
-
-- `instance_id`;
-- endpoint;
-- result/status class where useful;
-- streaming mode;
-- GPU/device ID.
-
-Do not label metrics with request IDs, API-key IDs/prefixes, arbitrary errors, prompts, paths or other unbounded/high-cardinality values.
-
-Prometheus should expose at least:
-
-- gateway requests total;
-- current active and queued requests;
-- request success/error counts;
-- latency/TTFT distributions or equivalent bounded summary metrics;
-- prompt/generated/total token counters;
-- generation throughput where meaningful;
-- autoload/load/eviction/idle-unload/failed-start metrics;
-- current RAM/VRAM/GPU utilization/allocation gauges;
-- Instance lifecycle state gauges.
-
-## Per-Instance logs
-
-Raw llama-server logs remain **in memory only** and do not survive a manager restart. No file rotation/persistent log store is introduced in Phase 11.
-
-The existing bounded supervisor ring remains the basis for log retention during a manager session.
-
-Log entries become structured enough to distinguish:
-
-- `stdout`;
-- `stderr`;
-- manager lifecycle events.
-
-The Instance log UI provides:
-
-- live tail;
-- source filtering;
-- text search/filter;
-- a clear/resettable current-session view where appropriate.
-
-Phase 11 does not add a separate per-Instance metrics summary page/card. Runtime telemetry already shown on Instance surfaces may remain, but the new historical request metrics stay Dashboard-centric.
-
-## Dashboard
-
-The Dashboard is the only new observability overview surface. Do not add a separate Metrics/Observability page.
-
-Follow the approved mockup structure and the existing application theme. Use Nuxt UI components first and Tailwind only for composition.
-
-### Header
-
-Title: **Dashboard**.
-
-Provide an **Open logs** action. The existing/Phase 11 Playground route may be linked when available, but Phase 11 must not implement Playground behavior merely to satisfy the Dashboard mockup.
-
-### KPI row
-
-Show compact cards matching the mockup intent:
-
-1. **Running** — running/total Instances, with starting/error context.
-2. **VRAM committed** — used/available aggregate and utilization context.
-3. **Gateway · 15 min** — request count and active API-key count.
-4. **Idle unload** — global idle-unload setting and number of Instance overrides.
-
-Use Instance terminology internally/API-wise even if compact UI copy uses “models” only where referring to OpenAI addressable model IDs would be clearer to users.
-
-### VRAM allocation
-
-Show one allocation row per GPU, including:
-
-- device name/ID;
-- used / total VRAM;
-- GPU utilization;
-- a visual utilization/allocation bar;
-- per-process/Instance attribution when available.
-
-Automatic/manual placement data and observed process attribution should be visually distinguishable where useful, but observed telemetry is the source of truth for current usage.
-
-### Gateway traffic · last 15 min
-
-Show recent individual request rows with the mockup columns:
-
-- Time;
-- Model (the exact `instance.id`);
-- Endpoint;
-- Key (safe key prefix/name only);
-- Tokens;
-- Latency;
-- Result.
-
-Streaming and error state should be available via row detail/status where useful without making the table excessively wide.
-
-### Needs attention
-
-Show actionable current problems such as:
-
-- failed/failed-to-start Instances;
-- recent inference errors;
-- manually stopped Always-On Instances;
-- high RAM/VRAM pressure;
-- scheduler/resource-pressure blocks.
-
-Each item should link to the most relevant existing control surface (Instance, logs, etc.).
-
-The panel is operational guidance, not an alert-management subsystem.
-
-## Error storage and privacy
-
-Request-level errors may be retained, but store sanitized, bounded error text only.
-
-Never persist raw authorization headers, API-key secrets, session cookies, provider tokens or encryption material.
-
-Default `metadata` request logging must not persist prompt/message/generated/tool/embedding content.
-
-`full` logging is an explicit per-Instance opt-in and should be presented as potentially sensitive/high-volume storage.
-
-## Performance and concurrency constraints
-
-Observability must not materially slow the inference path.
-
-- Gateway response streaming must remain streaming; do not buffer a response before forwarding it to the client.
-- Persistence occurs after/alongside response forwarding and should minimize time spent on the critical path.
-- WebSocket clients share sampled telemetry rather than triggering their own hardware probes.
-- Historical queries are indexed, bounded and paginated.
-- Retention cleanup is incremental/background work.
-- High-cardinality Prometheus label sets are prohibited.
-- Errors in observability persistence are logged but must not turn a successful inference into a failed inference.
+- Streaming inference must remain streaming; do not buffer streaming responses before forwarding.
+- Request identity/logging begins early, but persistence errors remain non-fatal to inference.
+- Finalization and cumulative counter updates are exactly-once/idempotent.
+- Short best-effort persistence after a client cancellation must not inherit the cancelled request context.
+- Full body capture remains explicit per-Instance opt-in.
+- Full bodies are never serialized into history-list/WebSocket summaries.
+- Historical queries are indexed, bounded, and paginated.
+- Retention cleanup runs in the background.
+- Forwarded IP metadata is spoofable and must remain observability-only.
 
 ## Implementation slices
 
 ### Slice 11.1 — Request observability foundation
 
-- direct development-schema additions;
-- per-Instance `metadata` / `full` request logging mode;
-- safe API-key attribution;
-- gateway request instrumentation;
-- individual request persistence;
-- active/queued counters;
-- summary/request/timeseries management APIs;
-- `/metrics` request metrics and optional token auth;
-- retention setting/cleanup;
-- tests.
+Request persistence, Instance logging policy, safe API-key attribution, gateway instrumentation, active/queued counters, management request APIs, Prometheus request metrics, retention, and tests.
 
 ### Slice 11.2 — Lifecycle + hardware history
 
-- shared manager-owned hardware sampling/history;
-- persisted GPU/RAM/VRAM telemetry;
-- lifecycle/scheduler/autoload/eviction/idle-unload/failed-start events and counters;
-- llama.cpp-native metric integration into shared current snapshots;
-- WebSocket observability events;
-- Prometheus lifecycle/hardware gauges/counters;
-- tests.
+Shared manager-owned sampling, persisted hardware telemetry, lifecycle/scheduler counters/events, llama.cpp metrics integration, WebSocket observability, Prometheus gauges, and tests.
 
 ### Slice 11.3 — Dashboard
 
-- replace the current generic Overview with the approved Dashboard layout;
-- KPI row;
-- VRAM allocation;
-- last-15-minute gateway traffic;
-- Needs attention;
-- live WebSocket updates with HTTP initial/history loading;
-- responsive Nuxt UI implementation;
-- frontend tests and coverage.
+Operational KPIs, VRAM allocation, recent gateway traffic, Needs attention, shared live updates, `/logs` integration, and frontend coverage.
 
 ### Slice 11.4 — Structured Instance logs
 
-- retain raw worker logs in memory only;
-- structured stdout/stderr/manager lifecycle source;
-- live tail plus source/text filtering;
-- preserve bounded session-only retention;
-- backend/frontend tests.
+Session-only raw worker logs with source/search filtering and live tail.
+
+### Slice 11.5 — Request-log explorer and flat tracing
+
+- request/trace identity before authentication/validation;
+- all gateway error attempts persisted;
+- LiteLLM trace/session/body compatibility and UUID generation;
+- call type + client IP/User-Agent persistence;
+- trace/request/search filters and bounded pagination;
+- metadata-only list/WebSocket DTO behavior;
+- full-content detail endpoint behavior;
+- `/logs` table, trace links, detail slideover, pretty/JSON rendering;
+- Dashboard and navigation integration;
+- backend/frontend regression and coverage tests.
 
 ## Acceptance criteria
 
-- request/history data survives manager restarts;
-- default observability retention is 30 days and is configurable;
-- every resolvable authenticated inference request is stored individually;
-- default Instance logging stores metadata only;
-- an Instance may explicitly opt into full request/response content storage;
-- full logging never stores API/session/provider secrets;
-- active, queued, success/error, duration, TTFT, token and generation-throughput metrics are available when measurable;
-- p50/p95/p99 latency and TTFT are available from management summary APIs;
-- request metrics can be broken down by Instance, endpoint, result/status and streaming mode;
-- API-key usage is visible in management observability without exposing secrets;
-- scheduler/autoload/load/eviction/idle-unload/failed-start activity is tracked;
-- RAM/VRAM/GPU history survives restart for the configured retention period;
-- llama.cpp native metrics are consumed opportunistically and failures remain non-fatal;
-- `/metrics` uses `llamacpp_manager_` names and works unauthenticated by default;
-- configuring the Prometheus token protects `/metrics`;
-- Prometheus does not expose high-cardinality API-key/request/content labels;
-- Dashboard follows the approved layout and uses the existing runtime WebSocket for live updates;
-- no separate observability page is introduced;
-- Instance logs remain session-only, distinguish stdout/stderr/manager lifecycle, and support live tail + search/filter;
-- inference streaming behavior remains intact;
+- request/history data survives manager restarts and obeys configured retention;
+- every gateway `/v1/...` request attempt is represented, including early auth/validation/unsupported-endpoint errors;
+- every logged request has a stable manager request ID and UUID trace ID;
+- LiteLLM trace header/session/body metadata is accepted with the specified precedence;
+- W3C `traceparent` support is not added by issue #60;
+- request and trace IDs are returned on successful and failed gateway responses;
+- client IP precedence and IPv4/IPv6 normalization follow this specification;
+- call type is stored for the four supported inference endpoints;
+- unresolved Instance/API-key metadata can remain unavailable on early failures;
+- default logging is metadata-only; full logging remains explicit per Instance;
+- list/WebSocket payloads never expose retained full bodies;
+- detail returns full bodies only when retained;
+- `/logs` exists in main navigation with required table fields, filters, trace links, bounded pagination, and right-side slideover detail;
+- `/logs?trace_id=<uuid>` is trace-only and chronological;
+- metadata-only detail explains why content is absent;
+- full detail offers structured/pretty and JSON content including messages/tools/tool calls where possible;
+- Dashboard links into `/logs` and request detail where practical;
+- inference streaming remains intact;
+- Prometheus remains free of high-cardinality request/log labels;
 - backend and frontend quality/coverage gates remain at least 90%.
