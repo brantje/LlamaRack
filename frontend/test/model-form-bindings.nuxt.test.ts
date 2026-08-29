@@ -26,9 +26,11 @@ beforeEach(() => {
   manager.profile.value = null
 })
 
-function selectComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'SelectMenu' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'USelectMenu' })
+async function selectGGUF(wrapper: any, path: string) {
+  const input = wrapper.findAll('input[type="radio"][name="gguf_path"]').find((item: any) => item.attributes('value') === path)
+  if (!input) throw new Error(`Missing GGUF option ${path}`)
+  await input.setValue()
+  await flushPromises()
 }
 
 describe('model creation form', () => {
@@ -49,11 +51,11 @@ describe('model creation form', () => {
     expect(wrapper.find('[name="priority"]').exists()).toBe(false)
     expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
 
-    const select = selectComponents(wrapper)[0]!
-    expect(select.props('items')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ label: 'Qwen/coder/qwen-Q4_K_M.gguf · Q4_K_M', value: 'Qwen/coder/qwen-Q4_K_M.gguf' })
-    ]))
-    expect(JSON.stringify(select.props('items'))).not.toContain('/models/')
+    const list = wrapper.get('[data-testid="gguf-select"]')
+    expect(list.text()).toContain('Qwen/coder/qwen-Q4_K_M.gguf')
+    expect(list.text()).toContain('deep/other.gguf')
+    expect(list.findAll('[data-testid="gguf-option"]')).toHaveLength(2)
+    expect(list.text()).not.toContain('/models/Qwen')
   })
 
   it('prefills first-instance name from the model name and keeps the generated slug in sync', async () => {
@@ -67,7 +69,7 @@ describe('model creation form', () => {
     })
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'Qwen/coder/qwen-Q4_K_M.gguf')
+    await selectGGUF(wrapper, 'Qwen/coder/qwen-Q4_K_M.gguf')
 
     await wrapper.get('[data-testid="model-name"]').setValue('Qwen Coder')
     await flushPromises()
@@ -124,7 +126,7 @@ describe('model creation form', () => {
     })
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'deep/other.gguf')
+    await selectGGUF(wrapper, 'deep/other.gguf')
     await wrapper.get('[data-testid="model-name"]').setValue('Coder')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -158,9 +160,9 @@ describe('model creation form', () => {
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
     expect(wrapper.text()).toContain('scan failed')
-    expect(selectComponents(wrapper)[0]!.props('items')).toEqual([])
+    expect(wrapper.get('[data-testid="gguf-select"]').findAll('[data-testid="gguf-option"]')).toHaveLength(0)
     await wrapper.findAll('button').find(button => button.text().includes('Rescan'))!.trigger('click')
     await flushPromises()
-    expect(JSON.stringify(selectComponents(wrapper)[0]!.props('items'))).toContain('deep/other.gguf')
+    expect(wrapper.get('[data-testid="gguf-select"]').text()).toContain('deep/other.gguf')
   })
 })
