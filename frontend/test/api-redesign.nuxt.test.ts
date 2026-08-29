@@ -1,3 +1,4 @@
+import { computed } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
@@ -7,7 +8,7 @@ import StatusTag from '~/components/StatusTag.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
-mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
+mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: computed(() => 'http://manager.test:8888') }))
 
 function resetAuthenticated() {
   const manager = useManager()
