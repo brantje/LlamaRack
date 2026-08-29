@@ -1,6 +1,7 @@
 services:
   llamacpp-manager:
     image: ghcr.io/brantje/llamacpp-manager:${LCM_IMAGE_TAG:-latest}
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       LCM_LISTEN_ADDR: :8000
       LCM_DATA_DIR: /config
