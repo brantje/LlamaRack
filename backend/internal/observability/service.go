@@ -344,7 +344,7 @@ func (s *Service) ListRequests(ctx context.Context, filters RequestFilters) ([]R
 	query := `SELECT COALESCE(c.request_id,''),
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
-		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error
+		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL
 		FROM inference_requests r LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE 1=1`
 	var args []any
 	add := func(clause string, value any) { query += clause; args = append(args, value) }
@@ -410,14 +410,14 @@ func (s *Service) ListRequests(ctx context.Context, filters RequestFilters) ([]R
 
 func scanEnrichedRequest(row interface{ Scan(...any) error }) (RequestRecord, error) {
 	var item RequestRecord
-	var keyID, keyName, keyPrefix, errText sql.NullString
+	var keyID, keyName, keyPrefix, errText, requestBody, responseBody sql.NullString
 	var streaming, autoloaded int
 	var ttft, tps, promptTPS sql.NullFloat64
 	if err := row.Scan(
 		&item.RequestID, &item.ID, &item.TraceID, &item.CallType, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint,
 		&keyID, &keyName, &keyPrefix, &item.ClientIP, &item.UserAgent, &streaming, &item.StatusCode, &item.Result, &item.DurationMS,
 		&ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &promptTPS, &item.QueueDurationMS, &item.LoadDurationMS,
-		&autoloaded, &errText,
+		&autoloaded, &errText, &requestBody, &responseBody,
 	); err != nil {
 		return RequestRecord{}, err
 	}
@@ -442,6 +442,14 @@ func scanEnrichedRequest(row interface{ Scan(...any) error }) (RequestRecord, er
 	}
 	if errText.Valid {
 		item.Error = errText.String
+	}
+	if requestBody.Valid {
+		value := requestBody.String
+		item.RequestBody = &value
+	}
+	if responseBody.Valid {
+		value := responseBody.String
+		item.ResponseBody = &value
 	}
 	return item, nil
 }
