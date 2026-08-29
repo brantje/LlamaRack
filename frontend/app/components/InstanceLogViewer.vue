@@ -13,6 +13,7 @@ const live = ref(false)
 const error = ref('')
 const output = ref<HTMLElement | null>(null)
 let stream: EventSource | null = null
+let connectionGeneration = 0
 
 const sourceItems = [
   { label: 'All sources', value: 'all' },
@@ -58,6 +59,7 @@ function append(entry: LogEntry) {
 }
 
 function closeStream() {
+  connectionGeneration++
   stream?.close()
   stream = null
   live.value = false
@@ -76,17 +78,36 @@ async function loadSnapshot() {
   }
 }
 
-function connectStream() {
+async function connectStream() {
   closeStream()
+  const generation = connectionGeneration
   entries.value = []
   error.value = ''
   loading.value = true
   if (typeof EventSource === 'undefined') {
-    void loadSnapshot()
+    await loadSnapshot()
     return
   }
-  const url = `${manager.apiBase.value}/api/v1/logs/stream?instance_id=${encodeURIComponent(props.instanceId)}&limit=2000`
-  const nextStream = new EventSource(url, { withCredentials: true })
+
+  let ticket = ''
+  try {
+    const response = await manager.request<{ ticket: string }>('/api/v1/auth/ws-ticket', { method: 'POST' })
+    ticket = String(response?.ticket || '')
+  } catch (value: any) {
+    if (generation !== connectionGeneration) return
+    loading.value = false
+    error.value = value?.data?.error || value?.message || 'Unable to authenticate live log stream'
+    return
+  }
+  if (generation !== connectionGeneration) return
+  if (!ticket) {
+    loading.value = false
+    error.value = 'Unable to authenticate live log stream'
+    return
+  }
+
+  const url = `${manager.apiBase.value}/api/v1/logs/stream?instance_id=${encodeURIComponent(props.instanceId)}&limit=2000&ticket=${encodeURIComponent(ticket)}`
+  const nextStream = new EventSource(url)
   stream = nextStream
   nextStream.onopen = () => {
     if (stream !== nextStream) return
@@ -118,8 +139,8 @@ function clearView() {
   error.value = ''
 }
 
-watch(() => props.instanceId, () => connectStream())
-onMounted(connectStream)
+watch(() => props.instanceId, () => { void connectStream() })
+onMounted(() => { void connectStream() })
 onBeforeUnmount(closeStream)
 </script>
 

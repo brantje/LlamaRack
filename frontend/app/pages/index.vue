@@ -8,8 +8,6 @@ const { instances, runtimes, observabilityLive } = manager
 type APIKeyRef = { id: string; name: string; prefix: string }
 type RequestRecord = {
   id: number
-  request_id?: string
-  accepted_at?: number
   started_at: number
   finished_at: number
   instance_id: string
@@ -80,6 +78,11 @@ const ramUsed = computed(() => Math.max(0, hardware.value.ram_total_bytes - hard
 const ramPercent = computed(() => hardware.value.ram_total_bytes > 0 ? Math.min(100, (ramUsed.value / hardware.value.ram_total_bytes) * 100) : 0)
 const idleSeconds = computed(() => Number(settings.value?.idle_unload_seconds?.value || 0))
 const idleOverrides = computed(() => instances.value.filter(instance => instance.idle_unload_seconds > 0).length)
+const logsTarget = computed(() => {
+  const failed = runtimeList.value.find(runtime => runtime.state === 'FAILED')
+  const id = failed?.instance_id || instances.value[0]?.id
+  return id ? `/instances/${encodeURIComponent(id)}/detail` : '/instances'
+})
 
 const gatewayColumns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'started_at', header: 'Time' },
@@ -140,10 +143,6 @@ function requestKey(record: RequestRecord) {
   return record.api_key.name || record.api_key.prefix || 'API key'
 }
 
-function requestDetailTarget(record: RequestRecord) {
-  return record.request_id ? `/logs?request_id=${encodeURIComponent(record.request_id)}` : '/logs'
-}
-
 function gpuPercent(gpu: HardwareGPU) {
   return gpu.total_bytes > 0 ? Math.min(100, Math.max(0, gpu.used_bytes / gpu.total_bytes * 100)) : 0
 }
@@ -190,12 +189,12 @@ const attention = computed<AttentionItem[]>(() => {
       to: `/instances/${encodeURIComponent(runtime.instance_id)}/detail`
     })
   }
-  for (const request of displayedRequests.value.filter(request => request.result !== 'success' && request.result !== 'pending').slice(0, 2)) {
+  for (const request of displayedRequests.value.filter(request => request.result !== 'success').slice(0, 2)) {
     items.push({
-      key: `request-${request.request_id || request.id}`,
+      key: `request-${request.id}`,
       title: `${request.instance_id} returned ${request.status_code || 'an error'}`,
       detail: request.error || `${request.endpoint} failed during the last 15 minutes.`,
-      to: requestDetailTarget(request)
+      to: `/instances/${encodeURIComponent(request.instance_id)}/detail`
     })
   }
   for (const instance of instances.value) {
@@ -243,10 +242,18 @@ async function loadDashboard() {
 }
 
 async function refreshDashboard() {
+  if (!manager.initialized.value || !manager.user.value) return
   await Promise.allSettled([manager.refresh(), loadDashboard()])
 }
 
-onMounted(loadDashboard)
+watch(
+  [() => manager.initialized.value, () => manager.user.value],
+  ([initialized, user]) => {
+    if (!initialized || !user) return
+    void loadDashboard()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -254,7 +261,7 @@ onMounted(loadDashboard)
     <div class="flex flex-wrap items-start justify-between gap-4">
       <UPageHeader class="min-w-0 flex-1" headline="OVERVIEW" title="Dashboard" description="Live inference traffic, runtime health and accelerator allocation." />
       <div class="flex flex-wrap gap-2">
-        <UButton to="/logs" color="neutral" variant="soft" data-testid="open-request-logs">Open logs</UButton>
+        <UButton :to="logsTarget" color="neutral" variant="soft">Open logs</UButton>
         <UButton color="neutral" variant="soft" :loading="loading" @click="refreshDashboard">Refresh</UButton>
       </div>
     </div>
@@ -320,21 +327,18 @@ onMounted(loadDashboard)
         <template #header>
           <div class="flex items-center justify-between gap-3">
             <div><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">GATEWAY TRAFFIC · LAST 15 MIN</p><p class="mt-1 text-xs text-muted">Individual OpenAI-compatible requests with safe API-key attribution.</p></div>
-            <div class="flex items-center gap-2">
-              <UBadge color="neutral" variant="soft">{{ displayedRequests.length }} shown</UBadge>
-              <UButton to="/logs" color="neutral" variant="link" size="xs">View all logs</UButton>
-            </div>
+            <UBadge color="neutral" variant="soft">{{ displayedRequests.length }} shown</UBadge>
           </div>
         </template>
         <UEmpty v-if="!displayedRequests.length" variant="naked" title="No recent gateway traffic" description="Requests will appear here after inference traffic reaches an addressable Instance." />
         <UTable v-else :data="displayedRequests" :columns="gatewayColumns">
-          <template #started_at-cell="{ row }"><span class="font-mono text-xs">{{ formatTime(row.original.started_at || row.original.accepted_at || 0) }}</span></template>
-          <template #instance_id-cell="{ row }"><NuxtLink class="font-mono text-xs font-semibold text-primary" :to="requestDetailTarget(row.original)">{{ row.original.instance_id }}</NuxtLink></template>
+          <template #started_at-cell="{ row }"><span class="font-mono text-xs">{{ formatTime(row.original.started_at) }}</span></template>
+          <template #instance_id-cell="{ row }"><NuxtLink class="font-mono text-xs font-semibold text-primary" :to="`/instances/${encodeURIComponent(row.original.instance_id)}/detail`">{{ row.original.instance_id }}</NuxtLink></template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
           <template #api_key-cell="{ row }"><span class="text-xs">{{ requestKey(row.original) }}</span></template>
           <template #total_tokens-cell="{ row }"><span class="font-mono text-xs">{{ row.original.total_tokens || '—' }}</span></template>
           <template #duration_ms-cell="{ row }"><span class="font-mono text-xs">{{ formatDuration(row.original.duration_ms) }}</span></template>
-          <template #result-cell="{ row }"><UBadge :color="row.original.result === 'success' ? 'success' : row.original.result === 'pending' ? 'warning' : 'error'" variant="subtle" size="sm">{{ row.original.status_code || row.original.result }}</UBadge></template>
+          <template #result-cell="{ row }"><UBadge :color="row.original.result === 'success' ? 'success' : 'error'" variant="subtle" size="sm">{{ row.original.status_code || row.original.result }}</UBadge></template>
         </UTable>
       </UCard>
 

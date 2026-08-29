@@ -40,12 +40,23 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 			return
 		}
 
+		var (
+			user    auth.User
+			session auth.Session
+			err     error
+		)
 		token := bearerToken(r.Header.Get("Authorization"))
-		if token == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-			return
+		switch {
+		case token != "":
+			user, session, err = a.AuthenticateBearer(r.Context(), token)
+		case path == "/api/v1/logs/stream" && r.Method == http.MethodGet:
+			// Native EventSource cannot attach an Authorization header. Reuse the
+			// same short-lived, one-time ticket mechanism as the runtime WebSocket
+			// so bearer credentials never have to be placed in the stream URL.
+			user, session, err = a.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"))
+		default:
+			err = auth.ErrSessionInvalid
 		}
-		user, session, err := a.AuthenticateBearer(r.Context(), token)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
