@@ -78,4 +78,14 @@ describe('Administration global defaults editor', () => {
     await flushPromises()
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual({ zeta: '2' })
   })
+
+  it('treats a missing defaults model as an empty map during initial sync', async () => {
+    const wrapper = await mountSuspended(AdminGlobalDefaultsEditor, {
+      props: { modelValue: undefined as unknown as Record<string, string>, profile: null }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No global defaults.')
+    expect(wrapper.findAll('[data-testid="admin-global-default-row"]')).toHaveLength(0)
+    wrapper.unmount()
+  })
 })
