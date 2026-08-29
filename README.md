@@ -30,6 +30,8 @@ The production files are:
 - `docker-compose.yml` — default published image
 - `docker-compose.nvidia.yml` — NVIDIA/CUDA override using the `latest-cuda` image by default
 
+Published images run as unprivileged UID/GID `1000:1000` by default. The production Compose example exposes `PUID` and `PGID` so bind-mounted `data/config` and `data/models` can match host ownership when needed, for example `PUID=$(id -u) PGID=$(id -g) docker compose up -d` on Linux systems where the host user is not UID/GID 1000.
+
 Set `LCM_IMAGE_TAG` or `LCM_NVIDIA_IMAGE_TAG` to pin a specific released image tag instead of `latest` / `latest-cuda`.
 
 ## Local development
