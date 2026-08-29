@@ -41,13 +41,11 @@ func TestDockerNVIDIATelemetryRuntimeConfiguration(t *testing.T) {
 		}
 	}
 
-	dockerfilePath := filepath.Join(backendRoot, "Dockerfile")
-	releaseDockerfilePath := filepath.Join(repoRoot, "Dockerfile")
+	dockerfilePath := filepath.Join(repoRoot, "Dockerfile")
 	prodComposePath := filepath.Join(repoRoot, "docker-compose.yml")
 	prodNVIDIAComposePath := filepath.Join(repoRoot, "docker-compose.nvidia.yml")
 	devNVIDIAComposePath := filepath.Join(repoRoot, "docker-compose.dev.nvidia.yml")
 	dockerfile := read(dockerfilePath)
-	releaseDockerfile := read(releaseDockerfilePath)
 	prodCompose := read(prodComposePath)
 	prodNVIDIACompose := read(prodNVIDIAComposePath)
 	devNVIDIACompose := read(devNVIDIAComposePath)
@@ -83,7 +81,7 @@ func TestDockerNVIDIATelemetryRuntimeConfiguration(t *testing.T) {
 	// Published images must not run the manager or llama-server as root. The
 	// production Compose file keeps bind-mounted data writable by allowing the
 	// runtime UID/GID to be matched to host ownership.
-	assertContains(releaseDockerfilePath, releaseDockerfile,
+	assertContains(dockerfilePath, dockerfile,
 		"chown -R 1000:1000 /config /models",
 		"USER 1000:1000",
 	)
