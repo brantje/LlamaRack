@@ -18,13 +18,7 @@ function seed(overrides: Record<string, unknown> = {}) {
   manager.disconnectRuntimeEvents()
   manager.initialized.value = true
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{
-    id: 'm1', name: 'Detail Model', gguf_path: 'detail.gguf', total_bytes: 4 * gib, context_length: 16384,
-    helpers: [
-      { kind: 'mmproj', path: 'helpers/mmproj.gguf', flag: '--mmproj', size: 512 * 1024 ** 2 },
-      { kind: 'mtp', path: 'helpers/draft.gguf', size: 256 * 1024 ** 2 }
-    ]
-  } as any]
+  manager.models.value = [{ id: 'm1', name: 'Detail Model', gguf_path: 'detail.gguf', total_bytes: 4 * gib, context_length: 16384 }]
   manager.instances.value = [{
     id: 'detail', model_id: 'm1', name: 'Detail Instance', enabled: true, autoload_enabled: true,
     always_on: false, priority: 'normal', eviction_enabled: false, idle_unload_seconds: 0,
@@ -85,6 +79,18 @@ function installHappyRequests(manager = useManager()) {
       const metric = new URL(`http://x${path}`).searchParams.get('metric') || ''
       return history(metric)
     }
+    if (path === '/api/v1/llamacpp/config?model_id=m1') return {
+      effective: {
+        values: { mmproj: '/models/helpers/mmproj.gguf', 'spec-draft-model': '/models/helpers/draft.gguf' },
+        sources: { mmproj: 'model', 'spec-draft-model': 'detected' }
+      }
+    }
+    if (path === '/api/v1/models/inspect' && options?.method === 'POST') return {
+      dependencies: [
+        { kind: 'mmproj', total_bytes: 512 * 1024 ** 2 },
+        { kind: 'mtp', total_bytes: 256 * 1024 ** 2 }
+      ]
+    }
     if (path.startsWith('/api/v1/logs?')) return { instance_id: 'detail', entries: [] }
     if (path === '/api/v1/models') return manager.models.value
     if (path === '/api/v1/instances') return manager.instances.value
@@ -113,7 +119,7 @@ beforeEach(() => {
 })
 
 describe('Instance detail edge branches', () => {
-  it('renders companion helpers, process GPU attribution, other VRAM and formatting extremes', async () => {
+  it('loads real companion config, process GPU attribution, all GPU maps and formatting extremes', async () => {
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/detail/detail' })
     await flushPromises()
     const text = wrapper.text()
@@ -123,12 +129,46 @@ describe('Instance detail edge branches', () => {
     expect(text).toContain('123.5 tok/s')
     expect(text).toContain('Vision projector')
     expect(text).toContain('MTP draft model')
+    expect(text).toContain('/models/helpers/mmproj.gguf')
+    expect(text).toContain('/models/helpers/draft.gguf')
     expect(text).toContain('--mmproj')
-    expect(text).toContain('--model-draft')
+    expect(text).toContain('--spec-draft-model')
+    expect(text).toContain('512 MiB')
+    expect(text).toContain('256 MiB')
     expect(text).toContain('detail (this Instance)')
     expect(text).toContain('other')
     expect(text).toContain('Unattributed process memory')
+    expect(text).toContain('CUDA1 · Other')
+    expect(text).toContain('Free')
     expect(text).toContain('0 B')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config?model_id=m1')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: 'detail.gguf' } })
+  })
+
+  it('ignores inherited global helpers and clamps history to retained ranges', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/settings/general') return { observability_retention_days: { value: 1 } }
+      if (path === '/api/v1/llamacpp/config?model_id=m1') return { effective: { values: { mmproj: '/global/mmproj.gguf' }, sources: { mmproj: 'global' } } }
+      if (path.startsWith('/api/v1/observability/timeseries?')) return history(new URL(`http://x${path}`).searchParams.get('metric') || '')
+      if (path.startsWith('/api/v1/logs?')) return { instance_id: 'detail', entries: [] }
+      return []
+    })
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/detail/detail' })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="instance-detail-companions"]').exists()).toBe(false)
+
+    mocks.request.mockClear()
+    ;(wrapper.vm as any).setSelectedWindow(604800)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Requests · 24 hours')
+    const historyCalls = mocks.request.mock.calls.map(([path]) => String(path)).filter(path => path.startsWith('/api/v1/observability/timeseries?'))
+    expect(historyCalls).toHaveLength(7)
+    for (const path of historyCalls) {
+      const params = new URL(`http://x${path}`).searchParams
+      expect(params.get('window_seconds')).toBe('86400')
+      expect(params.get('bucket_seconds')).toBe('900')
+      expect(params.get('instance_id')).toBe('detail')
+    }
   })
 
   it('preserves direct launch/stop, confirmed kill and delete actions', async () => {
