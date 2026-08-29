@@ -2,7 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { APIKey } from '~/composables/useManager'
 
-type ManagedAPIKey = APIKey & { revoked_at?: number; created_by_user_id?: number }
+type ManagedAPIKey = APIKey & { revoked_at?: number }
 
 const manager = useManager()
 const { apiBase } = manager
@@ -16,9 +16,27 @@ const confirmation = ref<{ request: (options: Record<string, string>) => Promise
 const columns: TableColumn<ManagedAPIKey>[] = [
   { accessorKey: 'name', header: 'Name' },
   { accessorKey: 'prefix', header: 'Prefix' },
-  { accessorKey: 'enabled', header: 'Status' },
-  { id: 'actions', header: '' }
+  { id: 'status', header: 'Status' },
+  { accessorKey: 'created_at', header: 'Created' },
+  { accessorKey: 'last_used_at', header: 'Last used' },
+  { id: 'actions', header: 'Actions' }
 ]
+
+function formatTimestamp(value?: number) {
+  if (!value) return '—'
+  const date = new Date(value * 1000)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+}
+
+function statusVariant(key: ManagedAPIKey) {
+  if (key.revoked_at) return 'failed' as const
+  return key.enabled ? 'ready' as const : 'neutral' as const
+}
+
+function statusLabel(key: ManagedAPIKey) {
+  if (key.revoked_at) return 'Revoked'
+  return key.enabled ? 'Enabled' : 'Disabled'
+}
 
 async function load() {
   if (!manager.user.value) return
@@ -103,34 +121,32 @@ async function rotate(key: ManagedAPIKey) {
   <div class="space-y-5">
     <UPageHeader headline="OPENAI COMPATIBILITY" title="API" description="Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint." />
 
-    <UCard>
-      <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">BASE URL</p>
-      <h2 class="text-xl font-bold">Unified endpoint</h2>
-      <code class="my-4 block break-all border-y border-default py-3 font-mono text-sm text-primary">{{ apiBase }}/v1</code>
-      <p class="text-sm leading-6 text-muted">Supported initial routes: models, chat completions, completions, Responses and embeddings.</p>
-    </UCard>
+    <Frame class="p-5" data-testid="api-base-url">
+      <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BASE URL</p>
+      <h2 class="mt-1 text-base font-semibold">Unified endpoint</h2>
+      <code class="my-4 block break-all border-y border-[var(--color-divider)] py-3 font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>
+      <p class="text-sm leading-6 text-[var(--neutral-700)]">Supported routes: models, chat completions, completions, Responses and embeddings.</p>
+    </Frame>
 
-    <UCard>
-      <template #header>
-        <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">CREDENTIALS</p>
-            <h2 class="text-xl font-bold">Inference API keys</h2>
-          </div>
-          <UFieldGroup class="w-full md:w-auto">
-            <UInput v-model="name" data-testid="key-name" class="min-w-0 flex-1 md:w-48" placeholder="Key name" />
-            <UButton data-testid="create-key" size="sm" @click="createKey">Create key</UButton>
-          </UFieldGroup>
+    <Frame class="p-5" data-testid="api-keys-card">
+      <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CREDENTIALS</p>
+          <h2 class="mt-1 text-base font-semibold">Inference API keys</h2>
         </div>
-      </template>
+        <UFieldGroup class="w-full rounded-none md:w-auto">
+          <UInput v-model="name" data-testid="key-name" class="min-w-0 flex-1 md:w-48" placeholder="Key name" />
+          <AppButton data-testid="create-key" intent="primary" size="sm" @click="createKey">Create key</AppButton>
+        </UFieldGroup>
+      </div>
 
-      <p class="mb-4 text-sm text-muted">Disable keeps a key for later. Revoke invalidates it permanently while retaining safe metadata. Rotation returns replacement plaintext once.</p>
-      <UAlert v-if="error" class="mb-4" color="error" variant="subtle" :description="error" />
+      <p class="mt-4 text-sm text-[var(--neutral-700)]">Disable keeps a key for later. Revoke invalidates it permanently while retaining safe metadata. Rotation returns replacement plaintext once. Keys authenticate clients, not users.</p>
+      <UAlert v-if="error" class="mt-4" color="error" variant="subtle" :description="error" />
 
-      <section v-if="secret" class="mb-4 border-y border-default py-4">
+      <section v-if="secret" class="mt-4 border-y border-[var(--color-divider)] py-4" data-testid="fresh-api-key">
         <div class="space-y-3">
-          <strong class="text-sm">Copy this key now. It will not be shown again.</strong>
-          <code class="block break-all font-mono text-sm text-primary">{{ secret }}</code>
+          <strong class="text-sm font-semibold">Copy this key now. It will not be shown again.</strong>
+          <code class="block break-all font-mono text-[13.5px] text-[var(--accent-700)]">{{ secret }}</code>
           <AppCopyButton
             :text="secret"
             color="neutral"
@@ -144,25 +160,28 @@ async function rotate(key: ManagedAPIKey) {
         </div>
       </section>
 
-      <UTable v-if="keys.length" :data="keys" :columns="columns">
-        <template #prefix-cell="{ row }"><span class="font-mono text-xs">{{ row.original.prefix }}…</span></template>
-        <template #enabled-cell="{ row }">
-          <UBadge v-if="row.original.revoked_at" color="error" variant="subtle" size="sm">Revoked</UBadge>
-          <UBadge v-else :color="row.original.enabled ? 'success' : 'neutral'" variant="subtle" size="sm">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</UBadge>
-        </template>
-        <template #actions-cell="{ row }">
-          <div class="flex justify-end">
-            <UFieldGroup v-if="!row.original.revoked_at">
-              <UButton color="neutral" variant="soft" size="sm" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</UButton>
-              <UButton color="warning" variant="soft" size="sm" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</UButton>
-              <UButton color="error" variant="soft" size="sm" :loading="pending[row.original.id] === 'revoke'" :disabled="!!pending[row.original.id]" @click="revoke(row.original)">Revoke</UButton>
-            </UFieldGroup>
-          </div>
-        </template>
-      </UTable>
+      <div v-if="keys.length" class="mt-4 border border-[var(--color-divider)]" data-testid="api-keys-table">
+        <UTable :data="keys" :columns="columns">
+          <template #name-cell="{ row }"><span class="text-[13.5px] font-semibold">{{ row.original.name }}</span></template>
+          <template #prefix-cell="{ row }"><span class="font-mono text-[11.5px] text-[var(--neutral-700)]">{{ row.original.prefix }}…</span></template>
+          <template #status-cell="{ row }"><StatusTag :variant="statusVariant(row.original)">{{ statusLabel(row.original) }}</StatusTag></template>
+          <template #created_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.created_at) }}</span></template>
+          <template #last_used_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.last_used_at) }}</span></template>
+          <template #actions-cell="{ row }">
+            <div v-if="!row.original.revoked_at" class="flex justify-end gap-1">
+              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
+              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
+              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'revoke'" :disabled="!!pending[row.original.id]" @click="revoke(row.original)">Revoke</AppButton>
+            </div>
+          </template>
+        </UTable>
+      </div>
 
-      <UEmpty v-else variant="naked" title="No API keys created yet." description="Create a key to authenticate OpenAI-compatible clients." />
-    </UCard>
+      <div v-else class="mt-4 border border-[var(--color-divider)] px-4 py-8 text-center" data-testid="api-keys-empty">
+        <p class="text-sm font-semibold">No API keys created yet.</p>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">Create a key to authenticate OpenAI-compatible clients.</p>
+      </div>
+    </Frame>
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>
