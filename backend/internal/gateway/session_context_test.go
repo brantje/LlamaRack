@@ -70,7 +70,7 @@ func TestWithRequestLogContextPersistsBodyAndHeaderSessions(t *testing.T) {
 	seed := func(requestID string) {
 		t.Helper()
 		if err := service.RecordCorrelatedRequest(ctx, requestID, nil, observability.RequestRecord{
-			StartedAt: 1, FinishedAt: 2, Endpoint: "/v1/chat/completions", StatusCode: http.StatusOK, Result: "success",
+			StartedAt: 1, FinishedAt: 2, InstanceID: "test-instance", Endpoint: "/v1/chat/completions", StatusCode: http.StatusOK, Result: "success",
 		}); err != nil {
 			t.Fatal(err)
 		}
