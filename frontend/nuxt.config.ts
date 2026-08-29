@@ -1,3 +1,15 @@
+const themeBootstrap = `(() => {
+  const key = 'llamacpp-manager-theme'
+  const allowed = new Set(['dark', 'light'])
+  let value = 'dark'
+  try {
+    const stored = localStorage.getItem(key)
+    if (stored && allowed.has(stored)) value = stored
+  } catch {}
+  document.documentElement.dataset.theme = value
+  document.documentElement.style.colorScheme = value
+})()`
+
 export default defineNuxtConfig({
   ssr: false,
   modules: ['@nuxt/ui'],
@@ -12,8 +24,9 @@ export default defineNuxtConfig({
       title: 'llamacpp-manager',
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'color-scheme', content: 'dark' }
-      ]
+        { name: 'color-scheme', content: 'dark light' }
+      ],
+      script: [{ innerHTML: themeBootstrap }]
     }
   },
   colorMode: {

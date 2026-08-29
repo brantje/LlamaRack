@@ -1,63 +1,120 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "../../themes/shared.css";
+@import "../../themes/dark.css";
+@import "../../themes/light.css";
 
 @theme static {
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-machine);
 
-  --color-mint-50: #effdf8;
-  --color-mint-100: #d9faed;
-  --color-mint-200: #b7f6dc;
-  --color-mint-300: #a6f5d7;
-  --color-mint-400: #84f0c4;
-  --color-mint-500: #56ddb0;
-  --color-mint-600: #229f78;
-  --color-mint-700: #207e62;
-  --color-mint-800: #1e644f;
-  --color-mint-900: #1c5343;
-  --color-mint-950: #0c2f25;
+  --color-accent-50: var(--accent-100);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-900);
 
-  --color-danger-50: #fff1f3;
-  --color-danger-100: #ffe4e8;
-  --color-danger-200: #fecdd5;
-  --color-danger-300: #ffadb5;
-  --color-danger-400: #ff7c89;
-  --color-danger-500: #f24d61;
-  --color-danger-600: #d62f49;
-  --color-danger-700: #b4233b;
-  --color-danger-800: #961f37;
-  --color-danger-900: #7f2035;
-  --color-danger-950: #470d19;
+  --color-neutral-50: var(--neutral-100);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-950: var(--neutral-900);
 
-  --color-warn-50: #fff9e8;
-  --color-warn-100: #fff1c5;
-  --color-warn-200: #ffe48d;
-  --color-warn-300: #ffe096;
-  --color-warn-400: #ffd27a;
-  --color-warn-500: #f6b84d;
-  --color-warn-600: #c6761e;
-  --color-warn-700: #9e551d;
-  --color-warn-800: #82431f;
-  --color-warn-900: #6d381e;
-  --color-warn-950: #3e1c0c;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
 }
 
-:root,
-.dark {
-  --ui-radius: 0.6rem;
-  --ui-bg: #0a0f14;
-  --ui-bg-muted: #0b1117;
-  --ui-bg-elevated: #101820;
-  --ui-bg-accented: #141e27;
-  --ui-border: #263541;
-  --ui-border-muted: #1f2b34;
-  --ui-border-accented: #33434f;
-  --ui-text-dimmed: #6f8392;
-  --ui-text-muted: #91a1af;
-  --ui-text-toned: #b7c3ce;
-  --ui-text: #dfe8ef;
-  --ui-text-highlighted: #edf4fa;
-  --ui-text-inverted: #07120f;
-  --ui-bg-inverted: #edf4fa;
-  --ui-border-inverted: #edf4fa;
+:root {
+  --ui-radius: 0;
+  --ui-bg: var(--color-bg);
+  --ui-bg-muted: var(--neutral-100);
+  --ui-bg-elevated: var(--color-surface);
+  --ui-bg-accented: var(--neutral-300);
+  --ui-border: var(--color-divider);
+  --ui-border-muted: var(--color-divider);
+  --ui-border-accented: var(--neutral-500);
+  --ui-text-dimmed: var(--neutral-700);
+  --ui-text-muted: var(--neutral-800);
+  --ui-text-toned: var(--neutral-900);
+  --ui-text: var(--color-text);
+  --ui-text-highlighted: var(--color-text);
+  --ui-text-inverted: var(--color-bg);
+  --ui-bg-inverted: var(--color-text);
+  --ui-border-inverted: var(--color-text);
+}
+
+html,
+body,
+#__nuxt {
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+code,
+kbd,
+pre,
+.font-mono,
+[data-machine-value] {
+  font-family: var(--font-machine);
+  font-variant-numeric: tabular-nums;
+}
+
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+input[type='radio'],
+input[type='radio']::before,
+input[type='radio']::after {
+  border-radius: 9999px !important;
+}
+
+button,
+[role='button'] {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+button:disabled,
+[role='button'][aria-disabled='true'] {
+  opacity: .45;
 }

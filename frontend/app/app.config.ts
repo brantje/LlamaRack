@@ -1,30 +1,30 @@
 export default defineAppConfig({
   ui: {
     colors: {
-      primary: 'mint',
-      secondary: 'purple',
-      success: 'mint',
-      info: 'sky',
-      warning: 'warn',
-      error: 'danger',
-      neutral: 'slate'
+      primary: 'accent',
+      secondary: 'neutral',
+      success: 'accent',
+      info: 'accent',
+      warning: 'accent',
+      error: 'accent',
+      neutral: 'neutral'
     },
     button: {
       slots: {
-        base: 'font-semibold'
+        base: 'cursor-pointer font-semibold rounded-none'
       }
     },
     card: {
       slots: {
-        root: 'bg-elevated/90 border-default'
+        root: 'rounded-none border border-default bg-elevated shadow-none'
       }
     },
     pageHeader: {
       slots: {
         root: 'border-0 py-0',
-        headline: 'text-[11px] font-extrabold tracking-[0.18em] text-muted',
-        title: 'text-3xl sm:text-[34px] font-bold text-highlighted',
-        description: 'text-sm sm:text-base text-muted'
+        headline: 'text-[10px] uppercase tracking-[.1em] text-muted',
+        title: 'font-[var(--font-heading)] text-[30px] font-semibold tracking-[-.015em] text-highlighted',
+        description: 'text-[15px] leading-[1.55] text-muted'
       }
     }
   }

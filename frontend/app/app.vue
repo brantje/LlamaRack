@@ -1,6 +1,11 @@
+<script setup lang="ts">
+const { initializeTheme } = useAppTheme()
+onMounted(initializeTheme)
+</script>
+
 <template>
   <UApp>
-    <div class="min-h-screen bg-[radial-gradient(circle_at_70%_-10%,#162633_0,#0a0f14_38%)] text-default">
+    <div class="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
       <NuxtLayout>
         <NuxtPage />
       </NuxtLayout>
