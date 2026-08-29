@@ -108,7 +108,7 @@ async function submitAuth() {
         </UDashboardNavbar>
       </template>
       <template #body>
-        <div class="w-full"><slot /></div>
+        <div class="w-full p-4 sm:p-6 lg:p-10"><slot /></div>
       </template>
     </UDashboardPanel>
   </UDashboardGroup>
