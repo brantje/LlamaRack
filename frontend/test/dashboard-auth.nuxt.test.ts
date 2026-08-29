@@ -59,6 +59,18 @@ describe('Dashboard authentication lifecycle', () => {
     await flushPromises()
     expect(mocks.request).not.toHaveBeenCalled()
 
+    const refresh = wrapper.findAll('button').find(candidate => candidate.text().trim() === 'Refresh')
+    expect(refresh).toBeTruthy()
+    manager.initialized.value = false
+    await refresh!.trigger('click')
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalled()
+
+    manager.initialized.value = true
+    await refresh!.trigger('click')
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalled()
+
     manager.user.value = { id: 1, username: 'admin', enabled: true }
     await flushPromises()
 
