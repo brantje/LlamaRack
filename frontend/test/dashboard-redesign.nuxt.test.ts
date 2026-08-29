@@ -120,4 +120,42 @@ describe('Dashboard redesign', () => {
     expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('Gateway · 1 hour')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('last 1 hour')
   })
+
+  it('covers retained-history clamping and sparse neutral traffic formatting', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0, source: 'default', editable: true }, observability_retention_days: { value: 1, source: 'database', editable: true } }
+      if (path.startsWith('/api/v1/observability/summary')) {
+        return {
+          ...summary(),
+          requests: 0,
+          successes: 0,
+          errors: 0,
+          total_tokens: 12_000,
+          lifecycle: { autoloads: 0, failed_starts: 0, load_duration_ms_total: 0 }
+        }
+      }
+      if (path.startsWith('/api/v1/observability/requests')) {
+        return { items: [{ id: 2, started_at: 0, finished_at: 0, instance_id: 'coder', endpoint: '/v1/models', streaming: false, status_code: 302, result: 'other', duration_ms: Number.NaN, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, tokens_per_second: 150, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false }] }
+      }
+      return []
+    })
+
+    const wrapper = await mountSuspended(DashboardPage, { route: '/' })
+    await flushPromises()
+
+    const kpis = wrapper.get('[data-testid="dashboard-observability-kpis"]').text()
+    expect(kpis).toContain('12')
+    expect(kpis).toContain('Success rate · 15 min0')
+    const traffic = wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()
+    expect(traffic).toContain('unary')
+    expect(traffic).toContain('302')
+    expect(traffic).toContain('150')
+    expect(traffic).toContain('—')
+
+    mocks.request.mockClear()
+    ;(wrapper.vm as any).setSelectedWindow(604800)
+    await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/summary?window_seconds=86400')
+    expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('Gateway · 24 hours')
+  })
 })
