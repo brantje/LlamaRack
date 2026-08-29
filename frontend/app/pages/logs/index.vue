@@ -214,8 +214,7 @@ async function toggleLiveStreaming() {
   liveStreamingEnabled.value = !liveStreamingEnabled.value
   if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
 }
-async function selectRequest(requestID: string) {
-  detailOpen.value = true
+async function loadRequestDetail(requestID: string) {
   detailLoading.value = true
   detailError.value = ''
   detail.value = null
@@ -224,23 +223,40 @@ async function selectRequest(requestID: string) {
   catch (value: any) { detailError.value = value?.data?.error || value?.message || 'Unable to load request details' }
   finally { detailLoading.value = false }
 }
+async function showRequest(requestID: string, sessionID: string) {
+  if (!requestID) return
+  detailOpen.value = true
+  sessionSidebarOpen.value = true
+  let sessionPromise: Promise<void> | undefined
+  if (sessionID !== activeSessionID.value) {
+    activeSessionID.value = sessionID
+    sessionRequests.value = []
+    sessionError.value = ''
+    sessionSortMode.value = 'duration'
+    sessionPromise = sessionID ? loadSessionRequests(sessionID) : undefined
+  }
+  const detailPromise = detail.value?.request_id === requestID && !detailError.value
+    ? Promise.resolve()
+    : loadRequestDetail(requestID)
+  await Promise.all([detailPromise, sessionPromise])
+}
 async function openRequest(item: RequestRecord) {
   if (!item.request_id) return
   const sessionID = item.session_id && sessionCount(item) > 1 ? item.session_id : ''
+  await showRequest(item.request_id, sessionID)
   const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
   query.request_id = item.request_id
   if (sessionID) query.session_id = sessionID
   else delete query.session_id
   await router.push({ path: '/logs', query })
-  await syncDetailFromRoute()
 }
 async function selectSessionRequest(item: RequestRecord) {
   if (!item.request_id || !activeSessionID.value) return
+  await showRequest(item.request_id, activeSessionID.value)
   const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
   query.request_id = item.request_id
   query.session_id = activeSessionID.value
   await router.replace({ path: '/logs', query })
-  await selectRequest(item.request_id)
 }
 async function syncDetailFromRoute() {
   if (!routeReady.value) return
@@ -250,16 +266,8 @@ async function syncDetailFromRoute() {
     if (detailOpen.value) detailOpen.value = false
     return
   }
-  detailOpen.value = true
-  sessionSidebarOpen.value = true
-  if (sessionID !== activeSessionID.value) {
-    activeSessionID.value = sessionID
-    sessionRequests.value = []
-    sessionError.value = ''
-    sessionSortMode.value = 'duration'
-    if (sessionID) await loadSessionRequests(sessionID)
-  }
-  if (detail.value?.request_id !== requestID || detailError.value) await selectRequest(requestID)
+  if (detailOpen.value && detail.value?.request_id === requestID && activeSessionID.value === sessionID && !detailError.value) return
+  await showRequest(requestID, sessionID)
 }
 async function initializePage() {
   if (routeReady.value || !manager.initialized.value || !manager.user.value) return
