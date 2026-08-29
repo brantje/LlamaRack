@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewModelPage from '~/pages/models/new.vue'
@@ -37,22 +37,17 @@ beforeEach(() => {
   seedManager()
 })
 
-afterEach(() => {
-  vi.useRealTimers()
-})
-
 describe('Add model redesign', () => {
   it('renders bordered GGUF radios with real modified time and metadata-driven capabilities', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-08-30T00:00:00Z'))
+    const now = Date.now()
     const available = [
       {
         path: 'models/vision-looking-name.gguf', name: 'vision-looking-name.gguf', total_bytes: 1024,
-        modified_at: '2026-08-29T23:30:00Z', suggested_options: {}
+        modified_at: new Date(now - 30 * 60 * 1000).toISOString(), suggested_options: {}
       },
       {
         path: 'models/plain-model.gguf', name: 'plain-model.gguf', total_bytes: 1536,
-        modified_at: '2026-08-29T22:00:00Z',
+        modified_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
         suggested_options: { mmproj: '/models/mmproj-F16.gguf', 'spec-type': 'draft-mtp' }
       }
     ]
