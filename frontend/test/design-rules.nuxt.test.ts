@@ -79,7 +79,7 @@ describe('frontend design rules', () => {
     expect(readFileSync(resolve(appRoot, 'components/AppConfirmationModal.vue'), 'utf8')).toContain('<UModal')
   })
 
-  it('keeps Models as registry rows and Instances as sibling runtime cards', () => {
+  it('keeps Models as registry rows and Instances as table-first sibling runtime views', () => {
     const models = readFileSync(resolve(process.cwd(), 'app/pages/models/index.vue'), 'utf8')
     expect(models).toContain('data-testid="models-table"')
     expect(models).toContain('data-testid="model-row"')
@@ -87,12 +87,14 @@ describe('frontend design rules', () => {
     expect(models).not.toMatch(/>Start<|>Stop<|>Logs</)
 
     const instances = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')
+    expect(instances).toContain("const viewMode = ref<ViewMode>('table')")
+    expect(instances).toContain('data-testid="instances-table-view"')
     expect(instances).toContain('data-testid="instance-card"')
-    expect(instances).toMatch(/grid gap-4 md:grid-cols-2 2xl:grid-cols-3/)
+    expect(instances).toMatch(/grid gap-5 md:grid-cols-2 2xl:grid-cols-3/)
     expect(instances).toContain('<UModal')
-    expect(instances).toContain('>Launch</UButton>')
-    expect(instances).toContain('>Stop</UButton>')
-    expect(instances).toContain('>Logs</UButton>')
+    expect(instances).toContain('>Launch</AppButton>')
+    expect(instances).toContain('>Stop</AppButton>')
+    expect(instances).toContain('>Logs</AppButton>')
   })
 
   it('keeps Nuxt file-based pages mounted unconditionally', () => {
