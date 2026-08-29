@@ -10,12 +10,19 @@ function source(path: string) {
 }
 
 describe('Instance lifecycle policy copy', () => {
-  it.each([
-    'app/pages/instances/new.vue',
-    'app/pages/instances/[id]/edit.vue',
-    'app/pages/models/new.vue'
-  ])('keeps Always On and eviction protection visibly independent on %s', (path) => {
-    const page = source(path)
+  it('keeps the shared New/Edit lifecycle controls visibly independent', () => {
+    const form = source('app/components/InstanceForm.vue')
+    expect(form).toContain('label="Always On"')
+    expect(form).toContain(alwaysOnCopy)
+    expect(form).toContain('label="Allow resource-pressure eviction"')
+    expect(form).toContain(evictionCopy)
+
+    expect(source('app/pages/instances/new.vue')).toContain('<InstanceForm')
+    expect(source('app/pages/instances/[id]/edit.vue')).toContain('<InstanceForm')
+  })
+
+  it('keeps Model creation lifecycle copy independent', () => {
+    const page = source('app/pages/models/new.vue')
     expect(page).toContain('label="Always On"')
     expect(page).toContain(alwaysOnCopy)
     expect(page).toContain('label="Allow resource-pressure eviction"')
