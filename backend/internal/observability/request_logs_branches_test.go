@@ -124,7 +124,8 @@ func TestRequestLogSchemaExistingColumnsAndFailure(t *testing.T) {
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tableColumns(ctx, s.db, "inference_requests"); err == nil {
+	closed := New(s.db)
+	if err := closed.EnsureCorrelationSchema(ctx); err == nil {
 		t.Fatal("expected closed database error")
 	}
 }
