@@ -457,75 +457,109 @@ watch(liveRequestFingerprint, (next, previous) => {
 
           <div class="min-w-0 flex-1" :class="(detail || sessionRequests.length) && sessionSidebarOpen ? 'pl-6' : ''">
             <div v-if="(detail || sessionRequests.length) && !sessionSidebarOpen" class="mb-3"><UButton color="neutral" variant="soft" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">{{ activeSessionID ? 'Show session requests' : 'Show requests' }}</UButton></div>
-            <div class="space-y-6">
+            <div class="space-y-5">
               <USkeleton v-if="detailLoading" class="h-40 w-full" />
               <UAlert v-else-if="detailError" color="error" variant="subtle" title="Request details unavailable" :description="detailError" />
               <template v-else-if="detail">
-                <section>
-                  <div class="mb-4 flex items-center justify-between gap-3">
-                    <h3 class="text-lg font-semibold">Request Overview</h3>
-                    <UBadge :color="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'success' : 'error'" variant="subtle">{{ resultLabel(detail) }}</UBadge>
-                  </div>
-                  <p v-if="isPending(detail)" class="mb-4 text-xs text-muted">Request pending · The request is still in progress.</p>
-                  <p v-else-if="detail.result === 'error'" class="mb-4 text-xs text-error">Request failed · {{ detail.error || 'The request failed.' }}</p>
-                  <dl class="space-y-3 text-sm">
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Model</dt><dd>{{ requestModelName(detail) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Instance ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.instance_id || 'Unresolved' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Call Type</dt><dd>{{ detail.call_type || '—' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Endpoint</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.endpoint }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Streaming</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Key Alias</dt><dd class="text-muted">{{ requestKeyAlias(detail) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Start Time</dt><dd>{{ formatTime(detail.started_at) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">End Time</dt><dd>{{ formatTime(detail.finished_at) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Model ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.model_id || '—' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Request ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.request_id }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Session ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.session_id || '—' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Trace ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.trace_id || '—' }}</dd></div>
-                  </dl>
-                </section>
+                <UAlert
+                  v-if="detail.result === 'error'"
+                  data-testid="request-failure-banner"
+                  color="error"
+                  variant="subtle"
+                  title="Request Failed"
+                  :description="detail.error || `HTTP ${detail.status_code || 'error'}`"
+                />
 
-                <USeparator />
-
-                <section data-testid="request-detail-metrics">
-                  <h3 class="mb-4 text-base font-semibold">Metrics</h3>
-                  <dl class="space-y-3 text-sm">
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Total Latency</dt><dd class="font-mono">{{ formatDuration(detail.duration_ms) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">TTFT</dt><dd class="font-mono">{{ formatDuration(detail.ttft_ms) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Input Tokens</dt><dd class="font-mono">{{ detail.prompt_tokens }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Output Tokens</dt><dd class="font-mono">{{ detail.generated_tokens }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Total Tokens</dt><dd class="font-mono">{{ detail.total_tokens }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Prompt Processing</dt><dd class="font-mono">{{ formatRate(detail.prompt_tokens_per_second) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Generation Speed</dt><dd class="font-mono">{{ formatRate(detail.generation_tokens_per_second) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Queue Time</dt><dd class="font-mono">{{ formatDuration(detail.queue_duration_ms) }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Load Time</dt><dd class="font-mono">{{ formatDuration(detail.load_duration_ms) }}</dd></div>
-                  </dl>
-                </section>
-
-                <USeparator />
-
-                <section class="space-y-3">
-                  <div class="flex items-center justify-between"><h3 class="text-base font-semibold">Request & response content</h3><div v-if="detail.request_body || detail.response_body" class="flex gap-1"><UButton size="xs" :variant="detailMode === 'pretty' ? 'solid' : 'soft'" @click="detailMode = 'pretty'">Pretty</UButton><UButton size="xs" :variant="detailMode === 'json' ? 'solid' : 'soft'" @click="detailMode = 'json'">JSON</UButton></div></div>
-                  <UAlert v-if="!detail.request_body && !detail.response_body" color="neutral" variant="subtle" title="Content not recorded" description="This request used metadata-only logging, so request and response payloads were not retained." />
-                  <template v-else-if="detailMode === 'pretty'">
-                    <div v-if="requestMessages.length"><p class="text-xs font-semibold uppercase text-dimmed">Messages</p><div v-for="(message, index) in requestMessages" :key="index" class="mt-2"><UBadge color="neutral" variant="soft" size="sm">{{ message.role || 'message' }}</UBadge><pre class="mt-1 whitespace-pre-wrap text-xs text-muted">{{ typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2) }}</pre></div></div>
-                    <div v-if="requestTools.length"><p class="text-xs font-semibold uppercase text-dimmed">Tools</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(requestTools, null, 2) }}</pre></div>
-                    <div v-if="responseToolCalls.length"><p class="text-xs font-semibold uppercase text-dimmed">Response tool calls</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(responseToolCalls, null, 2) }}</pre></div>
-                    <div v-if="!requestMessages.length"><p class="text-xs font-semibold uppercase text-dimmed">Request</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
-                    <div><p class="text-xs font-semibold uppercase text-dimmed">Response</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
+                <UCard data-testid="request-detail-overview" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
+                  <template #header>
+                    <div class="flex items-center justify-between gap-3">
+                      <h3 class="text-sm font-semibold">Request Details</h3>
+                      <UBadge :color="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'success' : 'error'" variant="subtle">{{ resultLabel(detail) }}</UBadge>
+                    </div>
+                    <p v-if="isPending(detail)" class="mt-2 text-xs text-muted">The request is still in progress.</p>
                   </template>
-                  <template v-else><div><p class="text-xs font-semibold uppercase text-dimmed">Request JSON</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div><div><p class="text-xs font-semibold uppercase text-dimmed">Response JSON</p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div></template>
-                </section>
+                  <div data-testid="request-detail-overview-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Model:</dt><dd class="min-w-0 break-words">{{ requestModelName(detail) }}</dd>
+                      <dt class="text-muted">Call Type:</dt><dd>{{ detail.call_type || '—' }}</dd>
+                      <dt class="text-muted">Endpoint:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.endpoint }}</dd>
+                      <dt class="text-muted">Streaming:</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd>
+                      <dt class="text-muted">Key Alias:</dt><dd>{{ requestKeyAlias(detail) }}</dd>
+                      <dt class="text-muted">Request ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.request_id }}</dd>
+                    </dl>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Instance ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.instance_id || 'Unresolved' }}</dd>
+                      <dt class="text-muted">Model ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.model_id || '—' }}</dd>
+                      <dt class="text-muted">Session ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.session_id || '—' }}</dd>
+                      <dt class="text-muted">Trace ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.trace_id || '—' }}</dd>
+                    </dl>
+                  </div>
+                </UCard>
 
-                <USeparator />
+                <UCard data-testid="request-detail-metrics" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
+                  <template #header><h3 class="text-sm font-semibold">Metrics</h3></template>
+                  <div data-testid="request-detail-metrics-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Tokens:</dt><dd><span class="font-mono">{{ detail.total_tokens }}</span> <span class="text-muted">({{ detail.prompt_tokens }} prompt + {{ detail.generated_tokens }} completion)</span></dd>
+                      <dt class="text-muted">Duration:</dt><dd class="font-mono">{{ formatDuration(detail.duration_ms) }}</dd>
+                      <dt class="text-muted">Prompt Processing:</dt><dd class="font-mono">{{ formatRate(detail.prompt_tokens_per_second) }}</dd>
+                      <dt class="text-muted">Queue Time:</dt><dd class="font-mono">{{ formatDuration(detail.queue_duration_ms) }}</dd>
+                      <dt class="text-muted">Start Time:</dt><dd>{{ formatTime(detail.started_at) }}</dd>
+                    </dl>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Time to First Token:</dt><dd class="font-mono">{{ formatDuration(detail.ttft_ms) }}</dd>
+                      <dt class="text-muted">Generation Speed:</dt><dd class="font-mono">{{ formatRate(detail.generation_tokens_per_second) }}</dd>
+                      <dt class="text-muted">Load Time:</dt><dd class="font-mono">{{ formatDuration(detail.load_duration_ms) }}</dd>
+                      <dt class="text-muted">End Time:</dt><dd>{{ formatTime(detail.finished_at) }}</dd>
+                      <dt class="text-muted">Autoloaded:</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
+                    </dl>
+                  </div>
+                </UCard>
 
-                <section>
-                  <h3 class="mb-4 text-base font-semibold">Client Metadata</h3>
-                  <dl class="space-y-3 text-sm">
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Client IP</dt><dd class="font-mono text-xs text-muted">{{ detail.client_ip || '—' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">User-Agent</dt><dd class="break-words text-xs text-muted">{{ detail.user_agent || '—' }}</dd></div>
-                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Autoloaded</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd></div>
-                  </dl>
-                </section>
+                <UCard data-testid="request-detail-content" :ui="{ header: 'p-4 sm:px-4', body: 'p-0' }">
+                  <template #header>
+                    <div class="flex items-center justify-between gap-3">
+                      <h3 class="text-sm font-semibold">Request &amp; Response</h3>
+                      <div v-if="detail.request_body || detail.response_body" class="flex gap-1">
+                        <UButton size="xs" :variant="detailMode === 'pretty' ? 'solid' : 'soft'" @click="detailMode = 'pretty'">Pretty</UButton>
+                        <UButton size="xs" :variant="detailMode === 'json' ? 'solid' : 'soft'" @click="detailMode = 'json'">JSON</UButton>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="p-4">
+                    <UAlert v-if="!detail.request_body && !detail.response_body" color="neutral" variant="subtle" title="Content not recorded" description="This request used metadata-only logging, so request and response payloads were not retained." />
+                    <template v-else-if="detailMode === 'pretty'">
+                      <div v-if="requestMessages.length" class="space-y-3">
+                        <div class="flex items-center gap-2"><UIcon name="i-lucide-message-square" class="text-muted" /><p class="text-sm font-semibold">Input</p><span class="text-xs text-muted">Tokens: {{ detail.prompt_tokens }}</span></div>
+                        <div v-for="(message, index) in requestMessages" :key="index" class="border-t border-default pt-3 first:border-t-0 first:pt-0">
+                          <p class="text-[10px] font-semibold uppercase tracking-wide text-dimmed">{{ message.role || 'message' }}</p>
+                          <pre class="mt-1 whitespace-pre-wrap text-xs text-muted">{{ typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2) }}</pre>
+                        </div>
+                      </div>
+                      <div v-if="requestTools.length" class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Tools</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(requestTools, null, 2) }}</pre></div>
+                      <div v-if="responseToolCalls.length" class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Response tool calls</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(responseToolCalls, null, 2) }}</pre></div>
+                      <div v-if="!requestMessages.length" class="space-y-2"><p class="text-sm font-semibold">Input <span class="ml-2 text-xs font-normal text-muted">Tokens: {{ detail.prompt_tokens }}</span></p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
+                      <div class="mt-4 border-t border-default pt-4"><p class="text-sm font-semibold">Output <span class="ml-2 text-xs font-normal text-muted">Tokens: {{ detail.generated_tokens }}</span></p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
+                    </template>
+                    <template v-else>
+                      <div><p class="text-xs font-semibold uppercase text-dimmed">Request JSON</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
+                      <div class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Response JSON</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
+                    </template>
+                  </div>
+                </UCard>
+
+                <UCard data-testid="request-detail-client-metadata" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
+                  <template #header><h3 class="text-sm font-semibold">Client Metadata</h3></template>
+                  <div class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Client IP:</dt><dd class="font-mono text-xs text-muted">{{ detail.client_ip || '—' }}</dd>
+                      <dt class="text-muted">User-Agent:</dt><dd class="min-w-0 break-words text-xs text-muted">{{ detail.user_agent || '—' }}</dd>
+                    </dl>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
+                      <dt class="text-muted">Autoloaded:</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
+                    </dl>
+                  </div>
+                </UCard>
               </template>
             </div>
           </div>

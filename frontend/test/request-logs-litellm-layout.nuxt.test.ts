@@ -62,7 +62,7 @@ beforeEach(() => {
 })
 
 describe('LiteLLM-style request detail layout', () => {
-  it('shows a request sidebar for a single request and exposes both token rates', async () => {
+  it('uses two-column detail panels and exposes both token rates without a success banner', async () => {
     const item = requestRecord('lcm_single')
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/observability/requests?')) return { items: [item], has_more: false }
@@ -87,17 +87,44 @@ describe('LiteLLM-style request detail layout', () => {
     expect(sidebar?.textContent).toContain('1 request')
     expect(sidebar?.textContent).toContain('lcm_single')
 
+    const overview = document.body.querySelector('[data-testid="request-detail-overview"]')
+    const overviewGrid = document.body.querySelector('[data-testid="request-detail-overview-grid"]')
     const metrics = document.body.querySelector('[data-testid="request-detail-metrics"]')
-    expect(metrics?.textContent).toContain('Prompt Processing')
-    expect(metrics?.textContent).toContain('120.0 tok/s')
-    expect(metrics?.textContent).toContain('Generation Speed')
-    expect(metrics?.textContent).toContain('48.0 tok/s')
-    expect(document.body.textContent).toContain('Request Overview')
-    expect(document.body.textContent).toContain('StreamingTrue')
+    const metricsGrid = document.body.querySelector('[data-testid="request-detail-metrics-grid"]')
+    expect(overview?.textContent).toContain('Request Details')
+    expect(overview?.textContent).toContain('Model:')
+    expect(overview?.textContent).toContain('Qwen Coder 7B')
+    expect(overview?.textContent).toContain('Streaming:True')
+    expect(overviewGrid?.className).toContain('lg:grid-cols-2')
+    expect(metricsGrid?.className).toContain('lg:grid-cols-2')
+    expect(metrics?.textContent).toContain('Tokens:168')
+    expect(metrics?.textContent).toContain('120 prompt + 48 completion')
+    expect(metrics?.textContent).toContain('Prompt Processing:120.0 tok/s')
+    expect(metrics?.textContent).toContain('Generation Speed:48.0 tok/s')
+    expect(document.body.querySelector('[data-testid="request-failure-banner"]')).toBeNull()
 
     const vm = wrapper.vm as any
     expect(vm.formatRate()).toBe('—')
     expect(vm.formatRate(Number.NaN)).toBe('—')
+  })
+
+  it('shows a failure banner only for failed requests', async () => {
+    const item = requestRecord('lcm_failed', { result: 'error', status_code: 500, error: 'Worker unavailable' })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: [item], has_more: false }
+      if (path === '/api/v1/observability/requests/lcm_failed') return item
+      return {}
+    })
+
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
+    await flushPromises()
+
+    const failure = document.body.querySelector('[data-testid="request-failure-banner"]')
+    expect(failure).not.toBeNull()
+    expect(failure?.textContent).toContain('Request Failed')
+    expect(failure?.textContent).toContain('Worker unavailable')
   })
 
   it('uses the same sidebar for every request in a multi-request session', async () => {
