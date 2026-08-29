@@ -1,6 +1,8 @@
 module github.com/brantje/llamacpp-manager/backend
 
-go 1.27.0
+go 1.26.0
+
+toolchain go1.27.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0
