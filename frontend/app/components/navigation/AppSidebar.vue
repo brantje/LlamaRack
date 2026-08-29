@@ -11,8 +11,9 @@ const navigation: NavigationMenuItem[] = [
   { label: 'Instances', icon: 'i-lucide-server', to: '/instances' },
   { label: 'Downloads', icon: 'i-lucide-download', to: '/downloads' },
   { label: 'Logs', icon: 'i-lucide-list-start', to: '/logs' },
-  { label: 'API', icon: 'i-lucide-key-round', to: '/api' },
-  { type: 'separator' },
+  { label: 'API', icon: 'i-lucide-key-round', to: '/api' }
+]
+const administrationNavigation: NavigationMenuItem[] = [
   { label: 'Administration', icon: 'i-lucide-settings-2', to: '/admin' }
 ]
 </script>
@@ -30,6 +31,7 @@ const navigation: NavigationMenuItem[] = [
 
     <template #footer>
       <div class="grid w-full gap-3">
+        <UNavigationMenu :items="administrationNavigation" orientation="vertical" class="mt-auto w-full" data-testid="administration-main-nav" />
         <ThemeSelector />
         <div class="flex w-full items-center justify-between gap-3">
           <UButton to="/profile" color="neutral" variant="ghost" class="min-w-0 justify-start px-1">
