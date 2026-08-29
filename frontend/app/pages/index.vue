@@ -348,6 +348,12 @@ async function refreshDashboard() {
   await Promise.allSettled([manager.refresh(), loadDashboard()])
 }
 
+function setSelectedWindow(value: number) {
+  selectedWindow.value = value
+}
+
+defineExpose({ setSelectedWindow })
+
 watch(
   [() => manager.initialized.value, () => manager.user.value],
   ([initialized, user]) => {
@@ -405,8 +411,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame data-testid="dashboard-running" class="p-4">
         <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Ready</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ readyCount }}</strong>
-          <span class="text-sm text-muted">/ {{ instances.length }} Instances</span>
+          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ readyCount }}</strong>{{ ' ' }}<span class="text-sm text-muted">/ {{ instances.length }} Instances</span>
         </div>
         <p class="mt-1 text-[11px] text-muted">{{ startingCount }} loading · {{ failedCount }} failed</p>
       </Frame>
@@ -452,8 +457,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame class="p-4">
         <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">In flight</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ currentActivity?.active || 0 }}</strong>
-          <span class="text-sm text-muted">active</span>
+          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ currentActivity?.active || 0 }}</strong>{{ ' ' }}<span class="text-sm text-muted">active</span>
         </div>
         <p class="mt-1 text-[11px] text-muted">{{ currentActivity?.queued || 0 }} queued · {{ streamingCount }} streaming</p>
       </Frame>
@@ -547,13 +551,16 @@ watch(selectedWindow, (next, previous) => {
             <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">GATEWAY TRAFFIC</p>
             <h3 class="mt-1 text-xl">Gateway traffic · last {{ selectedRangeLabel }}</h3>
           </div>
-          <span class="font-mono text-xs text-muted">{{ recentRequests.length }} shown</span>
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-xs text-muted">{{ recentRequests.length }} shown</span>
+            <AppButton to="/logs" intent="ghost" size="xs" data-testid="open-request-logs">Request logs</AppButton>
+          </div>
         </div>
 
         <UEmpty v-if="!recentRequests.length" variant="naked" title="No recent gateway traffic" description="Requests in the selected history window will appear here." />
         <UTable v-else :data="recentRequests" :columns="gatewayColumns" class="w-full">
           <template #started_at-cell="{ row }">
-            <span class="font-mono text-xs">{{ formatTime(row.original.started_at) }}</span>
+            <NuxtLink :to="requestDetailTarget(row.original)" class="font-mono text-xs hover:text-[var(--color-accent)] hover:underline">{{ formatTime(row.original.started_at) }}</NuxtLink>
           </template>
           <template #instance_id-cell="{ row }">
             <div>

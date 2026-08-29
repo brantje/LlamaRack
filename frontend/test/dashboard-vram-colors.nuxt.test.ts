@@ -10,21 +10,7 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 const gib = 1024 ** 3
 
 function instance(id: string): Instance {
-  return {
-    id,
-    model_id: 'm1',
-    name: id,
-    enabled: true,
-    autoload_enabled: true,
-    always_on: false,
-    priority: 'normal',
-    eviction_enabled: true,
-    idle_unload_seconds: 0,
-    gpu_mode: 'auto',
-    gpu_devices: [],
-    tensor_split: '',
-    request_log_mode: 'metadata'
-  }
+  return { id, model_id: 'm1', name: id, enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '', request_log_mode: 'metadata' }
 }
 
 beforeEach(() => {
@@ -52,47 +38,17 @@ beforeEach(() => {
       ]
     },
     telemetry: [
-      {
-        instance_id: 'gemma-4-26b-a4b',
-        pid: 100,
-        gpu_devices: ['CUDA0', 'CUDA1'],
-        gpus: [
-          { device_id: 'CUDA0', vram_used_bytes: 15 * gib },
-          { device_id: 'CUDA1', vram_used_bytes: 948 * 1024 ** 2 }
-        ],
-        vram_used_bytes: 15 * gib + 948 * 1024 ** 2,
-        collected_at: '2026-08-28T10:00:00Z'
-      },
-      {
-        instance_id: 'gpt-oss-20b',
-        pid: 101,
-        gpu_devices: ['CUDA0', 'CUDA1'],
-        gpus: [
-          { device_id: 'CUDA0', vram_used_bytes: 120 * 1024 ** 2 },
-          { device_id: 'CUDA1', vram_used_bytes: 14 * gib }
-        ],
-        vram_used_bytes: 14 * gib + 120 * 1024 ** 2,
-        collected_at: '2026-08-28T10:00:00Z'
-      }
+      { instance_id: 'gemma-4-26b-a4b', pid: 100, gpu_devices: ['CUDA0', 'CUDA1'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 15 * gib }, { device_id: 'CUDA1', vram_used_bytes: 948 * 1024 ** 2 }], vram_used_bytes: 15 * gib + 948 * 1024 ** 2, collected_at: '2026-08-28T10:00:00Z' },
+      { instance_id: 'gpt-oss-20b', pid: 101, gpu_devices: ['CUDA0', 'CUDA1'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 120 * 1024 ** 2 }, { device_id: 'CUDA1', vram_used_bytes: 14 * gib }], vram_used_bytes: 14 * gib + 120 * 1024 ** 2, collected_at: '2026-08-28T10:00:00Z' }
     ]
   }
 })
 
 describe('Dashboard VRAM allocation colors', () => {
-  it('keeps each model color distinct and consistent across GPUs while Free stays blue', async () => {
+  it('keeps Instance colors consistent across GPUs and Free on the neutral scale', async () => {
     const manager = useManager()
     mocks.request.mockImplementation(async (path: string) => {
-      if (path.startsWith('/api/v1/observability/summary')) {
-        return {
-          requests: 0,
-          active_api_keys: 0,
-          lifecycle: { autoloads: 0, failed_starts: 0, load_duration_ms_total: 0 },
-          hardware: {
-            hardware: manager.observabilityLive.value!.hardware,
-            telemetry: manager.observabilityLive.value!.telemetry
-          }
-        }
-      }
+      if (path.startsWith('/api/v1/observability/summary')) return { requests: 0, active_api_keys: 0, lifecycle: { autoloads: 0, failed_starts: 0, load_duration_ms_total: 0 }, hardware: { hardware: manager.observabilityLive.value!.hardware, telemetry: manager.observabilityLive.value!.telemetry } }
       if (path.startsWith('/api/v1/observability/requests')) return { items: [] }
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0, source: 'default', editable: true } }
       return {}
@@ -110,6 +66,6 @@ describe('Dashboard VRAM allocation colors', () => {
     expect(gemma0.attributes('data-vram-color')).toBe(gemma1.attributes('data-vram-color'))
     expect(gpt0.attributes('data-vram-color')).toBe(gpt1.attributes('data-vram-color'))
     expect(gemma0.attributes('data-vram-color')).not.toBe(gpt0.attributes('data-vram-color'))
-    expect(free0.attributes('data-vram-color')).toBe('info')
+    expect(free0.attributes('data-vram-color')).toBe('neutral-500')
   })
 })
