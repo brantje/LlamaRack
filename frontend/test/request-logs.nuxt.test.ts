@@ -96,11 +96,10 @@ describe('Request logs', () => {
   })
 
   it('paginates bounded history and handles empty and API error states', async () => {
-    let calls = 0
+    let failHistory = false
     mocks.request.mockImplementation(async (path: string) => {
       if (!path.startsWith('/api/v1/observability/requests?')) return {}
-      calls++
-      if (calls >= 4) throw { data: { error: 'history unavailable' } }
+      if (failHistory) throw { data: { error: 'history unavailable' } }
       if (path.includes('offset=25')) return { items: [], limit: 25, offset: 25, has_more: false }
       return { items: [request], limit: 25, offset: 0, has_more: true }
     })
@@ -117,6 +116,7 @@ describe('Request logs', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('lcm_abc123')
 
+    failHistory = true
     await wrapper.findAll('button').find(button => button.text() === 'Refresh')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('history unavailable')
