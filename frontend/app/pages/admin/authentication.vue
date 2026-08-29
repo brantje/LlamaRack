@@ -135,7 +135,11 @@ async function testProviderForm() {
   providerTestMessage.value = ''
   providerTestError.value = ''
   try {
-    await manager.request('/api/v1/admin/auth/providers/test', { method: 'POST', body: providerPayload() })
+    if (editingProvider.value && !providerForm.client_secret) {
+      await manager.request(`/api/v1/admin/auth/providers/${encodeURIComponent(editingProvider.value.id)}/test`, { method: 'POST' })
+    } else {
+      await manager.request('/api/v1/admin/auth/providers/test', { method: 'POST', body: providerPayload() })
+    }
     providerTestMessage.value = 'Provider configuration test passed.'
   } catch (error: any) {
     providerTestError.value = error?.data?.error || error?.message || 'Provider configuration test failed'
@@ -281,7 +285,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
       <template #footer>
         <div class="flex w-full justify-end gap-2">
           <UButton color="neutral" variant="soft" @click="providerModalOpen = false">Cancel</UButton>
-          <UButton v-if="!editingProvider" color="neutral" variant="soft" :loading="providerBusy === 'draft-test'" @click="testProviderForm">Test configuration</UButton>
+          <UButton color="neutral" variant="soft" :loading="providerBusy === 'draft-test'" @click="testProviderForm">Test configuration</UButton>
           <UButton :loading="providerBusy === (editingProvider?.id || 'new')" @click="saveProvider">Save provider</UButton>
         </div>
       </template>
