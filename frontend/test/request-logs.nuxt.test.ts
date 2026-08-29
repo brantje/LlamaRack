@@ -13,6 +13,8 @@ const request = {
   id: 1,
   request_id: 'lcm_abc123',
   trace_id: traceID,
+  model_id: 'm1',
+  model_name: 'Qwen Coder 7B',
   call_type: 'chat_completion',
   started_at: Date.now() - 1000,
   finished_at: Date.now(),
@@ -43,7 +45,7 @@ function seedManager() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = []
+  manager.models.value = [{ id: 'm1', name: 'Qwen Coder 7B', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 4096 }]
   manager.instances.value = [{ id: 'coder', model_id: 'm1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '', request_log_mode: 'metadata' }]
   manager.runtimes.value = {}
   manager.runtimeTelemetry.value = {}
@@ -58,7 +60,7 @@ beforeEach(() => {
 })
 
 describe('Request logs', () => {
-  it('renders manager-native request fields, trace links and server-side search', async () => {
+  it('renders operational request fields and server-side search', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/observability/requests?')) return { items: [request], limit: 25, offset: 0, has_more: false }
       return {}
@@ -69,13 +71,14 @@ describe('Request logs', () => {
     const table = wrapper.get('[data-testid="request-log-table"]')
     expect(table.text()).toContain('Chat Completion')
     expect(table.text()).toContain('lcm_abc123')
-    expect(table.text()).toContain(traceID)
+    expect(table.text()).toContain('Qwen Coder 7B')
+    expect(table.text()).toContain('coder')
     expect(table.text()).toContain('Primary key')
     expect(table.text()).toContain('1.00 s')
-    expect(wrapper.find(`a[href="/logs?trace_id=${traceID}"]`).exists()).toBe(true)
+    expect(table.text()).toContain('35 ms')
     expect(String(mocks.request.mock.calls[0]![0])).toContain('limit=25')
 
-    const search = wrapper.get('[data-testid="request-log-filters"] input[placeholder="Request ID, trace, model…"]')
+    const search = wrapper.get('[data-testid="request-log-filters"] input[placeholder="Request ID, session, trace, model…"]')
     await search.setValue('coder')
     await wrapper.get('[data-testid="apply-request-log-filters"]').trigger('click')
     await flushPromises()
@@ -93,6 +96,37 @@ describe('Request logs', () => {
     await clear.trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="trace-filter"]').exists()).toBe(false)
+  })
+
+  it('collapses a multi-request session and navigates its requests in the drawer', async () => {
+    const sessionID = 'session-abc-123'
+    const first = { ...request, session_id: sessionID, session_total_count: 2, request_id: 'lcm_session_1', id: 11, duration_ms: 1200 }
+    const second = { ...request, session_id: sessionID, session_total_count: 2, request_id: 'lcm_session_2', id: 12, started_at: request.started_at + 100, duration_ms: 400, total_tokens: 12 }
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) {
+        if (path.includes(`session_id=${encodeURIComponent(sessionID)}`)) return { items: [first, second], limit: 100, offset: 0, has_more: false }
+        return { items: [first, second], limit: 25, offset: 0, has_more: false }
+      }
+      if (path === '/api/v1/observability/requests/lcm_session_1') return first
+      if (path === '/api/v1/observability/requests/lcm_session_2') return second
+      return {}
+    })
+
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const table = wrapper.get('[data-testid="request-log-table"]')
+    expect(table.text()).toContain('1 rows · 2 requests')
+    expect(table.text()).toContain('2 requests')
+
+    await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
+    await flushPromises()
+    const body = document.body.textContent || ''
+    expect(body).toContain(sessionID)
+    expect(body).toContain('lcm_session_1')
+    expect(body).toContain('lcm_session_2')
+    expect(body).toContain('Qwen Coder 7B')
+    expect(body).toContain(traceID)
+    expect(mocks.request.mock.calls.some(call => String(call[0]).includes(`session_id=${encodeURIComponent(sessionID)}`))).toBe(true)
   })
 
   it('paginates bounded history and handles empty and API error states', async () => {
@@ -137,6 +171,8 @@ describe('Request logs', () => {
     expect(bodyText).toContain('Content not recorded')
     expect(bodyText).toContain('198.51.100.10')
     expect(bodyText).toContain('50.0 tok/s')
+    expect(bodyText).toContain('Qwen Coder 7B')
+    expect(bodyText).toContain(traceID)
   })
 
   it('renders full payload messages, tools and JSON in detail', async () => {
