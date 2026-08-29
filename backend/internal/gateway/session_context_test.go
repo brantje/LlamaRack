@@ -169,12 +169,12 @@ func TestHomeAssistantMetadataSessionGroupsRequests(t *testing.T) {
 		}
 	}
 
-	grouped, err := service.ListRequestLogs(ctx, observability.RequestFilters{Limit: 10}, "")
+	history, err := service.ListRequestLogs(ctx, observability.RequestFilters{Limit: 10}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(grouped) != 1 || grouped[0].SessionID != sessionID || grouped[0].SessionTotalCount != 2 {
-		t.Fatalf("grouped=%+v", grouped)
+	if len(history) != 2 || history[0].SessionID != sessionID || history[1].SessionID != sessionID || history[0].SessionTotalCount != 2 || history[1].SessionTotalCount != 2 {
+		t.Fatalf("history=%+v", history)
 	}
 	sessionRows, err := service.ListRequestLogs(ctx, observability.RequestFilters{Limit: 10}, sessionID)
 	if err != nil {
