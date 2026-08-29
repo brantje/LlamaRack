@@ -31,6 +31,12 @@ func TestOIDCFrontendExchangeURL(t *testing.T) {
 			t.Fatalf("expected invalid frontend URL %q", invalid)
 		}
 	}
+	if _, err := oidcFrontendExchangeURL(exchange, "javascript:alert(1)"); err == nil {
+		t.Fatal("invalid frontend URL should fail redirect construction")
+	}
+	if _, err := oidcFrontendExchangeURL("://bad", "https://frontend.example.test"); err == nil {
+		t.Fatal("invalid exchange URL should fail")
+	}
 	if _, err := oidcFrontendExchangeURL("https://manager.example.test/", "https://frontend.example.test"); err == nil {
 		t.Fatal("missing exchange code should fail")
 	}
