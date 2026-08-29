@@ -166,32 +166,11 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		order = "ASC"
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	var query string
 	if sessionID != "" {
 		whereSQL += " AND x.session_id=?"
 		args = append(args, sessionID)
-		query = selectSQL + whereSQL + " ORDER BY r.started_at " + order + ",r.id " + order + " LIMIT ? OFFSET ?"
-	} else {
-		query = `WITH filtered AS (
-			SELECT r.id,COALESCE(x.session_id,'') AS session_id,r.started_at
-			FROM inference_requests r
-			LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
-			LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id` + whereSQL + `
-		), ranked AS (
-			SELECT id,started_at,ROW_NUMBER() OVER (
-				PARTITION BY CASE WHEN session_id<>'' THEN 'session:' || session_id ELSE 'request:' || id END
-				ORDER BY started_at ` + order + `,id ` + order + `
-			) AS session_rank
-			FROM filtered
-		), representatives AS (
-			SELECT id,started_at FROM ranked WHERE session_rank=1
-			ORDER BY started_at ` + order + `,id ` + order + `
-			LIMIT ? OFFSET ?
-		)
-		` + selectSQL + `
-		JOIN representatives p ON p.id=r.id
-		ORDER BY r.started_at ` + order + `,r.id ` + order
 	}
+	query := selectSQL + whereSQL + " ORDER BY r.started_at " + order + ",r.id " + order + " LIMIT ? OFFSET ?"
 	args = append(args, filters.Limit, filters.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
