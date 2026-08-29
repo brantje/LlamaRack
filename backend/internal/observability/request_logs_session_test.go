@@ -70,12 +70,12 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	}
 
 	searched, err := s.ListRequestLogs(ctx, RequestFilters{Search: "Qwen Coder", Limit: 25}, "")
-	if err != nil || len(searched) != 2 {
-		t.Fatalf("model search=%+v err=%v", searched, err)
+	if err != nil || len(searched) != 1 || searched[0].RequestID != "lcm_session_2" {
+		t.Fatalf("grouped model search=%+v err=%v", searched, err)
 	}
 	searched, err = s.ListRequestLogs(ctx, RequestFilters{Search: "session-abc", Limit: 25}, "")
-	if err != nil || len(searched) != 2 {
-		t.Fatalf("session search=%+v err=%v", searched, err)
+	if err != nil || len(searched) != 1 || searched[0].SessionTotalCount != 2 {
+		t.Fatalf("grouped session search=%+v err=%v", searched, err)
 	}
 	streaming := true
 	filtered, err := s.ListRequestLogs(ctx, RequestFilters{
@@ -101,6 +101,33 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	}
 	if err := s.UpdateRequestLogContext(ctx, "missing", "session-abc", "coder"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing context update err=%v", err)
+	}
+}
+
+func TestRequestLogHistoryPaginatesSessionRepresentatives(t *testing.T) {
+	s, ctx := seedSessionRequestLogs(t)
+	record := RequestRecord{
+		StartedAt: 1300, FinishedAt: 1400, InstanceID: "coder", Endpoint: "/v1/chat/completions",
+		StatusCode: http.StatusOK, Result: "success", DurationMS: 100, TraceID: "22222222-3333-4444-8555-666666666666", CallType: "chat_completion",
+	}
+	if err := s.RecordCorrelatedRequest(ctx, "lcm_single", nil, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateRequestLogContext(ctx, "lcm_single", "", "coder"); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := s.ListRequestLogs(ctx, RequestFilters{Limit: 1}, "")
+	if err != nil || len(first) != 1 || first[0].RequestID != "lcm_single" {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := s.ListRequestLogs(ctx, RequestFilters{Limit: 1, Offset: 1}, "")
+	if err != nil || len(second) != 1 || second[0].SessionID != "session-abc" || second[0].RequestID != "lcm_session_2" {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	third, err := s.ListRequestLogs(ctx, RequestFilters{Limit: 1, Offset: 2}, "")
+	if err != nil || len(third) != 0 {
+		t.Fatalf("third=%+v err=%v", third, err)
 	}
 }
 
