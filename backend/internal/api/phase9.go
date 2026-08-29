@@ -102,7 +102,14 @@ func (h *phase9ModelInspectHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, inspection)
+	candidates, candidateErr := h.models.InspectGGUFArtifactCandidates(r.Context(), in.GGUFPath)
+	if candidateErr != nil {
+		candidates = nil
+	}
+	writeJSON(w, http.StatusOK, struct {
+		models.GGUFInspection
+		DependencyCandidates []models.GGUFArtifactDependencyCandidate `json:"dependency_candidates,omitempty"`
+	}{GGUFInspection: inspection, DependencyCandidates: candidates})
 }
 
 func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
