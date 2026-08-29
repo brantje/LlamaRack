@@ -33,24 +33,39 @@ watch(manager.user, user => {
 </script>
 
 <template>
-  <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4">
-      <UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="Dashboard" description="Security, provider and runtime configuration for the manager." />
-      <UButton color="neutral" variant="soft" @click="load">Refresh</UButton>
-    </div>
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+  <AdminShell title="Dashboard" description="Security, provider and runtime status for the manager.">
+    <template #actions><AppButton intent="secondary" @click="load">Refresh</AppButton></template>
 
-    <UPageGrid v-if="summary" class="lg:grid-cols-3">
-      <UPageCard title="Users" description="Equivalent local management accounts." to="/admin/users" icon="i-lucide-users">
-        <p class="text-3xl font-bold">{{ summary.users.enabled }} <span class="text-base font-normal text-muted">enabled / {{ summary.users.total }} total</span></p>
-      </UPageCard>
-      <UPageCard title="Hugging Face" description="Provider credential status." to="/admin/huggingface" icon="i-lucide-sparkles">
-        <UBadge :color="summary.huggingface.configured ? 'success' : 'neutral'" variant="subtle">{{ summary.huggingface.configured ? 'Configured' : 'Not configured' }}</UBadge>
-      </UPageCard>
-      <UPageCard title="llama.cpp" description="Detected backend binary." to="/admin/llamacpp" icon="i-lucide-terminal-square">
-        <UBadge :color="summary.llamacpp.available ? 'success' : 'warning'" variant="subtle">{{ summary.llamacpp.available ? (summary.llamacpp.version || 'Available') : 'Unavailable' }}</UBadge>
-      </UPageCard>
-    </UPageGrid>
+    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
+
+    <div v-if="summary" class="grid gap-4 lg:grid-cols-3" data-testid="admin-summary-cards">
+      <NuxtLink to="/admin/users" class="block">
+        <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
+          <p class="text-sm font-semibold">Users</p>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Local management accounts</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.users.enabled }} enabled</p>
+          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ summary.users.total }} total</p>
+        </Frame>
+      </NuxtLink>
+
+      <NuxtLink to="/admin/huggingface" class="block">
+        <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
+          <p class="text-sm font-semibold">Hugging Face</p>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Provider credential</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.huggingface.configured ? 'Configured' : 'Not configured' }}</p>
+          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ summary.huggingface.configured && summary.huggingface.prefix ? `${summary.huggingface.prefix}…` : 'No token' }}</p>
+        </Frame>
+      </NuxtLink>
+
+      <NuxtLink to="/admin/llamacpp" class="block">
+        <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
+          <p class="text-sm font-semibold">llama.cpp</p>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Binary capabilities and defaults</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.llamacpp.available ? (summary.llamacpp.version || 'Available') : 'Unavailable' }}</p>
+          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ manager.profile.value?.options.length || 0 }} discovered options</p>
+        </Frame>
+      </NuxtLink>
+    </div>
     <div v-else class="grid gap-4 md:grid-cols-3"><USkeleton v-for="n in 3" :key="n" class="h-40 w-full" /></div>
-  </div>
+  </AdminShell>
 </template>
