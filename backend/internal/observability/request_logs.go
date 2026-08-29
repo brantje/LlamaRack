@@ -32,10 +32,9 @@ type RequestLogDetail struct {
 	ResponseBody *string `json:"response_body,omitempty"`
 }
 
-// EnsureRequestLogSchema extends the one-to-one request correlation table with
-// session and model-at-request-time metadata. The project is still in
-// development, so this remains part of schema initialization instead of a
-// migration series.
+// EnsureRequestLogSchema creates the development-time request log context
+// table. No ALTER/backfill migration is used: session and model-at-request-time
+// metadata is kept separately from the existing correlation and request rows.
 func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 	if _, ok := requestLogSchemaReady.Load(s.db); ok {
 		return nil
@@ -48,29 +47,17 @@ func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	columns, err := tableColumns(ctx, s.db, "inference_request_correlations")
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS inference_request_log_context (
+		request_id TEXT PRIMARY KEY REFERENCES inference_request_correlations(request_id) ON DELETE CASCADE,
+		session_id TEXT NOT NULL DEFAULT '',
+		model_id TEXT NOT NULL DEFAULT '',
+		model_name TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
 		return err
 	}
-	additions := []struct {
-		name string
-		ddl  string
-	}{
-		{"session_id", `ALTER TABLE inference_request_correlations ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
-		{"model_id", `ALTER TABLE inference_request_correlations ADD COLUMN model_id TEXT NOT NULL DEFAULT ''`},
-		{"model_name", `ALTER TABLE inference_request_correlations ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`},
-	}
-	for _, addition := range additions {
-		if columns[addition.name] {
-			continue
-		}
-		if _, err := s.db.ExecContext(ctx, addition.ddl); err != nil {
-			return fmt.Errorf("add inference request correlation column %s: %w", addition.name, err)
-		}
-	}
 	for _, index := range []string{
-		`CREATE INDEX IF NOT EXISTS inference_request_correlations_session_idx ON inference_request_correlations(session_id)`,
-		`CREATE INDEX IF NOT EXISTS inference_request_correlations_model_idx ON inference_request_correlations(model_id)`,
+		`CREATE INDEX IF NOT EXISTS inference_request_log_context_session_idx ON inference_request_log_context(session_id)`,
+		`CREATE INDEX IF NOT EXISTS inference_request_log_context_model_idx ON inference_request_log_context(model_id)`,
 	} {
 		if _, err := s.db.ExecContext(ctx, index); err != nil {
 			return err
@@ -81,8 +68,8 @@ func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 }
 
 // UpdateRequestLogContext records grouping and model identity independently
-// from request completion. Calling it after the gateway response retains a
-// supplied session id and captures the model identity that served the request.
+// from request completion. Captured model identity remains available even if a
+// Model or Instance is later renamed or removed.
 func (s *Service) UpdateRequestLogContext(ctx context.Context, requestID, sessionID, instanceID string) error {
 	if err := s.EnsureRequestLogSchema(ctx); err != nil {
 		return err
@@ -90,6 +77,10 @@ func (s *Service) UpdateRequestLogContext(ctx context.Context, requestID, sessio
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return fmt.Errorf("request_id is required")
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&exists); err != nil {
+		return err
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	var modelID, modelName string
@@ -99,21 +90,14 @@ func (s *Service) UpdateRequestLogContext(ctx context.Context, requestID, sessio
 			return err
 		}
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE inference_request_correlations SET
-		session_id=CASE WHEN ?<>'' THEN ? ELSE session_id END,
-		model_id=CASE WHEN ?<>'' THEN ? ELSE model_id END,
-		model_name=CASE WHEN ?<>'' THEN ? ELSE model_name END
-		WHERE request_id=?`,
-		sessionID, sessionID, modelID, modelID, modelName, modelName, requestID)
-	if err != nil {
-		return err
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	_, err := s.db.ExecContext(ctx, `INSERT INTO inference_request_log_context(request_id,session_id,model_id,model_name)
+		VALUES(?,?,?,?)
+		ON CONFLICT(request_id) DO UPDATE SET
+			session_id=CASE WHEN excluded.session_id<>'' THEN excluded.session_id ELSE inference_request_log_context.session_id END,
+			model_id=CASE WHEN excluded.model_id<>'' THEN excluded.model_id ELSE inference_request_log_context.model_id END,
+			model_name=CASE WHEN excluded.model_name<>'' THEN excluded.model_name ELSE inference_request_log_context.model_name END`,
+		requestID, sessionID, modelID, modelName)
+	return err
 }
 
 func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, sessionID string) ([]RequestLogRecord, error) {
@@ -130,9 +114,12 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
-		COALESCE(c.session_id,''),COALESCE(c.model_id,''),COALESCE(c.model_name,''),
-		CASE WHEN COALESCE(c.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
-		FROM inference_requests r LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE 1=1`
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),
+		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
+		FROM inference_requests r
+		LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
+		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id
+		WHERE 1=1`
 	var args []any
 	add := func(clause string, value any) { query += clause; args = append(args, value) }
 	if filters.SinceMS > 0 {
@@ -166,11 +153,11 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		add(" AND r.trace_id=?", filters.TraceID)
 	}
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
-		add(" AND c.session_id=?", sessionID)
+		add(" AND x.session_id=?", sessionID)
 	}
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		like := "%" + search + "%"
-		query += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR c.session_id LIKE ? OR r.instance_id LIKE ? OR c.model_id LIKE ? OR c.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		query += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
 		for i := 0; i < 12; i++ {
 			args = append(args, like)
 		}
@@ -256,9 +243,12 @@ func (s *Service) GetRequestLogByRequestID(ctx context.Context, requestID string
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body,
-		COALESCE(c.session_id,''),COALESCE(c.model_id,''),COALESCE(c.model_name,''),
-		CASE WHEN COALESCE(c.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_correlations sc WHERE sc.session_id=c.session_id) ELSE 1 END
-		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE c.request_id=?`, requestID)
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),
+		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
+		FROM inference_requests r
+		JOIN inference_request_correlations c ON c.inference_request_id=r.id
+		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id
+		WHERE c.request_id=?`, requestID)
 	record, err := scanRequestLog(row)
 	if err != nil {
 		return RequestLogDetail{}, err
