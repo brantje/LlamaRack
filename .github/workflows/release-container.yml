@@ -1,6 +1,8 @@
 name: Release container
 
 on:
+  push:
+    branches: [main]
   release:
     types: [published]
 
@@ -34,7 +36,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.event.release.prerelease == false }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=raw,value=main,enable=${{ github.event_name == 'push' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -57,7 +60,8 @@ jobs:
             type=semver,pattern={{version}}-cuda
             type=semver,pattern={{major}}.{{minor}}-cuda
             type=semver,pattern={{major}}-cuda
-            type=raw,value=latest-cuda,enable=${{ github.event.release.prerelease == false }}
+            type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' }}
 
       - name: Build and push CUDA image
         uses: docker/build-push-action@v6
