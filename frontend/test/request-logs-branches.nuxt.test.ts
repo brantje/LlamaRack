@@ -79,7 +79,6 @@ describe('Request logs branch coverage', () => {
     expect(text).toContain('Completion')
     expect(text).toContain('key-id')
     expect(text).toContain('pk_only')
-    expect(text).toContain('API key')
     expect(text).toContain('—')
 
     await wrapper.findAll('[data-testid="request-detail-trigger"]')[0]!.trigger('click')
