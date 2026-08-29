@@ -7,6 +7,7 @@ type AuthSettings = {
   oidc_jit_provisioning_enabled: SettingValue<boolean>
   oidc_auto_link_enabled: SettingValue<boolean>
   external_url: SettingValue<string>
+  frontend_url?: SettingValue<string>
 }
 type Provider = {
   id: string
@@ -47,7 +48,7 @@ const providerTestMessage = ref('')
 const providerTestError = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
-const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, external_url: '' })
+const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, external_url: '', frontend_url: '' })
 const providers = ref<Provider[]>([])
 const providerModalOpen = ref(false)
 const editingProvider = ref<Provider | null>(null)
@@ -90,6 +91,7 @@ async function load() {
     settingsForm.oidc_jit_provisioning_enabled = authSettings.oidc_jit_provisioning_enabled.value
     settingsForm.oidc_auto_link_enabled = authSettings.oidc_auto_link_enabled.value
     settingsForm.external_url = authSettings.external_url.value
+    settingsForm.frontend_url = authSettings.frontend_url?.value || ''
     providers.value = providerItems || []
   } catch (error: any) {
     errorMessage.value = error?.data?.error || error?.message || 'Failed to load authentication settings'
@@ -225,8 +227,11 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
       <UCard>
         <template #header><h2 class="text-lg font-semibold">Login policy</h2></template>
         <div class="space-y-5">
-          <UFormField label="External URL" description="Public base URL used to generate stable OIDC callbacks.">
+          <UFormField label="External URL" description="Public backend URL used to generate stable OIDC callback URIs.">
             <UInput v-model="settingsForm.external_url" class="w-full" placeholder="https://manager.example.com" />
+          </UFormField>
+          <UFormField label="Frontend URL" description="Optional browser destination after OIDC sign-in. Leave empty to use External URL.">
+            <UInput v-model="settingsForm.frontend_url" class="w-full" placeholder="https://manager.example.com" />
           </UFormField>
           <USeparator />
           <USwitch v-model="settingsForm.local_login_enabled" label="Allow local username/password login" />
