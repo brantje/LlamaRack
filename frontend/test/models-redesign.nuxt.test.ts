@@ -75,7 +75,7 @@ describe('Models registry redesign', () => {
     const add = actions.find(button => button.text() === 'Add model')!
     expect(refresh.props('intent')).toBe('secondary')
     expect(discover.props('intent')).toBe('secondary')
-    expect(discover.attributes('to')).toBe('/models/discover')
+    expect(wrapper.findAll('a').find(link => link.text() === 'Discover')?.attributes('href')).toBe('/models/discover')
     expect(add.props('intent')).toBe('primary')
   })
 })
