@@ -50,6 +50,7 @@ const detailError = ref('')
 const detail = ref<RequestDetail | null>(null)
 const detailMode = ref<'pretty' | 'json'>('pretty')
 const filters = reactive({ window: '1h', instance_id: '', endpoint: '', api_key_id: '', result: '', status_code: '', streaming: '', search: '' })
+let loadGeneration = 0
 
 const windowItems = [
   { label: 'Last 15 minutes', value: '15m' }, { label: 'Last hour', value: '1h' },
@@ -72,6 +73,18 @@ const columns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'total_tokens', header: 'Tokens' }, { accessorKey: 'duration_ms', header: 'Duration' },
   { accessorKey: 'ttft_ms', header: 'TTFT' }
 ]
+const liveRequestFingerprint = computed(() => {
+  const items = (manager.observabilityLive.value?.requests || []) as RequestRecord[]
+  return items.map(item => [
+    item.id, item.request_id, item.started_at, item.finished_at, item.status_code,
+    item.result, item.total_tokens, item.duration_ms, item.ttft_ms ?? ''
+  ].join(':')).join('|')
+})
+const liveState = computed(() => {
+  if (!manager.runtimeEventsConnected.value) return { label: 'Disconnected', color: 'neutral' as const }
+  if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }
+  return { label: 'Live', color: 'success' as const }
+})
 
 function callTypeLabel(value?: string) {
   return ({ chat_completion: 'Chat Completion', completion: 'Completion', response: 'Responses', embedding: 'Embedding' } as Record<string, string>)[value || ''] || '—'
@@ -100,17 +113,22 @@ function listPath() {
   return `/api/v1/observability/requests?${query}`
 }
 async function loadRequests() {
+  const generation = ++loadGeneration
   loading.value = true
   error.value = ''
   try {
     const payload = await manager.request<RequestPage>(listPath())
+    if (generation !== loadGeneration) return
     requests.value = payload.items || []
     hasMore.value = Boolean(payload.has_more)
   } catch (value: any) {
+    if (generation !== loadGeneration) return
     error.value = value?.data?.error || value?.message || 'Unable to load request logs'
     requests.value = []
     hasMore.value = false
-  } finally { loading.value = false }
+  } finally {
+    if (generation === loadGeneration) loading.value = false
+  }
 }
 async function applyFilters() { offset.value = 0; await loadRequests() }
 async function previousPage() { offset.value = Math.max(0, offset.value - pageSize); await loadRequests() }
@@ -130,6 +148,14 @@ async function selectRequest(requestID: string) {
   try { detail.value = await manager.request<RequestDetail>(`/api/v1/observability/requests/${encodeURIComponent(requestID)}`) }
   catch (value: any) { detailError.value = value?.data?.error || value?.message || 'Unable to load request details' }
   finally { detailLoading.value = false }
+}
+async function initializePage() {
+  if (routeReady.value || !manager.initialized.value || !manager.user.value) return
+  traceID.value = String(route.query.trace_id || '').trim()
+  await loadRequests()
+  routeReady.value = true
+  const requestID = String(route.query.request_id || '').trim()
+  if (requestID) await selectRequest(requestID)
 }
 function parseBody(raw?: string) { if (!raw) return null; try { return JSON.parse(raw) } catch { return raw } }
 function prettyBody(raw?: string) { const value = parseBody(raw); return value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2) }
@@ -151,12 +177,20 @@ watch(detailOpen, async (open) => {
   const query = { ...route.query }; delete query.request_id
   await router.replace({ path: '/logs', query })
 })
-onMounted(async () => {
-  traceID.value = String(route.query.trace_id || '').trim()
-  await loadRequests()
-  routeReady.value = true
-  const requestID = String(route.query.request_id || '').trim()
-  if (requestID) await selectRequest(requestID)
+watch(
+  [() => manager.initialized.value, () => manager.user.value],
+  ([initialized, user]) => {
+    if (!initialized || !user) {
+      routeReady.value = false
+      return
+    }
+    void initializePage()
+  },
+  { immediate: true }
+)
+watch(liveRequestFingerprint, (next, previous) => {
+  if (!routeReady.value || !manager.user.value || offset.value !== 0 || !next || next === previous) return
+  void loadRequests()
 })
 </script>
 
@@ -164,7 +198,10 @@ onMounted(async () => {
   <div class="space-y-5" data-testid="request-logs-page">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent OpenAI-compatible inference request history, correlation IDs, traces and performance metadata." />
-      <UButton color="neutral" variant="soft" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</UButton>
+      <div class="flex items-center gap-2">
+        <UBadge data-testid="request-logs-live-state" :color="liveState.color" variant="subtle">{{ liveState.label }}</UBadge>
+        <UButton color="neutral" variant="soft" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</UButton>
+      </div>
     </div>
 
     <UAlert v-if="traceID" data-testid="trace-filter" color="info" variant="subtle" title="Trace filter active" :description="`Showing requests in chronological order for ${traceID}.`">
