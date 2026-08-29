@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AppSidebar from '~/components/navigation/AppSidebar.vue'
-import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 
 const route = useRoute()
 const manager = useManager()
@@ -9,7 +8,6 @@ const credentials = reactive({ username: '', password: '' })
 const remember = ref(false)
 const authError = ref('')
 const authenticating = ref(false)
-const isAdmin = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'))
 
 onMounted(async () => {
   if (!initialized.value) await manager.initialize()
@@ -98,12 +96,11 @@ async function submitAuth() {
   </UMain>
 
   <UDashboardGroup v-show="initialized && !backendError && !!user">
-    <AdminSidebar v-if="isAdmin" />
-    <AppSidebar v-else />
+    <AppSidebar />
 
     <UDashboardPanel id="manager-main">
       <template #header>
-        <UDashboardNavbar :title="isAdmin ? 'Administration' : 'llamacpp-manager'" class="lg:hidden">
+        <UDashboardNavbar title="llamacpp-manager" class="lg:hidden">
           <template #leading><UDashboardSidebarToggle /></template>
         </UDashboardNavbar>
       </template>
