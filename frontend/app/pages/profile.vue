@@ -1,10 +1,15 @@
 <script setup lang="ts">
 type ProfileUser = { id: number; username: string; enabled: boolean; created_at: number; last_login_at?: number }
 type Session = { id: string; user_id: number; created_at: number; expires_at: number; remote_address: string; user_agent: string; current?: boolean }
+type ExternalIdentity = { id: string; provider_id: string; issuer: string; subject: string; user_id: number; created_at: number }
+type PublicOIDCProvider = { id: string; name: string }
+type AuthProvidersResponse = { providers?: PublicOIDCProvider[] }
 
 const manager = useManager()
 const profile = ref<ProfileUser | null>(null)
 const sessions = ref<Session[]>([])
+const identities = ref<ExternalIdentity[]>([])
+const authProviders = ref<PublicOIDCProvider[]>([])
 const error = ref('')
 const success = ref('')
 const busy = ref(false)
@@ -22,16 +27,24 @@ function clientLabel(userAgent: string) {
   return platform && browser !== 'Unknown client' ? `${browser} on ${platform}` : browser
 }
 
+function providerName(identity: ExternalIdentity) {
+  return authProviders.value.find(provider => provider.id === identity.provider_id)?.name || identity.issuer
+}
+
 async function load() {
   if (!manager.user.value) return
   error.value = ''
   try {
-    const [user, activeSessions] = await Promise.all([
+    const [user, activeSessions, linkedIdentities, providers] = await Promise.all([
       manager.request<ProfileUser>('/api/v1/me'),
-      manager.request<Session[]>('/api/v1/me/sessions')
+      manager.request<Session[]>('/api/v1/me/sessions'),
+      manager.request<ExternalIdentity[]>('/api/v1/me/identities'),
+      manager.request<AuthProvidersResponse>('/api/v1/auth/providers')
     ])
     profile.value = user
     sessions.value = activeSessions || []
+    identities.value = linkedIdentities || []
+    authProviders.value = providers?.providers || []
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load profile'
   }
@@ -63,6 +76,26 @@ async function changePassword() {
     error.value = value?.data?.error || value?.message || 'Unable to change password'
   } finally {
     busy.value = false
+  }
+}
+
+async function unlinkIdentity(identity: ExternalIdentity) {
+  error.value = ''
+  success.value = ''
+  const name = providerName(identity)
+  const confirmed = await confirmation.value?.request({
+    title: 'Unlink authentication source',
+    description: `Unlink ${name} from this account? You will no longer be able to sign in with this source unless it is linked again.`,
+    confirmLabel: 'Unlink source',
+    color: 'error'
+  })
+  if (!confirmed) return
+  try {
+    await manager.request(`/api/v1/admin/auth/identities/${encodeURIComponent(identity.id)}`, { method: 'DELETE' })
+    success.value = `${name} unlinked.`
+    await load()
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to unlink authentication source'
   }
 }
 
@@ -106,7 +139,7 @@ async function revokeAll() {
 
 <template>
   <div class="space-y-5">
-    <UPageHeader headline="ACCOUNT" title="Profile" description="Manage your local account password and active management sessions." />
+    <UPageHeader headline="ACCOUNT" title="Profile" description="Manage your local account password, linked authentication sources and active management sessions." />
     <UAlert v-if="error" color="error" variant="subtle" :description="error" />
     <UAlert v-if="success" color="success" variant="subtle" :description="success" />
 
@@ -119,15 +152,40 @@ async function revokeAll() {
       </dl>
     </UCard>
 
-    <UCard class="max-w-3xl">
-      <template #header><h2 class="text-xl font-bold">Change password</h2></template>
-      <UForm :state="password" class="space-y-4" @submit="changePassword">
-        <UFormField label="Current password" required><UInput v-model="password.current" class="w-full" type="password" autocomplete="current-password" required /></UFormField>
-        <UFormField label="New password" required><UInput v-model="password.next" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
-        <UFormField label="Confirm new password" required><UInput v-model="password.confirmation" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
-        <UButton type="submit" :loading="busy">Change password</UButton>
-      </UForm>
-    </UCard>
+    <div class="grid gap-5 lg:grid-cols-2">
+      <UCard>
+        <template #header><h2 class="text-xl font-bold">Change password</h2></template>
+        <UForm :state="password" class="space-y-4" @submit="changePassword">
+          <UFormField label="Current password" required><UInput v-model="password.current" class="w-full" type="password" autocomplete="current-password" required /></UFormField>
+          <UFormField label="New password" required><UInput v-model="password.next" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
+          <UFormField label="Confirm new password" required><UInput v-model="password.confirmation" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
+          <UButton type="submit" :loading="busy">Change password</UButton>
+        </UForm>
+      </UCard>
+
+      <UCard>
+        <template #header>
+          <div>
+            <h2 class="text-xl font-bold">Authentication sources</h2>
+            <p class="text-sm text-muted">External sign-in providers linked to this account.</p>
+          </div>
+        </template>
+        <div v-if="identities.length" class="divide-y divide-default">
+          <div v-for="identity in identities" :key="identity.id" class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0 text-sm">
+              <div class="flex items-center gap-2">
+                <span class="font-semibold">{{ providerName(identity) }}</span>
+                <UBadge color="neutral" variant="subtle">OIDC</UBadge>
+              </div>
+              <p class="mt-1 truncate text-muted">{{ identity.issuer }}</p>
+              <p class="mt-1 text-xs text-muted">Linked {{ dateTime(identity.created_at) }}</p>
+            </div>
+            <UButton color="error" variant="soft" size="sm" @click="unlinkIdentity(identity)">Unlink</UButton>
+          </div>
+        </div>
+        <UEmpty v-else variant="naked" title="No linked authentication sources" description="This account is not linked to an external sign-in provider." />
+      </UCard>
+    </div>
 
     <UCard>
       <template #header>
