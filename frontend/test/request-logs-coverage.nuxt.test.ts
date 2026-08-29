@@ -151,10 +151,10 @@ describe('Request logs focused branch coverage', () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/observability/requests?')) {
         if (path.includes(`session_id=${encodeURIComponent(sessionID)}`)) throw { data: { error: 'session unavailable' } }
+        if (path.includes('session_id=other-session')) throw {}
         return { items: [grouped], has_more: false }
       }
       if (path === '/api/v1/observability/requests/lcm_session_error') return grouped
-      if (path === '/api/v1/observability/requests/lcm_single') return record('lcm_single', { session_id: '', session_total_count: 1 })
       return {}
     })
 
@@ -168,7 +168,7 @@ describe('Request logs focused branch coverage', () => {
     const vm = wrapper.vm as any
     await vm.loadSessionRequests('other-session')
     await flushPromises()
-    expect(vm.sessionError).toBe('session unavailable')
+    expect(vm.sessionError).toBe('Unable to load session requests')
 
     manager.user.value = null
     await flushPromises()
