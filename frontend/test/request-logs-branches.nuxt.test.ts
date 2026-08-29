@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import LogsPage from '~/pages/logs/index.vue'
 import { useManager } from '~/composables/useManager'
+
+enableAutoUnmount(afterEach)
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -45,7 +47,6 @@ function seedManager() {
 beforeEach(() => {
   mocks.request.mockReset()
   seedManager()
-  document.body.innerHTML = ''
 })
 
 describe('Request logs branch coverage', () => {
