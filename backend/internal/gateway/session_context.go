@@ -57,7 +57,7 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		headerSessionID := sessionIDFromHeaders(r)
+		sessionFromHeader := sessionIDFromHeaders(r)
 		bodySessionID := make(chan string, 1)
 		if r.Body == nil {
 			bodySessionID <- ""
@@ -78,12 +78,12 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 			}()
 		}
 
-		if headerSessionID != "" {
-			w.Header().Set(headerSessionID, headerSessionID)
+		if sessionFromHeader != "" {
+			w.Header().Set(headerSessionID, sessionFromHeader)
 		}
 		next.ServeHTTP(w, r)
 
-		sessionID := headerSessionID
+		sessionID := sessionFromHeader
 		if sessionID == "" {
 			select {
 			case sessionID = <-bodySessionID:
