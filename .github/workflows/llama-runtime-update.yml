@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: llama-runtime-update
+  group: llama.cpp-runtime-update
   cancel-in-progress: false
 
 env:
@@ -90,7 +90,7 @@ jobs:
             exit 1
           fi
 
-          image_tag="llama-${release_tag}"
+          image_tag="llama.cpp-${release_tag}"
           target="${REGISTRY}/${IMAGE_NAME}:${image_tag}"
 
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
@@ -154,15 +154,15 @@ jobs:
             LLAMA_IMAGE=${{ needs.detect.outputs.cpu_image }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}
-            ghcr.io/${{ github.repository }}:llama-latest
+            ghcr.io/${{ github.repository }}:llama.cpp-latest
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}
             io.llamacpp-manager.build.reason=llama.cpp-update
-            io.llamacpp-manager.llama.release=${{ needs.detect.outputs.release_tag }}
-            io.llamacpp-manager.llama.build=${{ needs.detect.outputs.build_tag }}
-            io.llamacpp-manager.llama.image=${{ needs.detect.outputs.cpu_image }}
-          cache-from: type=gha,scope=llama-update-cpu
-          cache-to: type=gha,mode=max,scope=llama-update-cpu
+            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cpu_image }}
+          cache-from: type=gha,scope=llama.cpp-update-cpu
+          cache-to: type=gha,mode=max,scope=llama.cpp-update-cpu
 
       - name: Build and push CUDA image
         uses: docker/build-push-action@v6
@@ -174,15 +174,15 @@ jobs:
             LLAMA_IMAGE=${{ needs.detect.outputs.cuda_image }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}-cuda
-            ghcr.io/${{ github.repository }}:llama-latest-cuda
+            ghcr.io/${{ github.repository }}:llama.cpp-latest-cuda
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}-cuda
             io.llamacpp-manager.build.reason=llama.cpp-update
-            io.llamacpp-manager.llama.release=${{ needs.detect.outputs.release_tag }}
-            io.llamacpp-manager.llama.build=${{ needs.detect.outputs.build_tag }}
-            io.llamacpp-manager.llama.image=${{ needs.detect.outputs.cuda_image }}
-          cache-from: type=gha,scope=llama-update-cuda
-          cache-to: type=gha,mode=max,scope=llama-update-cuda
+            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cuda_image }}
+          cache-from: type=gha,scope=llama.cpp-update-cuda
+          cache-to: type=gha,mode=max,scope=llama.cpp-update-cuda
 
       - name: Publish summary
         shell: bash
@@ -195,8 +195,8 @@ jobs:
             echo 'Published tags:'
             echo "- \`${{ needs.detect.outputs.image_tag }}\`"
             echo "- \`${{ needs.detect.outputs.image_tag }}-cuda\`"
-            echo '- `llama-latest`'
-            echo '- `llama-latest-cuda`'
+            echo '- `llama.cpp-latest`'
+            echo '- `llama.cpp-latest-cuda`'
             echo
             echo 'The normal `latest` and `latest-cuda` manager-release tags were not changed.'
           } >> "${GITHUB_STEP_SUMMARY}"
