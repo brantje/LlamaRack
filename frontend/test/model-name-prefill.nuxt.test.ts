@@ -22,11 +22,6 @@ function resetManager() {
   manager.profile.value = null
 }
 
-function selectComponents(wrapper: any) {
-  const components = wrapper.findAllComponents({ name: 'SelectMenu' })
-  return components.length ? components : wrapper.findAllComponents({ name: 'USelectMenu' })
-}
-
 beforeEach(() => {
   mocks.request.mockReset()
   resetManager()
@@ -54,7 +49,7 @@ describe('detected model name prefill', () => {
 
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    selectComponents(wrapper)[0]!.vm.$emit('update:modelValue', 'qwen-Q4_K_M.gguf')
+    await wrapper.get('input[type="radio"][name="gguf_path"][value="qwen-Q4_K_M.gguf"]').setValue()
     await flushPromises()
 
     expect((wrapper.get('[data-testid="model-name"]').element as HTMLInputElement).value).toBe('Qwen coder 32b')
