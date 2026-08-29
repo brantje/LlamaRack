@@ -18,6 +18,7 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/config"
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
 	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
+	frontendui "github.com/brantje/llamacpp-manager/backend/internal/frontend"
 	"github.com/brantje/llamacpp-manager/backend/internal/gateway"
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
@@ -189,7 +190,11 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 		return value
 	}, observabilitySampler.RuntimeStates)
-	mux := newMux(securedManagement, openAI, metrics)
+	frontendDir := os.Getenv("LCM_FRONTEND_DIR")
+	if frontendDir == "" {
+		frontendDir = "/app/frontend"
+	}
+	mux := newMux(securedManagement, openAI, frontendui.New(frontendDir), metrics)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -238,7 +243,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	return nil
 }
 
-func newMux(apiServer, openAI http.Handler, metrics ...http.Handler) *http.ServeMux {
+func newMux(apiServer, openAI, frontendHandler http.Handler, metrics ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	openAPIDoc := newOpenAPIDocument()
 	mux.Handle("GET /openapi.json", openAPIDoc.JSONHandler())
@@ -252,10 +257,7 @@ func newMux(apiServer, openAI http.Handler, metrics ...http.Handler) *http.Serve
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"name": "llamacpp-manager", "status": "running"})
-	})
+	mux.Handle("/", frontendHandler)
 	return mux
 }
 
