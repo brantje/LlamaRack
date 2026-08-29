@@ -3,6 +3,7 @@ package frontend
 import (
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -23,11 +24,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
-	if cleanPath == "." {
+	// Anchor the request path at / before cleaning it so traversal attempts
+	// can never escape the configured frontend root.
+	cleanPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	if cleanPath == "" || cleanPath == "." {
 		cleanPath = "index.html"
 	}
-	candidate := filepath.Join(h.root, cleanPath)
+	candidate := filepath.Join(h.root, filepath.FromSlash(cleanPath))
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		http.ServeFile(w, r, candidate)
 		return
@@ -35,7 +38,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Missing static assets must remain a real 404; returning index.html here
 	// would make browsers try to parse HTML as JavaScript, CSS, or an image.
-	if strings.HasPrefix(r.URL.Path, "/_nuxt/") || filepath.Ext(cleanPath) != "" {
+	if strings.HasPrefix(r.URL.Path, "/_nuxt/") || path.Ext(cleanPath) != "" {
 		http.NotFound(w, r)
 		return
 	}
