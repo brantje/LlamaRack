@@ -68,6 +68,16 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		hasMore := len(items) > limit
 		if hasMore {
 			items = items[:limit]
+		} else if limit == 500 && len(items) == limit {
+			probeFilters := filters
+			probeFilters.Offset = filters.Offset + limit
+			probeFilters.Limit = 1
+			probe, probeErr := h.service.ListRequests(r.Context(), probeFilters)
+			if probeErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": probeErr.Error()})
+				return
+			}
+			hasMore = len(probe) > 0
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items, "limit": limit, "offset": filters.Offset, "has_more": hasMore})
 	case "/api/v1/observability/timeseries":
