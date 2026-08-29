@@ -57,7 +57,7 @@ A request record contains, where available:
 
 - stable manager request ID;
 - trace ID;
-- LiteLLM session ID;
+- session ID (supplied or generated);
 - normalized call type;
 - request start and finish timestamps;
 - requested/canonical `instance.id` (may be unavailable for early failures);
@@ -119,9 +119,19 @@ Issue #60 intentionally does **not** add W3C `traceparent`/`tracestate` support 
 
 ## LiteLLM session grouping
 
-LiteLLM session identity is persisted separately from `trace_id`. The manager accepts a bounded valid session identity from `X-LiteLLM-Session-ID` and supported LiteLLM/request-body session metadata. Session identity is used to group related retained requests in `/logs`; it does not change request routing and is not a security boundary.
+Session identity is persisted separately from `trace_id` and is used only to relate requests in the request-detail sidepanel. It does not change request routing and is not a security boundary.
 
-Normal request-history queries collapse a multi-request session to one representative row **before pagination**. Pagination offsets therefore count visible history rows/sessions rather than hidden individual requests, and the same session must not reappear merely because its requests crossed a raw-request page boundary.
+Session resolution precedence is:
+
+1. `X-LiteLLM-Session-ID`;
+2. another bounded valid `X-*-Session-ID` header, excluding the LiteLLM trace header;
+3. supported Codex session/thread headers for Codex clients;
+4. `litellm_metadata.session_id` from the request JSON body;
+5. `metadata.session_id` from the request JSON body, including Home Assistant Local OpenAI LLM;
+6. top-level `session_id` from the request JSON body;
+7. a newly generated UUID when none of the supported sources provides a valid session ID.
+
+Normal request-history queries return **every request as its own row** and paginate individual requests. Requests sharing one `session_id` are not collapsed or deduplicated in the main `/logs` table.
 
 A `session_id=<id>` request-history query returns the individual retained requests in that session for the session sidepanel. The individual request-detail response also carries its session identity and retained session request count, allowing a `/logs?request_id=<id>` deep link to discover and open the full session without requiring `session_id` in the incoming URL.
 
@@ -198,7 +208,7 @@ Request-history filters include, where applicable:
 - session ID for individual session expansion;
 - bounded text search across useful request metadata.
 
-History queries are bounded and paginated. Normal history pagination is based on visible session/request representatives. The list API returns metadata summaries only. The detail API returns retained request/response bodies when full logging captured them.
+History queries are bounded and paginated by individual request rows. The list API returns metadata summaries only. The detail API returns retained request/response bodies when full logging captured them.
 
 ## Request logs UI (`/logs`)
 
@@ -221,7 +231,7 @@ The main request table exposes:
 
 Trace identity remains available in request detail and via the `trace_id` query/filter instead of consuming a permanent wide table column.
 
-Normal history is newest-first. Multi-request sessions appear as one representative row. Opening a grouped row shows the requests in that session in the right-side detail sidepanel. Session expansion remains individually paginated/bounded by the management API rather than loading arbitrary retained history into the browser.
+Normal history is newest-first and every request remains visible as an individual row, even when several requests share one session ID. Opening any request in a multi-request session loads the other retained requests from that session into the right-side detail sidepanel. Session expansion remains individually paginated/bounded by the management API rather than loading arbitrary retained history into the browser.
 
 A trace-filtered view may use:
 
@@ -286,7 +296,7 @@ Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-s
 - Full body capture remains explicit per-Instance opt-in.
 - Full bodies are never serialized into history-list/WebSocket summaries.
 - Historical queries are indexed, bounded, and paginated.
-- Multi-request session collapse occurs server-side before normal-history pagination.
+- Main request history paginates individual requests; session grouping is sidepanel-only.
 - Retention cleanup runs in the background.
 - Forwarded IP metadata is spoofable and must remain observability-only.
 
@@ -312,13 +322,13 @@ Session-only raw worker logs with source/search filtering and live tail.
 
 - request/trace identity before authentication/validation;
 - all gateway error attempts persisted;
-- distinct LiteLLM trace and session compatibility plus UUID trace generation;
-- server-side multi-request session grouping/pagination;
+- distinct LiteLLM trace and session compatibility plus UUID generation for missing trace/session identity;
+- per-request history pagination plus session-aware sidepanel expansion;
 - call type + client IP/User-Agent persistence;
 - trace/request/session/search filters and bounded pagination;
 - metadata-only list/WebSocket DTO behavior;
 - full-content detail endpoint behavior;
-- `/logs` grouped table, session-aware detail slideover, pretty/JSON rendering;
+- `/logs` individual request table, session-aware detail slideover, pretty/JSON rendering;
 - Dashboard and navigation integration;
 - backend/frontend regression and coverage tests.
 
@@ -326,8 +336,9 @@ Session-only raw worker logs with source/search filtering and live tail.
 
 - request/history data survives manager restarts and obeys configured retention;
 - every gateway `/v1/...` request attempt is represented, including early auth/validation/unsupported-endpoint errors;
-- every logged request has a stable manager request ID and UUID trace ID;
+- every logged request has a stable manager request ID, UUID trace ID, and session ID;
 - LiteLLM trace header/body metadata is accepted with the specified precedence;
+- session identity follows the specified precedence and falls back to a generated UUID when absent;
 - LiteLLM session identity remains separate from trace identity and never becomes a trace fallback;
 - W3C `traceparent` support is not added by issue #60;
 - request and trace IDs are returned on successful and failed gateway responses;
@@ -338,10 +349,10 @@ Session-only raw worker logs with source/search filtering and live tail.
 - default logging is metadata-only; full logging remains explicit per Instance;
 - list/WebSocket payloads never expose retained full bodies;
 - detail returns full bodies only when retained;
-- normal `/logs` pagination counts grouped visible rows and does not repeat a session across raw-request page boundaries;
+- normal `/logs` pagination counts individual requests and never collapses rows that share a session ID;
 - request-only deep links discover and load their session when applicable;
 - slower stale request-detail responses cannot overwrite the latest selection;
-- `/logs` exists in main navigation with required table fields, filters, bounded pagination, session grouping, and right-side slideover detail;
+- `/logs` exists in main navigation with required table fields, filters, bounded pagination, session-aware sidepanel navigation, and right-side slideover detail;
 - `/logs?trace_id=<uuid>` is trace-only and chronological;
 - metadata-only detail explains why content is absent;
 - full detail offers structured/pretty and JSON content including messages/tools/tool calls where possible;
