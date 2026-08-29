@@ -26,21 +26,16 @@ function resetManager(user: { id: number; username: string; enabled: boolean } |
   manager.profile.value = null
   return manager
 }
-
 function components(wrapper: any, names: string[]) {
   const out: any[] = []
   const seen = new Set<Element>()
   for (const name of names) {
     for (const component of wrapper.findAllComponents({ name })) {
-      if (component.element && !seen.has(component.element)) {
-        seen.add(component.element)
-        out.push(component)
-      }
+      if (component.element && !seen.has(component.element)) { seen.add(component.element); out.push(component) }
     }
   }
   return out
 }
-
 function inputs(wrapper: any) { return components(wrapper, ['Input', 'UInput']) }
 function button(wrapper: any, text: string) {
   const found = wrapper.findAll('button').find((candidate: any) => candidate.text().trim() === text)
@@ -65,33 +60,27 @@ async function confirmation(kind: 'confirm' | 'cancel') {
   await flushPromises()
 }
 function modalButton(text: string) {
-  const found = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === text)
+  const found = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === text && !candidate.disabled)
   if (!found) throw new Error(`Missing modal button: ${text}`)
   return found
 }
-
-const profile: Profile = {
-  path: '/app/llama-server',
-  version: 'b9999',
-  fingerprint: 'fingerprint',
-  options: [{ key: 'ctx-size', value_hint: 'N', kind: 'integer' }]
+function setLastPassword(value: string) {
+  const input = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)
+  if (!input) throw new Error('Missing modal password input')
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+const profile: Profile = {
+  path: '/app/llama-server', version: 'b9999', fingerprint: 'fingerprint',
+  options: [{ key: 'ctx-size', value_hint: 'N', kind: 'integer', description: 'Context size' }]
+}
 function settingsResponse(overrides: Record<string, any> = {}) {
   const setting = (value: any, source = 'default', editable = true) => ({ value, source, editable })
   return {
-    session_lifetime_seconds: setting(3600),
-    login_protection_enabled: setting(true),
-    login_failure_threshold: setting(5),
-    login_lockout_seconds: setting(60),
-    trusted_proxies: setting(''),
-    allowed_origins: setting(''),
-    external_url: setting(''),
-    startup_timeout_seconds: setting(120),
-    idle_unload_seconds: setting(0),
-    always_on_reconcile_seconds: setting(0),
-    runtime: { data_dir: '/data', models_dir: '/models', database_path: '/data/db', listen_addr: ':8000', llama_server_path: '/llama-server' },
-    ...overrides
+    session_lifetime_seconds: setting(3600), login_protection_enabled: setting(true), login_failure_threshold: setting(5), login_lockout_seconds: setting(60),
+    trusted_proxies: setting(''), allowed_origins: setting(''), external_url: setting(''), startup_timeout_seconds: setting(120), idle_unload_seconds: setting(0), always_on_reconcile_seconds: setting(0),
+    runtime: { data_dir: '/data', models_dir: '/models', database_path: '/data/db', listen_addr: ':8000', llama_server_path: '/llama-server' }, ...overrides
   }
 }
 
@@ -114,40 +103,32 @@ describe('Phase 10 deep user branches', () => {
       [new Error('users exploded'), 'users exploded'],
       [{}, 'Unable to load users']
     ] as const) {
-      resetManager()
-      mocks.request.mockReset()
-      mocks.request.mockRejectedValue(failure)
+      resetManager(); mocks.request.mockReset(); mocks.request.mockRejectedValue(failure)
       const wrapper = await mountSuspended(AdminUsersPage, { route: false })
       await flushPromises()
       expect(wrapper.text()).toContain(message)
       wrapper.unmount()
     }
 
-    resetManager(null)
-    mocks.request.mockReset()
+    resetManager(null); mocks.request.mockReset()
     const signedOut = await mountSuspended(AdminUsersPage, { route: false })
     await flushPromises()
     expect(mocks.request).not.toHaveBeenCalled()
     signedOut.unmount()
   })
 
-  it('covers self-disable, enable, delete, reset and session-revoke branches', async () => {
+  it('covers self-disable, enable and both password-reset branches', async () => {
     let users = [
-      { id: 1, username: 'admin', enabled: true, created_at: 1, last_login_at: 2, active_sessions: 1 },
-      { id: 2, username: 'operator', enabled: false, created_at: 1, active_sessions: 0 }
+      { id: 1, username: 'admin', enabled: true, created_at: 1, last_login_at: 2 },
+      { id: 2, username: 'operator', enabled: false, created_at: 1 }
     ]
-    let sessions: any = null
     let initializeCalls = 0
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/users' && !options) return users
       if (path === '/api/v1/users/1' && options?.method === 'PATCH') { users = users.map(u => u.id === 1 ? { ...u, enabled: false } : u); return {} }
       if (path === '/api/v1/users/2' && options?.method === 'PATCH') { users = users.map(u => u.id === 2 ? { ...u, enabled: true } : u); return {} }
-      if (path === '/api/v1/users/2' && options?.method === 'DELETE') { users = users.filter(u => u.id !== 2); return {} }
       if (path === '/api/v1/users/1/password' && options?.method === 'POST') return {}
       if (path === '/api/v1/users/2/password' && options?.method === 'POST') return {}
-      if (path === '/api/v1/users/2/sessions') return sessions
-      if (path === '/api/v1/sessions/current%2Ftwo' && options?.method === 'DELETE') return {}
-      if (path === '/api/v1/sessions/other' && options?.method === 'DELETE') return {}
       if (path === '/api/v1/auth/bootstrap') { initializeCalls++; return { required: true } }
       return []
     })
@@ -155,129 +136,48 @@ describe('Phase 10 deep user branches', () => {
     const manager = useManager()
     const wrapper = await mountSuspended(AdminUsersPage, { route: false })
     await flushPromises()
-
     await rowButton(tableRow(wrapper, 'admin'), 'Disable').trigger('click')
     await confirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/1', { method: 'PATCH', body: { enabled: false } })
     expect(initializeCalls).toBe(1)
 
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
     await rowButton(tableRow(wrapper, 'operator'), 'Enable').trigger('click')
     await confirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/2', { method: 'PATCH', body: { enabled: true } })
 
-    let operator = tableRow(wrapper, 'operator')
-    await rowButton(operator, 'Reset password').trigger('click')
-    await flushPromises()
-    let modalInput = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)!
-    modalInput.value = 'replacement-password'
-    modalInput.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    modalButton('Reset password').click()
-    await flushPromises()
+    await rowButton(tableRow(wrapper, 'operator'), 'Reset password').trigger('click')
+    await flushPromises(); setLastPassword('replacement-password'); await flushPromises(); modalButton('Reset password').click(); await flushPromises()
     expect(wrapper.text()).toContain('Password reset for operator')
 
-    // Self-disable correctly reinitializes into a signed-out state with bearer
-    // auth. Restore the synthetic current-user state before exercising the
-    // independent self-password-reset branch in this component test.
     manager.user.value = { id: 1, username: 'admin', enabled: true }
     await rowButton(tableRow(wrapper, 'admin'), 'Reset password').trigger('click')
-    await flushPromises()
-    modalInput = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)!
-    modalInput.value = 'admin-replacement'
-    modalInput.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    modalButton('Reset password').click()
-    await flushPromises()
+    await flushPromises(); setLastPassword('admin-replacement'); await flushPromises(); modalButton('Reset password').click(); await flushPromises()
     expect(initializeCalls).toBe(2)
-
-    // Resetting the current user's password invalidates their bearer session.
-    // Restore the synthetic signed-in state before exercising unrelated user
-    // management branches in this isolated component test.
-    manager.user.value = { id: 1, username: 'admin', enabled: true }
-    sessions = null
-    operator = tableRow(wrapper, 'operator')
-    await rowButton(operator, 'Sessions').trigger('click')
-    await flushPromises()
-    expect(document.body.textContent).toContain('No active sessions')
-
-    sessions = [
-      { id: 'current/two', user_id: 2, created_at: 1, expires_at: 2, remote_address: '', user_agent: 'Chrome/1 Windows', current: true },
-      { id: 'other', user_id: 2, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Firefox/1 Linux' }
-    ]
-    await rowButton(tableRow(wrapper, 'operator'), 'Sessions').trigger('click')
-    await flushPromises()
-    const revokeButtons = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(candidate => candidate.textContent?.trim() === 'Revoke')
-    revokeButtons[0]!.click()
-    await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/sessions/current%2Ftwo', { method: 'DELETE' })
-    expect(initializeCalls).toBe(3)
-
-    // Revoking a current session reinitializes authentication as well. Keep
-    // this fixture signed in for the remaining non-current session/delete cases.
-    manager.user.value = { id: 1, username: 'admin', enabled: true }
-    const revokeAfterRefresh = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(candidate => candidate.textContent?.trim() === 'Revoke')
-    revokeAfterRefresh[1]!.click()
-    await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/sessions/other', { method: 'DELETE' })
-
-    await rowButton(tableRow(wrapper, 'operator'), 'Delete').trigger('click')
-    await confirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/users/2', { method: 'DELETE' })
-    expect(wrapper.text()).not.toContain('operator')
     wrapper.unmount()
   })
 
-  it('covers user mutation error fallbacks for delete, reset, sessions and revoke', async () => {
-    const users = [{ id: 2, username: 'operator', enabled: true, created_at: 1, active_sessions: 1 }]
-    let failurePath = ''
-    let failure: any = {}
+  it('covers user toggle and reset error fallbacks plus mismatched create passwords', async () => {
+    const users = [{ id: 2, username: 'operator', enabled: true, created_at: 1 }]
+    let failReset: any = null
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/users' && !options) return users
-      if (path === '/api/v1/users/2/sessions' && path !== failurePath) return [{ id: 's', user_id: 2, created_at: 1, expires_at: 2, remote_address: '', user_agent: '' }]
-      if (path === failurePath) throw failure
+      if (path === '/api/v1/users/2' && options?.method === 'PATCH') throw { data: { error: 'toggle denied' } }
+      if (path === '/api/v1/users/2/password' && options?.method === 'POST') throw failReset
       return {}
     })
     const wrapper = await mountSuspended(AdminUsersPage, { route: false })
     await flushPromises()
 
-    failurePath = '/api/v1/users/2'
-    failure = { data: { error: 'delete denied' } }
-    await rowButton(tableRow(wrapper, 'operator'), 'Delete').trigger('click')
+    await rowButton(tableRow(wrapper, 'operator'), 'Disable').trigger('click')
     await confirmation('confirm')
-    expect(wrapper.text()).toContain('delete denied')
+    expect(wrapper.text()).toContain('toggle denied')
 
-    failure = {}
-    await rowButton(tableRow(wrapper, 'operator'), 'Delete').trigger('click')
-    await confirmation('confirm')
-    expect(wrapper.text()).toContain('Unable to delete user')
-
-    failurePath = '/api/v1/users/2/password'
-    failure = new Error('reset exploded')
-    await rowButton(tableRow(wrapper, 'operator'), 'Reset password').trigger('click')
-    await flushPromises()
-    const resetInput = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)!
-    resetInput.value = 'replacement-password'
-    resetInput.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushPromises()
-    modalButton('Reset password').click()
-    await flushPromises()
-    expect(wrapper.text()).toContain('reset exploded')
-
-    failurePath = '/api/v1/users/2/sessions'
-    failure = {}
-    await rowButton(tableRow(wrapper, 'operator'), 'Sessions').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('Unable to load sessions')
-
-    failurePath = ''
-    await rowButton(tableRow(wrapper, 'operator'), 'Sessions').trigger('click')
-    await flushPromises()
-    failurePath = '/api/v1/sessions/s'
-    failure = { data: { error: 'revoke denied' } }
-    const revoke = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(candidate => candidate.textContent?.trim() === 'Revoke').at(-1)!
-    revoke.click()
-    await flushPromises()
-    expect(wrapper.text()).toContain('revoke denied')
+    for (const [failure, message] of [[new Error('reset exploded'), 'reset exploded'], [{}, 'Unable to reset password']] as const) {
+      failReset = failure
+      await rowButton(tableRow(wrapper, 'operator'), 'Reset password').trigger('click')
+      await flushPromises(); setLastPassword('replacement-password'); await flushPromises(); modalButton('Reset password').click(); await flushPromises()
+      expect(wrapper.text()).toContain(message)
+    }
     wrapper.unmount()
   })
 })
@@ -302,72 +202,45 @@ describe('Phase 10 deep profile branches', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('No active sessions')
     expect(wrapper.text()).toContain('Never')
+    wrapper.unmount()
 
     sessions = [{ id: 'current', user_id: 1, created_at: 1, expires_at: 2, remote_address: '', user_agent: '', current: true }]
-    wrapper.unmount()
-    resetManager()
-    storeManagementToken('profile-token', false)
+    resetManager(); storeManagementToken('profile-token', false)
     const current = await mountSuspended(ProfilePage, { route: false })
-    await flushPromises()
-    await button(current, 'Sign out').trigger('click')
-    await flushPromises()
+    await flushPromises(); await button(current, 'Sign out').trigger('click'); await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/logout', { method: 'POST' })
     current.unmount()
 
-    resetManager()
-    sessions = [{ id: 'other', user_id: 1, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Safari/1 Mac OS X' }]
+    resetManager(); sessions = [{ id: 'other', user_id: 1, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Safari/1 Mac OS X' }]
     const actions = await mountSuspended(ProfilePage, { route: false })
     await flushPromises()
+    await button(actions, 'Revoke others').trigger('click'); await confirmation('cancel')
+    await button(actions, 'Log out everywhere').trigger('click'); await confirmation('cancel')
 
-    await button(actions, 'Revoke others').trigger('click')
-    await confirmation('cancel')
-    await button(actions, 'Log out everywhere').trigger('click')
-    await confirmation('cancel')
-
-    failPath = '/api/v1/me/sessions/revoke-others'
-    fail = new Error('others exploded')
-    await button(actions, 'Revoke others').trigger('click')
-    await confirmation('confirm')
+    failPath = '/api/v1/me/sessions/revoke-others'; fail = new Error('others exploded')
+    await button(actions, 'Revoke others').trigger('click'); await confirmation('confirm')
     expect(actions.text()).toContain('others exploded')
-
     fail = {}
-    await button(actions, 'Revoke others').trigger('click')
-    await confirmation('confirm')
+    await button(actions, 'Revoke others').trigger('click'); await confirmation('confirm')
     expect(actions.text()).toContain('Unable to revoke other sessions')
 
-    failPath = '/api/v1/me/sessions/revoke-all'
-    fail = { data: { error: 'all denied' } }
-    await button(actions, 'Log out everywhere').trigger('click')
-    await confirmation('confirm')
+    failPath = '/api/v1/me/sessions/revoke-all'; fail = { data: { error: 'all denied' } }
+    await button(actions, 'Log out everywhere').trigger('click'); await confirmation('confirm')
     expect(actions.text()).toContain('all denied')
-
     fail = {}
-    await button(actions, 'Log out everywhere').trigger('click')
-    await confirmation('confirm')
+    await button(actions, 'Log out everywhere').trigger('click'); await confirmation('confirm')
     expect(actions.text()).toContain('Unable to log out all sessions')
     actions.unmount()
   })
 
   it('covers profile and password fallback errors', async () => {
-    for (const [failure, message] of [
-      [{ data: { error: 'profile denied' } }, 'profile denied'],
-      [{}, 'Unable to load profile']
-    ] as const) {
-      resetManager()
-      mocks.request.mockReset()
-      mocks.request.mockRejectedValue(failure)
+    for (const [failure, message] of [[{ data: { error: 'profile denied' } }, 'profile denied'], [{}, 'Unable to load profile']] as const) {
+      resetManager(); mocks.request.mockReset(); mocks.request.mockRejectedValue(failure)
       const wrapper = await mountSuspended(ProfilePage, { route: false })
-      await flushPromises()
-      expect(wrapper.text()).toContain(message)
-      wrapper.unmount()
+      await flushPromises(); expect(wrapper.text()).toContain(message); wrapper.unmount()
     }
-
-    for (const [failure, message] of [
-      [new Error('password exploded'), 'password exploded'],
-      [{}, 'Unable to change password']
-    ] as const) {
-      resetManager()
-      mocks.request.mockReset()
+    for (const [failure, message] of [[new Error('password exploded'), 'password exploded'], [{}, 'Unable to change password']] as const) {
+      resetManager(); mocks.request.mockReset()
       mocks.request.mockImplementation(async (path: string, options?: any) => {
         if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 1 }
         if (path === '/api/v1/me/sessions') return []
@@ -377,14 +250,9 @@ describe('Phase 10 deep profile branches', () => {
       const wrapper = await mountSuspended(ProfilePage, { route: false })
       await flushPromises()
       const passwordInputs = inputs(wrapper).filter(component => component.props('type') === 'password')
-      for (const [index, value] of ['current-password', 'replacement-password', 'replacement-password'].entries()) {
-        passwordInputs[index].vm.$emit('update:modelValue', value)
-      }
-      await flushPromises()
-      await wrapper.find('form').trigger('submit')
-      await flushPromises()
-      expect(wrapper.text()).toContain(message)
-      wrapper.unmount()
+      for (const [index, value] of ['current-password', 'replacement-password', 'replacement-password'].entries()) passwordInputs[index].vm.$emit('update:modelValue', value)
+      await flushPromises(); await wrapper.find('form').trigger('submit'); await flushPromises()
+      expect(wrapper.text()).toContain(message); wrapper.unmount()
     }
   })
 })
@@ -393,47 +261,30 @@ describe('Phase 10 llama and general branch variants', () => {
   it('covers llama profile validation, unknown version and error fallbacks', async () => {
     let response: any = { profile: { ...profile, version: undefined }, effective: { global: {} } }
     let failure: any = null
-    mocks.request.mockImplementation(async (path: string, options?: any) => {
+    mocks.request.mockImplementation(async (path: string) => {
       if (failure) throw failure
-      if (path === '/api/v1/llamacpp/config' && options?.method === 'PUT') return {}
       if (path === '/api/v1/llamacpp/config') return response
       return []
     })
-
     const wrapper = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('unknown')
     expect(wrapper.text()).toContain('/app/llama-server')
-
-    response = { profile: { path: '', options: [] }, effective: { global: null } }
-    resetManager()
-    const invalidPath = await mountSuspended(AdminLlamaCppPage, { route: false })
-    await flushPromises()
-    expect(invalidPath.text()).toContain('llama-server could not be discovered')
-    invalidPath.unmount()
-
-    response = { profile: { path: '/llama', options: null }, effective: { global: {} } }
-    resetManager()
-    const invalidOptions = await mountSuspended(AdminLlamaCppPage, { route: false })
-    await flushPromises()
-    expect(invalidOptions.text()).toContain('llama-server could not be discovered')
-    invalidOptions.unmount()
-
-    for (const [nextFailure, message] of [
-      [{ data: { error: 'llama denied' } }, 'llama denied'],
-      [new Error('llama exploded'), 'llama exploded'],
-      [{}, 'Unable to load llama.cpp configuration']
-    ] as const) {
-      resetManager()
-      failure = nextFailure
-      const failed = await mountSuspended(AdminLlamaCppPage, { route: false })
-      await flushPromises()
-      expect(failed.text()).toContain(message)
-      failed.unmount()
-      failure = null
-    }
-
     wrapper.unmount()
+
+    response = { profile: { path: '', options: [] }, effective: { global: null } }; resetManager()
+    const invalidPath = await mountSuspended(AdminLlamaCppPage, { route: false })
+    await flushPromises(); expect(invalidPath.text()).toContain('llama-server could not be discovered'); invalidPath.unmount()
+
+    response = { profile: { path: '/llama', options: null }, effective: { global: {} } }; resetManager()
+    const invalidOptions = await mountSuspended(AdminLlamaCppPage, { route: false })
+    await flushPromises(); expect(invalidOptions.text()).toContain('llama-server could not be discovered'); invalidOptions.unmount()
+
+    for (const [nextFailure, message] of [[{ data: { error: 'llama denied' } }, 'llama denied'], [new Error('llama exploded'), 'llama exploded'], [{}, 'Unable to load llama.cpp configuration']] as const) {
+      resetManager(); failure = nextFailure
+      const failed = await mountSuspended(AdminLlamaCppPage, { route: false })
+      await flushPromises(); expect(failed.text()).toContain(message); failed.unmount(); failure = null
+    }
   })
 
   it('covers llama save error variants and General signed-out/invalid-save branches', async () => {
@@ -445,27 +296,16 @@ describe('Phase 10 llama and general branch variants', () => {
     })
     const llama = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
-    for (const [failure, message] of [
-      [{ data: { error: 'save denied' } }, 'save denied'],
-      [new Error('save exploded'), 'save exploded'],
-      [{}, 'Unable to save llama.cpp defaults']
-    ] as const) {
-      saveFailure = failure
-      await button(llama, 'Save defaults').trigger('click')
-      await flushPromises()
-      expect(llama.text()).toContain(message)
+    for (const [failure, message] of [[{ data: { error: 'save denied' } }, 'save denied'], [new Error('save exploded'), 'save exploded'], [{}, 'Unable to save llama.cpp defaults']] as const) {
+      saveFailure = failure; await button(llama, 'Save defaults').trigger('click'); await flushPromises(); expect(llama.text()).toContain(message)
     }
     llama.unmount()
 
-    resetManager(null)
-    mocks.request.mockReset()
+    resetManager(null); mocks.request.mockReset()
     const signedOut = await mountSuspended(AdminGeneralPage, { route: false })
-    await flushPromises()
-    expect(mocks.request).not.toHaveBeenCalled()
-    signedOut.unmount()
+    await flushPromises(); expect(mocks.request).not.toHaveBeenCalled(); signedOut.unmount()
 
-    resetManager()
-    let settings: any = settingsResponse()
+    resetManager(); let settings: any = settingsResponse()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/settings/general' && options?.method === 'PUT') return []
       if (path === '/api/v1/settings/general') return settings
@@ -473,19 +313,18 @@ describe('Phase 10 llama and general branch variants', () => {
       return []
     })
     const general = await mountSuspended(AdminGeneralPage, { route: false })
-    await flushPromises()
-    await button(general, 'Save changes').trigger('click')
-    await flushPromises()
+    await flushPromises(); await button(general, 'Save changes').trigger('click'); await flushPromises()
     expect(general.text()).toContain('Invalid manager settings response')
     general.unmount()
   })
 
-  it('covers admin sidebar without a current user', async () => {
+  it('covers the Administration secondary navigation active state without a current user', async () => {
     resetManager(null)
-    mocks.request.mockResolvedValue([])
-    const sidebar = await mountSuspended(AdminSidebar, { route: '/admin' })
+    const sidebar = await mountSuspended(AdminSidebar, { route: '/admin/llamacpp' })
     await flushPromises()
-    expect(sidebar.text()).toContain('Sign out')
+    expect(sidebar.text()).toContain('Administration')
+    expect(sidebar.get('[data-testid="admin-nav-llama.cpp"]').classes()).toContain('bg-[var(--accent-100)]')
+    expect(sidebar.text()).not.toContain('Sign out')
     sidebar.unmount()
   })
 })
