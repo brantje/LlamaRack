@@ -5,6 +5,7 @@ import NewInstancePage from '~/pages/instances/new.vue'
 import EditInstancePage from '~/pages/instances/[id]/edit.vue'
 import EditModelPage from '~/pages/models/[id]/edit.vue'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
+import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import HardwarePlacementEditor from '~/components/HardwarePlacementEditor.vue'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
 
@@ -69,7 +70,6 @@ function components(wrapper: any, name: string, fallback: string) {
   const found = wrapper.findAllComponents({ name })
   return found.length ? found : wrapper.findAllComponents({ name: fallback })
 }
-function selects(wrapper: any) { return components(wrapper, 'SelectMenu', 'USelectMenu') }
 function numbers(wrapper: any) { return components(wrapper, 'InputNumber', 'UInputNumber') }
 function checkboxes(wrapper: any) { return components(wrapper, 'Checkbox', 'UCheckbox') }
 function checkbox(wrapper: any, label: string) {
@@ -77,15 +77,14 @@ function checkbox(wrapper: any, label: string) {
   if (!control) throw new Error(`Missing checkbox: ${label}`)
   return control
 }
-function selectWithValue(wrapper: any, value: string) {
-  const control = selects(wrapper).find((item: any) => Array.isArray(item.props('items')) && item.props('items').some((entry: any) => entry?.value === value))
-  if (!control) throw new Error(`Missing select containing value: ${value}`)
-  return control
-}
 function inputWithValue(wrapper: any, value: string) {
   const control = components(wrapper, 'Input', 'UInput').find((item: any) => item.props('modelValue') === value)
   if (!control) throw new Error(`Missing input containing value: ${value}`)
   return control
+}
+async function selectRegisteredModel(wrapper: any, value: string) {
+  await wrapper.get(`input[type="radio"][value="${value}"]`).trigger('change')
+  await flushPromises()
 }
 
 async function clickConfirmation(kind: 'confirm' | 'cancel') {
@@ -117,9 +116,8 @@ describe('Instance configuration pages', () => {
     })
 
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
-    selectWithValue(wrapper, 'm1').vm.$emit('update:modelValue', 'm1')
-    selectWithValue(wrapper, 'high').vm.$emit('update:modelValue', 'high')
-    await flushPromises()
+    await selectRegisteredModel(wrapper, 'm1')
+    await wrapper.get('[data-testid="priority-high"]').trigger('click')
 
     expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Coder Model')
     expect((wrapper.get('[data-testid="instance-slug"]').element as HTMLInputElement).value).toBe('coder-model')
@@ -132,7 +130,7 @@ describe('Instance configuration pages', () => {
     placement.vm.$emit('update:gpuMode', 'manual')
     placement.vm.$emit('update:gpuDevices', ['CUDA0', 'CUDA1'])
     placement.vm.$emit('update:tensorSplit', '1,1')
-    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192', threads: '4' })
+    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192', threads: '4' })
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 90)
     checkbox(wrapper, 'Always On').vm.$emit('update:modelValue', true)
     checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
@@ -170,10 +168,10 @@ describe('Instance configuration pages', () => {
       return {}
     })
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
-    selectWithValue(wrapper, 'm1').vm.$emit('update:modelValue', 'm1')
+    await selectRegisteredModel(wrapper, 'm1')
     await wrapper.get('[data-testid="instance-name"]').setValue('Cancelled Launch')
     checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
-    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
+    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -208,11 +206,10 @@ describe('Instance configuration pages', () => {
     const wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     expect(wrapper.text()).toContain('Edit Instance')
-    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
+    expect(wrapper.findComponent(InstanceOverridesEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
     inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')
-    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
+    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
     await flushPromises()
-    expect(wrapper.text()).toContain('API-breaking rename')
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -223,7 +220,7 @@ describe('Instance configuration pages', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/primary-coder', {
       method: 'PUT',
       body: expect.objectContaining({
-        name: 'Renamed Coder', gpu_mode: 'manual', gpu_devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1',
+        name: 'Renamed Coder', slug: 'renamed-coder', gpu_mode: 'manual', gpu_devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1',
         options: { 'ctx-size': '16384', threads: '6' }, restart_running: true, confirm_model_id_change: true
       })
     })
