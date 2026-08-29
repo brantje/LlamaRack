@@ -174,4 +174,129 @@ describe('Request logs focused branch coverage', () => {
     await flushPromises()
     expect(vm.routeReady).toBe(false)
   })
+
+  it('covers body parsing, empty sessions, live states and model fallbacks', async () => {
+    const manager = resetManager()
+    mocks.request.mockResolvedValue({ items: [], has_more: false })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.sessionDuration).toBe(0)
+    expect(vm.parseBody()).toBeNull()
+    expect(vm.parseBody('not-json')).toBe('not-json')
+    expect(vm.parseBody('{"value":1}')).toEqual({ value: 1 })
+    expect(vm.prettyBody()).toBe('')
+    expect(vm.prettyBody('not-json')).toBe('not-json')
+    expect(vm.prettyBody('{"value":1}')).toContain('"value": 1')
+
+    vm.detail = {
+      ...record('lcm_content'),
+      request_body: '{"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function"}]}',
+      response_body: '{"choices":[{"message":{"tool_calls":[{"id":"call-1"}]}},{"message":{}}]}'
+    }
+    await flushPromises()
+    expect(vm.requestMessages).toHaveLength(1)
+    expect(vm.requestTools).toHaveLength(1)
+    expect(vm.responseToolCalls).toHaveLength(1)
+
+    vm.detail = { ...record('lcm_empty_content'), request_body: '{}', response_body: '{}' }
+    await flushPromises()
+    expect(vm.requestMessages).toEqual([])
+    expect(vm.requestTools).toEqual([])
+    expect(vm.responseToolCalls).toEqual([])
+
+    manager.instances.value.push({ ...manager.instances.value[0]!, id: 'unknown-model-instance', model_id: 'unknown-model' })
+    manager.instances.value.push({ ...manager.instances.value[0]!, id: 'empty-model-instance', model_id: '' })
+    expect(vm.requestModelName(record('16', { model_name: '', model_id: '', instance_id: 'unknown-model-instance' }))).toBe('unknown-model')
+    expect(vm.requestModelName(record('17', { model_name: '', model_id: '', instance_id: 'empty-model-instance' }))).toBe('—')
+
+    vm.liveStreamingEnabled = false
+    expect(vm.liveState.label).toBe('Live off')
+    vm.liveStreamingEnabled = true
+    manager.runtimeEventsConnected.value = false
+    expect(vm.liveState.label).toBe('Disconnected')
+    manager.runtimeEventsConnected.value = true
+    vm.offset = 25
+    expect(vm.liveState.label).toBe('Live paused on older page')
+    vm.offset = 0
+    expect(vm.liveState.label).toBe('Live')
+
+    vm.sessionRequests = [record('lcm_negative_duration', { started_at: 100, finished_at: 50, session_total_count: 0 })]
+    await flushPromises()
+    expect(vm.sessionDuration).toBe(0)
+    expect(vm.sessionTotalCount).toBe(1)
+    expect(vm.sessionTruncated).toBe(false)
+  })
+
+  it('covers paged sessions and early-return request controls', async () => {
+    const manager = resetManager()
+    mocks.request.mockResolvedValue({ items: [], has_more: false })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(await vm.showRequest('', '')).toEqual({ current: false, sessionID: '' })
+    await vm.openRequest(record('', { request_id: '' }))
+    vm.activeSessionID = ''
+    await vm.selectSessionRequest(record('lcm_no_active_session'))
+
+    vm.routeReady = false
+    await vm.syncDetailFromRoute()
+    vm.routeReady = true
+    vm.detailOpen = true
+    await vm.syncDetailFromRoute()
+    expect(vm.detailOpen).toBe(false)
+    await vm.syncDetailFromRoute()
+
+    vm.routeReady = true
+    await vm.initializePage()
+    vm.routeReady = false
+    manager.initialized.value = false
+    await vm.initializePage()
+    manager.initialized.value = true
+    manager.user.value = null
+    await vm.initializePage()
+    manager.user.value = { id: 1, username: 'admin', enabled: true }
+
+    vm.liveStreamingEnabled = true
+    await vm.toggleLiveStreaming()
+    expect(vm.liveStreamingEnabled).toBe(false)
+    vm.routeReady = false
+    await vm.toggleLiveStreaming()
+    expect(vm.liveStreamingEnabled).toBe(true)
+
+    let sessionCalls = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (!path.includes('session_id=paged-session')) return { items: [], has_more: false }
+      sessionCalls++
+      if (sessionCalls === 1) return { items: undefined, has_more: true }
+      return { items: [record('lcm_paged', { session_id: 'paged-session' })], has_more: false }
+    })
+    await vm.loadSessionRequests('paged-session')
+    expect(sessionCalls).toBe(2)
+    expect(vm.sessionRequests).toHaveLength(1)
+  })
+
+  it('discards stale history responses', async () => {
+    mocks.request.mockResolvedValue({ items: [], has_more: false })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    let resolveOld: ((value: any) => void) | undefined
+    const oldResponse = new Promise(resolve => { resolveOld = resolve })
+    mocks.request
+      .mockImplementationOnce(() => oldResponse)
+      .mockResolvedValueOnce({ items: [record('lcm_new')], has_more: true })
+
+    const oldLoad = vm.loadRequests()
+    const newLoad = vm.loadRequests()
+    await newLoad
+    resolveOld?.({ items: [record('lcm_old')], has_more: false })
+    await oldLoad
+    expect(vm.requests.map((item: any) => item.request_id)).toEqual(['lcm_new'])
+    expect(vm.hasMore).toBe(true)
+    expect(vm.loading).toBe(false)
+  })
 })
