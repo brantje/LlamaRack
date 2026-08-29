@@ -198,4 +198,41 @@ describe('InstanceLogViewer', () => {
     expect(wrapper.text()).toContain('authentication required')
     wrapper.unmount()
   })
+
+  it('rejects an empty stream ticket without creating an EventSource', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    mocks.request.mockResolvedValueOnce({ ticket: '' })
+
+    const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
+    await flushPromises()
+
+    expect(FakeEventSource.instances).toHaveLength(0)
+    expect(wrapper.text()).toContain('Unable to authenticate live log stream')
+    wrapper.unmount()
+  })
+
+  it('ignores a stale ticket response after the Instance changes', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    let resolveFirst!: (value: { ticket: string }) => void
+    const firstTicket = new Promise<{ ticket: string }>((resolve) => { resolveFirst = resolve })
+    mocks.request
+      .mockReturnValueOnce(firstTicket)
+      .mockResolvedValueOnce({ ticket: 'fresh-ticket' })
+
+    const wrapper = await mountSuspended(InstanceLogViewer, { props: { instanceId: 'coder' }, route: false })
+    await flushPromises()
+    expect(FakeEventSource.instances).toHaveLength(0)
+
+    await wrapper.setProps({ instanceId: 'coder-v2' })
+    await flushPromises()
+    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeEventSource.instances[0]!.url).toContain('instance_id=coder-v2')
+    expect(FakeEventSource.instances[0]!.url).toContain('ticket=fresh-ticket')
+
+    resolveFirst({ ticket: 'stale-ticket' })
+    await flushPromises()
+    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeEventSource.instances[0]!.url).not.toContain('stale-ticket')
+    wrapper.unmount()
+  })
 })
