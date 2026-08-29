@@ -115,6 +115,14 @@ func TestListJSONExcludesFullBodiesButDetailReturnsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	items, err := s.ListRequests(context.Background(), RequestFilters{RequestID: "lcm_full", Limit: 10})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("list items=%+v err=%v", items, err)
+	}
+	if items[0].RequestBody != nil || items[0].ResponseBody != nil {
+		t.Fatalf("history materialized full content: %+v", items[0])
+	}
+
 	h := NewManagementHandler(s)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/observability/requests?request_id=lcm_full&limit=10", nil))
