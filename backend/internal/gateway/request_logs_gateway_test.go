@@ -35,17 +35,25 @@ func TestTraceResolutionPrecedenceAndGeneration(t *testing.T) {
 	if got := resolveTraceID(r, ""); len(got) != 36 || got[14] != '4' {
 		t.Fatalf("generated trace=%q", got)
 	}
-	r.Header.Set("X-LiteLLM-Session-ID", testTraceSession)
-	if got := resolveTraceID(r, testTraceBody); got != testTraceSession {
-		t.Fatalf("session trace=%q", got)
+	r.Header.Set(headerSessionID, testTraceSession)
+	if got := resolveTraceID(r, testTraceBody); got != testTraceBody {
+		t.Fatalf("session must not replace body trace, got=%q", got)
 	}
-	r.Header.Set("X-LiteLLM-Trace-ID", strings.ToUpper(testTraceHeader))
+	r.Header.Set(headerTraceID, strings.ToUpper(testTraceHeader))
 	if got := resolveTraceID(r, testTraceBody); got != testTraceHeader {
 		t.Fatalf("header trace=%q", got)
 	}
-	r.Header.Set("X-LiteLLM-Trace-ID", "not-a-uuid")
-	if got := resolveTraceID(r, testTraceBody); got != testTraceSession {
-		t.Fatalf("invalid header should fall through, got=%q", got)
+	r.Header.Set(headerTraceID, "not-a-uuid")
+	if got := resolveTraceID(r, testTraceBody); got != testTraceBody {
+		t.Fatalf("invalid trace header should fall through to body trace, got=%q", got)
+	}
+	r.Header.Del(headerTraceID)
+	generated := resolveTraceID(r, "")
+	if generated == testTraceSession {
+		t.Fatalf("session id reused as trace=%q", generated)
+	}
+	if _, ok := normalizeUUID(generated); !ok {
+		t.Fatalf("generated trace invalid=%q", generated)
 	}
 	if _, ok := normalizeUUID("bad"); ok {
 		t.Fatal("invalid UUID accepted")
@@ -109,9 +117,9 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, tc.path, tc.secret, tc.body, map[string]string{
-				"X-LiteLLM-Trace-ID": testTraceHeader,
-				"User-Agent":         "request-log-test/1.0",
-				"Forwarded":          "for=203.0.113.20",
+				headerTraceID: testTraceHeader,
+				"User-Agent": "request-log-test/1.0",
+				"Forwarded":  "for=203.0.113.20",
 			})
 			if w.Code != tc.want {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -137,7 +145,7 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 	}
 }
 
-func TestLiteLLMBodyAndSessionTracePropagation(t *testing.T) {
+func TestLiteLLMBodyTraceRemainsSeparateFromSessionIdentity(t *testing.T) {
 	f := newGatewayFixture(t, false)
 	body := `{"model":"gateway-model","litellm_metadata":{"trace_id":"` + testTraceBody + `"}}`
 	w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, body, nil)
@@ -149,16 +157,16 @@ func TestLiteLLMBodyAndSessionTracePropagation(t *testing.T) {
 		t.Fatalf("body trace record=%+v err=%v", record, err)
 	}
 
-	w = gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, body, map[string]string{"X-LiteLLM-Session-ID": testTraceSession})
-	if w.Header().Get(headerTraceID) != testTraceSession {
-		t.Fatalf("session trace header=%q", w.Header().Get(headerTraceID))
+	w = gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, body, map[string]string{headerSessionID: testTraceSession})
+	if w.Header().Get(headerTraceID) != testTraceBody {
+		t.Fatalf("session must not replace body trace header=%q", w.Header().Get(headerTraceID))
 	}
 }
 
 func TestMultipleRequestsShareTraceAndSuccessReturnsTrace(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	for i := 0; i < 2; i++ {
-		w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"gateway-model"}`, map[string]string{"X-LiteLLM-Trace-ID": testTraceHeader})
+		w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"gateway-model"}`, map[string]string{headerTraceID: testTraceHeader})
 		if w.Code != http.StatusOK || w.Header().Get(headerTraceID) != testTraceHeader || w.Header().Get(headerRequestID) == "" {
 			t.Fatalf("response=%d headers=%v", w.Code, w.Header())
 		}
