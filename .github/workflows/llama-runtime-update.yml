@@ -58,6 +58,10 @@ jobs:
             echo 'Unable to determine latest stable llama.cpp release tag.' >&2
             exit 1
           fi
+          if [[ ! "${release_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "llama.cpp release tag is not a valid container tag component: ${release_tag}" >&2
+            exit 1
+          fi
           if [[ -z "${asset_url}" || "${asset_url}" == "null" ]]; then
             echo "llama.cpp ${release_tag} does not expose nightly-tag.txt; cannot resolve an immutable build image." >&2
             exit 1
@@ -91,7 +95,13 @@ jobs:
           fi
 
           image_tag="llama.cpp-${release_tag}"
-          target="${REGISTRY}/${IMAGE_NAME}:${image_tag}"
+          if [[ ! "${image_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Derived image tag is not a valid container tag: ${image_tag}" >&2
+            exit 1
+          fi
+
+          cpu_target="${REGISTRY}/${IMAGE_NAME}:${image_tag}"
+          cuda_target="${REGISTRY}/${IMAGE_NAME}:${image_tag}-cuda"
 
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "build_tag=${build_tag}" >> "${GITHUB_OUTPUT}"
@@ -99,29 +109,44 @@ jobs:
           echo "cpu_image=${cpu_image}" >> "${GITHUB_OUTPUT}"
           echo "cuda_image=${cuda_image}" >> "${GITHUB_OUTPUT}"
 
-          if docker buildx imagetools inspect "${target}" >/dev/null 2>&1; then
+          cpu_exists=false
+          cuda_exists=false
+          if docker buildx imagetools inspect "${cpu_target}" >/dev/null 2>&1; then
+            cpu_exists=true
+          fi
+          if docker buildx imagetools inspect "${cuda_target}" >/dev/null 2>&1; then
+            cuda_exists=true
+          fi
+
+          if [[ "${cpu_exists}" == 'true' && "${cuda_exists}" == 'true' ]]; then
             echo 'should_build=false' >> "${GITHUB_OUTPUT}"
-            echo "llama.cpp ${release_tag} (${build_tag}) is already published as ${target}."
+            echo "llama.cpp ${release_tag} (${build_tag}) is already published as ${cpu_target} and ${cuda_target}."
           else
             echo 'should_build=true' >> "${GITHUB_OUTPUT}"
-            echo "New llama.cpp release detected: ${release_tag} (${build_tag})."
+            echo "llama.cpp ${release_tag} (${build_tag}) requires publication; CPU exists=${cpu_exists}, CUDA exists=${cuda_exists}."
           fi
 
       - name: Summary
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.detect.outputs.release_tag }}
+          BUILD_TAG: ${{ steps.detect.outputs.build_tag }}
+          CPU_IMAGE: ${{ steps.detect.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ steps.detect.outputs.cuda_image }}
+          SHOULD_BUILD: ${{ steps.detect.outputs.should_build }}
         run: |
           {
             echo '## 🦙 llama.cpp runtime update'
             echo
-            echo "- llama.cpp release: \`${{ steps.detect.outputs.release_tag }}\`"
-            echo "- llama.cpp build: \`${{ steps.detect.outputs.build_tag }}\`"
-            echo "- CPU runtime: \`${{ steps.detect.outputs.cpu_image }}\`"
-            echo "- CUDA runtime: \`${{ steps.detect.outputs.cuda_image }}\`"
+            echo "- llama.cpp release: \`${RELEASE_TAG}\`"
+            echo "- llama.cpp build: \`${BUILD_TAG}\`"
+            echo "- CPU runtime: \`${CPU_IMAGE}\`"
+            echo "- CUDA runtime: \`${CUDA_IMAGE}\`"
             echo "- Manager source: \`${GITHUB_SHA}\`"
-            if [[ '${{ steps.detect.outputs.should_build }}' == 'true' ]]; then
-              echo '- Result: new upstream release detected; images will be built.'
+            if [[ "${SHOULD_BUILD}" == 'true' ]]; then
+              echo '- Result: new or incomplete upstream publication detected; images will be built.'
             else
-              echo '- Result: already published; no rebuild required.'
+              echo '- Result: both versioned CPU and CUDA images are already published; no rebuild required.'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -186,15 +211,19 @@ jobs:
 
       - name: Publish summary
         shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.detect.outputs.release_tag }}
+          BUILD_TAG: ${{ needs.detect.outputs.build_tag }}
+          IMAGE_TAG: ${{ needs.detect.outputs.image_tag }}
         run: |
           {
             echo '## 🦙 llama.cpp update published'
             echo
-            echo "Rebuilt LlamaCPP Manager because llama.cpp released \`${{ needs.detect.outputs.release_tag }}\` (build \`${{ needs.detect.outputs.build_tag }}\`)."
+            echo "Rebuilt LlamaCPP Manager because llama.cpp released \`${RELEASE_TAG}\` (build \`${BUILD_TAG}\`)."
             echo
             echo 'Published tags:'
-            echo "- \`${{ needs.detect.outputs.image_tag }}\`"
-            echo "- \`${{ needs.detect.outputs.image_tag }}-cuda\`"
+            echo "- \`${IMAGE_TAG}\`"
+            echo "- \`${IMAGE_TAG}-cuda\`"
             echo '- `llama.cpp-latest`'
             echo '- `llama.cpp-latest-cuda`'
             echo
