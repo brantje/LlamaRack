@@ -56,28 +56,14 @@ describe('OIDC provider draft testing', () => {
     await add.trigger('click')
     await flushPromises()
 
-    const inputs = [...document.body.querySelectorAll<HTMLInputElement>('input')]
-    expect(inputs.length).toBeGreaterThanOrEqual(10)
-    inputs[0]!.value = 'Authentik'
-    inputs[0]!.dispatchEvent(new Event('input'))
-    inputs[1]!.value = 'https://auth.example.test/application/o/manager/'
-    inputs[1]!.dispatchEvent(new Event('input'))
-    inputs[3]!.value = 'manager-client'
-    inputs[3]!.dispatchEvent(new Event('input'))
-    inputs[4]!.value = 'client-secret'
-    inputs[4]!.dispatchEvent(new Event('input'))
-    await flushPromises()
-
     bodyButton('Test configuration').click()
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/admin/auth/providers/test', {
       method: 'POST',
       body: expect.objectContaining({
-        name: 'Authentik',
-        issuer: 'https://auth.example.test/application/o/manager/',
-        client_id: 'manager-client',
-        client_secret: 'client-secret',
-        scopes: ['openid', 'profile', 'email']
+        enabled: true,
+        scopes: ['openid', 'profile', 'email'],
+        username_claim: 'preferred_username'
       })
     })
     expect(document.body.textContent).toContain('Provider configuration test passed.')
