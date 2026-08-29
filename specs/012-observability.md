@@ -18,6 +18,7 @@ The manager must make it possible to answer:
 - request result/status, duration, queue/load time, TTFT, token usage, and throughput;
 - which API keys are using the gateway without exposing secrets;
 - which requests belong to the same flat multi-request trace;
+- which requests belong to the same LiteLLM session, independently of tracing;
 - the client IP/User-Agent associated with a request for operational debugging;
 - whether autoloading, scheduling, eviction, or idle-unload activity is occurring;
 - what currently needs operator attention;
@@ -26,7 +27,7 @@ The manager must make it possible to answer:
 
 ## Persistence and retention
 
-Observability request and hardware history survives manager restarts and uses the existing SQLite database. During active development, update the current schema directly; do not introduce a migration framework solely for Phase 11.
+Observability request and hardware history survives manager restarts and uses the existing SQLite database. During active development, update the current schema directly; do not introduce a migration framework solely for Phase 11. Development databases created with an incompatible earlier schema may be recreated rather than silently ALTERed/backfilled at runtime.
 
 Persist individual inference request records rather than only aggregate buckets. Retention is configurable and defaults to **30 days**. Retention applies to request history, request network metadata, and historical hardware samples. Cleanup runs incrementally in the background and must not block inference traffic.
 
@@ -50,13 +51,17 @@ This includes, at minimum:
 
 Request identity and durable request logging begin before authentication/body validation can return. The gateway centralizes finalization so every outcome is finalized once. Observability persistence is best-effort relative to inference: persistence failures are logged but do not turn an otherwise successful inference into an inference failure. If the early insert fails and persistence recovers before completion, finalization may create the completed row as a recovery path.
 
+Potentially large or chunked unauthenticated request bodies must not be buffered to the full normal request-size limit before API-key validation. The gateway may use a small bounded pre-authentication metadata budget while still finalizing failed-auth request records through the normal observability path.
+
 A request record contains, where available:
 
 - stable manager request ID;
 - trace ID;
+- LiteLLM session ID;
 - normalized call type;
 - request start and finish timestamps;
 - requested/canonical `instance.id` (may be unavailable for early failures);
+- captured model ID/name where resolvable;
 - endpoint;
 - safe API-key identity (ID/name/prefix, never the secret; may be unavailable);
 - streaming mode;
@@ -103,15 +108,22 @@ Tracing is first-class flat grouping: related requests share one UUID `trace_id`
 Trace resolution precedence is:
 
 1. `X-LiteLLM-Trace-ID`;
-2. `X-LiteLLM-Session-ID`;
-3. `litellm_metadata.trace_id` from the request JSON body;
-4. a newly generated UUID.
+2. `litellm_metadata.trace_id` from the request JSON body;
+3. a newly generated UUID.
 
-Header values take precedence over body metadata. A valid supplied trace ID is preserved on failures. If no valid trace ID is supplied, the manager generates a UUID.
+A LiteLLM session ID is **not** a trace ID and must never be used as a trace fallback. The trace header takes precedence over body trace metadata. A valid supplied trace ID is preserved on failures. If no valid trace ID is supplied, the manager generates a UUID.
 
 Issue #60 intentionally does **not** add W3C `traceparent`/`tracestate` support or parent-request headers.
 
 `GET /api/v1/observability/requests` supports `trace_id` filtering. Normal history is newest-first. A trace-filtered result is oldest-first/chronological so chained requests are understandable.
+
+## LiteLLM session grouping
+
+LiteLLM session identity is persisted separately from `trace_id`. The manager accepts a bounded valid session identity from `X-LiteLLM-Session-ID` and supported LiteLLM/request-body session metadata. Session identity is used to group related retained requests in `/logs`; it does not change request routing and is not a security boundary.
+
+Normal request-history queries collapse a multi-request session to one representative row **before pagination**. Pagination offsets therefore count visible history rows/sessions rather than hidden individual requests, and the same session must not reappear merely because its requests crossed a raw-request page boundary.
+
+A `session_id=<id>` request-history query returns the individual retained requests in that session for the session sidepanel. The individual request-detail response also carries its session identity and retained session request count, allowing a `/logs?request_id=<id>` deep link to discover and open the full session without requiring `session_id` in the incoming URL.
 
 ## Client network metadata
 
@@ -155,7 +167,7 @@ Dashboard/API summaries expose at least p50, p95, and p99 for completed request 
 
 Track cumulative gateway/token metrics and lifecycle/scheduler activity including autoload, load duration, eviction, idle-unload, and failed starts. Completion/finalization counter updates must be exactly-once/idempotent.
 
-Prometheus labels must not contain request IDs, trace IDs, API-key IDs/prefixes, client IPs, User-Agent strings, prompt text, arbitrary errors, or other unbounded/high-cardinality values.
+Prometheus labels must not contain request IDs, trace IDs, session IDs, API-key IDs/prefixes, client IPs, User-Agent strings, prompt text, arbitrary errors, or other unbounded/high-cardinality values.
 
 ## Hardware history and llama.cpp metrics
 
@@ -183,9 +195,10 @@ Request-history filters include, where applicable:
 - streaming mode;
 - exact request ID lookup;
 - trace ID;
+- session ID for individual session expansion;
 - bounded text search across useful request metadata.
 
-History queries are bounded and paginated. The list API returns metadata summaries only. The detail API returns retained request/response bodies when full logging captured them.
+History queries are bounded and paginated. Normal history pagination is based on visible session/request representatives. The list API returns metadata summaries only. The detail API returns retained request/response bodies when full logging captured them.
 
 ## Request logs UI (`/logs`)
 
@@ -195,17 +208,22 @@ The main request table exposes:
 
 - Time;
 - Status;
+- Model name;
+- Instance ID;
+- Key alias;
+- Duration;
+- TTFT;
+- Tokens;
 - Call Type;
 - Request ID;
-- Trace ID;
-- Instance / Model (`instance.id`);
-- Endpoint;
-- API Key (safe identity only);
-- Tokens;
-- Duration;
-- TTFT.
+- Session;
+- Endpoint.
 
-Normal history is newest-first. Clicking a trace ID navigates to:
+Trace identity remains available in request detail and via the `trace_id` query/filter instead of consuming a permanent wide table column.
+
+Normal history is newest-first. Multi-request sessions appear as one representative row. Opening a grouped row shows the requests in that session in the right-side detail sidepanel. Session expansion remains individually paginated/bounded by the management API rather than loading arbitrary retained history into the browser.
+
+A trace-filtered view may use:
 
 ```text
 /logs?trace_id=<uuid>
@@ -215,16 +233,18 @@ That view shows only requests matching the trace and orders them chronologically
 
 The page exposes server-side filters for the management API fields and bounded pagination; it must not load all retained history into the browser.
 
-Selecting a request opens a **right-side Nuxt UI `USlideover`** while keeping the logs page in place. A deep link may use `request_id` in the `/logs` query string to open the same slideover.
+Selecting a request opens a **right-side Nuxt UI `USlideover`** while keeping the logs page in place. A deep link may use `request_id` in the `/logs` query string to open the same slideover. If that request belongs to a multi-request session, the detail response is authoritative for the session identity; the UI loads the session requests and may canonicalize the URL with `session_id`.
+
+Rapid selection changes must be race-safe: a slower response for an older selection must not overwrite the latest selected request/detail.
 
 Request detail shows:
 
 1. status/error summary;
-2. request identity/details;
+2. request identity/details, including request/session/trace identity;
 3. timings and metrics;
 4. token usage/throughput;
 5. request/response content when retained;
-6. metadata including request ID, trace ID, call type, client IP, and User-Agent.
+6. metadata including model/Instance, safe key alias, client IP, and User-Agent.
 
 Failures get prominent HTTP status + sanitized error treatment. Metadata-only requests explicitly state that request/response content was not recorded.
 
@@ -236,7 +256,7 @@ Do not add API Base, cost/accounting, teams, providers, environment, end-user ac
 
 The Dashboard remains the compact live operational overview. It provides an **Open logs** action to `/logs`.
 
-Recent gateway traffic and request-error attention items deep-link into `/logs?request_id=<request_id>` when a stable request ID is available. The dedicated logs explorer does not replace Dashboard KPIs or resource telemetry.
+Recent gateway traffic and request-error attention items deep-link into `/logs?request_id=<request_id>` when a stable request ID is available. The dedicated logs explorer discovers session context from request detail, so Dashboard does not need to know or append a session ID.
 
 ## Live updates
 
@@ -259,12 +279,14 @@ Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-s
 ## Performance and privacy constraints
 
 - Streaming inference must remain streaming; do not buffer streaming responses before forwarding.
+- Potentially large unauthenticated request bodies are authenticated before full-size buffering; failed-auth observability remains bounded.
 - Request identity/logging begins early, but persistence errors remain non-fatal to inference.
 - Finalization and cumulative counter updates are exactly-once/idempotent.
 - Short best-effort persistence after a client cancellation must not inherit the cancelled request context.
 - Full body capture remains explicit per-Instance opt-in.
 - Full bodies are never serialized into history-list/WebSocket summaries.
 - Historical queries are indexed, bounded, and paginated.
+- Multi-request session collapse occurs server-side before normal-history pagination.
 - Retention cleanup runs in the background.
 - Forwarded IP metadata is spoofable and must remain observability-only.
 
@@ -290,12 +312,13 @@ Session-only raw worker logs with source/search filtering and live tail.
 
 - request/trace identity before authentication/validation;
 - all gateway error attempts persisted;
-- LiteLLM trace/session/body compatibility and UUID generation;
+- distinct LiteLLM trace and session compatibility plus UUID trace generation;
+- server-side multi-request session grouping/pagination;
 - call type + client IP/User-Agent persistence;
-- trace/request/search filters and bounded pagination;
+- trace/request/session/search filters and bounded pagination;
 - metadata-only list/WebSocket DTO behavior;
 - full-content detail endpoint behavior;
-- `/logs` table, trace links, detail slideover, pretty/JSON rendering;
+- `/logs` grouped table, session-aware detail slideover, pretty/JSON rendering;
 - Dashboard and navigation integration;
 - backend/frontend regression and coverage tests.
 
@@ -304,16 +327,21 @@ Session-only raw worker logs with source/search filtering and live tail.
 - request/history data survives manager restarts and obeys configured retention;
 - every gateway `/v1/...` request attempt is represented, including early auth/validation/unsupported-endpoint errors;
 - every logged request has a stable manager request ID and UUID trace ID;
-- LiteLLM trace header/session/body metadata is accepted with the specified precedence;
+- LiteLLM trace header/body metadata is accepted with the specified precedence;
+- LiteLLM session identity remains separate from trace identity and never becomes a trace fallback;
 - W3C `traceparent` support is not added by issue #60;
 - request and trace IDs are returned on successful and failed gateway responses;
+- potentially large unauthenticated bodies cannot consume the full normal request-body buffer before API-key validation;
 - client IP precedence and IPv4/IPv6 normalization follow this specification;
 - call type is stored for the four supported inference endpoints;
-- unresolved Instance/API-key metadata can remain unavailable on early failures;
+- unresolved Instance/API-key/model metadata can remain unavailable on early failures;
 - default logging is metadata-only; full logging remains explicit per Instance;
 - list/WebSocket payloads never expose retained full bodies;
 - detail returns full bodies only when retained;
-- `/logs` exists in main navigation with required table fields, filters, trace links, bounded pagination, and right-side slideover detail;
+- normal `/logs` pagination counts grouped visible rows and does not repeat a session across raw-request page boundaries;
+- request-only deep links discover and load their session when applicable;
+- slower stale request-detail responses cannot overwrite the latest selection;
+- `/logs` exists in main navigation with required table fields, filters, bounded pagination, session grouping, and right-side slideover detail;
 - `/logs?trace_id=<uuid>` is trace-only and chronological;
 - metadata-only detail explains why content is absent;
 - full detail offers structured/pretty and JSON content including messages/tools/tool calls where possible;
