@@ -102,6 +102,41 @@ describe('Request logs live updates', () => {
     wrapper.unmount()
   })
 
+  it('can disable and re-enable live request refresh without disconnecting the shared stream', async () => {
+    const manager = resetManager()
+    const first = request('lcm_1')
+    let history = [first]
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: history, has_more: false }
+      return {}
+    })
+
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    const toggle = wrapper.get('[data-testid="request-logs-live-toggle"]')
+    expect(toggle.text()).toContain('Pause live')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="request-logs-live-state"]').text()).toBe('Live off')
+    expect(wrapper.get('[data-testid="request-logs-live-toggle"]').text()).toContain('Enable live')
+    expect(manager.runtimeEventsConnected.value).toBe(true)
+
+    const callsWhilePaused = mocks.request.mock.calls.filter(call => String(call[0]).startsWith('/api/v1/observability/requests?')).length
+    const second = request('lcm_2')
+    history = [second, first]
+    manager.observabilityLive.value = liveSnapshot(history)
+    await flushPromises()
+    expect(mocks.request.mock.calls.filter(call => String(call[0]).startsWith('/api/v1/observability/requests?'))).toHaveLength(callsWhilePaused)
+    expect(wrapper.get('[data-testid="request-log-table"]').text()).not.toContain('lcm_2')
+
+    await wrapper.get('[data-testid="request-logs-live-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="request-logs-live-state"]').text()).toBe('Live')
+    expect(wrapper.get('[data-testid="request-log-table"]').text()).toContain('lcm_2')
+    expect(manager.runtimeEventsConnected.value).toBe(true)
+    wrapper.unmount()
+  })
+
   it('pauses automatic live refresh while browsing an older page', async () => {
     const manager = resetManager()
     const first = request('lcm_1')
