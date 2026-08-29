@@ -276,7 +276,7 @@ async function openRequest(item: RequestRecord) {
   await router.push({ path: '/logs', query })
 }
 async function selectSessionRequest(item: RequestRecord) {
-  if (!item.request_id) return
+  if (!item.request_id || !activeSessionID.value) return
   const selection = await showRequest(item.request_id, activeSessionID.value)
   if (!selection.current) return
   const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
@@ -415,10 +415,10 @@ watch(liveRequestFingerprint, (next, previous) => {
       <template #footer><div class="flex items-center justify-between"><span class="text-xs text-muted">Rows {{ requests.length ? offset + 1 : 0 }}–{{ offset + requests.length }}</span><div class="flex gap-2"><UButton color="neutral" variant="soft" size="sm" :disabled="offset === 0 || loading" @click="previousPage">Previous</UButton><UButton color="neutral" variant="soft" size="sm" :disabled="!hasMore || loading" @click="nextPage">Next</UButton></div></div></template>
     </UCard>
 
-    <USlideover v-model:open="detailOpen" side="right" title="Request Details" description="Inspect the selected request, session context, performance metrics and retained content." data-testid="request-detail-slideover" :ui="{ content: 'sm:max-w-[min(92vw,1400px)]' }">
+    <USlideover v-model:open="detailOpen" side="right" title="Request Details" data-testid="request-detail-slideover" :ui="{ content: 'sm:max-w-[min(92vw,1400px)]' }">
       <template #body>
         <div class="flex min-h-[76vh] min-w-0">
-          <aside v-if="detail && sessionSidebarOpen" data-testid="request-sidebar" class="w-72 shrink-0 border-r border-default pr-4">
+          <aside v-if="(detail || sessionRequests.length) && sessionSidebarOpen" data-testid="request-sidebar" class="w-72 shrink-0 border-r border-default pr-4">
             <div class="mb-4 flex items-start justify-between gap-2">
               <div class="min-w-0">
                 <p class="text-sm font-semibold">Request</p>
@@ -455,8 +455,8 @@ watch(liveRequestFingerprint, (next, previous) => {
             </UScrollArea>
           </aside>
 
-          <div class="min-w-0 flex-1" :class="detail && sessionSidebarOpen ? 'pl-6' : ''">
-            <div v-if="detail && !sessionSidebarOpen" class="mb-3"><UButton color="neutral" variant="soft" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">Show requests</UButton></div>
+          <div class="min-w-0 flex-1" :class="(detail || sessionRequests.length) && sessionSidebarOpen ? 'pl-6' : ''">
+            <div v-if="(detail || sessionRequests.length) && !sessionSidebarOpen" class="mb-3"><UButton color="neutral" variant="soft" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">{{ activeSessionID ? 'Show session requests' : 'Show requests' }}</UButton></div>
             <div class="space-y-6">
               <USkeleton v-if="detailLoading" class="h-40 w-full" />
               <UAlert v-else-if="detailError" color="error" variant="subtle" title="Request details unavailable" :description="detailError" />
@@ -466,20 +466,21 @@ watch(liveRequestFingerprint, (next, previous) => {
                     <h3 class="text-lg font-semibold">Request Overview</h3>
                     <UBadge :color="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'success' : 'error'" variant="subtle">{{ resultLabel(detail) }}</UBadge>
                   </div>
-                  <UAlert v-if="detail.result === 'error' && detail.error" color="error" variant="subtle" title="Request failed" :description="detail.error" class="mb-4" />
-                  <dl class="grid gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
-                    <div><dt class="text-xs text-muted">Model</dt><dd class="mt-1 text-sm">{{ requestModelName(detail) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Instance ID</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.instance_id || 'Unresolved' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Call Type</dt><dd class="mt-1 text-sm">{{ detail.call_type || '—' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Endpoint</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.endpoint }}</dd></div>
-                    <div><dt class="text-xs text-muted">Streaming</dt><dd class="mt-1 text-sm">{{ detail.streaming ? 'True' : 'False' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Key Alias</dt><dd class="mt-1 text-sm text-muted">{{ requestKeyAlias(detail) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Start Time</dt><dd class="mt-1 text-sm">{{ formatTime(detail.started_at) }}</dd></div>
-                    <div><dt class="text-xs text-muted">End Time</dt><dd class="mt-1 text-sm">{{ formatTime(detail.finished_at) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Model ID</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.model_id || '—' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Request ID</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.request_id }}</dd></div>
-                    <div><dt class="text-xs text-muted">Session ID</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.session_id || '—' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Trace ID</dt><dd class="mt-1 break-all font-mono text-xs text-muted">{{ detail.trace_id || '—' }}</dd></div>
+                  <p v-if="isPending(detail)" class="mb-4 text-xs text-muted">Request pending · The request is still in progress.</p>
+                  <p v-else-if="detail.result === 'error'" class="mb-4 text-xs text-error">Request failed · {{ detail.error || 'The request failed.' }}</p>
+                  <dl class="space-y-3 text-sm">
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Model</dt><dd>{{ requestModelName(detail) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Instance ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.instance_id || 'Unresolved' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Call Type</dt><dd>{{ detail.call_type || '—' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Endpoint</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.endpoint }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Streaming</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Key Alias</dt><dd class="text-muted">{{ requestKeyAlias(detail) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Start Time</dt><dd>{{ formatTime(detail.started_at) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">End Time</dt><dd>{{ formatTime(detail.finished_at) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Model ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.model_id || '—' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Request ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.request_id }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Session ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.session_id || '—' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Trace ID</dt><dd class="break-all font-mono text-xs text-muted">{{ detail.trace_id || '—' }}</dd></div>
                   </dl>
                 </section>
 
@@ -487,16 +488,16 @@ watch(liveRequestFingerprint, (next, previous) => {
 
                 <section data-testid="request-detail-metrics">
                   <h3 class="mb-4 text-base font-semibold">Metrics</h3>
-                  <dl class="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-                    <div><dt class="text-xs text-muted">Total Latency</dt><dd class="mt-1 font-mono text-sm">{{ formatDuration(detail.duration_ms) }}</dd></div>
-                    <div><dt class="text-xs text-muted">TTFT</dt><dd class="mt-1 font-mono text-sm">{{ formatDuration(detail.ttft_ms) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Input Tokens</dt><dd class="mt-1 font-mono text-sm">{{ detail.prompt_tokens }}</dd></div>
-                    <div><dt class="text-xs text-muted">Output Tokens</dt><dd class="mt-1 font-mono text-sm">{{ detail.generated_tokens }}</dd></div>
-                    <div><dt class="text-xs text-muted">Total Tokens</dt><dd class="mt-1 font-mono text-sm">{{ detail.total_tokens }}</dd></div>
-                    <div><dt class="text-xs text-muted">Prompt Processing</dt><dd class="mt-1 font-mono text-sm">{{ formatRate(detail.prompt_tokens_per_second) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Generation Speed</dt><dd class="mt-1 font-mono text-sm">{{ formatRate(detail.generation_tokens_per_second) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Queue Time</dt><dd class="mt-1 font-mono text-sm">{{ formatDuration(detail.queue_duration_ms) }}</dd></div>
-                    <div><dt class="text-xs text-muted">Load Time</dt><dd class="mt-1 font-mono text-sm">{{ formatDuration(detail.load_duration_ms) }}</dd></div>
+                  <dl class="space-y-3 text-sm">
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Total Latency</dt><dd class="font-mono">{{ formatDuration(detail.duration_ms) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">TTFT</dt><dd class="font-mono">{{ formatDuration(detail.ttft_ms) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Input Tokens</dt><dd class="font-mono">{{ detail.prompt_tokens }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Output Tokens</dt><dd class="font-mono">{{ detail.generated_tokens }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Total Tokens</dt><dd class="font-mono">{{ detail.total_tokens }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Prompt Processing</dt><dd class="font-mono">{{ formatRate(detail.prompt_tokens_per_second) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Generation Speed</dt><dd class="font-mono">{{ formatRate(detail.generation_tokens_per_second) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Queue Time</dt><dd class="font-mono">{{ formatDuration(detail.queue_duration_ms) }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Load Time</dt><dd class="font-mono">{{ formatDuration(detail.load_duration_ms) }}</dd></div>
                   </dl>
                 </section>
 
@@ -519,10 +520,10 @@ watch(liveRequestFingerprint, (next, previous) => {
 
                 <section>
                   <h3 class="mb-4 text-base font-semibold">Client Metadata</h3>
-                  <dl class="grid gap-x-8 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
-                    <div><dt class="text-xs text-muted">Client IP</dt><dd class="mt-1 font-mono text-xs text-muted">{{ detail.client_ip || '—' }}</dd></div>
-                    <div><dt class="text-xs text-muted">User-Agent</dt><dd class="mt-1 break-words text-xs text-muted">{{ detail.user_agent || '—' }}</dd></div>
-                    <div><dt class="text-xs text-muted">Autoloaded</dt><dd class="mt-1 text-sm">{{ detail.autoloaded ? 'True' : 'False' }}</dd></div>
+                  <dl class="space-y-3 text-sm">
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Client IP</dt><dd class="font-mono text-xs text-muted">{{ detail.client_ip || '—' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">User-Agent</dt><dd class="break-words text-xs text-muted">{{ detail.user_agent || '—' }}</dd></div>
+                    <div class="grid grid-cols-[9rem_minmax(0,1fr)] gap-4"><dt class="text-muted">Autoloaded</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd></div>
                   </dl>
                 </section>
               </template>
