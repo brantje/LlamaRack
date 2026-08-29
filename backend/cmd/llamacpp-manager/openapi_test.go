@@ -67,7 +67,7 @@ func TestInferenceOpenAPIResponseHeaders(t *testing.T) {
 
 func TestMuxServesRuntimeOpenAPIAndScalarDocs(t *testing.T) {
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	mux := newMux(fallback, fallback)
+	mux := newMux(fallback, fallback, fallback)
 
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
