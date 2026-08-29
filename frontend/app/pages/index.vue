@@ -245,7 +245,14 @@ async function refreshDashboard() {
   await Promise.allSettled([manager.refresh(), loadDashboard()])
 }
 
-onMounted(loadDashboard)
+watch(
+  [() => manager.initialized.value, () => manager.user.value],
+  ([initialized, user]) => {
+    if (!initialized || !user) return
+    void loadDashboard()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
