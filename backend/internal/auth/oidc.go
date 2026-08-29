@@ -277,13 +277,22 @@ func (m *OIDCManager) ListProviders(ctx context.Context) ([]OIDCProvider, error)
 		if err != nil {
 			return nil, err
 		}
-		provider.SecretConfigured, err = m.secrets.SecretConfigured(ctx, oidcSecretName(provider.ID))
+		out = append(out, provider)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		configured, err := m.secrets.SecretConfigured(ctx, oidcSecretName(out[i].ID))
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, provider)
+		out[i].SecretConfigured = configured
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 type scanFunc func(...any) error
