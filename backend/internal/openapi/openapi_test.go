@@ -29,9 +29,14 @@ func TestDocumentRegistrationAndHandlers(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	doc.JSONHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	req := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	req.Header.Set("Origin", "https://openapi-importer.example")
+	doc.JSONHandler().ServeHTTP(w, req)
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("json status=%d headers=%v", w.Code, w.Header())
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("openapi CORS origin=%q, want *", got)
 	}
 	var spec map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &spec); err != nil {
