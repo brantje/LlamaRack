@@ -167,11 +167,30 @@ CREATE TABLE IF NOT EXISTS inference_requests (
  autoloaded INTEGER NOT NULL DEFAULT 0,
  error TEXT NOT NULL DEFAULT '',
  request_body TEXT,
- response_body TEXT
+ response_body TEXT,
+ trace_id TEXT NOT NULL DEFAULT '',
+ call_type TEXT NOT NULL DEFAULT '',
+ client_ip TEXT NOT NULL DEFAULT '',
+ user_agent TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS inference_requests_started_at_idx ON inference_requests(started_at DESC);
 CREATE INDEX IF NOT EXISTS inference_requests_instance_started_idx ON inference_requests(instance_id,started_at DESC);
 CREATE INDEX IF NOT EXISTS inference_requests_api_key_started_idx ON inference_requests(api_key_id,started_at DESC);
+CREATE INDEX IF NOT EXISTS inference_requests_trace_started_idx ON inference_requests(trace_id,started_at);
+CREATE INDEX IF NOT EXISTS inference_requests_endpoint_started_idx ON inference_requests(endpoint,started_at DESC);
+CREATE TABLE IF NOT EXISTS inference_request_correlations (
+ request_id TEXT PRIMARY KEY,
+ inference_request_id INTEGER NOT NULL UNIQUE REFERENCES inference_requests(id) ON DELETE CASCADE,
+ prompt_tokens_per_second REAL
+);
+CREATE TABLE IF NOT EXISTS inference_request_log_context (
+ request_id TEXT PRIMARY KEY REFERENCES inference_request_correlations(request_id) ON DELETE CASCADE,
+ session_id TEXT NOT NULL DEFAULT '',
+ model_id TEXT NOT NULL DEFAULT '',
+ model_name TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS inference_request_log_context_session_idx ON inference_request_log_context(session_id);
+CREATE INDEX IF NOT EXISTS inference_request_log_context_model_idx ON inference_request_log_context(model_id);
 CREATE TABLE IF NOT EXISTS observability_counters (
  metric TEXT NOT NULL,
  instance_id TEXT NOT NULL DEFAULT '',
