@@ -61,6 +61,7 @@ func TestDynamicCORSAllowsConfiguredAndSameOriginRequests(t *testing.T) {
 		if w.Header().Get("Access-Control-Allow-Credentials") != "" || w.Header().Get("Vary") != "Origin" { t.Fatalf("origin %q unexpected CORS response headers: %v", origin, w.Header()) }
 		if w.Header().Get("Access-Control-Allow-Headers") == "" || w.Header().Get("Access-Control-Allow-Methods") == "" { t.Fatalf("origin %q missing CORS capability headers", origin) }
 		if !strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "Authorization") || strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "X-CSRF-Token") { t.Fatalf("origin %q unexpected allowed headers: %q", origin, w.Header().Get("Access-Control-Allow-Headers")) }
+		if !strings.Contains(w.Header().Get("Access-Control-Expose-Headers"), "X-LiteLLM-Trace-ID") { t.Fatalf("origin %q trace header is not exposed: %q", origin, w.Header().Get("Access-Control-Expose-Headers")) }
 	}
 	if called != 2 { t.Fatalf("next calls=%d", called) }
 }
