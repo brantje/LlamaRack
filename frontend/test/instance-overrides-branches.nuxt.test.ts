@@ -49,4 +49,23 @@ describe('Instance overrides edge branches', () => {
     expect(wrapper.findAll('[data-testid="instance-override-row"]')).toHaveLength(1)
     expect(wrapper.text()).not.toContain('CPU threads')
   })
+
+  it('treats an undefined model value as an empty override map', async () => {
+    const wrapper = await mountSuspended(InstanceOverridesEditor, {
+      props: { modelValue: undefined as any }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No Instance-specific overrides.')
+    await wrapper.get('[data-testid="add-instance-option"]').trigger('click')
+
+    const row = wrapper.get('[data-testid="instance-override-row"]')
+    const inputs = row.findAllComponents({ name: 'Input' }).length
+      ? row.findAllComponents({ name: 'Input' })
+      : row.findAllComponents({ name: 'UInput' })
+    inputs[1]!.vm.$emit('update:modelValue', 'ignored')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual({})
+  })
 })
