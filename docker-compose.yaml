@@ -1,0 +1,23 @@
+services:
+  llamacpp-manager:
+    image: ghcr.io/brantje/llamacpp-manager:${LCM_IMAGE_TAG:-latest}
+    environment:
+      LCM_LISTEN_ADDR: :8000
+      LCM_DATA_DIR: /config
+      LCM_MODELS_DIR: /models
+      LCM_LLAMA_SERVER: /app/llama-server
+      LCM_HOST_PROC: /host/proc
+      LCM_ALWAYS_ON_RECONCILE_SECONDS: ${LCM_ALWAYS_ON_RECONCILE_SECONDS:-15}
+    volumes:
+      - ./data/config:/config
+      - ./data/models:/models
+      - /proc:/host/proc:ro
+    ports:
+      - "8888:8000"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/llamacpp-manager", "healthcheck"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
