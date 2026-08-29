@@ -69,7 +69,8 @@ describe('Request logs review edge cases', () => {
 
     await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('Request pending')
-    expect(document.body.textContent).toContain('still in progress')
+    expect(document.body.textContent).toContain('pending')
+    expect(document.body.textContent).toContain('The request is still in progress.')
+    expect(document.body.querySelector('[data-testid="request-failure-banner"]')).toBeNull()
   })
 })
