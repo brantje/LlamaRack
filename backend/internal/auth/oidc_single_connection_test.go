@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,15 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
 	"github.com/brantje/llamacpp-manager/backend/internal/settings"
 )
+
+type failingConfiguredSecretStore struct {
+	*huggingface.SecretStore
+	err error
+}
+
+func (s failingConfiguredSecretStore) SecretConfigured(context.Context, string) (bool, error) {
+	return false, s.err
+}
 
 func TestOIDCListProvidersWithDatabaseBackedSecretStore(t *testing.T) {
 	dataDir := t.TempDir()
@@ -59,5 +69,24 @@ func TestOIDCListProvidersWithDatabaseBackedSecretStore(t *testing.T) {
 	}
 	if !providers[0].SecretConfigured {
 		t.Fatal("provider should report configured client secret")
+	}
+
+	statusErr := errors.New("secret status failed")
+	failingManager := auth.NewOIDCManager(authService, managerSettings, failingConfiguredSecretStore{SecretStore: secretStore, err: statusErr})
+	if _, err := failingManager.ListProviders(t.Context()); !errors.Is(err, statusErr) {
+		t.Fatalf("list providers secret status error=%v want=%v", err, statusErr)
+	}
+
+	canceledCtx, cancelList := context.WithCancel(t.Context())
+	cancelList()
+	if _, err := manager.ListProviders(canceledCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("list providers canceled context error=%v want=%v", err, context.Canceled)
+	}
+
+	if _, err := db.ExecContext(t.Context(), "UPDATE oidc_providers SET created_at='not-an-integer' WHERE id=?", created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.ListProviders(t.Context()); err == nil {
+		t.Fatal("list providers should fail when a provider row cannot be scanned")
 	}
 }
