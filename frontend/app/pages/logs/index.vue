@@ -40,6 +40,7 @@ type RequestRecord = {
 type RequestDetail = RequestRecord & { request_body?: string; response_body?: string }
 type RequestPage = { items: RequestRecord[]; has_more: boolean }
 type SessionSortMode = 'duration' | 'start_time'
+type RequestSelection = { current: boolean; sessionID: string }
 
 const pageSize = 25
 const sessionPageSize = 100
@@ -66,6 +67,8 @@ const sessionSidebarOpen = ref(true)
 const filters = reactive({ window: '1h', instance_id: '', endpoint: '', api_key_id: '', result: '', status_code: '', streaming: '', search: '' })
 let loadGeneration = 0
 let sessionLoadGeneration = 0
+let detailLoadGeneration = 0
+let detailSelectionGeneration = 0
 
 const windowItems = [
   { label: 'Last 15 minutes', value: '15m' }, { label: 'Last hour', value: '1h' },
@@ -89,15 +92,7 @@ const columns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'call_type', header: 'Call Type' }, { accessorKey: 'request_id', header: 'Request ID' },
   { accessorKey: 'session_id', header: 'Session' }, { accessorKey: 'endpoint', header: 'Endpoint' }
 ]
-const displayRequests = computed(() => {
-  const representatives = new Set<string>()
-  return requests.value.filter((item) => {
-    if (!item.session_id || (item.session_total_count || 1) <= 1) return true
-    if (representatives.has(item.session_id)) return false
-    representatives.add(item.session_id)
-    return true
-  })
-})
+const displayRequests = computed(() => requests.value)
 const sortedSessionRequests = computed(() => {
   const rows = [...sessionRequests.value]
   if (sessionSortMode.value === 'start_time') return rows.sort((a, b) => a.started_at - b.started_at)
@@ -214,60 +209,93 @@ async function toggleLiveStreaming() {
   liveStreamingEnabled.value = !liveStreamingEnabled.value
   if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
 }
-async function loadRequestDetail(requestID: string) {
+async function loadRequestDetail(requestID: string): Promise<RequestDetail | null> {
+  const generation = ++detailLoadGeneration
   detailLoading.value = true
   detailError.value = ''
   detail.value = null
   detailMode.value = 'pretty'
-  try { detail.value = await manager.request<RequestDetail>(`/api/v1/observability/requests/${encodeURIComponent(requestID)}`) }
-  catch (value: any) { detailError.value = value?.data?.error || value?.message || 'Unable to load request details' }
-  finally { detailLoading.value = false }
+  try {
+    const payload = await manager.request<RequestDetail>(`/api/v1/observability/requests/${encodeURIComponent(requestID)}`)
+    if (generation !== detailLoadGeneration) return null
+    detail.value = payload
+    return payload
+  } catch (value: any) {
+    if (generation !== detailLoadGeneration) return null
+    detailError.value = value?.data?.error || value?.message || 'Unable to load request details'
+    return null
+  } finally {
+    if (generation === detailLoadGeneration) detailLoading.value = false
+  }
 }
-async function showRequest(requestID: string, sessionID: string) {
-  if (!requestID) return
+async function showRequest(requestID: string, routeSessionID: string): Promise<RequestSelection> {
+  if (!requestID) return { current: false, sessionID: '' }
+  const selectionGeneration = ++detailSelectionGeneration
   detailOpen.value = true
   sessionSidebarOpen.value = true
-  let sessionPromise: Promise<void> | undefined
-  if (sessionID !== activeSessionID.value) {
-    activeSessionID.value = sessionID
+  const loadedDetail = detail.value?.request_id === requestID && !detailError.value
+    ? detail.value
+    : await loadRequestDetail(requestID)
+  if (selectionGeneration !== detailSelectionGeneration) return { current: false, sessionID: '' }
+
+  if (!loadedDetail) {
+    if (routeSessionID !== activeSessionID.value) {
+      ++sessionLoadGeneration
+      activeSessionID.value = ''
+      sessionRequests.value = []
+      sessionError.value = ''
+    }
+    return { current: true, sessionID: '' }
+  }
+
+  const resolvedSessionID = sessionCount(loadedDetail) > 1 ? (loadedDetail.session_id || '') : ''
+  if (resolvedSessionID !== activeSessionID.value) {
+    ++sessionLoadGeneration
+    activeSessionID.value = resolvedSessionID
     sessionRequests.value = []
     sessionError.value = ''
     sessionSortMode.value = 'duration'
-    sessionPromise = sessionID ? loadSessionRequests(sessionID) : undefined
+    if (resolvedSessionID) await loadSessionRequests(resolvedSessionID)
   }
-  const detailPromise = detail.value?.request_id === requestID && !detailError.value
-    ? Promise.resolve()
-    : loadRequestDetail(requestID)
-  await Promise.all([detailPromise, sessionPromise])
+  if (selectionGeneration !== detailSelectionGeneration) return { current: false, sessionID: '' }
+  return { current: true, sessionID: resolvedSessionID }
 }
 async function openRequest(item: RequestRecord) {
   if (!item.request_id) return
-  const sessionID = item.session_id && sessionCount(item) > 1 ? item.session_id : ''
-  await showRequest(item.request_id, sessionID)
+  const selection = await showRequest(item.request_id, item.session_id || '')
+  if (!selection.current) return
   const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
   query.request_id = item.request_id
-  if (sessionID) query.session_id = sessionID
+  if (selection.sessionID) query.session_id = selection.sessionID
   else delete query.session_id
   await router.push({ path: '/logs', query })
 }
 async function selectSessionRequest(item: RequestRecord) {
   if (!item.request_id || !activeSessionID.value) return
-  await showRequest(item.request_id, activeSessionID.value)
+  const selection = await showRequest(item.request_id, activeSessionID.value)
+  if (!selection.current) return
   const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
   query.request_id = item.request_id
-  query.session_id = activeSessionID.value
+  if (selection.sessionID) query.session_id = selection.sessionID
+  else delete query.session_id
   await router.replace({ path: '/logs', query })
 }
 async function syncDetailFromRoute() {
   if (!routeReady.value) return
   const requestID = String(route.query.request_id || '').trim()
-  const sessionID = String(route.query.session_id || '').trim()
+  const routeSessionID = String(route.query.session_id || '').trim()
   if (!requestID) {
     if (detailOpen.value) detailOpen.value = false
     return
   }
-  if (detailOpen.value && detail.value?.request_id === requestID && activeSessionID.value === sessionID && !detailError.value) return
-  await showRequest(requestID, sessionID)
+  if (detailOpen.value && detail.value?.request_id === requestID && activeSessionID.value === routeSessionID && !detailError.value) return
+  const selection = await showRequest(requestID, routeSessionID)
+  if (!selection.current || detail.value?.request_id !== requestID || selection.sessionID === routeSessionID) return
+  const query: Record<string, string> = Object.fromEntries(Object.entries(route.query).flatMap(([key, value]) => typeof value === 'string' ? [[key, value]] : []))
+  query.request_id = requestID
+  if (selection.sessionID) query.session_id = selection.sessionID
+  else delete query.session_id
+  await router.replace({ path: '/logs', query })
 }
 async function initializePage() {
   if (routeReady.value || !manager.initialized.value || !manager.user.value) return
@@ -294,12 +322,18 @@ watch(() => route.query.trace_id, async (value) => {
 watch([() => route.query.request_id, () => route.query.session_id], () => { void syncDetailFromRoute() })
 watch(detailOpen, async (open) => {
   if (open) return
+  ++detailSelectionGeneration
+  ++detailLoadGeneration
+  ++sessionLoadGeneration
   activeSessionID.value = ''
   sessionRequests.value = []
   sessionError.value = ''
   sessionSortMode.value = 'duration'
   sessionSidebarOpen.value = true
   detail.value = null
+  detailError.value = ''
+  detailLoading.value = false
+  sessionLoading.value = false
   if (!route.query.request_id && !route.query.session_id) return
   const query = { ...route.query }; delete query.request_id; delete query.session_id
   await router.replace({ path: '/logs', query })
@@ -353,7 +387,7 @@ watch(liveRequestFingerprint, (next, previous) => {
     </UCard>
 
     <UCard data-testid="request-log-table">
-      <template #header><div class="flex items-center justify-between gap-3"><div><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">REQUEST HISTORY</p><p class="mt-1 text-xs text-muted">{{ traceID ? 'Oldest first for this trace.' : 'Newest first.' }} Full payloads load only for the selected request.</p></div><UBadge color="neutral" variant="soft">{{ displayRequests.length }} rows · {{ requests.length }} requests</UBadge></div></template>
+      <template #header><div class="flex items-center justify-between gap-3"><div><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">REQUEST HISTORY</p><p class="mt-1 text-xs text-muted">{{ traceID ? 'Oldest first for this trace.' : 'Newest first.' }} Full payloads load only for the selected request.</p></div><UBadge color="neutral" variant="soft">{{ requests.length }} rows</UBadge></div></template>
       <UEmpty v-if="!loading && !requests.length" variant="naked" title="No matching requests" description="Adjust the filters or send inference traffic through the gateway." />
       <div v-else class="overflow-x-auto">
         <UTable :data="displayRequests" :columns="columns" class="min-w-[1380px]">
@@ -371,7 +405,7 @@ watch(liveRequestFingerprint, (next, previous) => {
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
         </UTable>
       </div>
-      <template #footer><div class="flex items-center justify-between"><span class="text-xs text-muted">Requests {{ requests.length ? offset + 1 : 0 }}–{{ offset + requests.length }}</span><div class="flex gap-2"><UButton color="neutral" variant="soft" size="sm" :disabled="offset === 0 || loading" @click="previousPage">Previous</UButton><UButton color="neutral" variant="soft" size="sm" :disabled="!hasMore || loading" @click="nextPage">Next</UButton></div></div></template>
+      <template #footer><div class="flex items-center justify-between"><span class="text-xs text-muted">Rows {{ requests.length ? offset + 1 : 0 }}–{{ offset + requests.length }}</span><div class="flex gap-2"><UButton color="neutral" variant="soft" size="sm" :disabled="offset === 0 || loading" @click="previousPage">Previous</UButton><UButton color="neutral" variant="soft" size="sm" :disabled="!hasMore || loading" @click="nextPage">Next</UButton></div></div></template>
     </UCard>
 
     <USlideover v-model:open="detailOpen" side="right" :title="activeSessionID ? `Session ${shortID(activeSessionID, 28)}` : (detail?.request_id || 'Request details')" description="Select an event in the session sidebar to inspect its request and response details." data-testid="request-detail-slideover" :ui="{ content: 'sm:max-w-5xl' }">
