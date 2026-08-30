@@ -1,0 +1,134 @@
+name: Apply redesign feedback round eight
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/apply-redesign-feedback-round8.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded remaining review patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          NL = chr(10)
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:180]!r}')
+              p.write_text(source.replace(old, new, 1))
+
+          playground = 'frontend/app/pages/playground.vue'
+          replace_once(playground, "const phase = ref<'cold' | 'generating' | 'completed' | ''>('')", "const phase = ref<'cold' | 'generating' | 'completed' | 'failed' | ''>('')")
+          replace_once(playground, "const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', '': '' }[phase.value]))", "const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Failed', '': '' }[phase.value]))")
+          replace_once(playground, ':variant="phase === \'completed\' ? \'ready\' : \'pending\'"', ':variant="phase === \'completed\' ? \'ready\' : phase === \'failed\' ? \'failed\' : \'pending\'"')
+          replace_once(playground, "    phase.value = 'completed'\n  } catch (value: any) {", "    phase.value = response.ok ? 'completed' : 'failed'\n  } catch (value: any) {")
+          replace_once(playground, "    } else {\n      error.value = value?.message || 'Inference request failed.'\n      phase.value = ''\n    }", "    } else {\n      error.value = value?.message || 'Inference request failed.'\n      phase.value = 'failed'\n    }")
+
+          models = 'frontend/app/pages/models/index.vue'
+          replace_once(
+              models,
+              '      <div class="overflow-x-auto" role="region" aria-label="Registered models table. Scroll horizontally to view all columns on small screens." tabindex="0" data-testid="models-table-scroll">' + NL + '        <table class="min-w-[920px] w-full border-collapse text-left" data-testid="models-table">',
+              '      <div class="overflow-x-auto" role="region" aria-label="Registered models table. Scroll horizontally to view all columns on small screens." tabindex="0" data-testid="models-table-scroll">' + NL + '        <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for path, context and actions.</p>' + NL + '        <table class="min-w-[920px] w-full border-collapse text-left" data-testid="models-table">'
+          )
+
+          models_test = 'frontend/test/models-redesign.nuxt.test.ts'
+          replace_once(
+              models_test,
+              "    expect(scrollRegion.attributes('aria-label')).toContain('Scroll horizontally')",
+              "    expect(scrollRegion.attributes('aria-label')).toContain('Scroll horizontally')" + NL + "    expect(scrollRegion.text()).toContain('Scroll horizontally for path, context and actions.')"
+          )
+
+          playground_test = 'frontend/test/playground-branches.nuxt.test.ts'
+          replace_once(
+              playground_test,
+              "      expect(wrapper.text()).toContain(message)\n    }\n    expect(publicFetch).toHaveBeenCalledTimes(5)",
+              "      expect(wrapper.text()).toContain(message)\n      expect(wrapper.text()).toContain('Failed')\n      expect(wrapper.text()).not.toContain('Completed')\n    }\n    expect(publicFetch).toHaveBeenCalledTimes(5)"
+          )
+          replace_once(
+              playground_test,
+              "    expect(wrapper.text()).toContain('Inference request failed.')\n    wrapper.unmount()",
+              "    expect(wrapper.text()).toContain('Inference request failed.')\n    expect(wrapper.text()).toContain('Failed')\n    expect(wrapper.text()).not.toContain('Completed')\n    wrapper.unmount()"
+          )
+
+          e2e = 'frontend/e2e/redesign-screenshots.spec.ts'
+          replace_once(
+              e2e,
+              "const now = Date.now()\nconst nowSeconds = Math.floor(now / 1000)",
+              "const now = Date.now()\nconst nowSeconds = Math.floor(now / 1000)\nconst playgroundHoldRelease = new WeakMap<Page, () => void>()\nconst playgroundColdPages = new WeakSet<Page>()"
+          )
+          replace_once(
+              e2e,
+              "  { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 }\n]",
+              "  { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 },\n  { id: 'key-revoked', name: 'Retired integration', prefix: 'lcm_sk_ef56', enabled: false, revoked_at: nowSeconds - 7200, created_at: nowSeconds - 86400 * 45, last_used_at: nowSeconds - 10800 }\n]"
+          )
+          replace_once(
+              e2e,
+              "  if (pathname === '/api/v1/observability/requests') return { items: requests, next_cursor: '' }",
+              "  if (pathname === '/api/v1/observability/requests') return { items: requests, next_cursor: '' }\n  if (pathname === '/api/v1/observability/playground/req_playground_fixture') return { request: { request_id: 'req_playground_fixture', instance_id: 'qwen3-primary', status_code: 200, result: 'success', duration_ms: 1680, ttft_ms: 182, prompt_tokens: 42, generated_tokens: 96, total_tokens: 138, tokens_per_second: 57.1, load_duration_ms: 0, autoloaded: false }, state_trace: ['READY', 'GENERATING', 'READY'], evictions_triggered: [] }"
+          )
+          replace_once(
+              e2e,
+              "  if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys",
+              "  if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys\n  if (pathname === '/api/v1/api-keys' && method === 'POST') return { key: { id: 'key-visual', name: 'Visual QA', prefix: 'lcm_sk_vis', enabled: true, created_at: nowSeconds, last_used_at: 0 }, secret: 'lcm_sk_visual_fixture_secret' }"
+          )
+          replace_once(
+              e2e,
+              "    const url = new URL(request.url())\n    if (url.pathname === '/api/v1/auth/ws-ticket') {",
+              "    const url = new URL(request.url())\n    if (playgroundColdPages.has(page) && /^\\/api\\/v1\\/instances\\/[^/]+\\/runtime$/.test(url.pathname)) {\n      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ instance_id: 'qwen3-primary', model_id: 'qwen3-8b-q4km', state: 'UNLOADED' }) })\n      return\n    }\n    if (url.pathname === '/api/v1/playground/chat/completions' && request.method() === 'POST') {\n      const payload = request.postData() || ''\n      if (payload.includes('UX_ERROR')) {\n        await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify({ error: { message: 'Representative gateway failure for visual QA.' } }) })\n        return\n      }\n      if (payload.includes('UX_HOLD')) await new Promise<void>(resolve => playgroundHoldRelease.set(page, resolve))\n      await route.fulfill({\n        status: 200,\n        headers: { ...corsHeaders, 'content-type': 'text/event-stream', 'x-llamacpp-manager-request-id': 'req_playground_fixture' },\n        body: ['data: {\"choices\":[{\"delta\":{\"content\":\"KV cache reuse \"}}]}', 'data: {\"choices\":[{\"delta\":{\"content\":\"avoids repeated prompt evaluation.\"}}]}', 'data: [DONE]'].join('\\n\\n') + '\\n\\n'\n      })\n      return\n    }\n    if (url.pathname === '/api/v1/auth/ws-ticket') {"
+          )
+          replace_once(
+              e2e,
+              "  })\n}\n",
+              "  })\n}\n\nasync function waitForManagerPanel(page: Page) {\n  const panel = page.locator('#dashboard-panel-manager-main')\n  await expect(panel).toBeVisible({ timeout: 15_000 })\n  await expect(panel).not.toBeEmpty()\n  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()\n  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()\n}\n",
+          )
+          replace_once(
+              e2e,
+              "    const panel = page.locator('#dashboard-panel-manager-main')\n    await expect(panel).toBeVisible({ timeout: 15_000 })\n    await expect(panel).not.toBeEmpty()\n    await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()\n    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()",
+              "    await waitForManagerPanel(page)"
+          )
+          p = Path(e2e)
+          source = p.read_text()
+          source += '''\n\ntest('playground generating and completed screenshots', async ({ page }, testInfo) => {\n  await page.goto('/playground', { waitUntil: 'domcontentloaded' })\n  await waitForManagerPanel(page)\n  await page.getByLabel('Playground message').fill('UX_HOLD Explain KV cache reuse.')\n  await page.getByRole('button', { name: 'Send', exact: true }).click()\n  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()\n  await expect(page.getByText('Generating', { exact: true })).toBeVisible()\n  await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-generating.png`, fullPage: true, animations: 'disabled' })\n\n  playgroundHoldRelease.get(page)?.()\n  await expect(page.getByText('Completed', { exact: true })).toBeVisible()\n  await expect(page.locator('[data-testid=\"playground-diagnostics\"]')).toContainText('57.10 tok/s')\n  await expect(page.locator('[data-testid=\"playground-thread\"]')).toContainText('avoids repeated prompt evaluation.')\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-completed.png`, fullPage: true, animations: 'disabled' })\n\n  await page.getByRole('button', { name: 'Request', exact: true }).click()\n  await expect(page.getByLabel('Raw request JSON')).toContainText('UX_HOLD Explain KV cache reuse.')\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-request.png`, fullPage: true, animations: 'disabled' })\n})\n\ntest('playground cold-start screenshot', async ({ page }, testInfo) => {\n  playgroundColdPages.add(page)\n  await page.goto('/playground', { waitUntil: 'domcontentloaded' })\n  await waitForManagerPanel(page)\n  await expect(page.getByText('UNLOADED', { exact: true }).first()).toBeVisible()\n  await page.getByLabel('Playground message').fill('UX_HOLD Trigger autoload.')\n  await page.getByRole('button', { name: 'Send', exact: true }).click()\n  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()\n  await expect(page.getByText('Cold start — autoload in progress', { exact: true })).toBeVisible()\n  await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-cold-start.png`, fullPage: true, animations: 'disabled' })\n  playgroundHoldRelease.get(page)?.()\n  await expect(page.getByText('Completed', { exact: true })).toBeVisible()\n})\n\ntest('playground error screenshot', async ({ page }, testInfo) => {\n  await page.goto('/playground', { waitUntil: 'domcontentloaded' })\n  await waitForManagerPanel(page)\n  await page.getByLabel('Playground message').fill('UX_ERROR Trigger representative failure.')\n  await page.getByRole('button', { name: 'Send', exact: true }).click()\n  await expect(page.locator('[data-testid=\"playground-error\"]')).toContainText('Representative gateway failure for visual QA.')\n  await expect(page.getByText('Failed', { exact: true })).toBeVisible()\n  await expect(page.getByText('Completed', { exact: true })).toBeHidden()\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-error.png`, fullPage: true, animations: 'disabled' })\n})\n\ntest('api key secret and revoke confirmation screenshots', async ({ page }, testInfo) => {\n  await page.goto('/api', { waitUntil: 'domcontentloaded' })\n  await waitForManagerPanel(page)\n  await expect(page.locator('[data-testid=\"api-keys-card\"]')).toContainText('Retired integration')\n  await expect(page.locator('[data-testid=\"api-keys-card\"]')).toContainText('Revoked')\n  await page.locator('[data-testid=\"key-name\"]').fill('Visual QA')\n  await page.locator('[data-testid=\"create-key\"]').click()\n  await expect(page.locator('[data-testid=\"fresh-api-key\"]')).toContainText('lcm_sk_visual_fixture_secret')\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-fresh-secret.png`, fullPage: true, animations: 'disabled' })\n\n  await page.getByRole('button', { name: 'Revoke', exact: true }).first().click()\n  await expect(page.locator('[data-testid=\"confirmation-confirm\"]')).toContainText('Revoke key')\n  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-revoke-confirmation.png`, fullPage: true, animations: 'disabled' })\n})\n'''
+          p.write_text(source)
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated fixes and remove helper
+        run: |
+          rm .github/workflows/apply-redesign-feedback-round8.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ui): close remaining operator review gaps" -m "Use an honest failed Playground phase for gateway/network failures, make Models horizontal overflow discoverable on mobile, and extend visual QA across Playground request states plus fresh/revoked API-key interactions."
+          git push origin HEAD:feature/redesign
