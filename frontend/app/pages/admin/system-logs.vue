@@ -70,7 +70,7 @@ function formatTime(value: string) {
 
 function levelClass(level: LogLevel) {
   if (level === 'INFO') return 'text-[var(--accent-700)]'
-  if (level === 'DEBUG') return 'opacity-45'
+  if (level === 'DEBUG') return 'text-[var(--neutral-700)]'
   if (level === 'WARN') return 'font-bold text-[var(--accent-800)]'
   return 'font-bold text-[var(--accent-900)]'
 }
@@ -190,20 +190,20 @@ onBeforeUnmount(closeStream)
     <template #actions>
       <div class="flex flex-wrap items-center justify-end gap-3" data-testid="system-log-header-controls">
         <div class="flex items-center gap-1" aria-label="Log level">
-          <button
+          <UButton
             v-for="level in levels"
             :key="level"
             type="button"
-            class="border px-3 py-1.5 text-xs font-semibold transition-colors"
-            :class="selectedLevel === level
-              ? 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]'
-              : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"
+            :color="selectedLevel === level ? 'primary' : 'neutral'"
+            :variant="selectedLevel === level ? 'soft' : 'ghost'"
+            size="sm"
+            class="justify-center"
             :aria-pressed="selectedLevel === level"
             :title="level === 'WARN' ? 'WARN + ERROR' : undefined"
             @click="selectedLevel = level"
           >
             {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}
-          </button>
+          </UButton>
         </div>
         <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />
         <div v-if="!follow && entries.length" class="flex items-center gap-1" data-testid="system-log-follow-paused"><StatusTag variant="neutral">Follow paused</StatusTag><AppButton intent="ghost" size="xs" @click="follow = true">Resume</AppButton></div>
@@ -212,19 +212,18 @@ onBeforeUnmount(closeStream)
 
     <div class="flex min-h-[calc(100vh-10rem)] flex-col gap-4" data-testid="system-log-viewer">
       <div class="flex flex-wrap items-center gap-2 border-y border-[var(--color-divider)] py-3">
-        <button
+        <UButton
           v-for="source in sourceItems"
           :key="source"
           type="button"
-          class="border px-2.5 py-1 text-xs font-semibold transition-colors"
-          :class="selectedSource === source
-            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'
-            : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"
+          :color="selectedSource === source ? 'primary' : 'neutral'"
+          :variant="selectedSource === source ? 'soft' : 'ghost'"
+          size="sm"
           :aria-pressed="selectedSource === source"
           @click="selectedSource = source"
         >
           {{ source === 'all' ? 'All sources' : source }}
-        </button>
+        </UButton>
         <UInput
           v-model="grep"
           class="ml-auto min-w-[14rem] font-mono"
@@ -236,7 +235,7 @@ onBeforeUnmount(closeStream)
 
       <p v-if="error" class="border border-[var(--accent-300)] bg-[var(--accent-100)] px-3 py-2 text-xs text-[var(--accent-900)]">
         {{ error }}
-        <button type="button" class="ml-2 font-semibold underline" @click="connectStream">Reconnect</button>
+        <AppButton type="button" intent="ghost" size="xs" class="ml-2" @click="connectStream">Reconnect</AppButton>
       </p>
 
       <Frame class="min-h-0 flex-1 overflow-hidden bg-[var(--neutral-100)] p-0">
@@ -252,9 +251,9 @@ onBeforeUnmount(closeStream)
             class="grid grid-cols-[auto_52px_150px_minmax(0,1fr)] gap-3 border-b border-[var(--color-divider)] px-3 py-1 last:border-b-0"
             data-testid="system-log-row"
           >
-            <time :datetime="entry.timestamp" class="whitespace-nowrap opacity-45">{{ formatTime(entry.timestamp) }}</time>
+            <time :datetime="entry.timestamp" class="whitespace-nowrap text-[var(--neutral-700)]">{{ formatTime(entry.timestamp) }}</time>
             <span :class="levelClass(entry.level)">{{ entry.level }}</span>
-            <span class="truncate opacity-55">{{ entry.source }}</span>
+            <span class="truncate text-[var(--neutral-800)]">{{ entry.source }}</span>
             <span class="min-w-0 whitespace-pre-wrap break-words text-[var(--neutral-900)]">{{ entry.message }}</span>
           </div>
           <div v-if="!visibleEntries.length && !loading" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">
