@@ -54,7 +54,10 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 		if path == "" {
 			path = "/"
 		}
-		if isStateChanging(r.Method) {
+		// The Playground bridge re-enters the inference gateway, which enforces
+		// its own 32 MiB request limit. Keep the generic 1 MiB management mutation
+		// cap for every other state-changing endpoint.
+		if isStateChanging(r.Method) && path != "/api/v1/playground/chat/completions" {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		}
 		if publicManagementRequest(path, r.Method) {
