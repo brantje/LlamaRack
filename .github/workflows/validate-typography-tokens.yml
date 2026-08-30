@@ -5,6 +5,7 @@ on:
     branches:
       - fix/redesign-typography-tokens
     paths:
+      - frontend/**
       - .github/workflows/validate-typography-tokens.yml
 
 jobs:
