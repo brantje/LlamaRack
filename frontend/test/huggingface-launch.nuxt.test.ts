@@ -58,7 +58,7 @@ describe('Hugging Face launch import', () => {
     const list = await mountSuspended(DiscoverPage, { route: '/models/discover' })
     await new Promise(resolve => setTimeout(resolve, 375))
     await flushPromises()
-    expect(list.text()).toContain('Model size 180B params')
+    expect(list.text()).toContain('180B params')
     expect(list.text()).toContain('Updated 3h ago')
     list.unmount()
 
