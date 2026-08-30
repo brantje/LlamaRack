@@ -1,0 +1,199 @@
+name: Apply redesign feedback round two retry
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/apply-redesign-feedback-round2b.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded feedback patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:100]!r}')
+              p.write_text(source.replace(old, new, 1))
+
+          replace_once('frontend/app/themes/dark.css', "  --color-accent: #5f8fcf;\n  --color-divider: #303030;", "  --color-accent: #5f8fcf;\n  --color-on-accent: #181818;\n  --color-divider: #303030;")
+          replace_once('frontend/app/themes/dark.css', '  --neutral-700: #7a7a7a;', '  --neutral-700: #949494;')
+          replace_once('frontend/app/themes/light.css', "  --color-accent: #5980a6;\n  --color-divider: #dedede;", "  --color-accent: #5980a6;\n  --color-on-accent: #111111;\n  --color-divider: #dedede;")
+          replace_once('frontend/app/themes/light.css', '  --neutral-700: #737373;', '  --neutral-700: #666666;')
+          replace_once('frontend/app/assets/css/main.css', '  --ui-text-inverted: var(--color-bg);', '  --ui-text-inverted: var(--color-on-accent);')
+          replace_once('frontend/nuxt.config.ts', '  devtools: { enabled: true },', "  devtools: { enabled: process.env.CI !== 'true' },")
+
+          replace_once(
+              'frontend/app/components/AdminShell.vue',
+              '      <div class="mb-5 flex items-start justify-between gap-4">\n        <UPageHeader class="min-w-0 flex-1" :headline="headline" :title="title" :description="description" />\n        <div v-if="$slots.actions" class="flex shrink-0 flex-wrap justify-end gap-2">',
+              '      <div class="mb-5 flex flex-col items-stretch gap-4 sm:flex-row sm:items-start sm:justify-between">\n        <UPageHeader class="min-w-0 flex-1" :headline="headline" :title="title" :description="description" />\n        <div v-if="$slots.actions" class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">'
+          )
+          replace_once(
+              'frontend/app/components/navigation/AdminSidebar.vue',
+              '        </span>\n      </summary>',
+              '        </span>\n        <UIcon name="i-lucide-chevron-down" class="size-4 shrink-0 text-[var(--neutral-700)]" aria-hidden="true" />\n      </summary>'
+          )
+          replace_once('frontend/app/pages/admin/huggingface.vue', '    <template #actions><AppButton intent="primary" :loading="busy" :disabled="!tokenInput.trim()" @click="save">Save token</AppButton></template>\n\n', '')
+          replace_once('frontend/app/pages/admin/authentication.vue', '            <AppButton intent="primary" icon="i-lucide-plus" @click="setProviderForm()">Add provider</AppButton>', '            <AppButton intent="secondary" icon="i-lucide-plus" @click="setProviderForm()">Add provider</AppButton>')
+          replace_once(
+              'frontend/app/pages/admin/authentication.vue',
+              '            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.local_login_enabled.source }}</span></div>\n            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>\n            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.oidc_auto_link_enabled.source }}</span></div>',
+              '            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.local_login_enabled.source }}</span></div>\n            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>\n            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_auto_link_enabled.source }}</span></div>'
+          )
+          replace_once('frontend/app/pages/admin/authentication.vue', '          <div class="mt-5 flex flex-wrap items-start gap-2 border border-[var(--color-divider)] px-4 py-3" data-testid="authentication-auto-link-note">', '          <div class="mt-5 flex flex-col items-start gap-2 border border-[var(--color-divider)] px-4 py-3 sm:flex-row" data-testid="authentication-auto-link-note">')
+          replace_once(
+              'frontend/app/pages/admin/authentication.vue',
+              '          <Frame v-else class="overflow-x-auto">\n            <div class="min-w-[760px]">',
+              '          <Frame v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="OIDC providers. Scroll horizontally for issuer, callback and actions.">\n            <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] sm:hidden">Scroll horizontally for issuer, callback and actions.</p>\n            <div class="min-w-[760px]">'
+          )
+
+          replace_once(
+              'frontend/app/pages/api.vue',
+              '      <code class="my-4 block break-all border-y border-[var(--color-divider)] py-3 font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>',
+              '      <div class="my-4 flex items-center gap-2 border-y border-[var(--color-divider)] py-3">\n        <code class="min-w-0 flex-1 break-all font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>\n        <AppCopyButton :text="`${apiBase}/v1`" icon-only color="neutral" variant="ghost" size="sm" error-message="Unable to copy Base URL. Select it and copy it manually." data-testid="copy-api-base-url" />\n      </div>'
+          )
+          replace_once(
+              'frontend/app/pages/api.vue',
+              '      <div v-if="keys.length" class="mt-4 border border-[var(--color-divider)]" data-testid="api-keys-table">\n        <UTable :data="keys" :columns="columns">',
+              '      <p v-if="keys.length" class="mt-4 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for key status, timestamps and actions.</p>\n      <div v-if="keys.length" class="mt-2 overflow-x-auto border border-[var(--color-divider)]" data-testid="api-keys-table" role="region" tabindex="0" aria-label="API keys. Scroll horizontally for status, timestamps and actions.">\n        <UTable class="min-w-[760px]" :data="keys" :columns="columns">'
+          )
+
+          replace_once(
+              'frontend/app/pages/models/[id]/details.vue',
+              '      <div v-else-if="details && !details.metadata.length" class="px-6 py-10 text-center">\n        <p class="font-semibold">No matching GGUF metadata</p>\n        <p class="mt-1 text-sm text-[var(--neutral-700)]">Try a different metadata key filter.</p>\n      </div>',
+              '      <div v-else-if="details && !details.metadata.length" class="px-6 py-10 text-center">\n        <p class="font-semibold">{{ appliedQuery ? \'No matching GGUF metadata\' : \'No GGUF metadata returned for this artifact\' }}</p>\n        <p class="mt-1 text-sm text-[var(--neutral-700)]">{{ appliedQuery ? `No keys match “${appliedQuery}”. Clear the filter to see all metadata.` : \'The GGUF parser returned no metadata keys for this registered artifact.\' }}</p>\n      </div>'
+          )
+          replace_once(
+              'frontend/app/pages/models/[id]/details.vue',
+              '        <p class="text-xs text-[var(--neutral-700)]">Showing {{ pageStart }}–{{ pageEnd }} of {{ details?.metadata_total || 0 }} matching keys</p>',
+              '        <p v-if="details?.metadata_total" class="text-xs text-[var(--neutral-700)]">Showing {{ pageStart }}–{{ pageEnd }} of {{ details.metadata_total }} matching keys</p>\n        <p v-else class="text-xs text-[var(--neutral-700)]">{{ appliedQuery ? \'No matching keys\' : \'No metadata keys to paginate\' }}</p>'
+          )
+
+          Path('frontend/test/redesign-feedback.nuxt.test.ts').write_text(dedent(r'''
+          import { readFileSync } from 'node:fs'
+          import { resolve } from 'node:path'
+          import { describe, expect, it } from 'vitest'
+
+          function variable(source: string, name: string) {
+            const value = source.match(new RegExp(`${name}\\s*:\\s*(#[0-9a-fA-F]{6})`))?.[1]
+            if (!value) throw new Error(`Missing ${name}`)
+            return value
+          }
+
+          function luminance(hex: string) {
+            const channels = [1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255)
+            const linear = channels.map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!
+          }
+
+          function contrast(a: string, b: string) {
+            const first = luminance(a)
+            const second = luminance(b)
+            const high = Math.max(first, second)
+            const low = Math.min(first, second)
+            return (high + 0.05) / (low + 0.05)
+          }
+
+          describe('redesign feedback regressions', () => {
+            it('keeps accent and muted text contrast at WCAG AA normal-text levels', () => {
+              for (const name of ['dark.css', 'light.css']) {
+                const source = readFileSync(resolve(process.cwd(), `app/themes/${name}`), 'utf8')
+                expect(contrast(variable(source, '--color-accent'), variable(source, '--color-on-accent')), `${name} on-accent`).toBeGreaterThanOrEqual(4.5)
+                expect(contrast(variable(source, '--color-bg'), variable(source, '--neutral-700')), `${name} muted on page`).toBeGreaterThanOrEqual(4.5)
+                expect(contrast(variable(source, '--color-surface'), variable(source, '--neutral-700')), `${name} muted on surface`).toBeGreaterThanOrEqual(4.5)
+              }
+              expect(readFileSync(resolve(process.cwd(), 'app/assets/css/main.css'), 'utf8')).toContain('--ui-text-inverted: var(--color-on-accent)')
+            })
+
+            it('keeps reviewed mobile action hierarchy and overflow affordances', () => {
+              const adminShell = readFileSync(resolve(process.cwd(), 'app/components/AdminShell.vue'), 'utf8')
+              const adminNav = readFileSync(resolve(process.cwd(), 'app/components/navigation/AdminSidebar.vue'), 'utf8')
+              const huggingFace = readFileSync(resolve(process.cwd(), 'app/pages/admin/huggingface.vue'), 'utf8')
+              const authentication = readFileSync(resolve(process.cwd(), 'app/pages/admin/authentication.vue'), 'utf8')
+              const api = readFileSync(resolve(process.cwd(), 'app/pages/api.vue'), 'utf8')
+              expect(adminShell).toContain('flex flex-col items-stretch gap-4 sm:flex-row')
+              expect(adminNav).toContain('i-lucide-chevron-down')
+              expect(huggingFace).not.toContain('<template #actions>')
+              expect(huggingFace.match(/@click="save"/g) || []).toHaveLength(1)
+              expect(authentication).toContain('intent="secondary" icon="i-lucide-plus"')
+              expect(authentication).toContain('Scroll horizontally for issuer, callback and actions.')
+              expect(api).toContain('data-testid="copy-api-base-url"')
+              expect(api).toContain('class="min-w-[760px]"')
+            })
+
+            it('distinguishes empty model metadata from an empty search result', () => {
+              const source = readFileSync(resolve(process.cwd(), 'app/pages/models/[id]/details.vue'), 'utf8')
+              expect(source).toContain('No GGUF metadata returned for this artifact')
+              expect(source).toContain('No keys match')
+              expect(source).toContain('v-if="details?.metadata_total"')
+            })
+          })
+          ''').lstrip())
+
+          e2e = Path('frontend/e2e/redesign-screenshots.spec.ts')
+          source = e2e.read_text()
+          marker = "  if (pathname === '/api/v1/admin/auth/providers') return adminAuthProviders\n"
+          if source.count(marker) != 1: raise SystemExit('e2e admin auth marker mismatch')
+          source = source.replace(marker, marker + "  if (pathname === '/api/v1/admin/summary') return { users: { total: 2, enabled: 2 }, huggingface: { configured: true, prefix: 'hf_demo' }, llamacpp: { available: true, path: llamaProfile.path, version: llamaProfile.version, fingerprint: llamaProfile.fingerprint } }\n", 1)
+
+          marker = "  if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }\n"
+          if source.count(marker) != 1: raise SystemExit('e2e model inspect marker mismatch')
+          source = source.replace(marker, marker + "  if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }\n", 1)
+
+          marker = "  if (/\\/downloads(?:\\/|$)/.test(pathname)) return []\n"
+          if source.count(marker) != 1: raise SystemExit('e2e downloads marker mismatch')
+          source = source.replace(marker, "  if (pathname === '/api/v1/downloads' && method === 'GET') return [{ id: 'dl-active', provider: 'huggingface', repo_id: 'Qwen/Qwen3-8B-GGUF', revision: 'main', artifact_id: 'q4_k_m', name: 'Qwen3 8B Q4_K_M', quantization: 'Q4_K_M', state: 'DOWNLOADING', total_bytes: 5420000000, downloaded_bytes: 2168000000, speed_bps: 84000000, created_at: nowSeconds - 240, updated_at: nowSeconds, files: [{ path: 'Qwen3-8B-Q4_K_M.gguf', size: 5420000000, state: 'DOWNLOADING', downloaded_bytes: 2168000000 }] }, { id: 'dl-failed', provider: 'huggingface', repo_id: 'example/failed-model', revision: 'main', artifact_id: 'q5', name: 'Failed model import', quantization: 'Q5_K_M', state: 'FAILED', total_bytes: 7200000000, downloaded_bytes: 1100000000, speed_bps: 0, error: 'Connection reset while downloading shard 2 of 3. Retry resumes verified partial files.', created_at: nowSeconds - 900, updated_at: nowSeconds - 300 }, { id: 'dl-completed', provider: 'huggingface', repo_id: 'google/gemma-3-12b-it-GGUF', revision: 'main', artifact_id: 'q5_k_m', name: 'Gemma 3 12B Q5_K_M', quantization: 'Q5_K_M', state: 'COMPLETED', total_bytes: 8230000000, downloaded_bytes: 8230000000, speed_bps: 0, created_at: nowSeconds - 7200, updated_at: nowSeconds - 3600 }]\n", 1)
+
+          marker = "  if (/\\/huggingface(?:\\/|$)/.test(pathname)) return { enabled: true, token_configured: true, items: [] }\n"
+          if source.count(marker) != 1: raise SystemExit('e2e huggingface marker mismatch')
+          replacement = "  if (pathname === '/api/v1/huggingface/token') return { configured: true, prefix: 'hf_demo' }\n  if (pathname === '/api/v1/huggingface/search') return { items: [{ id: 'Qwen/Qwen3-8B-GGUF', author: 'Qwen', downloads: 420000, likes: 980, last_modified: new Date(now - 3600000).toISOString(), parameter_count: 8000000000, tags: ['gguf', 'text-generation'], private: false, gated: false }], next_cursor: '' }\n  if (pathname === '/api/v1/huggingface/model') return { id: 'Qwen/Qwen3-8B-GGUF', author: 'Qwen', downloads: 420000, likes: 980, last_modified: new Date(now - 3600000).toISOString(), parameter_count: 8000000000, tags: ['gguf', 'text-generation'], private: false, gated: false, description: 'Representative Qwen3 GGUF repository used for deterministic visual QA.', revision: 'main', artifacts: [{ id: 'q4_k_m', name: 'Qwen3-8B-Q4_K_M.gguf', quantization: 'Q4_K_M', model_bytes: 5420000000, total_bytes: 5420000000, shard_count: 1, expected_shards: 1, complete: true, files: [{ path: 'Qwen3-8B-Q4_K_M.gguf', size: 5420000000 }] }, { id: 'q8_0', name: 'Qwen3-8B-Q8_0.gguf', quantization: 'Q8_0', model_bytes: 8600000000, total_bytes: 8600000000, shard_count: 1, expected_shards: 1, complete: true, files: [{ path: 'Qwen3-8B-Q8_0.gguf', size: 8600000000 }] }] }\n  if (pathname === '/api/v1/huggingface/recommendations') return { context_length: 32768, context_capability: 32768, context_assumed: false, metadata: { architecture: 'qwen3', context_length: 32768, block_count: 36, embedding_length: 4096, head_count: 32, kv_head_count: 8 }, hardware_available: true, hybrid_recommendations_enabled: true, artifacts: [{ artifact_id: 'q4_k_m', quantization: { name: 'Q4_K_M', tier: 'balanced', quality: 'Good', memory: 'Low', speed: 'Fast', summary: 'Recommended balance', tradeoff: 'Some quality loss', known: true }, recommended: true, runnable: true, fit: 'gpu', fit_label: 'Fits one GPU', reason: 'Fits on cuda:0 with context headroom.', memory: { weights_bytes: 5420000000, kv_cache_bytes: 1200000000, runtime_overhead_bytes: 600000000, cpu_only_ram_bytes: 7600000000, full_offload_vram_bytes: 7220000000 }, offload: { mode: 'full_gpu', devices: ['cuda:0'], kv_on_gpu: true, reason: 'Single-GPU full offload fits.' }, estimated_generation_speed: { estimated: true, min_tokens_per_second: 45, max_tokens_per_second: 68, label: '45–68 tok/s', reason: 'Estimated from available memory bandwidth.' }, confidence: 'high', warnings: [] }, { artifact_id: 'q8_0', quantization: { name: 'Q8_0', tier: 'quality', quality: 'Very high', memory: 'High', speed: 'Moderate', summary: 'Higher quality', tradeoff: 'Higher VRAM use', known: true }, recommended: false, runnable: true, fit: 'multi_gpu', fit_label: 'Fits across two GPUs', reason: 'Requires both configured GPUs for comfortable headroom.', memory: { weights_bytes: 8600000000, kv_cache_bytes: 1200000000, runtime_overhead_bytes: 700000000, cpu_only_ram_bytes: 11000000000, full_offload_vram_bytes: 10500000000 }, offload: { mode: 'multi_gpu', devices: ['cuda:0', 'cuda:1'], tensor_split: '0.5,0.5', kv_on_gpu: true, reason: 'Split weights across two GPUs.' }, confidence: 'medium', warnings: ['Uses more VRAM than the recommended artifact.'] }] }\n  if (/\\/huggingface(?:\\/|$)/.test(pathname)) return { enabled: true, token_configured: true, items: [] }\n"
+          source = source.replace(marker, replacement, 1)
+
+          marker = "  ['request-logs', '/logs'],\n"
+          if source.count(marker) != 1: raise SystemExit('e2e request logs pages marker mismatch')
+          source = source.replace(marker, marker + "  ['request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture'],\n  ['request-log-trace', '/logs?trace_id=trace_fixture'],\n", 1)
+          e2e.write_text(source)
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npx playwright test e2e/redesign-screenshots.spec.ts
+      - name: Commit validated fixes and remove helpers
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm .github/workflows/apply-redesign-feedback-round2.yml .github/workflows/apply-redesign-feedback-round2b.yml
+          git add frontend .github/workflows/apply-redesign-feedback-round2.yml .github/workflows/apply-redesign-feedback-round2b.yml
+          git diff --cached --check
+          git commit -m 'fix(ui): address redesign review feedback' -m 'Resolve cross-page contrast, responsive action hierarchy, mobile overflow affordances, and ambiguous empty states identified in the redesign UX review. Expand deterministic visual fixtures for key loaded and recovery states.'
+          git push origin HEAD:feature/redesign
