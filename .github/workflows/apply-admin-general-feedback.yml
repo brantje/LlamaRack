@@ -1,0 +1,49 @@
+name: Apply admin general feedback
+
+on:
+  push:
+    branches:
+      - fix/redesign-admin-general-feedback
+    paths:
+      - .github/workflows/apply-admin-general-feedback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/redesign-admin-general-feedback
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply Administration General feedback fixes
+        run: python .github/scripts/apply-admin-general-feedback.py
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Administration General fixes
+        run: |
+          rm .github/workflows/apply-admin-general-feedback.yml
+          rm .github/scripts/apply-admin-general-feedback.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ui): improve Administration settings feedback" -m "Keep locked-setting provenance readable, distinguish unchanged settings from unsaved edits, and add a mobile bottom save affordance for the long General settings form."
+          git push origin HEAD:fix/redesign-admin-general-feedback
