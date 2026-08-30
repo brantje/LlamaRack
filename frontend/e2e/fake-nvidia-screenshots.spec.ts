@@ -43,16 +43,17 @@ test('dashboard shows real fake-nvidia pressure state', async ({ page, request }
     gpus: Array<{ backend: string, name: string, total_bytes: number, used_bytes: number }>
     processes: Array<{ process_name?: string, used_bytes: number }>
   }
-  expect(snapshot.gpus).toHaveLength(2)
+  expect(snapshot.gpus).toHaveLength(4)
   expect(snapshot.gpus.every(gpu => gpu.backend === 'cuda')).toBeTruthy()
-  expect(snapshot.gpus[0]?.name).toContain('4060 Ti')
-  expect(snapshot.gpus[0]?.used_bytes || 0).toBeGreaterThan(14 * 1024 ** 3)
+  expect(snapshot.gpus.every(gpu => gpu.name.includes('RTX 4090'))).toBeTruthy()
+  expect(snapshot.gpus.every(gpu => gpu.total_bytes >= 23 * 1024 ** 3)).toBeTruthy()
+  expect(snapshot.gpus[0]?.used_bytes || 0).toBeGreaterThan(22 * 1024 ** 3)
   expect(snapshot.processes.some(process => process.process_name?.includes('fake-llama-server'))).toBeTruthy()
 
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
-  await expect(page.getByText(/RTX 4060 Ti/i).first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(/RTX 4090/i).first()).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(1500)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/dashboard-pressure.png`,
