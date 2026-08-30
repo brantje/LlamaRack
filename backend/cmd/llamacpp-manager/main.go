@@ -208,7 +208,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	go lifecycleService.RunReconciler(ctx, alwaysOnInterval)
 	go lifecycleService.RunIdleReconciler(ctx, idleUnloadTimeout)
 	go modelService.RunMetadataReconciler(ctx, 2*time.Second)
-	go importService.Run(ctx)
+	go importService.Run(ctx, 500*time.Millisecond)
 	go observabilitySampler.Run(ctx)
 	retentionDays := func(requestCtx context.Context) int {
 		value, resolveErr := managerSettings.Int(requestCtx, settings.ObservabilityRetentionDays)
