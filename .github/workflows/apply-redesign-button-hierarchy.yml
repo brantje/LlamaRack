@@ -23,6 +23,17 @@ jobs:
           node-version: '24'
       - name: Apply hierarchy refactor
         run: python .github/scripts/apply-redesign-button-hierarchy.py
+      - name: Migrate remaining launch confirmation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/app/pages/instances/new.vue')
+          source = path.read_text()
+          old = "color: 'primary'"
+          if source.count(old) != 1:
+              raise SystemExit(f'expected one legacy launch confirmation color, found {source.count(old)}')
+          path.write_text(source.replace(old, "confirmTone: 'default'", 1))
+          PY
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
