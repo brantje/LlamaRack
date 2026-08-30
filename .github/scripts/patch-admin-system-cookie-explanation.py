@@ -39,17 +39,14 @@ if text.count(old) != 1:
     raise SystemExit(f'system unavailable state marker: expected one match, found {text.count(old)}')
 text = text.replace(old, new, 1)
 
-marker = """    const url = new URL(request.url())
-    if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+marker = """    if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
 """
-route_patch = """    const url = new URL(request.url())
-    if (systemUnavailableLlamaPages.has(page) && url.pathname === '/api/v1/system' && request.method() === 'GET') {
+route_patch = """    if (systemUnavailableLlamaPages.has(page) && url.pathname === '/api/v1/system' && request.method() === 'GET') {
       const base = responseFor(url.pathname, request.method()) as Record<string, any>
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ ...base, llamacpp: { available: false } }) })
       return
     }
-    if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
-"""
+""" + marker
 if text.count(marker) != 1:
     raise SystemExit(f'system unavailable route marker: expected one match, found {text.count(marker)}')
 text = text.replace(marker, route_patch, 1)
