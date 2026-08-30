@@ -170,7 +170,10 @@ onMounted(() => void load())
       </div>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="model-details-error">
+      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to load GGUF metadata</p>
+      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+    </Frame>
 
     <Frame
       v-for="warning in details?.warnings || []"
@@ -256,7 +259,10 @@ onMounted(() => void load())
     <UModal v-model:open="valueOpen" :title="selectedEntry?.key || 'Metadata value'" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-4xl' }">
       <template #body>
         <div class="space-y-4">
-          <UAlert v-if="valueError" color="error" variant="subtle" :description="valueError" />
+          <Frame v-if="valueError" class="border-[var(--accent-800)] p-3" data-testid="metadata-expanded-error">
+            <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to expand GGUF metadata value</p>
+            <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ valueError }}</p>
+          </Frame>
           <div v-if="valueBusy && !valuePage"><USkeleton class="h-40 w-full" /></div>
           <template v-else-if="valuePage">
             <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--neutral-700)]">
