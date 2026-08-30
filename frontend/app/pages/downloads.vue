@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
             <p class="mt-1 truncate font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">{{ job.repo_id }}</p>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
-            <AppButton v-if="activeStates.has(job.state)" intent="destructive" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</AppButton>
+            <AppButton v-if="activeStates.has(job.state)" intent="secondary" tone="destructive" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</AppButton>
             <AppButton v-if="job.state === 'FAILED' || job.state === 'CANCELLED'" intent="secondary" size="sm" :loading="actionID === job.id" @click="retry(job)">Retry</AppButton>
             <AppButton v-if="job.state === 'CANCELLED'" intent="ghost" size="sm" :loading="actionID === job.id" @click="remove(job)">Remove</AppButton>
           </div>

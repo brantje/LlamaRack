@@ -91,7 +91,7 @@ describe('redesign theme foundations', () => {
   })
 
   it('renders the shared action hierarchy and forwards normal button attributes', async () => {
-    for (const intent of ['primary', 'secondary', 'ghost', 'destructive'] as const) {
+    for (const intent of ['primary', 'secondary', 'ghost'] as const) {
       const wrapper = await mountSuspended(AppButton, {
         route: false,
         props: { intent },
@@ -101,5 +101,21 @@ describe('redesign theme foundations', () => {
       expect(wrapper.text()).toContain(intent)
       expect(wrapper.find(`[aria-label="${intent} action"]`).exists()).toBe(true)
     }
+
+    const destructiveSecondary = await mountSuspended(AppButton, {
+      route: false,
+      props: { intent: 'secondary', tone: 'destructive' },
+      attrs: { 'aria-label': 'destructive secondary action' },
+      slots: { default: 'Delete' }
+    })
+    expect(destructiveSecondary.attributes('class')).toContain('danger-700')
+
+    const destructivePrimary = await mountSuspended(AppButton, {
+      route: false,
+      props: { intent: 'primary', tone: 'destructive' },
+      attrs: { 'aria-label': 'destructive primary action' },
+      slots: { default: 'Confirm delete' }
+    })
+    expect(destructivePrimary.attributes('class')).toContain('color-danger')
   })
 })

@@ -80,7 +80,7 @@ async function revoke(key: ManagedAPIKey) {
     title: 'Revoke API key',
     description: `Revoke API key “${key.name}”? Existing clients using it will fail immediately. Revoked metadata is retained for history.`,
     confirmLabel: 'Revoke key',
-    color: 'error'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   pending[key.id] = 'revoke'
@@ -100,7 +100,7 @@ async function rotate(key: ManagedAPIKey) {
     title: 'Rotate API key',
     description: `Rotate “${key.name}”? The current secret will be revoked immediately and a replacement secret will be shown once.`,
     confirmLabel: 'Rotate key',
-    color: 'warning'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   pending[key.id] = 'rotate'

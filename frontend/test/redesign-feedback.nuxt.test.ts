@@ -27,6 +27,9 @@ describe('redesign feedback regressions', () => {
     for (const name of ['dark.css', 'light.css']) {
       const source = readFileSync(resolve(process.cwd(), `app/themes/${name}`), 'utf8')
       expect(contrast(variable(source, '--color-accent'), variable(source, '--color-on-accent')), `${name} on-accent`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(variable(source, '--color-danger'), variable(source, '--color-on-danger')), `${name} on-danger`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(variable(source, '--color-bg'), variable(source, '--danger-700')), `${name} danger on page`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(variable(source, '--color-surface'), variable(source, '--danger-700')), `${name} danger on surface`).toBeGreaterThanOrEqual(4.5)
       expect(contrast(variable(source, '--color-bg'), variable(source, '--neutral-700')), `${name} muted on page`).toBeGreaterThanOrEqual(4.5)
       expect(contrast(variable(source, '--color-surface'), variable(source, '--neutral-700')), `${name} muted on surface`).toBeGreaterThanOrEqual(4.5)
     }

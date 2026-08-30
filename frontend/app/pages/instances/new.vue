@@ -31,7 +31,7 @@ async function submit() {
         description: 'Launching this Instance may stop other eligible idle Instances if fresh RAM/VRAM state shows that resource-pressure eviction is required.',
         confirmLabel: 'Launch Instance',
         cancelLabel: 'Keep stopped',
-        color: 'primary'
+        confirmTone: 'default'
       })
       if (!confirmed) {
         await manager.refresh()

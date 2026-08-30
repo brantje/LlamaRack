@@ -260,7 +260,7 @@ async function action(instance: Instance, operation: 'start' | 'stop' | 'restart
       title: 'Launch Instance',
       description: 'Launching this Instance may stop other idle Instances if resource-pressure eviction is required.',
       confirmLabel: 'Launch Instance',
-      color: 'primary'
+      confirmTone: 'default'
     })
     if (!confirmed) return
   }
@@ -269,7 +269,7 @@ async function action(instance: Instance, operation: 'start' | 'stop' | 'restart
       title: 'Kill Instance',
       description: 'Kill this Instance immediately? Active requests may fail.',
       confirmLabel: 'Kill Instance',
-      color: 'error'
+      confirmTone: 'destructive'
     })
     if (!confirmed) return
   }
@@ -290,7 +290,7 @@ async function remove(instance: Instance) {
     title: 'Delete Instance',
     description: `Delete Instance “${instance.name}”? The registered Model and GGUF file are kept.`,
     confirmLabel: 'Delete Instance',
-    color: 'error'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   pending.value = `${instance.id}:delete`
