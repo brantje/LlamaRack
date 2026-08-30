@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/validate-model-edit-options-density.yml
       - .github/scripts/patch-model-edit-options-density.py
+      - .github/scripts/fix-model-edit-options-density-copy.py
 
 permissions:
   contents: write
@@ -25,6 +26,7 @@ jobs:
       - name: Apply Edit model option density fixes
         run: |
           python .github/scripts/patch-model-edit-options-density.py
+          python .github/scripts/fix-model-edit-options-density-copy.py
           git diff --check
       - name: Install frontend dependencies
         working-directory: frontend
@@ -43,7 +45,7 @@ jobs:
         run: npm run test:e2e:screenshots
       - name: Commit validated Edit model option density fix
         run: |
-          rm .github/workflows/validate-model-edit-options-density.yml .github/scripts/patch-model-edit-options-density.py
+          rm .github/workflows/validate-model-edit-options-density.yml .github/scripts/patch-model-edit-options-density.py .github/scripts/fix-model-edit-options-density-copy.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
