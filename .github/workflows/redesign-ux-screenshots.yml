@@ -1,0 +1,51 @@
+name: Redesign UX screenshots
+
+on:
+  pull_request:
+    branches:
+      - feature/redesign
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/redesign-ux-screenshots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture redesigned pages
+        run: npm run test:e2e:screenshots
+
+      - name: Upload UX screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redesign-ux-screenshots
+          path: |
+            frontend/artifacts/ux-screenshots
+            frontend/artifacts/playwright-report
+            frontend/artifacts/test-results
+          if-no-files-found: warn
+          retention-days: 14
