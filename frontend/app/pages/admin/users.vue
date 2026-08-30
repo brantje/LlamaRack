@@ -107,8 +107,10 @@ async function submitReset() {
     <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
     <Frame v-if="success" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ success }}</p></div></Frame>
 
-    <Frame data-testid="admin-users-table">
-      <UTable :data="users" :columns="columns">
+    <Frame data-testid="admin-users-table" class="overflow-hidden p-0">
+      <p v-if="users.length" class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for status, dates and actions.</p>
+      <div class="overflow-x-auto" role="region" tabindex="0" aria-label="Administration users. Scroll horizontally for status, dates and actions.">
+        <UTable class="min-w-[720px]" :data="users" :columns="columns">
         <template #username-cell="{ row }">
           <div>
             <span class="text-[13.5px] font-semibold">{{ row.original.username }}</span>
@@ -124,7 +126,8 @@ async function submitReset() {
             <AppButton intent="ghost" size="xs" @click="toggleUser(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
           </div>
         </template>
-      </UTable>
+        </UTable>
+      </div>
       <div v-if="!users.length" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">No users</div>
     </Frame>
 

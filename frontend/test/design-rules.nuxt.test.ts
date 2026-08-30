@@ -126,7 +126,7 @@ describe('frontend design rules', () => {
     const themeRoot = resolve(appRoot, 'themes')
     const registry = readFileSync(resolve(themeRoot, 'index.ts'), 'utf8')
     const requiredVariables = [
-      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-divider',
+      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',
       '--neutral-100', '--neutral-200', '--neutral-300', '--neutral-400', '--neutral-500', '--neutral-600', '--neutral-700', '--neutral-800', '--neutral-900',
       '--accent-100', '--accent-200', '--accent-300', '--accent-400', '--accent-500', '--accent-600', '--accent-700', '--accent-800', '--accent-900',
       '--shadow-sm', '--shadow-md', '--shadow-lg'

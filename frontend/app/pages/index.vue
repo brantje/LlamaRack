@@ -592,7 +592,9 @@ watch(selectedWindow, (next, previous) => {
           <UEmpty variant="naked" title="No recent gateway traffic" description="Requests in the selected history window will appear here." />
           <AppButton to="/playground" intent="secondary" size="xs">Send a test request</AppButton>
         </div>
-        <UTable v-else :data="recentRequests" :columns="gatewayColumns" class="w-full">
+        <div v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="Gateway traffic. Scroll horizontally for request metrics and result.">
+          <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-muted md:hidden">Scroll horizontally for request metrics and result.</p>
+          <UTable :data="recentRequests" :columns="gatewayColumns" class="min-w-[860px] w-full">
           <template #started_at-cell="{ row }">
             <NuxtLink :to="requestDetailTarget(row.original)" class="font-mono text-xs hover:text-[var(--color-accent)] hover:underline">{{ formatTime(row.original.started_at) }}</NuxtLink>
           </template>
@@ -614,7 +616,8 @@ watch(selectedWindow, (next, previous) => {
               <StatusTag v-if="row.original.autoloaded" variant="pending">autoload</StatusTag>
             </div>
           </template>
-        </UTable>
+          </UTable>
+        </div>
       </Frame>
 
       <Frame id="needs-attention" data-testid="dashboard-attention" class="p-4" :class="attention.length ? 'order-1 xl:order-2' : 'order-2'">

@@ -346,8 +346,8 @@ onBeforeUnmount(() => {
       />
       <div class="flex flex-wrap items-center justify-end gap-2">
         <div class="flex border border-[var(--color-divider)]" data-testid="instances-view-toggle" aria-label="Instance view">
-          <button type="button" class="px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'table' ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-table" @click="viewMode = 'table'">Table</button>
-          <button type="button" class="border-l border-[var(--color-divider)] px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'cards' ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-cards" @click="viewMode = 'cards'">Cards</button>
+          <button type="button" class="px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'table' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-table" @click="viewMode = 'table'">Table</button>
+          <button type="button" class="border-l border-[var(--color-divider)] px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'cards' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-cards" @click="viewMode = 'cards'">Cards</button>
         </div>
         <AppButton intent="secondary" :loading="refreshing" @click="refreshPage">Refresh</AppButton>
         <AppButton to="/instances/new" intent="primary">New Instance</AppButton>
@@ -361,7 +361,7 @@ onBeforeUnmount(() => {
           :key="filter.value"
           type="button"
           class="border px-3 py-1.5 text-xs font-semibold transition-colors"
-          :class="stateFilter === filter.value ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]' : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-800)] hover:border-[var(--neutral-600)] hover:text-[var(--color-text)]'"
+          :class="stateFilter === filter.value ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-800)] hover:border-[var(--neutral-600)] hover:text-[var(--color-text)]'"
           :data-testid="`instances-filter-${filter.value}`"
           @click="stateFilter = filter.value"
         >{{ filter.label }}</button>
@@ -381,7 +381,8 @@ onBeforeUnmount(() => {
     </UEmpty>
     <UEmpty v-else-if="!filteredInstances.length" title="No Instances match this filter" description="Choose another state filter to see the rest of the fleet." />
 
-    <Frame v-else-if="viewMode === 'table'" class="overflow-x-auto" data-testid="instances-table-view">
+    <Frame v-else-if="viewMode === 'table'" class="overflow-x-auto" data-testid="instances-table-view" role="region" tabindex="0" aria-label="Instances table. Scroll horizontally for telemetry, lifecycle and actions.">
+      <p class="border-b border-[var(--color-divider)] px-3 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for telemetry, lifecycle and actions.</p>
       <table class="min-w-[1180px] w-full border-collapse text-left text-xs">
         <thead class="bg-[var(--neutral-200)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
           <tr>

@@ -295,7 +295,7 @@ onMounted(() => {
           <div>
             <p class="mb-2 text-xs font-semibold">Priority</p>
             <div class="inline-flex border border-[var(--color-divider)]" data-testid="instance-priority">
-              <button v-for="priority in ['low', 'normal', 'high']" :key="priority" type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold last:border-r-0" :class="form.priority === priority ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent'" :data-testid="`priority-${priority}`" @click="form.priority = priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</button>
+              <button v-for="priority in ['low', 'normal', 'high']" :key="priority" type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold last:border-r-0" :class="form.priority === priority ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" :data-testid="`priority-${priority}`" @click="form.priority = priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</button>
             </div>
           </div>
           <UFormField :label="`Idle unload timeout (seconds · 0 inherits the global ${globalIdleSeconds} s)`" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
@@ -311,8 +311,8 @@ onMounted(() => {
       <Frame class="p-5" data-testid="instance-form-placement">
         <div class="mb-4"><h2 class="text-base font-semibold">Placement</h2></div>
         <div class="mb-4 inline-flex border border-[var(--color-divider)]" data-testid="placement-mode">
-          <button type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'auto' ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent'" data-testid="placement-mode-auto" @click="setPlacementMode('auto')">Auto</button>
-          <button type="button" class="px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'manual' ? 'bg-[var(--color-accent)] text-[var(--color-bg)]' : 'bg-transparent'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</button>
+          <button type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'auto' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" data-testid="placement-mode-auto" @click="setPlacementMode('auto')">Auto</button>
+          <button type="button" class="px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'manual' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</button>
         </div>
         <p v-if="form.gpu_mode === 'auto'" class="mb-4 text-xs text-[var(--neutral-700)]">The scheduler picks devices from fresh VRAM state at launch time.</p>
         <div v-else class="mb-5 space-y-4" data-testid="manual-placement-controls">
@@ -359,6 +359,7 @@ onMounted(() => {
       <div class="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-5">
         <UCheckbox v-if="showLaunchAfterCreate" :model-value="launchAfterCreate" label="Launch after creation" @update:model-value="emit('update:launchAfterCreate', Boolean($event))" />
         <span v-else />
+        <p v-if="!canSubmit" class="max-w-xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="instance-submit-requirements">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>
         <div class="flex items-center gap-2"><AppButton to="/instances" intent="secondary">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">{{ submitLabel }}</AppButton></div>
       </div>
     </UForm>

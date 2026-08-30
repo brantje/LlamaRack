@@ -199,9 +199,10 @@ onBeforeUnmount(closeStream)
               ? 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]'
               : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"
             :aria-pressed="selectedLevel === level"
+            :title="level === 'WARN' ? 'WARN + ERROR' : undefined"
             @click="selectedLevel = level"
           >
-            {{ level === 'ALL' ? 'All' : level }}
+            {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}
           </button>
         </div>
         <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />
@@ -216,7 +217,7 @@ onBeforeUnmount(closeStream)
           type="button"
           class="border px-2.5 py-1 text-xs font-semibold transition-colors"
           :class="selectedSource === source
-            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]'
+            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'
             : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"
           :aria-pressed="selectedSource === source"
           @click="selectedSource = source"

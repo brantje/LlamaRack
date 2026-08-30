@@ -373,7 +373,7 @@ onBeforeUnmount(() => {
     <UForm
       v-if="!isDetail"
       :state="{}"
-      class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]"
+      class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px]"
       data-testid="discover-search-row"
       @submit="search"
     >
@@ -386,9 +386,7 @@ onBeforeUnmount(() => {
       <UFormField label="Sort" name="sort">
         <USelect v-model="sort" class="w-full" :items="sortOptions" value-key="value" />
       </UFormField>
-      <div class="flex items-end">
-        <AppButton intent="primary" class="w-full justify-center" type="submit" :loading="loading">Search</AppButton>
-      </div>
+      <p class="text-xs leading-5 text-[var(--neutral-700)] lg:col-span-3">Results update automatically as you type. Press Enter to search immediately.</p>
     </UForm>
 
     <Frame v-if="error" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]" data-testid="discover-error">

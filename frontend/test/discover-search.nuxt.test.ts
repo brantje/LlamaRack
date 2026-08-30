@@ -36,6 +36,8 @@ describe('Discover automatic search', () => {
   it('loads trending results, debounces input, accepts Hugging Face URLs and sorts immediately', async () => {
     const wrapper = await mountSuspended(DiscoverPage, { route: false })
 
+    expect(wrapper.findAll('button').some(button => button.text().trim() === 'Search')).toBe(false)
+    expect(wrapper.text()).toContain('Results update automatically as you type. Press Enter to search immediately.')
     expect(mocks.request).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(350)
     await flushPromises()

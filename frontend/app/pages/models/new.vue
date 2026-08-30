@@ -582,7 +582,8 @@ async function createModel() {
         </div>
       </Frame>
 
-      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-divider)] pt-5">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--color-divider)] pt-5">
+        <p class="mr-auto max-w-2xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="model-submit-requirements">Required: a GGUF artifact and Model name. When First Instance is enabled, its name and slug are also required.</p>
         <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
         <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">Cancel</AppButton>
         <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
