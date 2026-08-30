@@ -226,7 +226,10 @@ onMounted(() => {
       <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="instance-form-error">
+      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to save Instance</p>
+      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+    </Frame>
     <div v-if="loading" class="space-y-3"><USkeleton class="h-12 w-full" /><USkeleton class="h-56 w-full" /></div>
 
     <UForm v-else :state="form" class="space-y-5" @submit="emit('submit')">
@@ -345,7 +348,10 @@ onMounted(() => {
             <option value="full">Full request and response content</option>
           </select>
         </UFormField>
-        <UAlert v-if="form.request_log_mode === 'full'" class="mt-3" color="warning" variant="subtle" title="Full content logging enabled" description="Prompts, messages, generated content, embeddings payloads and tool arguments for this Instance may be retained until the configured observability retention period expires." />
+        <div v-if="form.request_log_mode === 'full'" class="mt-3 border-l-2 border-[var(--color-accent)] pl-3" data-testid="instance-full-log-warning">
+          <p class="text-sm font-semibold text-[var(--color-text)]">Full content logging enabled</p>
+          <p class="mt-1 text-xs leading-5 text-[var(--neutral-800)]">Prompts, messages, generated content, embeddings payloads and tool arguments for this Instance may be retained until the configured observability retention period expires.</p>
+        </div>
       </Frame>
 
       <div class="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-5">
