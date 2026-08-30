@@ -1,0 +1,68 @@
+name: Validate Admin Logs accessibility fixes
+
+on:
+  push:
+    branches:
+      - fix/redesign-admin-logs-accessibility
+    paths:
+      - .github/workflows/validate-admin-logs-accessibility.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/redesign-admin-logs-accessibility
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply Admin Logs accessibility fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/app/pages/admin/system-logs.vue')
+          text = path.read_text()
+          replacements = [
+            ("if (level === 'DEBUG') return 'opacity-45'", "if (level === 'DEBUG') return 'text-[var(--neutral-700)]'"),
+            ('''          <button\n            v-for="level in levels"\n            :key="level"\n            type="button"\n            class="border px-3 py-1.5 text-xs font-semibold transition-colors"\n            :class="selectedLevel === level\n              ? 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]'\n              : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"\n            :aria-pressed="selectedLevel === level"\n            :title="level === 'WARN' ? 'WARN + ERROR' : undefined"\n            @click="selectedLevel = level"\n          >\n            {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}\n          </button>''', '''          <UButton\n            v-for="level in levels"\n            :key="level"\n            type="button"\n            :color="selectedLevel === level ? 'primary' : 'neutral'"\n            :variant="selectedLevel === level ? 'soft' : 'ghost'"\n            size="sm"\n            class="justify-center"\n            :aria-pressed="selectedLevel === level"\n            :title="level === 'WARN' ? 'WARN + ERROR' : undefined"\n            @click="selectedLevel = level"\n          >\n            {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}\n          </UButton>'''),
+            ('''        <button\n          v-for="source in sourceItems"\n          :key="source"\n          type="button"\n          class="border px-2.5 py-1 text-xs font-semibold transition-colors"\n          :class="selectedSource === source\n            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'\n            : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-700)] hover:bg-[var(--neutral-100)]'"\n          :aria-pressed="selectedSource === source"\n          @click="selectedSource = source"\n        >\n          {{ source === 'all' ? 'All sources' : source }}\n        </button>''', '''        <UButton\n          v-for="source in sourceItems"\n          :key="source"\n          type="button"\n          :color="selectedSource === source ? 'primary' : 'neutral'"\n          :variant="selectedSource === source ? 'soft' : 'ghost'"\n          size="sm"\n          :aria-pressed="selectedSource === source"\n          @click="selectedSource = source"\n        >\n          {{ source === 'all' ? 'All sources' : source }}\n        </UButton>'''),
+            ('''        <button type="button" class="ml-2 font-semibold underline" @click="connectStream">Reconnect</button>''', '''        <AppButton type="button" intent="ghost" size="xs" class="ml-2" @click="connectStream">Reconnect</AppButton>'''),
+            ('''            <time :datetime="entry.timestamp" class="whitespace-nowrap opacity-45">{{ formatTime(entry.timestamp) }}</time>''', '''            <time :datetime="entry.timestamp" class="whitespace-nowrap text-[var(--neutral-700)]">{{ formatTime(entry.timestamp) }}</time>'''),
+            ('''            <span class="truncate opacity-55">{{ entry.source }}</span>''', '''            <span class="truncate text-[var(--neutral-800)]">{{ entry.source }}</span>'''),
+          ]
+          for old, new in replacements:
+            if old not in text:
+              raise SystemExit(f'missing guarded replacement: {old[:80]!r}')
+            text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          test = Path('frontend/test/admin-logs-accessibility.nuxt.test.ts')
+          test.write_text('''import { readFileSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { describe, expect, it } from 'vitest'\n\ndescribe('Administration Logs accessibility contract', () => {\n  it('uses Nuxt UI buttons for log filters and readable metadata tokens', () => {\n    const source = readFileSync(resolve(process.cwd(), 'app/pages/admin/system-logs.vue'), 'utf8')\n    expect(source).toContain('<UButton\\n            v-for="level in levels"')\n    expect(source).toContain('<UButton\\n          v-for="source in sourceItems"')\n    expect(source).toContain("intent=\\"ghost\\" size=\\"xs\\" class=\\"ml-2\\"")\n    expect(source).toContain("if (level === 'DEBUG') return 'text-[var(--neutral-700)]'")\n    expect(source).toContain('class="whitespace-nowrap text-[var(--neutral-700)]"')\n    expect(source).toContain('class="truncate text-[var(--neutral-800)]"')\n    expect(source).not.toContain('opacity-45')\n    expect(source).not.toContain('opacity-55')\n  })\n})\n''')
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Admin Logs fixes
+        run: |
+          rm .github/workflows/validate-admin-logs-accessibility.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add frontend/app/pages/admin/system-logs.vue frontend/test/admin-logs-accessibility.nuxt.test.ts .github/workflows/validate-admin-logs-accessibility.yml
+          git commit -m "fix(ui): improve Administration Logs accessibility"
+          git push origin HEAD:fix/redesign-admin-logs-accessibility
