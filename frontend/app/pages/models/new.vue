@@ -398,10 +398,13 @@ async function createModel() {
         :title="remoteMode ? 'Launch Hugging Face model' : 'Add model'"
         :description="remoteMode ? 'Configure the Model and its first Instance now. The Instance stays in Downloading state until the selected GGUF is ready.' : 'Register a GGUF model and optionally bootstrap its first addressable Instance.'"
       />
-      <AppButton :to="remoteMode ? '/discover' : '/models'" intent="secondary">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</AppButton>
+      <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</AppButton>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="model-add-error">
+      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to complete model operation</p>
+      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+    </Frame>
 
     <UForm :state="form" class="space-y-5" @submit="createModel">
       <Frame class="p-5" data-testid="model-form-gguf">
@@ -581,7 +584,7 @@ async function createModel() {
 
       <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-divider)] pt-5">
         <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
-        <AppButton :to="remoteMode ? '/discover' : '/models'" intent="secondary">Cancel</AppButton>
+        <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">Cancel</AppButton>
         <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
       </div>
     </UForm>
