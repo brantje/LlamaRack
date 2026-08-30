@@ -9,7 +9,7 @@ const navigation = [
   { label: 'Hugging Face', description: 'Provider credential', to: '/admin/huggingface' },
   { label: 'Users', description: 'Local management accounts', to: '/admin/users' },
   { label: 'System', description: 'Read-only diagnostics', to: '/admin/system' },
-  { label: 'Logs', description: 'Manager, gateway and Instance diagnostics', to: '/admin/logs' }
+  { label: 'Logs', description: 'Manager, gateway and Instance diagnostics', to: '/admin/system-logs' }
 ]
 
 function active(to: string) {
