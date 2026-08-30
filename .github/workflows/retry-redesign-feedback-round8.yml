@@ -47,7 +47,12 @@ jobs:
           new = "headers: { ...corsHeaders, 'access-control-expose-headers': 'x-llamacpp-manager-request-id', 'content-type': 'text/event-stream', 'x-llamacpp-manager-request-id': 'req_playground_fixture' }"
           if source.count(old) != 1:
               raise SystemExit(f'expected one generated Playground fixture header, found {source.count(old)}')
-          path.write_text(source.replace(old, new, 1))
+          source = source.replace(old, new, 1)
+          old_assertion = "await expect(page.getByLabel('Raw request JSON')).toContainText('UX_HOLD Explain KV cache reuse.')"
+          new_assertion = "await expect(page.getByLabel('Raw request JSON')).toHaveValue('UX_HOLD Explain KV cache reuse.')"
+          if source.count(old_assertion) != 1:
+              raise SystemExit(f'expected one raw-request textarea assertion, found {source.count(old_assertion)}')
+          path.write_text(source.replace(old_assertion, new_assertion, 1))
           PY
       - name: Install frontend dependencies
         working-directory: frontend
@@ -64,11 +69,10 @@ jobs:
       - name: Run redesign screenshot suite
         working-directory: frontend
         run: npm run test:e2e:screenshots
-      - name: Commit validated fixes and remove retry helper
+      - name: Commit validated fixes
         run: |
-          rm .github/workflows/retry-redesign-feedback-round8.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add frontend
           git commit -m "fix(ui): close remaining operator review gaps" -m "Use an honest failed Playground phase for gateway/network failures, make Models horizontal overflow discoverable on mobile, and extend visual QA across Playground request states plus fresh/revoked API-key interactions."
           git push origin HEAD:feature/redesign
