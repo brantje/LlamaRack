@@ -78,6 +78,12 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('PLAYGROUND')
     expect(wrapper.text()).toContain('This Instance is not loaded — sending will trigger autoload through the gateway.')
     expect(wrapper.find('#playground-api-key').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="playground-mobile-controls"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="playground-mobile-quick-parameters"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="playground-mobile-parameters-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-mobile-quick-parameters"]').text()).toContain('Quick controls stay beside the composer on mobile.')
+    expect(wrapper.get('[data-testid="playground-mobile-parameters-toggle"]').attributes('aria-expanded')).toBe('true')
 
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('Explain this code')
     await button(wrapper, 'Send').trigger('click')

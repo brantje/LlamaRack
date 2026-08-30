@@ -53,6 +53,7 @@ const error = ref('')
 const notice = ref('')
 const inFlight = ref(false)
 const phase = ref<'cold' | 'generating' | 'completed' | ''>('')
+const mobileParametersOpen = ref(false)
 let controller: AbortController | null = null
 
 const parameters = reactive<Parameters>({
@@ -74,6 +75,7 @@ const selectedRuntime = computed(() => selectedInstance.value ? manager.runtimeF
 const selectedTelemetry = computed<RuntimeTelemetry | undefined>(() => selectedInstance.value ? manager.telemetryForInstance(selectedInstance.value) : undefined)
 const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
+const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
 const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', '': '' }[phase.value]))
 
 const panelItems = [
@@ -87,6 +89,14 @@ function runtimeVariant(state: string) {
   if (state === 'FAILED') return 'failed' as const
   if (state === 'STARTING' || state === 'LOADING' || state === 'STOPPING') return 'pending' as const
   return 'neutral' as const
+}
+
+function selectInstance(value: unknown) {
+  const id = String(value || '')
+  if (!manager.instances.value.some(instance => instance.id === id)) return
+  selectedInstanceID.value = id
+  rawDirty.value = false
+  syncRawRequest()
 }
 
 function stopValues(value = parameters.stop) {
@@ -448,7 +458,7 @@ onBeforeUnmount(() => controller?.abort())
       <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="font-mono text-[18px] font-semibold text-[var(--neutral-900)]">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
+          <h1 class="min-w-0 break-all font-mono text-[16px] font-semibold text-[var(--neutral-900)] sm:text-[18px]">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
           <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
           <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : 'pending'">{{ phaseLabel }}</StatusTag>
         </div>
@@ -468,6 +478,21 @@ onBeforeUnmount(() => controller?.abort())
 
     <div class="grid min-h-[calc(100vh-11rem)] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
       <Frame class="flex min-h-[38rem] min-w-0 flex-col p-0" data-testid="playground-thread">
+        <div class="sticky top-0 z-10 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3 xl:hidden" data-testid="playground-mobile-controls">
+          <div class="flex min-w-0 items-center gap-2">
+            <USelect :model-value="selectedInstanceID" :items="instanceOptions" value-key="value" class="min-w-0 flex-1 font-mono" aria-label="Playground Instance" data-testid="playground-mobile-instance" @update:model-value="selectInstance" />
+            <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
+            <AppButton intent="secondary" size="sm" data-testid="playground-mobile-parameters-toggle" :aria-expanded="mobileParametersOpen" @click="mobileParametersOpen = !mobileParametersOpen">Parameters</AppButton>
+          </div>
+          <div v-if="mobileParametersOpen" class="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--color-divider)] pt-3" data-testid="playground-mobile-quick-parameters">
+            <UFormField label="temperature"><UInput v-model.number="parameters.temperature" data-testid="playground-mobile-temperature" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+            <UFormField label="top_p"><UInput v-model.number="parameters.topP" data-testid="playground-mobile-top-p" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+            <UFormField label="max_tokens"><UInput v-model.number="parameters.maxTokens" data-testid="playground-mobile-max-tokens" type="number" class="font-mono tabular-nums" /></UFormField>
+            <div class="flex items-end pb-2"><UCheckbox v-model="parameters.stream" label="stream" data-testid="playground-mobile-stream" /></div>
+            <p class="col-span-2 text-xs leading-5 text-[var(--neutral-700)]">Quick controls stay beside the composer on mobile. Advanced parameters and raw Request/Response inspection remain below the thread.</p>
+          </div>
+        </div>
+
         <div class="min-h-0 flex-1 space-y-5 overflow-auto p-5">
           <div v-if="parameters.systemPrompt.trim()" class="max-w-3xl font-mono text-[12.5px] text-[var(--neutral-700)]">
             <p class="mb-1 text-[9.5px] font-extrabold tracking-[0.18em]">system</p>
@@ -520,7 +545,7 @@ onBeforeUnmount(() => controller?.abort())
 
       <aside class="min-w-0 space-y-4" data-testid="playground-rail">
         <Frame class="p-0">
-          <div class="border-b border-[var(--color-divider)] p-4">
+          <div class="hidden border-b border-[var(--color-divider)] p-4 xl:block">
             <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Instance — the OpenAI model value</p>
             <div class="mt-3 max-h-56 space-y-1 overflow-auto">
               <button
@@ -529,9 +554,9 @@ onBeforeUnmount(() => controller?.abort())
                 type="button"
                 class="block w-full border px-3 py-2 text-left"
                 :class="selectedInstanceID === instance.id
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'
                   : 'border-[var(--color-divider)] bg-transparent'"
-                @click="selectedInstanceID = instance.id; rawDirty = false; syncRawRequest()"
+                @click="selectInstance(instance.id)"
               >
                 <span class="block font-mono text-[12px] font-semibold">{{ instance.id }}</span>
                 <span class="mt-0.5 block text-[10px] opacity-75">{{ manager.instanceState(instance) }} · {{ manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id }}</span>

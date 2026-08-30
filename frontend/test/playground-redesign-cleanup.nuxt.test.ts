@@ -18,6 +18,18 @@ describe('Playground redesign cleanup', () => {
     expect(source).toContain('Tokens / second</dt><dd class="font-mono tabular-nums"')
   })
 
+  it('keeps mobile experiment controls next to the composer without duplicating the desktop Instance list', () => {
+    expect(source).toContain('data-testid="playground-mobile-controls"')
+    expect(source).toContain('aria-label="Playground Instance"')
+    expect(source).toContain('data-testid="playground-mobile-parameters-toggle"')
+    expect(source).toContain('data-testid="playground-mobile-quick-parameters"')
+    expect(source).toContain('Quick controls stay beside the composer on mobile.')
+    expect(source).toContain('hidden border-b border-[var(--color-divider)] p-4 xl:block')
+    expect(source).toContain('text-[16px] font-semibold')
+    expect(source).toContain('text-[var(--color-on-accent)]')
+    expect(source).not.toContain('bg-[var(--color-accent)] text-white')
+  })
+
   it('uses the signed-in management bridge without a Playground API-key field', () => {
     expect(source).toContain("import { readManagementToken } from '~/composables/useManagerApi'")
     expect(source).toContain('/api/v1/playground/chat/completions')
