@@ -20,7 +20,7 @@ const administrationNavigation: NavigationMenuItem[] = [
 </script>
 
 <template>
-  <UDashboardSidebar id="manager-sidebar" collapsible class="bg-[var(--neutral-100)]">
+  <UDashboardSidebar id="manager-sidebar" collapsible class="bg-[var(--neutral-100)] lg:sticky lg:top-0 lg:h-svh lg:self-start">
     <template #header>
       <UButton to="/" color="neutral" variant="link" class="h-auto justify-start gap-3 px-1 py-2">
         <span class="font-[var(--font-heading)] text-3xl font-semibold text-[var(--color-accent)]">λ</span>
