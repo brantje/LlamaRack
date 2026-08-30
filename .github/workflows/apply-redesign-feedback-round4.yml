@@ -1,0 +1,91 @@
+name: Apply redesign feedback round four
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/apply-redesign-feedback-round4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded profile and logs patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          NL = chr(10)
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:140]!r}')
+              p.write_text(source.replace(old, new, 1))
+
+          profile = 'frontend/app/pages/profile.vue'
+          replace_once(profile, "const password = reactive({ current: '', next: '', confirmation: '' })", "const password = reactive({ current: '', next: '', confirmation: '' })" + NL + "const passwordVisible = reactive({ current: false, next: false, confirmation: false })" + NL + "const passwordMismatch = computed(() => Boolean(password.confirmation && password.next !== password.confirmation))" + NL + "const passwordReady = computed(() => Boolean(password.current && password.next.length >= 10 && password.confirmation.length >= 10 && !passwordMismatch.value))" + NL + "const otherSessionCount = computed(() => sessions.value.filter(session => !session.current).length)")
+          replace_once(profile, '        <Frame class="flex h-[66px] w-[66px] shrink-0 items-center justify-center p-0 font-mono text-xl font-semibold text-[var(--accent-700)]" data-testid="profile-avatar">' + NL + '          {{ initials(profile.username) }}' + NL + '        </Frame>', '        <UAvatar :text="initials(profile.username)" size="xl" class="h-[66px] w-[66px] shrink-0 font-mono text-xl font-semibold text-[var(--accent-700)]" data-testid="profile-avatar" />')
+          replace_once(profile, '      <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Changing the password signs out every other session.</p>', '      <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Changing the password signs out every other session. Use at least 10 characters for the new password.</p>')
+          replace_once(profile, '        <UFormField label="Current password" required><UInput v-model="password.current" class="w-full" type="password" autocomplete="current-password" required /></UFormField>', '        <UFormField label="Current password" required>' + NL + '          <UInput v-model="password.current" data-testid="profile-current-password" class="w-full" :type="passwordVisible.current ? \'text\' : \'password\'" autocomplete="current-password" required>' + NL + '            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.current ? \'i-lucide-eye-off\' : \'i-lucide-eye\'" :aria-label="passwordVisible.current ? \'Hide current password\' : \'Show current password\'" :aria-pressed="passwordVisible.current" data-testid="toggle-current-password" @click="passwordVisible.current = !passwordVisible.current" /></template>' + NL + '          </UInput>' + NL + '        </UFormField>')
+          replace_once(profile, '        <UFormField label="New password" required><UInput v-model="password.next" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>', '        <UFormField label="New password" help="At least 10 characters." required>' + NL + '          <UInput v-model="password.next" data-testid="profile-new-password" class="w-full" :type="passwordVisible.next ? \'text\' : \'password\'" autocomplete="new-password" minlength="10" required>' + NL + '            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.next ? \'i-lucide-eye-off\' : \'i-lucide-eye\'" :aria-label="passwordVisible.next ? \'Hide new password\' : \'Show new password\'" :aria-pressed="passwordVisible.next" data-testid="toggle-new-password" @click="passwordVisible.next = !passwordVisible.next" /></template>' + NL + '          </UInput>' + NL + '        </UFormField>')
+          replace_once(profile, '        <UFormField label="Confirm new password" required><UInput v-model="password.confirmation" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>', '        <UFormField label="Confirm new password" :error="passwordMismatch ? \'New password confirmation does not match.\' : undefined" required>' + NL + '          <UInput v-model="password.confirmation" data-testid="profile-confirm-password" class="w-full" :type="passwordVisible.confirmation ? \'text\' : \'password\'" autocomplete="new-password" minlength="10" required>' + NL + '            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.confirmation ? \'i-lucide-eye-off\' : \'i-lucide-eye\'" :aria-label="passwordVisible.confirmation ? \'Hide password confirmation\' : \'Show password confirmation\'" :aria-pressed="passwordVisible.confirmation" data-testid="toggle-confirm-password" @click="passwordVisible.confirmation = !passwordVisible.confirmation" /></template>' + NL + '          </UInput>' + NL + '        </UFormField>')
+          replace_once(profile, '        <AppButton type="submit" intent="primary" :loading="busy">Change password</AppButton>', '        <AppButton type="submit" intent="primary" :loading="busy" :disabled="!passwordReady">Change password</AppButton>')
+          replace_once(profile, '        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account.</p>', '        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account. Provider configuration is managed in <NuxtLink to="/admin/authentication" class="font-semibold text-[var(--accent-700)] hover:underline">Administration → Authentication</NuxtLink>.</p>')
+          replace_once(profile, '          <AppButton intent="secondary" size="sm" @click="revokeOthers">Revoke others</AppButton>' + NL + '          <AppButton intent="destructive" size="sm" @click="revokeAll">Log out everywhere</AppButton>', '          <AppButton intent="secondary" size="sm" :disabled="otherSessionCount === 0" @click="revokeOthers">Revoke others</AppButton>' + NL + '          <AppButton intent="destructive" size="sm" :disabled="sessions.length === 0" @click="revokeAll">Log out everywhere</AppButton>')
+
+          logs = 'frontend/app/pages/admin/system-logs.vue'
+          replace_once(logs, '        <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />', '        <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />' + NL + '        <div v-if="!follow && entries.length" class="flex items-center gap-1" data-testid="system-log-follow-paused"><StatusTag variant="neutral">Follow paused</StatusTag><AppButton intent="ghost" size="xs" @click="follow = true">Resume</AppButton></div>')
+
+          profile_test = 'frontend/test/profile-redesign.nuxt.test.ts'
+          replace_once(profile_test, "    expect(wrapper.get('[data-testid=\"profile-avatar\"]').text()).toBe('JD')", "    expect(wrapper.get('[data-testid=\"profile-avatar\"]').text()).toBe('JD')" + NL + "    expect(wrapper.get('[data-testid=\"profile-avatar\"]').element.tagName).toBe('SPAN')")
+          replace_once(profile_test, "    expect(wrapper.get('[data-testid=\"profile-password\"]').text()).toContain('Changing the password signs out every other session.')", "    const passwordSection = wrapper.get('[data-testid=\"profile-password\"]')" + NL + "    expect(passwordSection.text()).toContain('Changing the password signs out every other session.')" + NL + "    expect(passwordSection.text()).toContain('Use at least 10 characters for the new password.')" + NL + "    expect(passwordSection.text()).toContain('At least 10 characters.')" + NL + "    for (const [inputId, toggleId] of [['profile-current-password', 'toggle-current-password'], ['profile-new-password', 'toggle-new-password'], ['profile-confirm-password', 'toggle-confirm-password']]) {" + NL + "      const input = wrapper.get(`[data-testid=\"${inputId}\"]`)" + NL + "      const toggle = wrapper.get(`[data-testid=\"${toggleId}\"]`)" + NL + "      expect(input.attributes('type')).toBe('password')" + NL + "      await toggle.trigger('click')" + NL + "      expect(input.attributes('type')).toBe('text')" + NL + "      expect(toggle.attributes('aria-pressed')).toBe('true')" + NL + "      await toggle.trigger('click')" + NL + "      expect(input.attributes('type')).toBe('password')" + NL + "    }" + NL + "    const changePassword = wrapper.findAll('button').find(button => button.text().trim() === 'Change password')!" + NL + "    expect(changePassword.attributes('disabled')).toBeDefined()" + NL + "    await wrapper.get('[data-testid=\"profile-current-password\"]').setValue('current-password')" + NL + "    await wrapper.get('[data-testid=\"profile-new-password\"]').setValue('new-password')" + NL + "    await wrapper.get('[data-testid=\"profile-confirm-password\"]').setValue('different-password')" + NL + "    await flushPromises()" + NL + "    expect(passwordSection.text()).toContain('New password confirmation does not match.')" + NL + "    expect(changePassword.attributes('disabled')).toBeDefined()" + NL + "    await wrapper.get('[data-testid=\"profile-confirm-password\"]').setValue('new-password')" + NL + "    await flushPromises()" + NL + "    expect(passwordSection.text()).not.toContain('New password confirmation does not match.')" + NL + "    expect(changePassword.attributes('disabled')).toBeUndefined()")
+          replace_once(profile_test, "    expect(wrapper.get('[data-testid=\"profile-authentication-sources\"]').text()).toContain('OIDC')", "    expect(wrapper.get('[data-testid=\"profile-authentication-sources\"]').text()).toContain('OIDC')" + NL + "    expect(wrapper.get('[data-testid=\"profile-authentication-sources\"]').text()).toContain('Administration → Authentication')")
+          replace_once(profile_test, "    expect(wrapper.get('[data-testid=\"profile-sessions\"]').text()).toContain('Unknown address')", "    expect(wrapper.get('[data-testid=\"profile-sessions\"]').text()).toContain('Unknown address')" + NL + "    const sessionButtons = wrapper.get('[data-testid=\"profile-sessions\"]').findAll('button')" + NL + "    expect(sessionButtons.find(button => button.text().trim() === 'Revoke others')!.attributes('disabled')).toBeUndefined()" + NL + "    expect(sessionButtons.find(button => button.text().trim() === 'Log out everywhere')!.attributes('disabled')).toBeUndefined()")
+          replace_once(profile_test, "    expect(wrapper.text()).toContain('No active sessions')", "    expect(wrapper.text()).toContain('No active sessions')" + NL + "    const sessionButtons = wrapper.get('[data-testid=\"profile-sessions\"]').findAll('button')" + NL + "    expect(sessionButtons.find(button => button.text().trim() === 'Revoke others')!.attributes('disabled')).toBeDefined()" + NL + "    expect(sessionButtons.find(button => button.text().trim() === 'Log out everywhere')!.attributes('disabled')).toBeDefined()")
+
+          system_test = 'frontend/test/system-logs.nuxt.test.ts'
+          replace_once(system_test, "    expect((follow.props() as any).modelValue).toBe(false)" + NL + "    follow.vm.$emit('update:modelValue', true)" + NL + "    await flushPromises()" + NL + "    expect((follow.props() as any).modelValue).toBe(true)", "    expect((follow.props() as any).modelValue).toBe(false)" + NL + "    expect(scrolling.text()).toContain('Follow paused')" + NL + "    await button(scrolling, 'Resume').trigger('click')" + NL + "    await flushPromises()" + NL + "    expect((follow.props() as any).modelValue).toBe(true)" + NL + "    expect(scrolling.text()).not.toContain('Follow paused')")
+
+          e2e = 'frontend/e2e/redesign-screenshots.spec.ts'
+          replace_once(e2e, "const user = { id: 1, username: 'admin', enabled: true }", "const user = { id: 1, username: 'admin', enabled: true, created_at: nowSeconds - 86400 * 120, last_login_at: nowSeconds - 300 }" + NL + "const profileSessions = [" + NL + "  { id: 'session-current', user_id: 1, created_at: nowSeconds - 7200, expires_at: nowSeconds + 43200, remote_address: '192.0.2.24', user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36', current: true }," + NL + "  { id: 'session-other', user_id: 1, created_at: nowSeconds - 86400, expires_at: nowSeconds + 21600, remote_address: '198.51.100.18', user_agent: 'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/142.0' }" + NL + "]" + NL + "const profileIdentities = [{ id: 'identity-authentik', provider_id: 'authentik', issuer: 'https://auth.example.test/application/o/llamacpp-manager/', subject: 'admin-subject', user_id: 1, created_at: nowSeconds - 86400 * 30 }]" + NL + "const systemLogs = [" + NL + "  { timestamp: new Date(now - 90000).toISOString(), level: 'INFO', source: 'manager', message: 'reconcile: 2 Always On Instances satisfied' }," + NL + "  { timestamp: new Date(now - 60000).toISOString(), level: 'WARN', source: 'gateway', message: 'request queue depth reached 4 while qwen3-primary was loading' }," + NL + "  { timestamp: new Date(now - 30000).toISOString(), level: 'ERROR', source: 'qwen3-primary', message: 'worker exited unexpectedly after llama-server reported a representative long diagnostic message that verifies wrapping remains readable on narrow viewports' }," + NL + "  { timestamp: new Date(now - 10000).toISOString(), level: 'DEBUG', source: 'telemetry', message: 'mapped host PID 1421 to managed Instance qwen3-primary' }" + NL + "]")
+          replace_once(e2e, "  if (pathname === '/api/v1/me') return user", "  if (pathname === '/api/v1/me') return user" + NL + "  if (pathname === '/api/v1/me/sessions') return profileSessions" + NL + "  if (pathname === '/api/v1/me/identities') return profileIdentities")
+          replace_once(e2e, "  if (/\\/logs(?:\\/|$)/.test(pathname)) return { items: [] }", "  if (pathname === '/api/v1/logs') return { entries: systemLogs }" + NL + "  if (/\\/logs(?:\\/|$)/.test(pathname)) return { items: [] }")
+          replace_once(e2e, "  test(`${name} screenshot`, async ({ page }, testInfo) => {" + NL + "    await page.goto(path, { waitUntil: 'domcontentloaded' })", "  test(`${name} screenshot`, async ({ page }, testInfo) => {" + NL + "    if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })" + NL + "    await page.goto(path, { waitUntil: 'domcontentloaded' })")
+          replace_once(e2e, "    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()" + NL + "    await page.waitForTimeout(800)", "    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()" + NL + "    if (name === 'profile') {" + NL + "      await expect(page.locator('[data-testid=\"profile-sessions\"]')).toContainText('Current')" + NL + "      await expect(page.locator('[data-testid=\"profile-authentication-sources\"]')).toContainText('Authentik')" + NL + "    }" + NL + "    if (name === 'admin-logs') await expect(page.locator('[data-testid=\"system-log-row\"]')).toHaveCount(4)" + NL + "    await page.waitForTimeout(800)")
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated fixes and remove helper
+        run: |
+          rm .github/workflows/apply-redesign-feedback-round4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ui): improve profile and diagnostic feedback" -m "Add accessible password visibility and validation feedback, remove the nested profile card, disable inapplicable session actions, surface paused log following, and expand deterministic Profile and Admin Logs visual fixtures."
+          git push origin HEAD:feature/redesign
