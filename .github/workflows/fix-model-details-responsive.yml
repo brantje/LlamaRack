@@ -1,5 +1,6 @@
 name: Validate Model details responsive feedback
 
+# Re-run after correcting the expanded metadata readiness assertion.
 on:
   push:
     branches:
@@ -29,7 +30,7 @@ jobs:
         working-directory: frontend
         run: npm ci
       - name: Run required frontend coverage
-        working-directory: frontend
+        working_directory: frontend
         run: npm run test:coverage
       - name: Build frontend
         working-directory: frontend
