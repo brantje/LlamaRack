@@ -265,7 +265,7 @@ for (const [name, path] of pages) {
     await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
-      fullPage: false,
+      fullPage: true,
       animations: 'disabled'
     })
   })
