@@ -220,8 +220,8 @@ onMounted(() => void load())
 
       <div v-if="busy && !details" class="p-6"><USkeleton class="h-40 w-full" /></div>
       <div v-else-if="details && !details.metadata.length" class="px-6 py-10 text-center">
-        <p class="font-semibold">No matching GGUF metadata</p>
-        <p class="mt-1 text-sm text-[var(--neutral-700)]">Try a different metadata key filter.</p>
+        <p class="font-semibold">{{ appliedQuery ? 'No matching GGUF metadata' : 'No GGUF metadata returned for this artifact' }}</p>
+        <p class="mt-1 text-sm text-[var(--neutral-700)]">{{ appliedQuery ? `No keys match “${appliedQuery}”. Clear the filter to see all metadata.` : 'The GGUF parser returned no metadata keys for this registered artifact.' }}</p>
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full table-fixed text-left" data-testid="metadata-table">
@@ -248,7 +248,8 @@ onMounted(() => void load())
       </div>
 
       <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-divider)] px-5 py-3">
-        <p class="text-xs text-[var(--neutral-700)]">Showing {{ pageStart }}–{{ pageEnd }} of {{ details?.metadata_total || 0 }} matching keys</p>
+        <p v-if="details?.metadata_total" class="text-xs text-[var(--neutral-700)]">Showing {{ pageStart }}–{{ pageEnd }} of {{ details.metadata_total }} matching keys</p>
+        <p v-else class="text-xs text-[var(--neutral-700)]">{{ appliedQuery ? 'No matching keys' : 'No metadata keys to paginate' }}</p>
         <div class="flex gap-2">
           <AppButton type="button" intent="ghost" size="sm" :disabled="!canPrevious || busy" @click="previousPage">Previous</AppButton>
           <AppButton type="button" intent="ghost" size="sm" :disabled="!canNext || busy" @click="nextPage">Next</AppButton>

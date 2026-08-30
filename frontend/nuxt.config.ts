@@ -13,7 +13,7 @@ const themeBootstrap = `(() => {
 export default defineNuxtConfig({
   ssr: false,
   modules: ['@nuxt/ui'],
-  devtools: { enabled: true },
+  devtools: { enabled: process.env.CI !== 'true' },
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || ''

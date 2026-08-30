@@ -58,8 +58,6 @@ async function remove() {
 
 <template>
   <AdminShell title="Hugging Face" description="Manage the global provider credential used for private and gated repositories.">
-    <template #actions><AppButton intent="primary" :loading="busy" :disabled="!tokenInput.trim()" @click="save">Save token</AppButton></template>
-
     <Frame class="max-w-[720px] p-5" data-testid="admin-huggingface-card">
       <div>
         <h2 class="text-base font-semibold">Provider credential</h2>

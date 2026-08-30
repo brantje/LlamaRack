@@ -265,12 +265,12 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           </div>
 
           <div class="mt-5 border-t border-[var(--color-divider)] pt-5 space-y-4">
-            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.local_login_enabled.source }}</span></div>
-            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>
-            <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.oidc_auto_link_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.local_login_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_auto_link_enabled.source }}</span></div>
           </div>
 
-          <div class="mt-5 flex flex-wrap items-start gap-2 border border-[var(--color-divider)] px-4 py-3" data-testid="authentication-auto-link-note">
+          <div class="mt-5 flex flex-col items-start gap-2 border border-[var(--color-divider)] px-4 py-3 sm:flex-row" data-testid="authentication-auto-link-note">
             <StatusTag variant="pending">Explicit linking required</StatusTag>
             <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking.</p>
           </div>
@@ -283,7 +283,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
               <h2 class="mt-1 text-xl font-semibold">External login providers</h2>
               <p class="mt-1 text-sm text-[var(--neutral-800)]">Multiple providers can be enabled at the same time.</p>
             </div>
-            <AppButton intent="primary" icon="i-lucide-plus" @click="setProviderForm()">Add provider</AppButton>
+            <AppButton intent="secondary" icon="i-lucide-plus" @click="setProviderForm()">Add provider</AppButton>
           </div>
 
           <Frame v-if="providers.length === 0" class="p-8 text-center">
@@ -292,7 +292,8 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
             <AppButton class="mt-4" intent="primary" @click="setProviderForm()">Add provider</AppButton>
           </Frame>
 
-          <Frame v-else class="overflow-x-auto">
+          <Frame v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="OIDC providers. Scroll horizontally for issuer, callback and actions.">
+            <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] sm:hidden">Scroll horizontally for issuer, callback and actions.</p>
             <div class="min-w-[760px]">
               <div class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] gap-4 border-b border-[var(--color-divider)] px-4 py-2 text-[11px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
                 <span>Provider</span><span>Issuer</span><span>Callback</span><span class="text-right">Actions</span>

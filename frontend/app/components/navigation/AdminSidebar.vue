@@ -27,6 +27,7 @@ const currentItem = computed(() => navigation.find(item => active(item.to)) ?? n
           <span class="block text-[13.5px] font-semibold leading-5">Administration · {{ currentItem.label }}</span>
           <span class="block text-[11px] leading-4 text-[var(--neutral-800)]">Choose administration section</span>
         </span>
+        <UIcon name="i-lucide-chevron-down" class="size-4 shrink-0 text-[var(--neutral-700)]" aria-hidden="true" />
       </summary>
       <nav class="mt-2 border border-[var(--color-divider)]" aria-label="Administration sections">
         <NuxtLink

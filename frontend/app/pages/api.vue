@@ -124,7 +124,10 @@ async function rotate(key: ManagedAPIKey) {
     <Frame class="p-5" data-testid="api-base-url">
       <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BASE URL</p>
       <h2 class="mt-1 text-base font-semibold">Unified endpoint</h2>
-      <code class="my-4 block break-all border-y border-[var(--color-divider)] py-3 font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>
+      <div class="my-4 flex items-center gap-2 border-y border-[var(--color-divider)] py-3">
+        <code class="min-w-0 flex-1 break-all font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>
+        <AppCopyButton :text="`${apiBase}/v1`" icon-only color="neutral" variant="ghost" size="sm" error-message="Unable to copy Base URL. Select it and copy it manually." data-testid="copy-api-base-url" />
+      </div>
       <p class="text-sm leading-6 text-[var(--neutral-700)]">Supported routes: models, chat completions, completions, Responses and embeddings.</p>
     </Frame>
 
@@ -163,8 +166,9 @@ async function rotate(key: ManagedAPIKey) {
         </div>
       </section>
 
-      <div v-if="keys.length" class="mt-4 border border-[var(--color-divider)]" data-testid="api-keys-table">
-        <UTable :data="keys" :columns="columns">
+      <p v-if="keys.length" class="mt-4 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for key status, timestamps and actions.</p>
+      <div v-if="keys.length" class="mt-2 overflow-x-auto border border-[var(--color-divider)]" data-testid="api-keys-table" role="region" tabindex="0" aria-label="API keys. Scroll horizontally for status, timestamps and actions.">
+        <UTable class="min-w-[760px]" :data="keys" :columns="columns">
           <template #name-cell="{ row }"><span class="text-[13.5px] font-semibold">{{ row.original.name }}</span></template>
           <template #prefix-cell="{ row }"><span class="font-mono text-[11.5px] text-[var(--neutral-700)]">{{ row.original.prefix }}…</span></template>
           <template #status-cell="{ row }"><StatusTag :variant="statusVariant(row.original)">{{ statusLabel(row.original) }}</StatusTag></template>

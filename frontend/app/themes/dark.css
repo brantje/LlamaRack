@@ -4,6 +4,7 @@ html[data-theme='dark'] {
   --color-surface: #2a2a2a;
   --color-text: #f3f3f3;
   --color-accent: #5f8fcf;
+  --color-on-accent: #181818;
   --color-divider: #303030;
 
   --neutral-100: #181818;
@@ -12,7 +13,7 @@ html[data-theme='dark'] {
   --neutral-400: #303030;
   --neutral-500: #3c3c3c;
   --neutral-600: #5a5a5a;
-  --neutral-700: #7a7a7a;
+  --neutral-700: #949494;
   --neutral-800: #afafaf;
   --neutral-900: #e7e7e7;
 

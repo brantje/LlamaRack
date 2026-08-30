@@ -52,7 +52,7 @@
   --ui-text-toned: var(--neutral-900);
   --ui-text: var(--color-text);
   --ui-text-highlighted: var(--color-text);
-  --ui-text-inverted: var(--color-bg);
+  --ui-text-inverted: var(--color-on-accent);
   --ui-bg-inverted: var(--color-text);
   --ui-border-inverted: var(--color-text);
 }
