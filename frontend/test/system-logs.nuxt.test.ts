@@ -73,7 +73,7 @@ describe('System diagnostics logs', () => {
     expect(workerChip.attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(2)
 
-    await button(wrapper, 'WARN').trigger('click')
+    await button(wrapper, 'WARN+').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('three failures')
     expect(wrapper.text()).toContain('worker exited status 2')
