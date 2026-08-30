@@ -1,0 +1,51 @@
+name: Validate Instance action priority
+
+on:
+  push:
+    branches:
+      - fix/redesign-button-hierarchy
+    paths:
+      - .github/workflows/fix-instance-stop-priority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/redesign-button-hierarchy
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply one-line action hierarchy fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/app/pages/instances/[id]/detail.vue')
+          source = path.read_text()
+          old = '<AppButton v-else intent="primary" :loading="pending === \'stop\'" @click="runtimeAction(\'stop\')">Stop</AppButton>'
+          new = '<AppButton v-else intent="secondary" :loading="pending === \'stop\'" @click="runtimeAction(\'stop\')">Stop</AppButton>'
+          if source.count(old) != 1:
+              raise SystemExit(f'expected one Stop primary action, found {source.count(old)}')
+          path.write_text(source.replace(old, new, 1))
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Commit validated action hierarchy fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend
+          git commit -m "fix(ui): clarify Instance detail action priority"
+          git push origin HEAD:fix/redesign-button-hierarchy
