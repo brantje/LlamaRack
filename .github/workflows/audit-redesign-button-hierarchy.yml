@@ -1,0 +1,29 @@
+name: Audit redesign button hierarchy
+
+on:
+  push:
+    branches:
+      - audit/redesign-button-hierarchy
+    paths:
+      - .github/workflows/audit-redesign-button-hierarchy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/redesign-button-hierarchy
+      - name: Inventory button semantics
+        run: |
+          echo '=== AppButton destructive intent ==='
+          rg -n --glob '*.vue' 'intent="destructive"|:intent=.*destructive' frontend/app || true
+          echo '=== Direct UButton error/warning colors ==='
+          rg -n --glob '*.vue' '<UButton[^>]*(color="(error|warning)"|:color=.*(error|warning))' frontend/app || true
+          echo '=== Confirmation legacy colors ==='
+          rg -n --glob '*.{vue,ts}' "color:\s*'(error|warning)'|color:\s*[^,\n]*\?\s*'(error|warning)'" frontend/app || true
+          echo '=== All direct UButton occurrences in confirmation/delete surfaces ==='
+          rg -n '<UButton' frontend/app/components/AppConfirmationModal.vue frontend/app/components/ModelDeleteModal.vue || true
