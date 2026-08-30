@@ -1,0 +1,26 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+const formSource = readFileSync(resolve(process.cwd(), 'app/components/InstanceForm.vue'), 'utf8')
+const editSource = readFileSync(resolve(process.cwd(), 'app/pages/instances/[id]/edit.vue'), 'utf8')
+
+describe('Instance form redesign cleanup', () => {
+  it('uses semantic Frame and StatusTag error notes', () => {
+    expect(formSource).toContain('data-testid="instance-form-error"')
+    expect(formSource).toContain('<StatusTag variant="failed">Unable to save Instance</StatusTag>')
+    expect(formSource).not.toContain('<UAlert')
+
+    expect(editSource).toContain('data-testid="instance-edit-load-error"')
+    expect(editSource).toContain('<StatusTag variant="failed">Unable to load Instance</StatusTag>')
+    expect(editSource).not.toContain('<UAlert')
+  })
+
+  it('retains the issue-required identity and placement hooks', () => {
+    expect(formSource).toContain('data-testid="instance-name"')
+    expect(formSource).toContain('data-testid="instance-slug"')
+    expect(formSource).toContain('data-testid="companion-mmproj"')
+    expect(formSource).toContain('data-testid="manual-placement-controls"')
+    expect(formSource).toContain(':disabled="!canSubmit"')
+  })
+})
