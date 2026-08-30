@@ -50,25 +50,25 @@ test('dashboard shows real fake-nvidia pressure state', async ({ page, request }
   expect(snapshot.processes.some(process => process.process_name?.includes('fake-llama-server'))).toBeTruthy()
 
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await expect(page.locator('#manager-main')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
   await expect(page.getByText(/RTX 4060 Ti/i).first()).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(1500)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/dashboard-pressure.png`,
-    fullPage: true,
+    fullPage: false,
     animations: 'disabled'
   })
 })
 
 test('system diagnostics render against fake-nvidia manager', async ({ page }, testInfo) => {
   await page.goto('/admin/system', { waitUntil: 'domcontentloaded' })
-  await expect(page.locator('#manager-main')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: 'System' })).toBeVisible()
   await expect(page.getByText('llama.cpp', { exact: true })).toBeVisible()
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/admin-system.png`,
-    fullPage: true,
+    fullPage: false,
     animations: 'disabled'
   })
 })
