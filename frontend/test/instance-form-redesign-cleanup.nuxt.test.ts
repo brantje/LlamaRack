@@ -19,7 +19,8 @@ describe('Instance form redesign cleanup', () => {
   it('retains the issue-required identity and placement hooks', () => {
     expect(formSource).toContain('data-testid="instance-name"')
     expect(formSource).toContain('data-testid="instance-slug"')
-    expect(formSource).toContain('data-testid="companion-mmproj"')
+    expect(formSource).toContain("{ key: 'mmproj', label: 'Vision projector'")
+    expect(formSource).toContain(':data-testid="`companion-${definition.key}`"')
     expect(formSource).toContain('data-testid="manual-placement-controls"')
     expect(formSource).toContain(':disabled="!canSubmit"')
   })
