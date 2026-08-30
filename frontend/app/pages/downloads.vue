@@ -74,8 +74,8 @@ function eta(job: DownloadJob) {
 function stateVariant(state: string): 'ready' | 'pending' | 'neutral' | 'failed' {
   if (state === 'COMPLETED') return 'ready'
   if (state === 'FAILED') return 'failed'
-  if (state === 'CANCELLED') return 'neutral'
-  return 'pending'
+  if (activeStates.has(state)) return 'pending'
+  return 'neutral'
 }
 
 function applyJob(job: DownloadJob) {
@@ -220,8 +220,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]">
-      {{ error }}
+    <Frame v-if="error" class="p-3" data-testid="downloads-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Download error</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
     </Frame>
 
     <div v-if="loading && !jobs.length" class="space-y-3" data-testid="downloads-loading">
@@ -272,10 +275,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <Frame v-if="job.error" class="mt-4 border-[var(--accent-800)] bg-[var(--neutral-200)] p-3">
-          <div class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--accent-800)]">Download failed</div>
-          <p class="mt-1 text-sm text-[var(--color-text)]">{{ job.error }}</p>
-        </Frame>
+        <div v-if="job.error" class="mt-4 flex flex-wrap items-start gap-2 border border-[var(--color-divider)] p-3" data-testid="download-failure-note">
+          <StatusTag variant="failed">Download failed</StatusTag>
+          <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ job.error }}</p>
+        </div>
 
         <UAccordion
           v-if="job.files?.length"
