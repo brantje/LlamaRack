@@ -1,10 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
 
 const backendURL = 'http://127.0.0.1:8888'
 const username = 'ux-review-admin'
 const password = 'ux-review-password-1234'
 
-async function loginToken(request: Parameters<Parameters<typeof test.beforeEach>[0]>[0]['request']) {
+async function loginToken(request: APIRequestContext) {
   const bootstrap = await request.get(`${backendURL}/api/v1/auth/bootstrap`)
   expect(bootstrap.ok()).toBeTruthy()
   const bootstrapState = await bootstrap.json() as { required: boolean }
