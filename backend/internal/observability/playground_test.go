@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/database"
+	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 )
 
 func playgroundTestService(t *testing.T) *Service {
@@ -21,14 +22,15 @@ func playgroundTestService(t *testing.T) *Service {
 	return New(db)
 }
 
-func TestPlaygroundDiagnosticsUsesRequestRecordAndLifecycleWindow(t *testing.T) {
+func TestPlaygroundDiagnosticsUsesRequestRecordAndCorrelatedLifecycle(t *testing.T) {
 	service := playgroundTestService(t)
 	ctx := context.Background()
 	now := time.Now().UnixMilli()
 	ttft := 125.0
 	rate := 42.5
+	traceID := "11111111-1111-4111-8111-111111111111"
 	record := RequestRecord{
-		StartedAt: now - 1000, FinishedAt: now + 1000, InstanceID: "target", Endpoint: "/v1/chat/completions",
+		StartedAt: now - 1000, FinishedAt: now + 1000, InstanceID: "target", Endpoint: "/v1/chat/completions", TraceID: traceID,
 		StatusCode: http.StatusOK, Result: "success", DurationMS: 900, TTFTMS: &ttft,
 		PromptTokens: 12, GeneratedTokens: 24, TotalTokens: 36, TokensPerSecond: &rate,
 		LoadDurationMS: 320, Autoloaded: true,
@@ -36,13 +38,18 @@ func TestPlaygroundDiagnosticsUsesRequestRecordAndLifecycleWindow(t *testing.T) 
 	if err := service.FinalizeCorrelatedRequest(ctx, "req-playground", nil, record); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.RecordLifecycle(ctx, LifecycleEviction, "victim-a", 0); err != nil {
+	correlated := lifecycle.WithRequestCorrelation(ctx, traceID)
+	if err := service.RecordLifecycle(correlated, LifecycleEviction, "victim-a", 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.RecordLifecycle(ctx, LifecycleEviction, "victim-a", 0); err != nil {
+	if err := service.RecordLifecycle(correlated, LifecycleEviction, "victim-a", 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.RecordLifecycle(ctx, LifecycleLoad, "target", time.Second); err != nil {
+	other := lifecycle.WithRequestCorrelation(ctx, "22222222-2222-4222-8222-222222222222")
+	if err := service.RecordLifecycle(other, LifecycleEviction, "victim-from-concurrent-request", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.RecordLifecycle(correlated, LifecycleLoad, "target", time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -79,7 +86,10 @@ func TestPlaygroundLifecycleRecorderIgnoresUnrelatedEvents(t *testing.T) {
 	if err := service.recordPlaygroundLifecycleEvent(ctx, LifecycleLoad, "one"); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.recordPlaygroundLifecycleEvent(ctx, LifecycleEviction, " "); err != nil {
+	if err := service.recordPlaygroundLifecycleEvent(ctx, LifecycleEviction, "victim-without-correlation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.recordPlaygroundLifecycleEvent(lifecycle.WithRequestCorrelation(ctx, "33333333-3333-4333-8333-333333333333"), LifecycleEviction, " "); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
@@ -91,6 +101,39 @@ func TestPlaygroundLifecycleRecorderIgnoresUnrelatedEvents(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("count=%d", count)
+	}
+	if got := lifecycle.RequestCorrelationFromContext(nil); got != "" {
+		t.Fatalf("nil correlation=%q", got)
+	}
+	if got := lifecycle.RequestCorrelationFromContext(lifecycle.WithRequestCorrelation(ctx, "  ")); got != "" {
+		t.Fatalf("empty correlation=%q", got)
+	}
+}
+
+func TestPlaygroundSchemaMigratesDraftTable(t *testing.T) {
+	service := playgroundTestService(t)
+	ctx := context.Background()
+	if _, err := service.db.ExecContext(ctx, `CREATE TABLE playground_lifecycle_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		recorded_at INTEGER NOT NULL,
+		event TEXT NOT NULL,
+		instance_id TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ensurePlaygroundSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(recorded_at,event,instance_id,correlation_id) VALUES(?,?,?,?)`, time.Now().UnixMilli(), LifecycleEviction, "victim", "trace"); err != nil {
+		t.Fatalf("migration did not add correlation_id: %v", err)
+	}
+}
+
+func TestPlaygroundEvictionsWithoutTraceAreEmpty(t *testing.T) {
+	service := playgroundTestService(t)
+	got, err := service.playgroundEvictions(context.Background(), RequestRecord{InstanceID: "target"})
+	if err != nil || got != nil {
+		t.Fatalf("evictions=%v err=%v", got, err)
 	}
 }
 
