@@ -109,6 +109,7 @@ describe('Phase 11 Dashboard', () => {
 
     expect(wrapper.get('[data-testid="observability-dashboard"]').text()).toContain('Dashboard')
     expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('1 / 2 Instances')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('VRAM committed')
     expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('20 GiB')
     expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('83% of total device capacity')
     expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('12')
@@ -206,6 +207,6 @@ describe('Phase 11 Dashboard', () => {
     expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('0 / 0 Instances')
     expect(wrapper.get('[data-testid="dashboard-vram-allocation"]').text()).toContain('No GPU telemetry available')
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('No recent gateway traffic')
-    expect(wrapper.get('[data-testid="dashboard-attention"]').text()).toContain('Nothing needs attention')
+    expect(wrapper.get('[data-testid="dashboard-attention-empty"]').text()).toContain('Nothing needs attention')
   })
 })

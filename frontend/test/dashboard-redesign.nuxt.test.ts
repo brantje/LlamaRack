@@ -77,7 +77,7 @@ describe('Dashboard redesign', () => {
     expect(wrapper.get('[data-testid="dashboard-last-updated"]').attributes('aria-live')).toBe('polite')
 
     const managedVram = wrapper.get('[data-testid="dashboard-vram"]').text()
-    expect(managedVram).toContain('Managed VRAM')
+    expect(managedVram).toContain('VRAM committed')
     expect(managedVram).toContain('total device capacity attributed to managed Instances')
     expect(managedVram).toContain('2.0 GiB device use unattributed')
 

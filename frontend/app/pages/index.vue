@@ -445,7 +445,7 @@ watch(selectedWindow, (next, previous) => {
       </Frame>
 
       <Frame data-testid="dashboard-vram" class="p-4">
-        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="VRAM attributed to managed llama.cpp Instances; other device processes are excluded.">Managed VRAM</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="VRAM committed to manager-attributed llama.cpp Instances; other device processes are excluded.">VRAM committed</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ formatBytes(committedVRAM) }}</strong>
           <span class="text-sm text-muted">/ {{ formatBytes(totalVRAM) }}</span>
@@ -625,7 +625,7 @@ watch(selectedWindow, (next, previous) => {
           <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">OPERATIONS</p>
           <h3 class="mt-1 text-xl">Needs attention</h3>
         </div>
-        <UEmpty v-if="!attention.length" variant="naked" title="Nothing needs attention." />
+        <p v-if="!attention.length" class="py-3 text-sm text-muted" data-testid="dashboard-attention-empty">Nothing needs attention.</p>
         <div v-else class="space-y-3">
           <div v-for="item in attention" :key="item.key" class="border-l-2 border-[var(--color-accent)] pl-3">
             <div class="flex items-start justify-between gap-3">

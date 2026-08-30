@@ -432,7 +432,11 @@ async function createModel() {
 
         <div v-else data-testid="gguf-select" class="border border-[var(--color-divider)]">
           <div v-if="scanning" class="px-4 py-6 text-sm text-[var(--neutral-700)]">Scanning model folder…</div>
-          <div v-else-if="!availableGGUFs.length" class="px-4 py-6 text-sm text-[var(--neutral-700)]">No unregistered GGUF files found</div>
+          <div v-else-if="!availableGGUFs.length" class="px-4 py-6" data-testid="gguf-empty-state">
+            <p class="text-sm font-semibold text-[var(--color-text)]">No unregistered GGUF files found</p>
+            <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--neutral-800)]">Create model is unavailable until a GGUF artifact is selected. Rescan this manager or open Discover to find one.</p>
+            <div class="mt-3"><AppButton to="/models/discover" intent="secondary" size="xs">Open Discover</AppButton></div>
+          </div>
           <label
             v-for="file in availableGGUFs"
             v-else

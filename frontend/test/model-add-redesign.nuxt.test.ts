@@ -38,6 +38,19 @@ beforeEach(() => {
 })
 
 describe('Add model redesign', () => {
+  it('explains the local artifact dependency and offers Discover when no GGUF can be selected', async () => {
+    mocks.request.mockImplementation(async (path: string) => path === '/api/v1/models/available' ? [] : {})
+
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+
+    const empty = wrapper.get('[data-testid="gguf-empty-state"]')
+    expect(empty.text()).toContain('No unregistered GGUF files found')
+    expect(empty.text()).toContain('Create model is unavailable until a GGUF artifact is selected.')
+    expect(empty.text()).toContain('Open Discover')
+    expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
+  })
+
   it('renders bordered GGUF radios with real modified time and metadata-driven capabilities', async () => {
     const now = Date.now()
     const available = [

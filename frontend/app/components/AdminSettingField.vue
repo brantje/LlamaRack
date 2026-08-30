@@ -4,7 +4,7 @@ const props = defineProps<{
   source: string
 }>()
 
-const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-700)]')
+const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(--accent-800)]' : 'text-[var(--neutral-800)]')
 </script>
 
 <template>
@@ -12,7 +12,7 @@ const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(-
     <template #label>
       <span class="flex w-full items-center justify-between gap-3 text-xs font-semibold">
         <span>{{ label }}</span>
-        <span class="font-mono text-[10.5px] font-normal" :class="sourceClass" data-testid="setting-source">{{ source }}</span>
+        <span class="font-mono text-[11.5px] font-normal" :class="sourceClass" data-testid="setting-source">{{ source }}</span>
       </span>
     </template>
     <slot />

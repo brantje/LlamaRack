@@ -17,6 +17,13 @@ describe('Administration machine typography', () => {
     expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ info.llamacpp.options || 0 }}')
   })
 
+  it('keeps setting provenance readable while preserving machine typography', () => {
+    const content = source('app/components/AdminSettingField.vue')
+    expect(content).toContain('font-mono text-[11.5px] font-normal')
+    expect(content).toContain("'text-[var(--neutral-800)]'")
+    expect(content).toContain("'text-[var(--accent-800)]'")
+  })
+
   it('keeps user timestamps mono and tabular', () => {
     const content = source('app/pages/admin/users.vue')
     expect(content.match(/font-mono text-xs tabular-nums text-\[var\(--neutral-700\)\]/g)).toHaveLength(2)
