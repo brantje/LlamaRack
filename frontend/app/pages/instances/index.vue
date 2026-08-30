@@ -369,7 +369,12 @@ onBeforeUnmount(() => {
       <span class="font-mono text-[10.5px] text-[var(--neutral-700)]" data-testid="instances-telemetry-snapshot">{{ snapshotLabel(telemetrySnapshot) }}</span>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="p-3" data-testid="instances-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Instance operation failed</StatusTag>
+        <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
+      </div>
+    </Frame>
 
     <UEmpty v-if="!instances.length" title="No Instances configured" description="Create an Instance for a registered Model. Stopped Instances remain here and can be launched later.">
       <template #actions><AppButton to="/instances/new" intent="primary" size="sm">New Instance</AppButton></template>
