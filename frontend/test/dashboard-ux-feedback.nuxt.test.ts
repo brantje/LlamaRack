@@ -13,6 +13,6 @@ describe('dashboard UX feedback foundations', () => {
     expect(appConfig).toContain('max-lg:min-h-11 max-lg:min-w-11')
     expect(appConfig).toContain("base: 'rounded-none max-lg:min-h-11'")
     expect(appConfig).toContain("headline: 'text-xs")
-    expect(shared).toContain('--font-size-table-header: 0.75rem')
+    expect(shared).toContain('--font-size-table-header: 11px')
   })
 })
