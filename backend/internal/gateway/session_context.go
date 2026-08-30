@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/observability"
 	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 )
@@ -101,6 +102,9 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		if traceID, ok := suppliedTraceID(r, ""); ok {
+			r = r.WithContext(lifecycle.WithRequestCorrelation(r.Context(), traceID))
+		}
 		sessionFromHeader := sessionIDFromHeaders(r)
 		bodyMetadata := make(chan requestLogMetadata, 1)
 		if r.Body == nil {
