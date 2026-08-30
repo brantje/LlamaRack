@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
-import { NodeTypes, parse, type ElementNode, type TemplateChildNode } from '@vue/compiler-dom'
+import { NodeTypes, parse as parseTemplate, type ElementNode, type TemplateChildNode } from '@vue/compiler-dom'
+import { parse as parseSfc } from '@vue/compiler-sfc'
 import { describe, expect, it } from 'vitest'
 
 function vueFiles(directory: string): string[] {
@@ -23,9 +24,9 @@ function staticIntent(node: ElementNode) {
 }
 
 function multiplePrimaryGroups(source: string): number {
-  const template = source.match(/<template>([\s\S]*?)<\/template>/)?.[1]
+  const template = parseSfc(source).descriptor.template?.content
   if (!template) return 0
-  const root = parse(template)
+  const root = parseTemplate(template)
   let violations = 0
 
   function visit(node: TemplateChildNode) {
