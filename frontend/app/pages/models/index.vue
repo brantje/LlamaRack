@@ -57,7 +57,7 @@ async function remove(id: string) {
         title="Models"
         description="Registered GGUF inventory and reusable llama.cpp defaults. Runtime lifecycle is managed from Instances."
       />
-      <div class="flex flex-wrap justify-end gap-2">
+      <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:justify-end">
         <AppButton type="button" intent="secondary" @click="manager.refresh">Refresh</AppButton>
         <AppButton to="/models/discover" intent="secondary" icon="i-lucide-search">Discover</AppButton>
         <AppButton to="/models/new" intent="primary">Add model</AppButton>
@@ -78,8 +78,8 @@ async function remove(id: string) {
     </Frame>
 
     <Frame v-else class="overflow-hidden p-0">
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse text-left" data-testid="models-table">
+      <div class="overflow-x-auto" role="region" aria-label="Registered models table. Scroll horizontally to view all columns on small screens." tabindex="0" data-testid="models-table-scroll">
+        <table class="min-w-[920px] w-full border-collapse text-left" data-testid="models-table">
           <thead class="border-b border-[var(--color-divider)] bg-[var(--neutral-100)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
             <tr>
               <th class="px-4 py-3 font-semibold">Name</th>
@@ -97,11 +97,11 @@ async function remove(id: string) {
                   {{ model.name }}
                 </NuxtLink>
               </td>
-              <td class="max-w-[340px] break-all px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">{{ model.gguf_path }}</td>
+              <td class="min-w-[260px] max-w-[420px] break-words px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">{{ model.gguf_path }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ formatBytes(model.total_bytes) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ model.quantization || '—' }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ contextLabel(model.context_length) }}</td>
-              <td class="px-4 py-3">
+              <td class="whitespace-nowrap px-4 py-3">
                 <div class="flex justify-end gap-1">
                   <AppButton :to="`/models/${model.id}/details`" intent="ghost" size="xs">Details</AppButton>
                   <AppButton :to="`/models/${model.id}/edit`" intent="ghost" size="xs">Edit</AppButton>

@@ -101,17 +101,17 @@ async function submitAuth() {
     </UCard>
   </UMain>
 
-  <UDashboardGroup v-show="initialized && !backendError && !!user" class="relative inset-auto min-h-svh overflow-visible">
+  <UDashboardGroup v-show="initialized && !backendError && !!user">
     <AppSidebar />
 
-    <UDashboardPanel id="manager-main" :ui="{ body: 'overflow-y-visible' }">
+    <UDashboardPanel id="manager-main" class="min-w-0" :ui="{ body: 'overflow-y-visible' }">
       <template #header>
         <UDashboardNavbar title="llamacpp-manager" class="lg:hidden">
           <template #leading><UDashboardSidebarToggle /></template>
         </UDashboardNavbar>
       </template>
       <template #body>
-        <div class="w-full p-4 sm:p-6 lg:p-10"><slot /></div>
+        <div class="min-w-0 w-full p-4 sm:p-6 lg:p-10"><slot /></div>
       </template>
     </UDashboardPanel>
   </UDashboardGroup>

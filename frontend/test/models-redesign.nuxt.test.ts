@@ -47,14 +47,22 @@ describe('Models registry redesign', () => {
     expect(table.text()).toContain('1.5 KiB')
     expect(table.text()).toContain('Q4_K_M')
     expect(table.text()).toContain('Unknown')
+    expect(table.classes()).toContain('min-w-[920px]')
+
+    const scrollRegion = wrapper.get('[data-testid="models-table-scroll"]')
+    expect(scrollRegion.attributes('role')).toBe('region')
+    expect(scrollRegion.attributes('tabindex')).toBe('0')
+    expect(scrollRegion.attributes('aria-label')).toContain('Scroll horizontally')
 
     const nameLink = table.findAll('a').find(link => link.text().includes('Coder 7B'))!
     expect(nameLink.attributes('href')).toBe('/models/coder/details')
     expect(nameLink.classes()).toContain('text-[13.5px]')
 
     const pathCell = table.findAll('td')[1]!
-    expect(pathCell.classes()).toContain('max-w-[340px]')
-    expect(pathCell.classes()).toContain('break-all')
+    expect(pathCell.classes()).toContain('min-w-[260px]')
+    expect(pathCell.classes()).toContain('max-w-[420px]')
+    expect(pathCell.classes()).toContain('break-words')
+    expect(pathCell.classes()).not.toContain('break-all')
     expect(pathCell.classes()).toContain('font-mono')
     expect(pathCell.classes()).toContain('text-[11.5px]')
 

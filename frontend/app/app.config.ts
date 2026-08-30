@@ -31,7 +31,7 @@ export default defineAppConfig({
     },
     pageHeader: {
       slots: {
-        root: 'border-0 py-0',
+        root: 'w-full basis-full border-0 py-0 sm:basis-auto',
         headline: 'text-xs uppercase tracking-[.1em] text-muted',
         title: 'font-[var(--font-heading)] text-[30px] font-semibold tracking-[-.015em] text-highlighted',
         description: 'text-[15px] leading-[1.55] text-muted'
