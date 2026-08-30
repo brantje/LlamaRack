@@ -61,6 +61,13 @@ describe('Model details redesign', () => {
     expect(wrapper.text()).toContain('MODEL REGISTRY')
     expect(wrapper.text()).toContain('General metadata read directly from the registered GGUF. Runtime controls remain on Instances.')
 
+    const header = wrapper.get('[data-testid="model-details-header"]')
+    expect(header.classes()).toContain('flex-wrap')
+    const headerActions = wrapper.get('[data-testid="model-details-actions"]')
+    expect(headerActions.classes()).toContain('w-full')
+    expect(headerActions.classes()).toContain('sm:w-auto')
+    expect(headerActions.classes()).toContain('sm:justify-end')
+
     const summary = wrapper.get('[data-testid="model-details-summary"]')
     for (const label of ['Path', 'Size', 'GGUF version', 'Metadata keys', 'Architecture', 'Quantization', 'Context capability', 'Tensor count']) {
       expect(summary.text()).toContain(label)

@@ -157,14 +157,14 @@ onMounted(() => void load())
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-6">
+    <div class="flex flex-wrap items-start justify-between gap-4" data-testid="model-details-header">
       <UPageHeader
         class="min-w-0 flex-1"
         headline="MODEL REGISTRY"
         :title="details?.model.name || 'Model details'"
         description="General metadata read directly from the registered GGUF. Runtime controls remain on Instances."
       />
-      <div class="flex flex-wrap justify-end gap-2">
+      <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:justify-end" data-testid="model-details-actions">
         <AppButton to="/models" intent="secondary">Back to models</AppButton>
         <AppButton v-if="details?.model.id" :to="`/models/${details.model.id}/edit`" intent="primary">Edit</AppButton>
       </div>

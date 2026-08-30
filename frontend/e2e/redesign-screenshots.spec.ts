@@ -205,6 +205,7 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/models/available') return []
   if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }
+  if (pathname === '/api/v1/models/qwen3-8b-q4km/details/value') return { key: 'tokenizer.ggml.tokens', type: 'array[string]', items: ['<|endoftext|>', '<|im_start|>', '<|im_end|>', 'hello'], offset: 0, limit: 100, total: 4, has_more: false }
   if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)
   if (pathname === '/api/v1/imports') return []
   if (/^\/api\/v1\/instances\/[^/]+\/runtime$/.test(pathname)) return runtimes[decodeURIComponent(pathname.split('/')[4] || '')] || { state: 'UNLOADED' }
@@ -421,6 +422,16 @@ for (const [name, path] of pages) {
     })
   })
 }
+
+
+test('model details expanded metadata screenshot', async ({ page }, testInfo) => {
+  await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.getByRole('heading', { name: 'Qwen3 8B' })).toBeVisible()
+  await page.locator('[data-testid="metadata-expand"]').first().click()
+  await expect(page.locator('[data-testid="metadata-expanded-items"]')).toContainText('<|endoftext|>')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
+})
 
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
