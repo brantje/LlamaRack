@@ -168,8 +168,8 @@ async function revokeAll() {
           </div>
           <dl class="mt-4 divide-y divide-[var(--color-divider)] text-sm">
             <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Username</dt><dd class="font-mono text-[13px]">{{ profile.username }}</dd></div>
-            <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Created</dt><dd class="font-mono text-[12px]">{{ dateTime(profile.created_at) }}</dd></div>
-            <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Last login</dt><dd class="font-mono text-[12px]">{{ dateTime(profile.last_login_at) }}</dd></div>
+            <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Created</dt><dd class="font-mono text-[12px] tabular-nums">{{ dateTime(profile.created_at) }}</dd></div>
+            <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Last login</dt><dd class="font-mono text-[12px] tabular-nums">{{ dateTime(profile.last_login_at) }}</dd></div>
           </dl>
         </div>
       </div>
@@ -200,7 +200,7 @@ async function revokeAll() {
               <StatusTag variant="neutral">OIDC</StatusTag>
             </div>
             <p class="mt-1 truncate font-mono text-[10.5px] text-[var(--neutral-700)]">{{ identity.issuer }}</p>
-            <p class="mt-1 text-[10.5px] text-[var(--neutral-700)]">Linked {{ dateTime(identity.created_at) }}</p>
+            <p class="mt-1 font-mono text-[10.5px] tabular-nums text-[var(--neutral-700)]">Linked {{ dateTime(identity.created_at) }}</p>
           </div>
           <AppButton intent="ghost" size="sm" @click="unlinkIdentity(identity)">Unlink</AppButton>
         </div>
@@ -230,7 +230,7 @@ async function revokeAll() {
               <span class="text-[13.5px] font-semibold">{{ clientLabel(session.user_agent) }}</span>
               <StatusTag v-if="session.current" variant="ready">Current</StatusTag>
             </div>
-            <p class="mt-1 break-words font-mono text-[10.5px] leading-5 text-[var(--neutral-700)]">
+            <p class="mt-1 break-words font-mono text-[10.5px] leading-5 tabular-nums text-[var(--neutral-700)]">
               {{ session.remote_address || 'Unknown address' }} · Created {{ dateTime(session.created_at) }} · Expires {{ dateTime(session.expires_at) }}
             </p>
           </div>
