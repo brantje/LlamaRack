@@ -17,4 +17,12 @@ describe('Playground redesign cleanup', () => {
     expect(source).toContain('Prompt tokens</dt><dd class="font-mono tabular-nums"')
     expect(source).toContain('Tokens / second</dt><dd class="font-mono tabular-nums"')
   })
+
+  it('uses the signed-in management bridge without a Playground API-key field', () => {
+    expect(source).toContain("import { readManagementToken } from '~/composables/useManagerApi'")
+    expect(source).toContain('/api/v1/playground/chat/completions')
+    expect(source).not.toContain('playground-api-key')
+    expect(source).not.toContain('lcm-playground-api-key')
+    expect(source).not.toContain("const apiKey = ref('')")
+  })
 })
