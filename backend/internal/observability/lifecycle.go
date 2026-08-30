@@ -37,5 +37,8 @@ func (s *Service) RecordLifecycle(ctx context.Context, event, instanceID string,
 	if event == LifecycleLoad && duration > 0 {
 		if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: instanceID, Value: float64(duration.Microseconds()) / 1000}); err != nil { return err }
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return s.recordPlaygroundLifecycleEvent(ctx, event, instanceID)
 }
