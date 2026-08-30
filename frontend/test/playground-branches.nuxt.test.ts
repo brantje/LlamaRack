@@ -201,7 +201,7 @@ describe('Playground edge branches', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await prepareRaw(wrapper, { model: 'coder', messages: [], stream: false })
     await button(wrapper, 'Send').trigger('click')
-    await new Promise(resolve => setTimeout(resolve, 450))
+    await new Promise(resolve => setTimeout(resolve, 500))
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledTimes(6)
@@ -211,7 +211,10 @@ describe('Playground edge branches', () => {
   })
 
   it('covers clipboard success/failure, tab credential removal, clear and keyboard send behavior', async () => {
-    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'))
+    const writeText = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('denied'))
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 200 })))
     sessionStorage.setItem('lcm-playground-api-key', 'lcm_saved')
@@ -224,6 +227,14 @@ describe('Playground edge branches', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('curl copied.')
     expect(String(writeText.mock.calls[0]![0])).toContain('$LLAMA_API_KEY')
+
+    await button(wrapper, 'Copy SDK example').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('SDK example copied.')
+    const sdk = String(writeText.mock.calls[1]![0])
+    expect(sdk).toContain('import json')
+    expect(sdk).toContain('json.loads(')
+    expect(sdk).toContain('client.chat.completions.create(**body)')
 
     await button(wrapper, 'Copy SDK example').trigger('click')
     await flushPromises()
