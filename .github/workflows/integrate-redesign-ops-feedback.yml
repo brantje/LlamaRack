@@ -25,27 +25,73 @@ jobs:
         run: |
           git fetch origin \
             4bae38940d6bb71ec22eda0e7a27ce49cc53c0c6 \
-            5ece113527dc2f09b0b5af1722d6596226ee4555 \
             bfc8459e9e069b5cef35cace0b6dd93e970c40c3 \
             640a59339e0bd274949b36eff37b8594dfb17b47 \
-            73e26d3b2e47f4915ad65af9291c229b21039f09 \
-            e23217470b3e6bf503c69d1f03546ba58931e5a7
+            73e26d3b2e47f4915ad65af9291c229b21039f09
 
-          git diff --binary 4bae38940d6bb71ec22eda0e7a27ce49cc53c0c6 5ece113527dc2f09b0b5af1722d6596226ee4555 -- \
-            frontend/app/pages/instances/index.vue \
-            frontend/test/redesign-feedback.nuxt.test.ts \
-            frontend/test/instances-controls-accessibility.nuxt.test.ts \
-            frontend/e2e/redesign-screenshots.spec.ts | git apply --3way
+          git show 4bae38940d6bb71ec22eda0e7a27ce49cc53c0c6:.github/scripts/patch-instances-controls-states.py > /tmp/patch-instances-controls-states.py
+          python /tmp/patch-instances-controls-states.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/test/instances-controls-accessibility.nuxt.test.ts')
+          text = path.read_text()
+          text = text.replace(
+              "    expect(source).toContain('data-testid=\"instances-view-table\" :aria-pressed=\"viewMode === 'table'\"')",
+              "    expect(source).toContain(`data-testid=\"instances-view-table\" :aria-pressed=\"viewMode === 'table'\"`)"
+          )
+          text = text.replace(
+              "    expect(source).toContain('data-testid=\"instances-view-cards\" :aria-pressed=\"viewMode === 'cards'\"')",
+              "    expect(source).toContain(`data-testid=\"instances-view-cards\" :aria-pressed=\"viewMode === 'cards'\"`)"
+          )
+          path.write_text(text)
+          PY
 
           git diff --binary bfc8459e9e069b5cef35cace0b6dd93e970c40c3 640a59339e0bd274949b36eff37b8594dfb17b47 -- \
             frontend/app/pages/logs/index.vue \
             frontend/test/request-logs-filter-collapse.nuxt.test.ts \
             frontend/test/request-logs-branches.nuxt.test.ts | git apply --3way
 
-          git diff --binary 73e26d3b2e47f4915ad65af9291c229b21039f09 e23217470b3e6bf503c69d1f03546ba58931e5a7 -- \
-            frontend/app/pages/index.vue \
-            frontend/test/dashboard-redesign.nuxt.test.ts \
-            frontend/e2e/redesign-screenshots.spec.ts | git apply --3way
+          git show 73e26d3b2e47f4915ad65af9291c229b21039f09:.github/scripts/patch-dashboard-attention-state.py > /tmp/patch-dashboard-attention-state.py
+          python /tmp/patch-dashboard-attention-state.py
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('frontend/e2e/redesign-screenshots.spec.ts')
+          text = path.read_text()
+
+          weakset_marker = "const dashboardFailurePages = new WeakSet<Page>()"
+          if weakset_marker not in text:
+              raise SystemExit('dashboard weakset marker not found while scoping Instances fixtures')
+          text = text.replace(weakset_marker, "const instancesStatePages = new WeakSet<Page>()\n" + weakset_marker, 1)
+
+          response_old = "  if (pathname === '/api/v1/instances' && method === 'GET') return instances\n  if (pathname === '/api/v1/imports') return [{ id: 'import-qwen3-downloading', job_id: 'dl-qwen3-downloading', model_id: 'qwen3-8b-q4km', instance_id: 'qwen3-downloading', state: 'DOWNLOADING', start_when_ready: true }]"
+          response_new = "  if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)\n  if (pathname === '/api/v1/imports') return []"
+          if response_old not in text:
+              raise SystemExit('global Instances fixture response marker not found')
+          text = text.replace(response_old, response_new, 1)
+
+          route_marker = "    const url = new URL(request.url())\n    if (dashboardFailurePages.has(page) && /^\\/api\\/v1\\/instances\\/[^/]+\\/runtime$/.test(url.pathname)) {"
+          route_replacement = """    const url = new URL(request.url())
+              if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+                await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
+                return
+              }
+              if (instancesStatePages.has(page) && url.pathname === '/api/v1/imports') {
+                await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify([{ id: 'import-qwen3-downloading', job_id: 'dl-qwen3-downloading', model_id: 'qwen3-8b-q4km', instance_id: 'qwen3-downloading', state: 'DOWNLOADING', start_when_ready: true }]) })
+                return
+              }
+              if (dashboardFailurePages.has(page) && /^\/api\/v1\/instances\/[^/]+\/runtime$/.test(url.pathname)) {"""
+          if route_marker not in text:
+              raise SystemExit('route handler marker not found while scoping Instances fixtures')
+          text = text.replace(route_marker, route_replacement, 1)
+
+          test_marker = "test('instances operational card states screenshot', async ({ page }, testInfo) => {\n  await page.goto('/instances', { waitUntil: 'domcontentloaded' })"
+          test_replacement = "test('instances operational card states screenshot', async ({ page }, testInfo) => {\n  instancesStatePages.add(page)\n  await page.goto('/instances', { waitUntil: 'domcontentloaded' })"
+          if test_marker not in text:
+              raise SystemExit('Instances special screenshot marker not found')
+          text = text.replace(test_marker, test_replacement, 1)
+          path.write_text(text)
+          PY
 
           git diff --check
       - name: Install frontend dependencies
