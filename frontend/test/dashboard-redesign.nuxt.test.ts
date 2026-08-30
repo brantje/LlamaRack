@@ -68,16 +68,26 @@ describe('Dashboard redesign', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('CONTROL PLANE')
+    expect(wrapper.get('[data-testid="dashboard-header"]').classes()).toEqual(expect.arrayContaining(['flex-col', 'md:flex-row']))
     expect(wrapper.get('[data-testid="dashboard-system-logs"]').attributes('href')).toBe('/admin/system-logs')
     expect(wrapper.get('[data-testid="open-request-logs"]').attributes('href')).toBe('/logs')
     expect(wrapper.get('[data-testid="dashboard-range"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="dashboard-retention-note"]').text()).toContain('1 day')
+    expect(wrapper.get('[data-testid="dashboard-last-updated"]').text()).toContain('Last updated')
+    expect(wrapper.get('[data-testid="dashboard-last-updated"]').attributes('aria-live')).toBe('polite')
+
+    const managedVram = wrapper.get('[data-testid="dashboard-vram"]').text()
+    expect(managedVram).toContain('Managed VRAM')
+    expect(managedVram).toContain('total device capacity attributed to managed Instances')
+    expect(managedVram).toContain('2.0 GiB device use unattributed')
+
     const kpis = wrapper.get('[data-testid="dashboard-observability-kpis"]').text()
     expect(kpis).toContain('Tokens · 15 min')
     expect(kpis).toContain('3.5')
     expect(kpis).toContain('90')
     expect(kpis).toContain('2 active')
     expect(kpis).toContain('1 streaming')
+    expect(wrapper.get('[data-testid="dashboard-success-rate"]').text()).toContain('9 ok · 1 errors')
 
     const vram = wrapper.get('[data-testid="dashboard-vram-allocation"]')
     expect(vram.element.tagName).toBe('SECTION')
@@ -85,6 +95,7 @@ describe('Dashboard redesign', () => {
     expect(vram.text()).toContain('2.0 GiB')
     expect(vram.text()).toContain('Free')
     expect(vram.text()).toContain('4.0 GiB')
+    expect(vram.text()).toContain('GPU util')
     expect(wrapper.get('[data-testid="dashboard-host-ram"]').text()).toContain('16 GiB / 32 GiB')
 
     const traffic = wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()
@@ -96,9 +107,8 @@ describe('Dashboard redesign', () => {
     expect(traffic).toContain('42.5')
 
     mocks.request.mockClear()
-    const refresh = wrapper.findAll('button').find(button => button.text().includes('Refresh'))
-    expect(refresh).toBeTruthy()
-    await refresh!.trigger('click')
+    const refresh = wrapper.get('[data-testid="dashboard-refresh"]')
+    await refresh.trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/settings/general')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/summary?window_seconds=900')
@@ -129,7 +139,7 @@ describe('Dashboard redesign', () => {
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('last 1 hour')
   })
 
-  it('covers retained-history clamping and sparse neutral traffic formatting', async () => {
+  it('covers zero-request semantics, alert priority, retained-history clamping and sparse neutral traffic formatting', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0, source: 'default', editable: true }, observability_retention_days: { value: 1, source: 'database', editable: true } }
       if (path.startsWith('/api/v1/observability/summary')) {
@@ -153,7 +163,17 @@ describe('Dashboard redesign', () => {
 
     const kpis = wrapper.get('[data-testid="dashboard-observability-kpis"]').text()
     expect(kpis).toContain('12')
-    expect(kpis).toContain('Success rate · 15 min0')
+    const success = wrapper.get('[data-testid="dashboard-success-rate"]').text()
+    expect(success).toContain('Success rate · 15 min—')
+    expect(success).toContain('No requests in 15 min')
+    expect(success).not.toContain('0%')
+
+    const attentionLink = wrapper.get('[data-testid="dashboard-attention-link"]')
+    expect(attentionLink.text()).toContain('Needs attention · 1')
+    expect(attentionLink.attributes('href')).toBe('#needs-attention')
+    expect(wrapper.get('[data-testid="dashboard-attention"]').classes()).toEqual(expect.arrayContaining(['order-1', 'xl:order-2']))
+    expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').classes()).toEqual(expect.arrayContaining(['order-2', 'xl:order-1']))
+
     const traffic = wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()
     expect(traffic).toContain('unary')
     expect(traffic).toContain('302')
