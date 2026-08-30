@@ -229,8 +229,12 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
     </template>
 
     <div class="space-y-5">
-      <Frame v-if="errorMessage" class="border-[var(--accent-800)] px-4 py-3 text-sm text-[var(--accent-900)]">{{ errorMessage }}</Frame>
-      <Frame v-if="successMessage" class="px-4 py-3 text-sm text-[var(--accent-800)]">{{ successMessage }}</Frame>
+      <Frame v-if="errorMessage" class="px-4 py-3" data-testid="authentication-error">
+        <div class="flex flex-wrap items-start gap-2"><StatusTag variant="failed">Authentication error</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ errorMessage }}</p></div>
+      </Frame>
+      <Frame v-if="successMessage" class="px-4 py-3" data-testid="authentication-success">
+        <div class="flex flex-wrap items-start gap-2"><StatusTag variant="ready">Updated</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ successMessage }}</p></div>
+      </Frame>
 
       <div v-if="loading" class="space-y-3">
         <USkeleton class="h-44 w-full" />
@@ -266,9 +270,10 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
             <div class="flex items-center justify-between gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="text-[10px] font-mono uppercase">{{ settings?.oidc_auto_link_enabled.source }}</span></div>
           </div>
 
-          <Frame class="mt-5 bg-[var(--neutral-100)] px-4 py-3 text-sm text-[var(--neutral-800)]">
-            Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking.
-          </Frame>
+          <div class="mt-5 flex flex-wrap items-start gap-2 border border-[var(--color-divider)] px-4 py-3" data-testid="authentication-auto-link-note">
+            <StatusTag variant="pending">Explicit linking required</StatusTag>
+            <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking.</p>
+          </div>
         </Frame>
 
         <section data-testid="authentication-providers">
@@ -313,8 +318,12 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
     <UModal v-model:open="providerModalOpen" :title="editingProvider ? 'Edit OIDC provider' : 'Add OIDC provider'">
       <template #body>
         <div class="space-y-4">
-          <Frame v-if="providerTestError" class="border-[var(--accent-800)] px-4 py-3 text-sm text-[var(--accent-900)]">{{ providerTestError }}</Frame>
-          <Frame v-else-if="providerTestMessage" class="px-4 py-3 text-sm text-[var(--accent-800)]">{{ providerTestMessage }}</Frame>
+          <Frame v-if="providerTestError" class="px-4 py-3" data-testid="provider-test-error">
+            <div class="flex flex-wrap items-start gap-2"><StatusTag variant="failed">Test failed</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ providerTestError }}</p></div>
+          </Frame>
+          <Frame v-else-if="providerTestMessage" class="px-4 py-3" data-testid="provider-test-success">
+            <div class="flex flex-wrap items-start gap-2"><StatusTag variant="ready">Test passed</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ providerTestMessage }}</p></div>
+          </Frame>
           <UFormField label="Display name"><UInput v-model="providerForm.name" class="w-full" /></UFormField>
           <USwitch v-model="providerForm.enabled" label="Enabled" />
           <UFormField label="Issuer URL"><UInput v-model="providerForm.issuer" class="w-full" placeholder="https://id.example.com/application/o/manager/" /></UFormField>
