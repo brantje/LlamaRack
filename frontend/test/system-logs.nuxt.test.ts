@@ -170,4 +170,16 @@ describe('System diagnostics logs', () => {
     expect((follow.props() as any).modelValue).toBe(true)
     scrolling.unmount()
   })
+
+  it('treats a malformed snapshot collection as an empty diagnostic view', async () => {
+    vi.stubGlobal('EventSource', undefined)
+    mocks.request.mockResolvedValueOnce({ entries: null })
+
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('No log lines match this filter.')
+    wrapper.unmount()
+  })
 })
