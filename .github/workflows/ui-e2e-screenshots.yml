@@ -1,0 +1,215 @@
+name: UI E2E screenshots
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/ui-e2e-screenshots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm install --no-package-lock --legacy-peer-deps
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture UI pages
+        env:
+          NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
+        run: npm run test:e2e:screenshots
+
+      - name: Upload UI screenshot artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-screenshots
+          path: |
+            frontend/artifacts/ux-screenshots
+            frontend/artifacts/playwright-report
+            frontend/artifacts/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
+  fake-nvidia-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FAKE_NVIDIA_VERSION: v1.0.0
+      FAKE_NVIDIA_SOURCE_COMMIT: 425d692afab314a9a24a72a954a041fbf9d626a7
+      FAKE_NVIDIA_RUNTIME_SHA256: 47590ab8bc9b4728c6f13ae49eecc53ea7ad55144c8dbd3a685cc12aafe0b49b
+      FAKE_NVIDIA_CLI_SHA256: e0d7a711d2ea2d7c7ff08b3b15894874e26f763ae5a4b56378d70062ad45cebd
+      NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-package-lock --legacy-peer-deps
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Download backend modules
+        working-directory: backend
+        run: go mod download
+
+      - name: Build manager backend
+        working-directory: backend
+        run: go build -mod=mod -o ../artifacts/bin/llamacpp-manager ./cmd/llamacpp-manager
+
+      - name: Install pinned fake-nvidia release
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_archive="$RUNNER_TEMP/fake-nvidia-runtime.tar.gz"
+          cli_archive="$RUNNER_TEMP/fake-nvidia-cli.tar.gz"
+          runtime_dir="$RUNNER_TEMP/fake-nvidia-runtime"
+          cli_dir="$RUNNER_TEMP/fake-nvidia-cli"
+
+          curl --fail --location --retry 3 \
+            "https://github.com/brantje/fake-nvidia/releases/download/${FAKE_NVIDIA_VERSION}/fake-nvidia-runtime-${FAKE_NVIDIA_VERSION}-linux-amd64.tar.gz" \
+            --output "$runtime_archive"
+          curl --fail --location --retry 3 \
+            "https://github.com/brantje/fake-nvidia/releases/download/${FAKE_NVIDIA_VERSION}/fake-nvidia-${FAKE_NVIDIA_VERSION}-linux-amd64.tar.gz" \
+            --output "$cli_archive"
+
+          printf '%s  %s\n' "$FAKE_NVIDIA_RUNTIME_SHA256" "$runtime_archive" | sha256sum -c -
+          printf '%s  %s\n' "$FAKE_NVIDIA_CLI_SHA256" "$cli_archive" | sha256sum -c -
+
+          mkdir -p "$runtime_dir" "$cli_dir"
+          tar -xzf "$runtime_archive" -C "$runtime_dir"
+          tar -xzf "$cli_archive" -C "$cli_dir"
+
+          fake_cli="$(find "$cli_dir" -type f -path '*/bin/fake-nvidia' -print -quit)"
+          test -n "$fake_cli"
+          test -x "$runtime_dir/bin/nvidia-smi"
+          test -x "$runtime_dir/bin/fake-llama-server"
+
+          mkdir -p "$runtime_dir/config"
+          "$fake_cli" render \
+            --profile rtx4060ti-16gb \
+            --count 2 \
+            --output "$runtime_dir/config/config.yaml"
+          : > "$runtime_dir/config/overrides.yaml"
+
+          {
+            echo "FAKE_NVIDIA_RUNTIME_DIR=$runtime_dir"
+            echo "MOCK_NVML_CONFIG=$runtime_dir/config/config.yaml"
+            echo "MOCK_NVML_OVERRIDES=$runtime_dir/config/overrides.yaml"
+            echo "LD_LIBRARY_PATH=$runtime_dir/lib"
+            echo "PATH=$runtime_dir/bin:$PATH"
+          } >> "$GITHUB_ENV"
+
+          printf 'Pinned fake-nvidia %s (%s)\n' "$FAKE_NVIDIA_VERSION" "$FAKE_NVIDIA_SOURCE_COMMIT"
+
+      - name: Verify simulated NVIDIA topology
+        run: |
+          set -euo pipefail
+          nvidia-smi -L
+          test "$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits | wc -l)" -eq 2
+          nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits
+
+      - name: Start simulated external GPU workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/runtime
+          truncate -s 1M "$RUNNER_TEMP/external-workload.gguf"
+          nohup "$FAKE_NVIDIA_RUNTIME_DIR/bin/fake-llama-server" \
+            --model "$RUNNER_TEMP/external-workload.gguf" \
+            --host 127.0.0.1 \
+            --port 11999 \
+            --fake-gpus 0 \
+            --fake-vram 15GiB \
+            --fake-sm-util 88 \
+            --fake-memory-util 72 \
+            > artifacts/runtime/fake-llama-server.log 2>&1 &
+          echo $! > artifacts/runtime/fake-llama-server.pid
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11999/health >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl --fail --silent http://127.0.0.1:11999/health >/dev/null
+          nvidia-smi --query-compute-apps=pid,gpu_uuid,used_memory,process_name --format=csv,noheader,nounits
+
+      - name: Start manager backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lcm-data" "$RUNNER_TEMP/lcm-models" artifacts/runtime
+          nohup env \
+            LCM_LISTEN_ADDR=127.0.0.1:8888 \
+            LCM_DATA_DIR="$RUNNER_TEMP/lcm-data" \
+            LCM_MODELS_DIR="$RUNNER_TEMP/lcm-models" \
+            LCM_LLAMA_SERVER="$FAKE_NVIDIA_RUNTIME_DIR/bin/fake-llama-server" \
+            LCM_ALLOWED_ORIGIN=http://127.0.0.1:3000 \
+            LCM_ALWAYS_ON_RECONCILE_SECONDS=0 \
+            ./artifacts/bin/llamacpp-manager \
+            > artifacts/runtime/manager.log 2>&1 &
+          echo $! > artifacts/runtime/manager.pid
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8888/health >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl --fail --silent http://127.0.0.1:8888/health
+          sleep 2
+
+      - name: Capture fake-nvidia runtime pages
+        working-directory: frontend
+        env:
+          FAKE_NVIDIA_E2E: '1'
+        run: npx playwright test --config=playwright.config.ts e2e/fake-nvidia-screenshots.spec.ts
+
+      - name: Upload fake-nvidia UI artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-fake-nvidia
+          path: |
+            frontend/artifacts/ux-screenshots/fake-nvidia
+            frontend/artifacts/playwright-report
+            frontend/artifacts/test-results
+            artifacts/runtime
+          if-no-files-found: warn
+          retention-days: 14
