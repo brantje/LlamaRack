@@ -6,6 +6,8 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 )
 
+const managementPlaygroundBearer = "Bearer management-playground-internal"
+
 // NewManagementPlaygroundProxy re-enters the normal OpenAI-compatible gateway
 // after the management API has authenticated the operator. It deliberately
 // rewrites to the public inference route so lifecycle, autoload, eviction,
@@ -23,10 +25,12 @@ func NewManagementPlaygroundProxy(next http.Handler) http.Handler {
 		urlCopy.RawPath = ""
 		request.URL = &urlCopy
 		request.Header = r.Header.Clone()
-		// Never pass the management bearer token into inference authentication or
-		// onward to llama-server. The private context marker above is the trust
-		// boundary for this in-process bridge.
-		request.Header.Del("Authorization")
+		// Never pass the management bearer token into inference authentication.
+		// Replace it with a non-secret sentinel so the gateway keeps its normal
+		// Bearer-shape validation; the private context marker makes the auth
+		// service skip API-key lookup. The gateway strips Authorization before
+		// proxying to llama-server, so the sentinel never reaches the worker.
+		request.Header.Set("Authorization", managementPlaygroundBearer)
 
 		next.ServeHTTP(w, request)
 	})
