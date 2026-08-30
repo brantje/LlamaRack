@@ -401,7 +401,12 @@ defineExpose({ setSelectedWindow })
       </div>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="p-3" data-testid="instance-detail-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Instance detail unavailable</StatusTag>
+        <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
+      </div>
+    </Frame>
     <div v-if="loading" class="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><USkeleton v-for="n in 4" :key="n" class="h-36 w-full" /></div>
 
     <template v-else-if="instance">
