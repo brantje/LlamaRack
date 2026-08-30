@@ -183,7 +183,10 @@ const curlExample = computed(() => {
   return `curl ${manager.apiBase.value}/v1/chat/completions \\\n  -H 'Authorization: Bearer $LLAMA_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${escaped}'`
 })
 
-const sdkExample = computed(() => `import os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${manager.apiBase.value}/v1",\n    api_key=os.environ["LLAMA_API_KEY"],\n)\n\nresponse = client.chat.completions.create(**${rawRequest.value || JSON.stringify(parameterBody())})`)
+const sdkExample = computed(() => {
+  const body = rawRequest.value || JSON.stringify(parameterBody(), null, 2)
+  return `import json\nimport os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${manager.apiBase.value}/v1",\n    api_key=os.environ["LLAMA_API_KEY"],\n)\n\nbody = json.loads(${JSON.stringify(body)})\nresponse = client.chat.completions.create(**body)`
+})
 
 async function copyText(text: string, label: string) {
   notice.value = ''
@@ -417,14 +420,7 @@ const gpuAllocation = computed(() => {
   return devices.length ? `${devices.join(', ')} · ${formatBytes(telemetry.vram_used_bytes)}` : '—'
 })
 
-const capturedHeaders = computed(() => {
-  const rows = [...responseHeaders.value]
-  const port = selectedRuntime.value?.port
-  if (port && !rows.some(([key]) => key.toLowerCase() === 'x-llamacpp-manager-upstream-port')) {
-    rows.push(['x-llamacpp-manager-upstream-port', String(port)])
-  }
-  return rows
-})
+const capturedHeaders = computed(() => responseHeaders.value)
 
 watch(() => manager.instances.value, instances => {
   if (!instances.length) {
