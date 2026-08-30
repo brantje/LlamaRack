@@ -57,6 +57,8 @@ describe('Add model edge branches', () => {
     expect(rows[4]!.text()).toContain(`modified ${oldTimestamp.toLocaleDateString()}`)
     expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('None found')
     expect(wrapper.get('[data-testid="companion-mtp"]').text()).toContain('None found')
+    expect(wrapper.get('[data-testid="companion-empty-mmproj"]').classes()).toContain('text-[var(--neutral-800)]')
+    expect(wrapper.get('[data-testid="companion-empty-mtp"]').classes()).toContain('text-[var(--neutral-800)]')
   })
 
   it('surfaces scan and metadata inspection API errors through their prescribed states', async () => {

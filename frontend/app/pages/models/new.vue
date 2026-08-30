@@ -391,7 +391,7 @@ async function createModel() {
 
 <template>
   <div class="space-y-5">
-    <div class="flex items-start justify-between gap-6">
+    <div class="flex flex-wrap items-start justify-between gap-4" data-testid="model-add-header">
       <UPageHeader
         class="min-w-0 flex-1"
         headline="MODEL REGISTRY"
@@ -509,10 +509,10 @@ async function createModel() {
                 <UInput model-value="" class="min-w-0 flex-1 font-mono" placeholder="value cleared" readonly />
                 <AppButton type="button" intent="ghost" size="xs" @click="enableCompanion(definition)">Enable</AppButton>
               </div>
-              <p class="mt-2 text-[10.5px] text-[var(--neutral-700)]">value cleared — the flag is not passed</p>
+              <p class="mt-2 text-[10.5px] text-[var(--neutral-800)]" :data-testid="`companion-disabled-${definition.kind}`">value cleared — the flag is not passed</p>
             </template>
 
-            <p v-else class="mt-4 text-xs text-[var(--neutral-700)]">No compatible {{ definition.title.toLowerCase() }} was detected in this artifact scope.</p>
+            <p v-else class="mt-4 text-xs text-[var(--neutral-800)]" :data-testid="`companion-empty-${definition.kind}`">No compatible {{ definition.title.toLowerCase() }} was detected in this artifact scope.</p>
 
             <div v-if="candidateList(definition).length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-3">
               <p class="mb-2 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
@@ -599,7 +599,7 @@ async function createModel() {
 
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--color-divider)] pt-5">
         <p class="mr-auto max-w-2xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="model-submit-requirements">Required: a GGUF artifact and Model name. When First Instance is enabled, its name and slug are also required.</p>
-        <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
+        <AppButton v-if="!remoteMode" type="button" intent="ghost" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
         <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">Cancel</AppButton>
         <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
       </div>

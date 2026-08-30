@@ -7,6 +7,19 @@ const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
 const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
+const baselineFingerprint = ref('')
+
+function formFingerprint() {
+  return JSON.stringify({
+    name: form.name,
+    context_length: form.context_length,
+    options: Object.entries(form.options).sort(([left], [right]) => left.localeCompare(right))
+  })
+}
+
+const valid = computed(() => Boolean(form.name.trim()))
+const dirty = computed(() => !loading.value && Boolean(baselineFingerprint.value) && formFingerprint() !== baselineFingerprint.value)
+const canSubmit = computed(() => valid.value && dirty.value)
 
 onMounted(async () => {
   try {
@@ -17,6 +30,7 @@ onMounted(async () => {
     form.name = model.name
     form.context_length = model.context_length || 0
     form.options = { ...(options || {}) }
+    baselineFingerprint.value = formFingerprint()
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Model'
   } finally {
@@ -25,6 +39,7 @@ onMounted(async () => {
 })
 
 async function submit() {
+  if (!canSubmit.value) return
   busy.value = true
   error.value = ''
   try {
@@ -97,9 +112,12 @@ async function submit() {
         <LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" />
       </Frame>
 
-      <div class="flex justify-end gap-2 border-t border-[var(--color-divider)] pt-4">
+      <div class="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">
+        <p class="mr-auto text-xs text-[var(--neutral-700)]" data-testid="model-edit-submit-hint">
+          {{ !valid ? 'Required: Model name.' : dirty ? 'Unsaved changes.' : 'No changes to save.' }}
+        </p>
         <AppButton to="/models" intent="secondary">Cancel</AppButton>
-        <AppButton type="submit" intent="primary" :loading="busy">Save Model</AppButton>
+        <AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">Save Model</AppButton>
       </div>
     </UForm>
   </div>

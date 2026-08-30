@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import ModelsPage from '~/pages/models/index.vue'
 import AppButton from '~/components/AppButton.vue'
+import AppCopyButton from '~/components/AppCopyButton.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -66,6 +67,18 @@ describe('Models registry redesign', () => {
     expect(pathCell.classes()).not.toContain('break-all')
     expect(pathCell.classes()).toContain('font-mono')
     expect(pathCell.classes()).toContain('text-[11.5px]')
+
+    const copyPath = wrapper.getComponent(AppCopyButton)
+    expect(copyPath.props('text')).toBe('nested/models/coder/coder-q4.gguf')
+    expect(copyPath.props('iconOnly')).toBe(true)
+    copyPath.vm.$emit('error', 'clipboard blocked')
+    await wrapper.vm.$nextTick()
+    const copyError = wrapper.get('[data-testid="models-error-state"]')
+    expect(copyError.text()).toContain('Unable to copy model path')
+    expect(copyError.text()).toContain('clipboard blocked')
+    copyPath.vm.$emit('copied', 'nested/models/coder/coder-q4.gguf')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="models-error-state"]').exists()).toBe(false)
 
     const rowActions = wrapper.findAllComponents(AppButton).filter(button => ['Details', 'Edit', 'Delete'].includes(button.text()))
     expect(rowActions.map(button => button.props('intent'))).toEqual(['ghost', 'ghost', 'ghost'])

@@ -4,7 +4,18 @@ import ModelDeleteModal from '~/components/ModelDeleteModal.vue'
 const manager = useManager()
 const { models } = manager
 const message = ref('')
+const messageTitle = ref('')
 const pending = ref<string | null>(null)
+
+function clearMessage() {
+  message.value = ''
+  messageTitle.value = ''
+}
+
+function showCopyError(value: string) {
+  messageTitle.value = 'Unable to copy model path'
+  message.value = value
+}
 const deleteModal = ref<{
   request: (options: { name: string, path: string, sizeLabel?: string }) => Promise<{ confirmed: boolean, deleteFiles: boolean }>
 } | null>(null)
@@ -35,12 +46,13 @@ async function remove(id: string) {
   })
   if (!result?.confirmed) return
   pending.value = id
-  message.value = ''
+  clearMessage()
   try {
     const suffix = result.deleteFiles ? '?delete_files=true' : ''
     await manager.request(`/api/v1/models/${encodeURIComponent(id)}${suffix}`, { method: 'DELETE' })
     await manager.refresh()
   } catch (error: any) {
+    messageTitle.value = 'Unable to delete model'
     message.value = error?.data?.error || error?.message || 'Unable to delete model'
   } finally {
     pending.value = null
@@ -65,7 +77,7 @@ async function remove(id: string) {
     </div>
 
     <Frame v-if="message" class="border-[var(--accent-800)] p-3" data-testid="models-error-state">
-      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to delete model</p>
+      <p class="text-sm font-semibold text-[var(--accent-900)]">{{ messageTitle || 'Model operation failed' }}</p>
       <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ message }}</p>
     </Frame>
 
@@ -98,7 +110,24 @@ async function remove(id: string) {
                   {{ model.name }}
                 </NuxtLink>
               </td>
-              <td class="min-w-[260px] max-w-[420px] break-words px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">{{ model.gguf_path }}</td>
+              <td class="min-w-[260px] max-w-[420px] break-words px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">
+                <div class="flex min-w-0 items-start gap-1">
+                  <span class="min-w-0 flex-1">{{ model.gguf_path }}</span>
+                  <AppCopyButton
+                    :text="model.gguf_path"
+                    label="Copy model path"
+                    copied-label="Copied model path"
+                    error-message="Unable to copy model path. Select the path and copy it manually."
+                    icon-only
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :data-testid="`copy-model-path-${model.id}`"
+                    @copied="clearMessage"
+                    @error="showCopyError"
+                  />
+                </div>
+              </td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ formatBytes(model.total_bytes) }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ model.quantization || '—' }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ contextLabel(model.context_length) }}</td>

@@ -3,6 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewModelPage from '~/pages/models/new.vue'
 import ModelOverridesEditor from '~/components/ModelOverridesEditor.vue'
+import AppButton from '~/components/AppButton.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -54,6 +55,9 @@ describe('Add model redesign', () => {
       '#model-artifact', '#model-companions', '#model-identity', '#model-defaults', '#model-first-instance'
     ])
     expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
+    expect(wrapper.get('[data-testid="model-add-header"]').classes()).toContain('flex-wrap')
+    const rescans = wrapper.findAllComponents(AppButton).filter(button => button.text() === 'Rescan')
+    expect(rescans.map(button => button.props('intent'))).toEqual(['secondary', 'ghost'])
   })
 
   it('renders bordered GGUF radios with real modified time and metadata-driven capabilities', async () => {
@@ -144,6 +148,7 @@ describe('Add model redesign', () => {
     expect(modelOptions(wrapper).mmproj).toBe('')
     expect(projectorSlot.text()).toContain('Ignored')
     expect(projectorSlot.text()).toContain('value cleared — the flag is not passed')
+    expect(projectorSlot.get('[data-testid="companion-disabled-mmproj"]').classes()).toContain('text-[var(--neutral-800)]')
 
     await projectorSlot.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
