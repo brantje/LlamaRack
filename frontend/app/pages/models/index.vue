@@ -64,7 +64,10 @@ async function remove(id: string) {
       </div>
     </div>
 
-    <UAlert v-if="message" color="error" variant="subtle" :description="message" />
+    <Frame v-if="message" class="border-[var(--accent-800)] p-3" data-testid="models-error-state">
+      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to delete model</p>
+      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ message }}</p>
+    </Frame>
 
     <Frame v-if="!models.length" class="p-8 text-center" data-testid="models-empty-state">
       <h2 class="text-base font-semibold">No models registered</h2>
