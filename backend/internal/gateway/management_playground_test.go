@@ -36,6 +36,27 @@ func TestManagementPlaygroundProxyReentersGatewayAndKeepsLogs(t *testing.T) {
 	}
 }
 
+func TestManagementPlaygroundProxyReplacesManagementBearerBeforeGateway(t *testing.T) {
+	var seenAuthorization, seenPath string
+	handler := NewManagementPlaygroundProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuthorization = r.Header.Get("Authorization")
+		seenPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer real-management-secret")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent || seenPath != "/v1/chat/completions" {
+		t.Fatalf("bridge rewrite status=%d path=%q", w.Code, seenPath)
+	}
+	if seenAuthorization != managementPlaygroundBearer || strings.Contains(seenAuthorization, "real-management-secret") {
+		t.Fatalf("management bearer was not safely replaced: %q", seenAuthorization)
+	}
+}
+
 func TestManagementPlaygroundProxyRejectsNonPost(t *testing.T) {
 	called := false
 	handler := NewManagementPlaygroundProxy(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
