@@ -54,8 +54,11 @@ async function submit() {
       <AppButton to="/models" intent="secondary">Back to Models</AppButton>
     </div>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]">
-      {{ error }}
+    <Frame v-if="error" class="p-3" data-testid="model-edit-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Model update failed</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
     </Frame>
 
     <div v-if="loading" class="space-y-4" data-testid="model-edit-loading">
