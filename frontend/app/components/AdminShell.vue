@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 
-defineProps<{
+withDefaults(defineProps<{
   title: string
   description: string
-}>()
+  headline?: string
+}>(), {
+  headline: 'ADMINISTRATION'
+})
 </script>
 
 <template>
@@ -12,7 +15,7 @@ defineProps<{
     <AdminSidebar />
     <main class="min-w-0 flex-1 lg:pl-1">
       <div class="mb-5 flex items-start justify-between gap-4">
-        <UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" :title="title" :description="description" />
+        <UPageHeader class="min-w-0 flex-1" :headline="headline" :title="title" :description="description" />
         <div v-if="$slots.actions" class="flex shrink-0 flex-wrap justify-end gap-2">
           <slot name="actions" />
         </div>
