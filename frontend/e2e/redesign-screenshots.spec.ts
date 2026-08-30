@@ -221,12 +221,14 @@ test.beforeEach(async ({ page }) => {
 for (const [name, path] of pages) {
   test(`${name} screenshot`, async ({ page }, testInfo) => {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('#dashboard-panel-manager-main')).not.toBeEmpty()
     await expect(page.locator('body')).not.toContainText('Manager connection failed')
     await expect(page.locator('body')).not.toContainText('Welcome back')
     await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
-      fullPage: true,
+      fullPage: false,
       animations: 'disabled'
     })
   })
