@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
 
-const dashboardSource = readFileSync(new URL('../app/pages/index.vue', import.meta.url), 'utf8')
+const dashboardSource = readFileSync(resolve(process.cwd(), 'app/pages/index.vue'), 'utf8')
 
 describe('dashboard redesign cleanup', () => {
   it('uses the canonical system logs route', () => {
