@@ -14,7 +14,7 @@ permissions:
 jobs:
   screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -122,8 +122,7 @@ jobs:
 
           mkdir -p "$runtime_dir/config"
           "$fake_cli" render \
-            --profile rtx4060ti-16gb \
-            --count 2 \
+            --spec frontend/e2e/fixtures/fake-nvidia-4x-rtx4090.json \
             --output "$runtime_dir/config/config.yaml"
           : > "$runtime_dir/config/overrides.yaml"
 
@@ -141,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           nvidia-smi -L
-          test "$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits | wc -l)" -eq 2
+          test "$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits | wc -l)" -eq 4
           nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits
 
       - name: Start simulated external GPU workload
@@ -155,7 +154,7 @@ jobs:
             --host 127.0.0.1 \
             --port 11999 \
             --fake-gpus 0 \
-            --fake-vram 15GiB \
+            --fake-vram 23GiB \
             --fake-sm-util 88 \
             --fake-memory-util 72 \
             > artifacts/runtime/fake-llama-server.log 2>&1 &
