@@ -25,6 +25,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          NL = chr(10)
 
           def replace_once(path: str, old: str, new: str):
               p = Path(path)
@@ -42,189 +43,37 @@ jobs:
                   raise SystemExit(f'{path}: expected at least {minimum} matches, found {count}: {old!r}')
               p.write_text(source.replace(old, new))
 
-          replace_all_min(
-              'frontend/app/components/InstanceForm.vue',
-              'bg-[var(--color-accent)] text-[var(--color-bg)]',
-              'bg-[var(--color-accent)] text-[var(--color-on-accent)]',
-              3,
-          )
-          replace_once(
-              'frontend/app/components/InstanceForm.vue',
-              '''      <div class="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-5">
-        <UCheckbox v-if="showLaunchAfterCreate" :model-value="launchAfterCreate" label="Launch after creation" @update:model-value="emit('update:launchAfterCreate', Boolean($event))" />
-        <span v-else />
-        <div class="flex items-center gap-2"><AppButton to="/instances" intent="secondary">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">{{ submitLabel }}</AppButton></div>
-      </div>''',
-              '''      <div class="flex flex-wrap items-end justify-between gap-4 border-t border-[var(--color-divider)] pt-5">
-        <div class="min-w-0">
-          <UCheckbox v-if="showLaunchAfterCreate" :model-value="launchAfterCreate" label="Launch after creation" @update:model-value="emit('update:launchAfterCreate', Boolean($event))" />
-          <p v-if="!canSubmit" class="mt-2 max-w-xl text-xs text-[var(--neutral-700)]" data-testid="instance-submit-requirements">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>
-        </div>
-        <div class="flex items-center gap-2"><AppButton to="/instances" intent="secondary">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">{{ submitLabel }}</AppButton></div>
-      </div>'''
-          )
+          replace_all_min('frontend/app/components/InstanceForm.vue', 'bg-[var(--color-accent)] text-[var(--color-bg)]', 'bg-[var(--color-accent)] text-[var(--color-on-accent)]', 3)
+          replace_once('frontend/app/components/InstanceForm.vue', '        <span v-else />', '        <span v-else />' + NL + '        <p v-if="!canSubmit" class="max-w-xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="instance-submit-requirements">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>')
 
-          replace_once(
-              'frontend/app/pages/models/new.vue',
-              '''      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-divider)] pt-5">
-        <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
-        <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">Cancel</AppButton>
-        <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
-      </div>''',
-              '''      <div class="flex flex-col gap-3 border-t border-[var(--color-divider)] pt-5 sm:flex-row sm:items-end sm:justify-between">
-        <p class="max-w-2xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="model-submit-requirements">Required: a GGUF artifact and Model name. When First Instance is enabled, its name and slug are also required.</p>
-        <div class="flex flex-wrap justify-end gap-2">
-          <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
-          <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">Cancel</AppButton>
-          <AppButton type="submit" intent="primary" :loading="busy" :disabled="submitDisabled">{{ remoteMode ? 'Create and download' : 'Create model' }}</AppButton>
-        </div>
-      </div>'''
-          )
+          replace_once('frontend/app/pages/models/new.vue', '      <div class="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-divider)] pt-5">', '      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--color-divider)] pt-5">')
+          replace_once('frontend/app/pages/models/new.vue', '        <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>', '        <p class="mr-auto max-w-2xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="model-submit-requirements">Required: a GGUF artifact and Model name. When First Instance is enabled, its name and slug are also required.</p>' + NL + '        <AppButton v-if="!remoteMode" type="button" intent="secondary" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>')
 
-          replace_once(
-              'frontend/app/components/ModelsDiscover.vue',
-              'class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]"',
-              'class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px]"'
-          )
-          replace_once(
-              'frontend/app/components/ModelsDiscover.vue',
-              '''      <div class="flex items-end">
-        <AppButton intent="primary" class="w-full justify-center" type="submit" :loading="loading">Search</AppButton>
-      </div>''',
-              '''      <p class="text-xs leading-5 text-[var(--neutral-700)] lg:col-span-3">Results update automatically as you type. Press Enter to search immediately.</p>'''
-          )
+          replace_once('frontend/app/components/ModelsDiscover.vue', 'class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]"', 'class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px]"')
+          replace_once('frontend/app/components/ModelsDiscover.vue', '      <div class="flex items-end">' + NL + '        <AppButton intent="primary" class="w-full justify-center" type="submit" :loading="loading">Search</AppButton>' + NL + '      </div>', '      <p class="text-xs leading-5 text-[var(--neutral-700)] lg:col-span-3">Results update automatically as you type. Press Enter to search immediately.</p>')
 
-          replace_all_min(
-              'frontend/app/pages/instances/index.vue',
-              'bg-[var(--color-accent)] text-[var(--color-bg)]',
-              'bg-[var(--color-accent)] text-[var(--color-on-accent)]',
-              3,
-          )
-          replace_once(
-              'frontend/app/pages/instances/index.vue',
-              '''    <Frame v-else-if="viewMode === 'table'" class="overflow-x-auto" data-testid="instances-table-view">
-      <table class="min-w-[1180px] w-full border-collapse text-left text-xs">''',
-              '''    <Frame v-else-if="viewMode === 'table'" class="overflow-x-auto" data-testid="instances-table-view" role="region" tabindex="0" aria-label="Instances table. Scroll horizontally for telemetry, lifecycle and actions.">
-      <p class="border-b border-[var(--color-divider)] px-3 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for telemetry, lifecycle and actions.</p>
-      <table class="min-w-[1180px] w-full border-collapse text-left text-xs">'''
-          )
+          replace_all_min('frontend/app/pages/instances/index.vue', 'bg-[var(--color-accent)] text-[var(--color-bg)]', 'bg-[var(--color-accent)] text-[var(--color-on-accent)]', 3)
+          replace_once('frontend/app/pages/instances/index.vue', '    <Frame v-else-if="viewMode === \'table\'" class="overflow-x-auto" data-testid="instances-table-view">', '    <Frame v-else-if="viewMode === \'table\'" class="overflow-x-auto" data-testid="instances-table-view" role="region" tabindex="0" aria-label="Instances table. Scroll horizontally for telemetry, lifecycle and actions.">')
+          replace_once('frontend/app/pages/instances/index.vue', '      <table class="min-w-[1180px] w-full border-collapse text-left text-xs">', '      <p class="border-b border-[var(--color-divider)] px-3 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for telemetry, lifecycle and actions.</p>' + NL + '      <table class="min-w-[1180px] w-full border-collapse text-left text-xs">')
 
-          replace_once(
-              'frontend/app/pages/admin/users.vue',
-              '''    <Frame data-testid="admin-users-table">
-      <UTable :data="users" :columns="columns">''',
-              '''    <Frame data-testid="admin-users-table" class="overflow-hidden p-0">
-      <p v-if="users.length" class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for status, dates and actions.</p>
-      <div class="overflow-x-auto" role="region" tabindex="0" aria-label="Administration users. Scroll horizontally for status, dates and actions.">
-      <UTable class="min-w-[720px]" :data="users" :columns="columns">'''
-          )
-          replace_once(
-              'frontend/app/pages/admin/users.vue',
-              '''      </UTable>
-      <div v-if="!users.length" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">No users</div>
-    </Frame>''',
-              '''      </UTable>
-      </div>
-      <div v-if="!users.length" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">No users</div>
-    </Frame>'''
-          )
+          replace_once('frontend/app/pages/admin/users.vue', '    <Frame data-testid="admin-users-table">', '    <Frame data-testid="admin-users-table" class="overflow-hidden p-0">')
+          replace_once('frontend/app/pages/admin/users.vue', '      <UTable :data="users" :columns="columns">', '      <p v-if="users.length" class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for status, dates and actions.</p>' + NL + '      <div class="overflow-x-auto" role="region" tabindex="0" aria-label="Administration users. Scroll horizontally for status, dates and actions.">' + NL + '        <UTable class="min-w-[720px]" :data="users" :columns="columns">')
+          replace_once('frontend/app/pages/admin/users.vue', '      </UTable>' + NL + '      <div v-if="!users.length"', '        </UTable>' + NL + '      </div>' + NL + '      <div v-if="!users.length"')
 
-          replace_once(
-              'frontend/app/pages/index.vue',
-              '''        <UTable v-else :data="recentRequests" :columns="gatewayColumns" class="w-full">''',
-              '''        <div v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="Gateway traffic. Scroll horizontally for request metrics and result.">
-          <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-muted md:hidden">Scroll horizontally for request metrics and result.</p>
-        <UTable :data="recentRequests" :columns="gatewayColumns" class="min-w-[860px] w-full">'''
-          )
-          replace_once(
-              'frontend/app/pages/index.vue',
-              '''          </template>
-        </UTable>
-      </Frame>
+          replace_once('frontend/app/pages/index.vue', '        <UTable v-else :data="recentRequests" :columns="gatewayColumns" class="w-full">', '        <div v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="Gateway traffic. Scroll horizontally for request metrics and result.">' + NL + '          <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-muted md:hidden">Scroll horizontally for request metrics and result.</p>' + NL + '          <UTable :data="recentRequests" :columns="gatewayColumns" class="min-w-[860px] w-full">')
+          replace_once('frontend/app/pages/index.vue', '        </UTable>' + NL + '      </Frame>' + NL + NL + '      <Frame id="needs-attention"', '          </UTable>' + NL + '        </div>' + NL + '      </Frame>' + NL + NL + '      <Frame id="needs-attention"')
 
-      <Frame id="needs-attention"''',
-              '''          </template>
-        </UTable>
-        </div>
-      </Frame>
+          replace_once('frontend/app/pages/admin/system-logs.vue', '            :aria-pressed="selectedLevel === level"' + NL + '            @click="selectedLevel = level"', '            :aria-pressed="selectedLevel === level"' + NL + '            :title="level === \'WARN\' ? \'WARN + ERROR\' : undefined"' + NL + '            @click="selectedLevel = level"')
+          replace_once('frontend/app/pages/admin/system-logs.vue', "            {{ level === 'ALL' ? 'All' : level }}", "            {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}")
+          replace_once('frontend/app/pages/admin/system-logs.vue', "? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]'", "? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'")
 
-      <Frame id="needs-attention"'''
-          )
+          replace_once('frontend/test/design-rules.nuxt.test.ts', "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-divider',", "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',")
+          replace_once('frontend/test/system-logs-redesign.nuxt.test.ts', "    expect(wrapper.get('[data-testid=\"system-log-header-controls\"]').text()).toContain('WARN')", "    expect(wrapper.get('[data-testid=\"system-log-header-controls\"]').text()).toContain('WARN+')")
+          replace_once('frontend/test/system-logs-redesign.nuxt.test.ts', "    await button(wrapper, 'WARN').trigger('click')", "    const warnButton = button(wrapper, 'WARN+')" + NL + "    expect(warnButton.attributes('title')).toBe('WARN + ERROR')" + NL + "    await warnButton.trigger('click')")
+          replace_once('frontend/test/discover-search.nuxt.test.ts', '    const wrapper = await mountSuspended(DiscoverPage, { route: false })' + NL + NL + '    expect(mocks.request).not.toHaveBeenCalled()', '    const wrapper = await mountSuspended(DiscoverPage, { route: false })' + NL + NL + "    expect(wrapper.findAll('button').some(button => button.text().trim() === 'Search')).toBe(false)" + NL + "    expect(wrapper.text()).toContain('Results update automatically as you type. Press Enter to search immediately.')" + NL + '    expect(mocks.request).not.toHaveBeenCalled()')
 
-          replace_once(
-              'frontend/app/pages/admin/system-logs.vue',
-              '            :aria-pressed="selectedLevel === level"\n            @click="selectedLevel = level"',
-              '            :aria-pressed="selectedLevel === level"\n            :title="level === \'WARN\' ? \'WARN + ERROR\' : undefined"\n            @click="selectedLevel = level"'
-          )
-          replace_once(
-              'frontend/app/pages/admin/system-logs.vue',
-              "            {{ level === 'ALL' ? 'All' : level }}",
-              "            {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}"
-          )
-          replace_once(
-              'frontend/app/pages/admin/system-logs.vue',
-              "? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]'",
-              "? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'"
-          )
-
-          replace_once(
-              'frontend/test/design-rules.nuxt.test.ts',
-              "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-divider',",
-              "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',"
-          )
-
-          replace_once(
-              'frontend/test/system-logs-redesign.nuxt.test.ts',
-              "    expect(wrapper.get('[data-testid=\"system-log-header-controls\"]').text()).toContain('WARN')",
-              "    expect(wrapper.get('[data-testid=\"system-log-header-controls\"]').text()).toContain('WARN+')"
-          )
-          replace_once(
-              'frontend/test/system-logs-redesign.nuxt.test.ts',
-              "    await button(wrapper, 'WARN').trigger('click')",
-              "    const warnButton = button(wrapper, 'WARN+')\n    expect(warnButton.attributes('title')).toBe('WARN + ERROR')\n    await warnButton.trigger('click')"
-          )
-
-          replace_once(
-              'frontend/test/discover-search.nuxt.test.ts',
-              '''    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-
-    expect(mocks.request).not.toHaveBeenCalled()''',
-              '''    const wrapper = await mountSuspended(DiscoverPage, { route: false })
-
-    expect(wrapper.findAll('button').some(button => button.text().trim() === 'Search')).toBe(false)
-    expect(wrapper.text()).toContain('Results update automatically as you type. Press Enter to search immediately.')
-    expect(mocks.request).not.toHaveBeenCalled()'''
-          )
-
-          feedback = Path('frontend/test/redesign-feedback.nuxt.test.ts')
-          source = feedback.read_text()
-          marker = '''  it('distinguishes empty model metadata from an empty search result', () => {'''
-          if source.count(marker) != 1:
-              raise SystemExit('redesign feedback insertion marker mismatch')
-          block = '''  it('keeps remaining reviewed actions and mobile data surfaces understandable', () => {
-    const instanceForm = readFileSync(resolve(process.cwd(), 'app/components/InstanceForm.vue'), 'utf8')
-    const instances = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')
-    const modelNew = readFileSync(resolve(process.cwd(), 'app/pages/models/new.vue'), 'utf8')
-    const discover = readFileSync(resolve(process.cwd(), 'app/components/ModelsDiscover.vue'), 'utf8')
-    const users = readFileSync(resolve(process.cwd(), 'app/pages/admin/users.vue'), 'utf8')
-    const dashboard = readFileSync(resolve(process.cwd(), 'app/pages/index.vue'), 'utf8')
-    const logs = readFileSync(resolve(process.cwd(), 'app/pages/admin/system-logs.vue'), 'utf8')
-
-    expect(instanceForm).toContain('data-testid="instance-submit-requirements"')
-    expect(instanceForm).toContain('text-[var(--color-on-accent)]')
-    expect(instances).toContain('Instances table. Scroll horizontally for telemetry, lifecycle and actions.')
-    expect(instances).toContain('text-[var(--color-on-accent)]')
-    expect(modelNew).toContain('data-testid="model-submit-requirements"')
-    expect(discover).toContain('Results update automatically as you type. Press Enter to search immediately.')
-    expect(discover).not.toContain('>Search</AppButton>')
-    expect(users).toContain('Administration users. Scroll horizontally for status, dates and actions.')
-    expect(dashboard).toContain('Gateway traffic. Scroll horizontally for request metrics and result.')
-    expect(logs).toContain("'WARN+'")
-    expect(logs).toContain('text-[var(--color-on-accent)]')
-  })
-
-'''
-          feedback.write_text(source.replace(marker, block + marker, 1))
+          replace_once('frontend/test/redesign-feedback.nuxt.test.ts', "    const api = readFileSync(resolve(process.cwd(), 'app/pages/api.vue'), 'utf8')", "    const api = readFileSync(resolve(process.cwd(), 'app/pages/api.vue'), 'utf8')" + NL + "    const instanceForm = readFileSync(resolve(process.cwd(), 'app/components/InstanceForm.vue'), 'utf8')" + NL + "    const instances = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')" + NL + "    const modelNew = readFileSync(resolve(process.cwd(), 'app/pages/models/new.vue'), 'utf8')" + NL + "    const discover = readFileSync(resolve(process.cwd(), 'app/components/ModelsDiscover.vue'), 'utf8')" + NL + "    const users = readFileSync(resolve(process.cwd(), 'app/pages/admin/users.vue'), 'utf8')" + NL + "    const dashboard = readFileSync(resolve(process.cwd(), 'app/pages/index.vue'), 'utf8')" + NL + "    const logs = readFileSync(resolve(process.cwd(), 'app/pages/admin/system-logs.vue'), 'utf8')")
+          replace_once('frontend/test/redesign-feedback.nuxt.test.ts', "    expect(api).toContain('class=\"min-w-[760px]\"')", "    expect(api).toContain('class=\"min-w-[760px]\"')" + NL + "    expect(instanceForm).toContain('data-testid=\"instance-submit-requirements\"')" + NL + "    expect(instanceForm).toContain('text-[var(--color-on-accent)]')" + NL + "    expect(instances).toContain('Instances table. Scroll horizontally for telemetry, lifecycle and actions.')" + NL + "    expect(instances).toContain('text-[var(--color-on-accent)]')" + NL + "    expect(modelNew).toContain('data-testid=\"model-submit-requirements\"')" + NL + "    expect(discover).toContain('Results update automatically as you type. Press Enter to search immediately.')" + NL + "    expect(discover).not.toContain('>Search</AppButton>')" + NL + "    expect(users).toContain('Administration users. Scroll horizontally for status, dates and actions.')" + NL + "    expect(dashboard).toContain('Gateway traffic. Scroll horizontally for request metrics and result.')" + NL + "    expect(logs).toContain(\"'WARN+'\")" + NL + "    expect(logs).toContain('text-[var(--color-on-accent)]')")
           PY
       - name: Install frontend dependencies
         working-directory: frontend
