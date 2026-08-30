@@ -1,0 +1,81 @@
+name: Apply redesign feedback round six
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/apply-redesign-feedback-round6.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded operator guidance patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          NL = chr(10)
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:180]!r}')
+              p.write_text(source.replace(old, new, 1))
+
+          dashboard = 'frontend/app/pages/index.vue'
+          replace_once(dashboard, 'title="VRAM attributed to managed llama.cpp Instances; other device processes are excluded.">Managed VRAM</p>', 'title="VRAM committed to manager-attributed llama.cpp Instances; other device processes are excluded.">VRAM committed</p>')
+          replace_once(dashboard, '<UEmpty v-if="!attention.length" variant="naked" title="Nothing needs attention." />', '<p v-if="!attention.length" class="py-3 text-sm text-muted" data-testid="dashboard-attention-empty">Nothing needs attention.</p>')
+
+          admin_field = 'frontend/app/components/AdminSettingField.vue'
+          replace_once(admin_field, "const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-700)]')", "const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(--accent-800)]' : 'text-[var(--neutral-800)]')")
+          replace_once(admin_field, 'class="font-mono text-[10.5px] font-normal"', 'class="font-mono text-[11.5px] font-normal"')
+
+          model_new = 'frontend/app/pages/models/new.vue'
+          replace_once(model_new, '<div v-else-if="!availableGGUFs.length" class="px-4 py-6 text-sm text-[var(--neutral-700)]">No unregistered GGUF files found</div>', '<div v-else-if="!availableGGUFs.length" class="px-4 py-6" data-testid="gguf-empty-state">' + NL + '            <p class="text-sm font-semibold text-[var(--color-text)]">No unregistered GGUF files found</p>' + NL + '            <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--neutral-800)]">Create model is unavailable until a GGUF artifact is selected. Rescan this manager or open Discover to find one.</p>' + NL + '            <div class="mt-3"><AppButton to="/models/discover" intent="secondary" size="xs">Open Discover</AppButton></div>' + NL + '          </div>')
+
+          dashboard_test = 'frontend/test/dashboard.nuxt.test.ts'
+          replace_once(dashboard_test, "    expect(wrapper.get('[data-testid=\"dashboard-vram\"]').text()).toContain('20 GiB')", "    expect(wrapper.get('[data-testid=\"dashboard-vram\"]').text()).toContain('VRAM committed')" + NL + "    expect(wrapper.get('[data-testid=\"dashboard-vram\"]').text()).toContain('20 GiB')")
+          replace_once(dashboard_test, "    expect(wrapper.get('[data-testid=\"dashboard-attention\"]').text()).toContain('Nothing needs attention')", "    expect(wrapper.get('[data-testid=\"dashboard-attention-empty\"]').text()).toContain('Nothing needs attention')")
+
+          admin_test = 'frontend/test/admin-machine-typography.nuxt.test.ts'
+          replace_once(admin_test, "  it('keeps user timestamps mono and tabular', () => {", "  it('keeps setting provenance readable while preserving machine typography', () => {" + NL + "    const content = source('app/components/AdminSettingField.vue')" + NL + "    expect(content).toContain('font-mono text-[11.5px] font-normal')" + NL + "    expect(content).toContain(\"'text-[var(--neutral-800)]'\")" + NL + "    expect(content).toContain(\"'text-[var(--accent-800)]'\")" + NL + "  })" + NL + NL + "  it('keeps user timestamps mono and tabular', () => {")
+
+          model_test = 'frontend/test/model-add-redesign.nuxt.test.ts'
+          replace_once(model_test, "  it('renders bordered GGUF radios with real modified time and metadata-driven capabilities', async () => {", "  it('explains the local artifact dependency and offers Discover when no GGUF can be selected', async () => {" + NL + "    mocks.request.mockImplementation(async (path: string) => path === '/api/v1/models/available' ? [] : {})" + NL + NL + "    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })" + NL + "    await flushPromises()" + NL + NL + "    const empty = wrapper.get('[data-testid=\"gguf-empty-state\"]')" + NL + "    expect(empty.text()).toContain('No unregistered GGUF files found')" + NL + "    expect(empty.text()).toContain('Create model is unavailable until a GGUF artifact is selected.')" + NL + "    expect(empty.text()).toContain('Open Discover')" + NL + "    expect(wrapper.get('[data-testid=\"model-submit-requirements\"]').text()).toContain('Required: a GGUF artifact and Model name.')" + NL + "  })" + NL + NL + "  it('renders bordered GGUF radios with real modified time and metadata-driven capabilities', async () => {")
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated fixes and remove helper
+        run: |
+          rm .github/workflows/apply-redesign-feedback-round6.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ui): refine remaining operator guidance" -m "Use clearer VRAM terminology and a quieter healthy Dashboard state, keep Administration setting provenance readable, and make the Add Model artifact dependency explicit with a direct Discover path."
+          git push origin HEAD:feature/redesign
