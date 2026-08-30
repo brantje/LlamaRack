@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const discoverDetailFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -333,6 +334,10 @@ async function installApiFixture(page: Page) {
       }], next_cursor: '' }) })
       return
     }
+    if (discoverDetailFailurePages.has(page) && url.pathname === '/api/v1/huggingface/model') {
+      await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify({ error: 'Repository temporarily unavailable for visual QA.' }) })
+      return
+    }
     if (playgroundColdPages.has(page) && /^\/api\/v1\/instances\/[^/]+\/runtime$/.test(url.pathname)) {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ instance_id: 'qwen3-primary', model_id: 'qwen3-8b-q4km', state: 'UNLOADED' }) })
       return
@@ -421,6 +426,24 @@ for (const [name, path] of pages) {
     })
   })
 }
+
+
+test('discover repository failure and retry screenshot', async ({ page }, testInfo) => {
+  discoverDetailFailurePages.add(page)
+  await page.goto('/models/discover/Qwen/Qwen3-8B-GGUF', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const failure = page.locator('[data-testid="discover-detail-error"]')
+  await expect(failure).toContainText('Repository temporarily unavailable for visual QA.')
+  await expect(failure).toContainText('Qwen/Qwen3-8B-GGUF')
+  await expect(page.locator('[data-testid="discover-detail-back"]')).toBeVisible()
+  await expect(page.locator('[data-testid="discover-detail-retry"]')).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/discover-detail-error.png`, fullPage: true, animations: 'disabled' })
+
+  discoverDetailFailurePages.delete(page)
+  await page.locator('[data-testid="discover-detail-retry"]').click()
+  await expect(page.locator('[data-testid="discover-repository-header"]').getByRole('heading', { name: 'Qwen/Qwen3-8B-GGUF' })).toBeVisible()
+  await expect(page.locator('[data-testid="discover-detail-error"]')).toBeHidden()
+})
 
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {

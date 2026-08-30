@@ -141,4 +141,36 @@ describe('Discover URL navigation and endless scrolling', () => {
     expect(wrapper.text()).toContain('Qwen/Qwen3.8-Flash-Next')
     wrapper.unmount()
   })
+
+  it('recovers a failed direct repository load with Retry and Back to Discover', async () => {
+    let attempts = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/huggingface/model?repo=Qwen%2FRecovery-GGUF') {
+        attempts++
+        if (attempts === 1) throw new Error('Repository temporarily unavailable')
+        return { id: 'Qwen/Recovery-GGUF', downloads: 3, likes: 4, private: false, gated: false, revision: 'main', artifacts: [] }
+      }
+      if (path.startsWith('/api/v1/huggingface/recommendations?')) {
+        return { context_length: 4096, context_capability: 4096, context_assumed: true, metadata: {}, hardware_available: false, hybrid_recommendations_enabled: false, artifacts: [] }
+      }
+      return []
+    })
+
+    const wrapper = await mountSuspended(DiscoverDetailPage, { route: '/models/discover/Qwen/Recovery-GGUF' })
+    await flushPromises()
+    const failure = wrapper.get('[data-testid="discover-detail-error"]')
+    expect(failure.text()).toContain('Repository temporarily unavailable')
+    expect(failure.text()).toContain('Qwen/Recovery-GGUF')
+
+    await wrapper.get('[data-testid="discover-detail-retry"]').trigger('click')
+    await flushPromises()
+    expect(attempts).toBe(2)
+    expect(wrapper.find('[data-testid="discover-detail-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Qwen/Recovery-GGUF')
+
+    await wrapper.get('[data-testid="discover-detail-actions"]').findAll('button')[0]!.trigger('click')
+    await flushPromises()
+    expect(mocks.navigateTo).toHaveBeenCalledWith('/models/discover')
+    wrapper.unmount()
+  })
 })
