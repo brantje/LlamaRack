@@ -85,6 +85,11 @@ jobs:
               "    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })\n    await flushPromises()\n\n    await wrapper.find('form').trigger('submit')",
               "    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })\n    await flushPromises()\n    expect(wrapper.text()).toContain('Unsaved changes')\n    expect(wrapper.text()).not.toContain('No changes to save.')\n\n    await wrapper.find('form').trigger('submit')"
           )
+          replace_once(
+              config_test,
+              "    inputWithValue(wrapper, 'Breaking Rename').vm.$emit('update:modelValue', 'Primary Coder')\n    failSave = true\n    await flushPromises()\n    await wrapper.find('form').trigger('submit')",
+              "    inputWithValue(wrapper, 'Breaking Rename').vm.$emit('update:modelValue', 'Primary Coder')\n    checkbox(wrapper, 'Always On').vm.$emit('update:modelValue', true)\n    failSave = true\n    await flushPromises()\n    await wrapper.find('form').trigger('submit')"
+          )
           PY
       - name: Install frontend dependencies
         working-directory: frontend
