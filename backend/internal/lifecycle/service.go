@@ -325,11 +325,13 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	satisfied := 0
 	for _, i := range items {
 		if !i.Enabled || !i.AlwaysOn || s.isManuallyStopped(i.ID) {
 			continue
 		}
 		if _, ok := s.sup.Endpoint(i.ID); ok {
+			satisfied++
 			s.clearResourceBlock(i.ID)
 			continue
 		}
@@ -339,6 +341,7 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 		}
 		go func(id string) { _, _ = s.startInstance(context.Background(), id, false) }(i.ID)
 	}
+	s.logAlwaysOnReconcile(satisfied)
 }
 
 func (s *Service) reconcileResourceBlocked(id string) {
