@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const chrome = devices['Desktop Chrome']
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -15,12 +17,28 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'desktop',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } }
+      name: 'mobile-small-360x800',
+      use: { ...chrome, viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true }
     },
     {
-      name: 'mobile',
-      use: { ...devices['Pixel 7'] }
+      name: 'mobile-large-412x915',
+      use: { ...chrome, viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true }
+    },
+    {
+      name: 'tablet-768x1024',
+      use: { ...chrome, viewport: { width: 768, height: 1024 }, hasTouch: true }
+    },
+    {
+      name: 'laptop-1366x768',
+      use: { ...chrome, viewport: { width: 1366, height: 768 } }
+    },
+    {
+      name: 'desktop-1440x1000',
+      use: { ...chrome, viewport: { width: 1440, height: 1000 } }
+    },
+    {
+      name: 'desktop-wide-1920x1080',
+      use: { ...chrome, viewport: { width: 1920, height: 1080 } }
     }
   ],
   webServer: {
