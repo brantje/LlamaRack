@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 )
+
+import "github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 
 var (
 	playgroundSchemaReady sync.Map
@@ -31,13 +32,43 @@ func (s *Service) ensurePlaygroundSchema(ctx context.Context) error {
 	}
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS playground_lifecycle_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		recorded_at INTEGER NOT NULL,
 		event TEXT NOT NULL,
-		instance_id TEXT NOT NULL
+		instance_id TEXT NOT NULL,
+		correlation_id TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS playground_lifecycle_events_recorded_idx ON playground_lifecycle_events(recorded_at,event)`); err != nil {
+
+	// The Playground diagnostics table was introduced on the redesign branch.
+	// Keep branch-local databases created by the earlier draft compatible rather
+	// than requiring a manual reset.
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(playground_lifecycle_events)`)
+	if err != nil {
+		return err
+	}
+	hasCorrelation := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "correlation_id" {
+			hasCorrelation = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasCorrelation {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE playground_lifecycle_events ADD COLUMN correlation_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS playground_lifecycle_events_correlation_idx ON playground_lifecycle_events(correlation_id,event,id)`); err != nil {
 		return err
 	}
 	playgroundSchemaReady.Store(s.db, struct{}{})
@@ -49,13 +80,14 @@ func (s *Service) recordPlaygroundLifecycleEvent(ctx context.Context, event, ins
 		return nil
 	}
 	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
+	correlationID := lifecycle.RequestCorrelationFromContext(ctx)
+	if instanceID == "" || correlationID == "" {
 		return nil
 	}
 	if err := s.ensurePlaygroundSchema(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(recorded_at,event,instance_id) VALUES(?,?,?)`, time.Now().UnixMilli(), event, instanceID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, event, instanceID, correlationID)
 	return err
 }
 
@@ -73,16 +105,16 @@ func requestStateTrace(record RequestRecord) []string {
 }
 
 func (s *Service) playgroundEvictions(ctx context.Context, record RequestRecord) ([]string, error) {
+	correlationID := strings.TrimSpace(record.TraceID)
+	if correlationID == "" {
+		return nil, nil
+	}
 	if err := s.ensurePlaygroundSchema(ctx); err != nil {
 		return nil, err
 	}
-	finishedAt := record.FinishedAt
-	if finishedAt <= 0 {
-		finishedAt = time.Now().UnixMilli()
-	}
 	rows, err := s.db.QueryContext(ctx, `SELECT instance_id FROM playground_lifecycle_events
-		WHERE event=? AND recorded_at>=? AND recorded_at<=? AND instance_id<>?
-		ORDER BY id`, LifecycleEviction, record.StartedAt, finishedAt, record.InstanceID)
+		WHERE event=? AND correlation_id=? AND instance_id<>?
+		ORDER BY id`, LifecycleEviction, correlationID, record.InstanceID)
 	if err != nil {
 		return nil, err
 	}
