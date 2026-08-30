@@ -50,11 +50,13 @@ beforeEach(() => {
   mocks.runtime.state = 'UNLOADED'
   mocks.runtime.port = 9101
   sessionStorage.clear()
+  localStorage.clear()
+  sessionStorage.setItem('lcm_management_token', 'management-playground')
   vi.unstubAllGlobals()
 })
 
 describe('Playground', () => {
-  it('sends through the public gateway, streams output and loads correlated diagnostics', async () => {
+  it('uses the management bridge, streams output and loads correlated gateway diagnostics', async () => {
     mocks.request.mockResolvedValue(diagnostic())
     const publicFetch = vi.fn(async (_url: string, init: RequestInit) => new Response(
       'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\n\ndata: [DONE]\n\n',
@@ -75,16 +77,16 @@ describe('Playground', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('PLAYGROUND')
     expect(wrapper.text()).toContain('This Instance is not loaded — sending will trigger autoload through the gateway.')
+    expect(wrapper.find('#playground-api-key').exists()).toBe(false)
 
-    await wrapper.get('#playground-api-key').setValue('lcm_playground_secret')
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('Explain this code')
     await button(wrapper, 'Send').trigger('click')
     await flushPromises()
 
     expect(publicFetch).toHaveBeenCalledTimes(1)
     const [url, init] = publicFetch.mock.calls[0]!
-    expect(url).toBe('http://manager.test:8888/v1/chat/completions')
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer lcm_playground_secret')
+    expect(url).toBe('http://manager.test:8888/api/v1/playground/chat/completions')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer management-playground')
     const body = JSON.parse(String(init.body))
     expect(body.model).toBe('coder')
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'Explain this code' })
@@ -99,7 +101,7 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('36 / 32768')
     expect(wrapper.text()).toContain('CUDA0 8.00 GiB')
     expect(wrapper.text()).toContain('x-llamacpp-manager-upstream-port: 9101')
-    expect(sessionStorage.getItem('lcm-playground-api-key')).toBe('lcm_playground_secret')
+    expect(sessionStorage.getItem('lcm-playground-api-key')).toBeNull()
     wrapper.unmount()
   })
 
@@ -114,7 +116,6 @@ describe('Playground', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
-    await wrapper.get('#playground-api-key').setValue('lcm_raw')
     await button(wrapper, 'Request').trigger('click')
     const raw = {
       model: 'coder',
@@ -136,7 +137,7 @@ describe('Playground', () => {
     wrapper.unmount()
   })
 
-  it('cancels the in-flight public request with Stop', async () => {
+  it('cancels the in-flight bridged request with Stop', async () => {
     mocks.runtime.state = 'READY'
     let seenSignal: AbortSignal | undefined
     const publicFetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -147,7 +148,6 @@ describe('Playground', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
-    await wrapper.get('#playground-api-key').setValue('lcm_stop')
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('long response')
     await button(wrapper, 'Send').trigger('click')
     await flushPromises()
@@ -161,17 +161,18 @@ describe('Playground', () => {
     wrapper.unmount()
   })
 
-  it('rejects missing credentials and invalid raw JSON without bypassing the gateway', async () => {
+  it('rejects a missing management session and invalid raw JSON without bypassing the bridge', async () => {
     const publicFetch = vi.fn()
     vi.stubGlobal('fetch', publicFetch)
+    sessionStorage.removeItem('lcm_management_token')
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
 
     await button(wrapper, 'Send').trigger('click')
-    expect(wrapper.text()).toContain('Enter an inference API key')
+    expect(wrapper.text()).toContain('Management session is unavailable. Sign in again.')
     expect(publicFetch).not.toHaveBeenCalled()
 
-    await wrapper.get('#playground-api-key').setValue('lcm_key')
+    sessionStorage.setItem('lcm_management_token', 'management-playground')
     await button(wrapper, 'Request').trigger('click')
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue('{bad json')
     await button(wrapper, 'Send').trigger('click')
