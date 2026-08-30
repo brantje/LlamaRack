@@ -96,8 +96,8 @@ jobs:
           )
           replace_once(
               e2e,
-              "  })\n}\n",
-              "  })\n}\n\nasync function waitForManagerPanel(page: Page) {\n  const panel = page.locator('#dashboard-panel-manager-main')\n  await expect(panel).toBeVisible({ timeout: 15_000 })\n  await expect(panel).not.toBeEmpty()\n  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()\n  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()\n}\n",
+              "    await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(responseFor(url.pathname, request.method())) })\n  })\n}\n\nconst pages = [",
+              "    await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(responseFor(url.pathname, request.method())) })\n  })\n}\n\nasync function waitForManagerPanel(page: Page) {\n  const panel = page.locator('#dashboard-panel-manager-main')\n  await expect(panel).toBeVisible({ timeout: 15_000 })\n  await expect(panel).not.toBeEmpty()\n  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()\n  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()\n}\n\nconst pages = ["
           )
           replace_once(
               e2e,
