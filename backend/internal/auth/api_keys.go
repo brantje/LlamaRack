@@ -98,6 +98,9 @@ func (s *Service) AuthenticateAPIKey(ctx context.Context, token string) error {
 // AuthenticateAPIKeyInfo validates a gateway key and returns only its safe
 // management identity. The raw secret is never retained or returned.
 func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (APIKey, error) {
+	if trustedInferenceContext(ctx) {
+		return APIKey{Name: "Management Playground", Enabled: true}, nil
+	}
 	if token == "" { return APIKey{}, errors.New("missing api key") }
 	var item APIKey
 	var lastUsed sql.NullInt64
