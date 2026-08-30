@@ -469,7 +469,10 @@ onBeforeUnmount(() => controller?.abort())
       </div>
     </header>
 
-    <p v-if="error" class="border border-[var(--accent-300)] bg-[var(--accent-100)] px-3 py-2 text-xs text-[var(--accent-900)]">{{ error }}</p>
+    <Frame v-if="error" class="flex items-start gap-2 p-3" data-testid="playground-error">
+      <StatusTag variant="failed">Request error</StatusTag>
+      <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+    </Frame>
     <p v-if="notice" class="border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]">{{ notice }}</p>
 
     <div class="grid min-h-[calc(100vh-11rem)] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -494,7 +497,7 @@ onBeforeUnmount(() => controller?.abort())
             >
               <p class="mb-1 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">{{ message.role }}</p>
               <p class="whitespace-pre-wrap text-sm leading-6">{{ message.content || (message.role === 'assistant' && inFlight ? '…' : '') }}</p>
-              <p v-if="message.role === 'assistant' && message.stats" class="mt-2 font-mono text-[11px] text-[var(--neutral-700)]">
+              <p v-if="message.role === 'assistant' && message.stats" class="mt-2 font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">
                 {{ message.stats.prompt }} prompt · {{ message.stats.completion }} completion · {{ formatRate(message.stats.rate) }} · ttft {{ formatMS(message.stats.ttft) }}
               </p>
             </article>
@@ -566,13 +569,13 @@ onBeforeUnmount(() => controller?.abort())
 
           <div v-if="activePanel === 'parameters'" class="space-y-4 p-4" data-testid="playground-parameters">
             <div class="grid grid-cols-2 gap-3">
-              <label class="text-[10px] text-[var(--neutral-700)]">temperature<UInput v-model.number="parameters.temperature" type="number" step="0.05" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">top_p<UInput v-model.number="parameters.topP" type="number" step="0.05" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">max_tokens<UInput v-model.number="parameters.maxTokens" type="number" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">seed<UInput v-model="parameters.seed" type="number" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">top_k<UInput v-model.number="parameters.topK" type="number" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">min_p<UInput v-model.number="parameters.minP" type="number" step="0.01" class="mt-1" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">repeat_penalty<UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="mt-1" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">temperature<UInput v-model.number="parameters.temperature" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">top_p<UInput v-model.number="parameters.topP" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">max_tokens<UInput v-model.number="parameters.maxTokens" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">seed<UInput v-model="parameters.seed" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">top_k<UInput v-model.number="parameters.topK" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">min_p<UInput v-model.number="parameters.minP" type="number" step="0.01" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[10px] text-[var(--neutral-700)]">repeat_penalty<UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
               <label class="text-[10px] text-[var(--neutral-700)]">stop<UInput v-model="parameters.stop" class="mt-1 font-mono" placeholder="one, two" /></label>
             </div>
             <UCheckbox v-model="parameters.stream" label="stream" />
@@ -613,18 +616,18 @@ onBeforeUnmount(() => controller?.abort())
         <Frame class="p-4" data-testid="playground-diagnostics">
           <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">REQUEST DIAGNOSTICS</p>
           <dl v-if="diagnostics" class="mt-3 divide-y divide-[var(--color-divider)] text-[11px]">
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance</dt><dd class="font-mono">{{ diagnostics.request.instance_id || '—' }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance state</dt><dd class="font-mono">{{ diagnostics.state_trace.join(' → ') || '—' }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.instance_id || '—' }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance state</dt><dd class="font-mono tabular-nums">{{ diagnostics.state_trace.join(' → ') || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Cold start</dt><dd>{{ diagnostics.request.autoloaded ? 'yes — autoload' : 'no' }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Startup time</dt><dd class="font-mono">{{ formatMS(diagnostics.request.load_duration_ms) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">TTFT</dt><dd class="font-mono">{{ formatMS(diagnostics.request.ttft_ms) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generation time</dt><dd class="font-mono">{{ formatMS(Math.max(0, diagnostics.request.duration_ms - (diagnostics.request.ttft_ms || 0))) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens</dt><dd class="font-mono">{{ diagnostics.request.prompt_tokens }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens</dt><dd class="font-mono">{{ diagnostics.request.generated_tokens }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tokens / second</dt><dd class="font-mono">{{ formatRate(diagnostics.request.tokens_per_second) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Context usage</dt><dd class="font-mono">{{ contextUsage }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">GPU allocation</dt><dd class="font-mono">{{ gpuAllocation }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Evictions triggered</dt><dd class="font-mono">{{ diagnostics.evictions_triggered.join(', ') || 'none' }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Startup time</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnostics.request.load_duration_ms) }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">TTFT</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnostics.request.ttft_ms) }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generation time</dt><dd class="font-mono tabular-nums">{{ formatMS(Math.max(0, diagnostics.request.duration_ms - (diagnostics.request.ttft_ms || 0))) }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.prompt_tokens }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.generated_tokens }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tokens / second</dt><dd class="font-mono tabular-nums">{{ formatRate(diagnostics.request.tokens_per_second) }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Context usage</dt><dd class="font-mono tabular-nums">{{ contextUsage }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">GPU allocation</dt><dd class="font-mono tabular-nums">{{ gpuAllocation }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Evictions triggered</dt><dd class="font-mono tabular-nums">{{ diagnostics.evictions_triggered.join(', ') || 'none' }}</dd></div>
           </dl>
           <p v-else class="mt-3 text-xs leading-5 text-[var(--neutral-700)]">Send a request to record lifecycle and inference diagnostics for this Instance.</p>
         </Frame>
