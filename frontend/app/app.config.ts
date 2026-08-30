@@ -14,6 +14,11 @@ export default defineAppConfig({
         base: 'cursor-pointer font-semibold rounded-none'
       }
     },
+    badge: {
+      slots: {
+        base: 'rounded-none'
+      }
+    },
     card: {
       slots: {
         root: 'rounded-none border border-default bg-elevated shadow-none'
