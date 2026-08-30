@@ -1,6 +1,7 @@
 package systemlog
 
 import (
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -137,7 +138,7 @@ func Log(level Level, source, message string) { Default.Add(level, source, messa
 
 func FormatDuration(duration time.Duration) string {
 	if duration < time.Second {
-		return time.Duration(duration.Milliseconds()).String()
+		return strconv.FormatInt(duration.Milliseconds(), 10) + "ms"
 	}
 	return duration.Round(10 * time.Millisecond).String()
 }
