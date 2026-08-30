@@ -57,7 +57,7 @@ test('dashboard shows real fake-nvidia pressure state', async ({ page, request }
   await page.waitForTimeout(1500)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/dashboard-pressure.png`,
-    fullPage: false,
+    fullPage: true,
     animations: 'disabled'
   })
 })
@@ -69,7 +69,7 @@ test('system diagnostics render against fake-nvidia manager', async ({ page }, t
   await expect(page.getByRole('heading', { name: 'llama.cpp', exact: true })).toBeVisible()
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/admin-system.png`,
-    fullPage: false,
+    fullPage: true,
     animations: 'disabled'
   })
 })
