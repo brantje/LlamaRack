@@ -8,6 +8,7 @@ type Summary = {
 const manager = useManager()
 const summary = ref<Summary | null>(null)
 const error = ref('')
+const loading = ref(false)
 
 function isSummary(value: unknown): value is Summary {
   if (!value || typeof value !== 'object') return false
@@ -17,13 +18,17 @@ function isSummary(value: unknown): value is Summary {
 
 async function load() {
   if (!manager.user.value) return
+  loading.value = true
   error.value = ''
   try {
     const value = await manager.request<Summary>('/api/v1/admin/summary')
-    summary.value = isSummary(value) ? value : null
+    if (!isSummary(value)) throw new Error('Invalid administration summary response')
+    summary.value = value
   } catch (value: any) {
     summary.value = null
     error.value = value?.data?.error || value?.message || 'Unable to load administration summary'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -34,10 +39,14 @@ watch(manager.user, user => {
 
 <template>
   <AdminShell title="Dashboard" description="Security, provider and runtime status for the manager.">
-    <template #actions><AppButton intent="secondary" @click="load">Refresh</AppButton></template>
+    <template #actions><AppButton intent="secondary" :loading="loading" @click="load">Refresh</AppButton></template>
 
-    <Frame v-if="error" class="mb-5 p-3">
-      <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div>
+    <Frame v-if="error" class="mb-5 p-3" data-testid="admin-summary-error">
+      <div class="flex flex-wrap items-center gap-2">
+        <StatusTag variant="failed">Summary unavailable</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+        <AppButton intent="secondary" size="xs" :loading="loading" @click="load">Retry</AppButton>
+      </div>
     </Frame>
 
     <div v-if="summary" class="grid gap-4 lg:grid-cols-3" data-testid="admin-summary-cards">
@@ -68,6 +77,6 @@ watch(manager.user, user => {
         </Frame>
       </NuxtLink>
     </div>
-    <div v-else class="grid gap-4 md:grid-cols-3"><USkeleton v-for="n in 3" :key="n" class="h-40 w-full" /></div>
+    <div v-else-if="loading" class="grid gap-4 md:grid-cols-3" data-testid="admin-summary-loading"><USkeleton v-for="n in 3" :key="n" class="h-40 w-full" /></div>
   </AdminShell>
 </template>
