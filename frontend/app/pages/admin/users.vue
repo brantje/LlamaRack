@@ -116,8 +116,8 @@ async function submitReset() {
           </div>
         </template>
         <template #enabled-cell="{ row }"><StatusTag :variant="row.original.enabled ? 'ready' : 'neutral'">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</StatusTag></template>
-        <template #created_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ dateTime(row.original.created_at) }}</span></template>
-        <template #last_login_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ dateTime(row.original.last_login_at) }}</span></template>
+        <template #created_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ dateTime(row.original.created_at) }}</span></template>
+        <template #last_login_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ dateTime(row.original.last_login_at) }}</span></template>
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <AppButton intent="ghost" size="xs" @click="openReset(row.original)">Reset password</AppButton>
