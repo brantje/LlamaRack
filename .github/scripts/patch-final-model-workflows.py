@@ -41,19 +41,23 @@ new = """    expect(wrapper.get('[data-testid=\"model-submit-requirements\"]').t
 if old not in text:
     raise SystemExit('missing Add Model hierarchy test marker')
 text = text.replace(old, new, 1)
-old = "    expect(wrapper.get('[data-testid=\"companion-mtp\"]').text()).toContain('None found')"
-new = """    expect(wrapper.get('[data-testid=\"companion-mtp\"]').text()).toContain('None found')
-    expect(wrapper.get('[data-testid=\"companion-empty-mmproj\"]').classes()).toContain('text-[var(--neutral-800)]')
-    expect(wrapper.get('[data-testid=\"companion-empty-mtp\"]').classes()).toContain('text-[var(--neutral-800)]')"""
-if old not in text:
-    raise SystemExit('missing Add Model empty companion test marker')
-text = text.replace(old, new, 1)
 old = "    expect(projectorSlot.text()).toContain('value cleared — the flag is not passed')"
 new = """    expect(projectorSlot.text()).toContain('value cleared — the flag is not passed')
     expect(projectorSlot.get('[data-testid=\"companion-disabled-mmproj\"]').classes()).toContain('text-[var(--neutral-800)]')"""
 if old not in text:
     raise SystemExit('missing Add Model disabled companion test marker')
 test.write_text(text.replace(old, new, 1))
+
+edge = Path('frontend/test/model-add-edge-branches.nuxt.test.ts')
+text = edge.read_text()
+old = """    expect(wrapper.get('[data-testid=\"companion-mmproj\"]').text()).toContain('None found')
+    expect(wrapper.get('[data-testid=\"companion-mtp\"]').text()).toContain('None found')"""
+new = old + """
+    expect(wrapper.get('[data-testid=\"companion-empty-mmproj\"]').classes()).toContain('text-[var(--neutral-800)]')
+    expect(wrapper.get('[data-testid=\"companion-empty-mtp\"]').classes()).toContain('text-[var(--neutral-800)]')"""
+if old not in text:
+    raise SystemExit('missing Add Model empty companion edge-test marker')
+edge.write_text(text.replace(old, new, 1))
 
 models = Path('frontend/app/pages/models/index.vue')
 text = models.read_text()
