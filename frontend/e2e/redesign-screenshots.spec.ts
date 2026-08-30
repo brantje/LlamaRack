@@ -211,7 +211,40 @@ function responseFor(pathname: string, method: string): unknown {
   }
   if (/\/users(?:\/|$)/.test(pathname)) return [user, { id: 2, username: 'operator', enabled: true }]
   if (/\/api-keys(?:\/|$)/.test(pathname)) return apiKeys
-  if (pathname === '/api/v1/downloads' && method === 'GET') return [{ id: 'dl-active', provider: 'huggingface', repo_id: 'Qwen/Qwen3-8B-GGUF', revision: 'main', artifact_id: 'q4_k_m', name: 'Qwen3 8B Q4_K_M', quantization: 'Q4_K_M', state: 'DOWNLOADING', total_bytes: 5420000000, downloaded_bytes: 2168000000, speed_bps: 84000000, created_at: nowSeconds - 240, updated_at: nowSeconds, files: [{ path: 'Qwen3-8B-Q4_K_M.gguf', size: 5420000000, state: 'DOWNLOADING', downloaded_bytes: 2168000000 }] }, { id: 'dl-failed', provider: 'huggingface', repo_id: 'example/failed-model', revision: 'main', artifact_id: 'q5', name: 'Failed model import', quantization: 'Q5_K_M', state: 'FAILED', total_bytes: 7200000000, downloaded_bytes: 1100000000, speed_bps: 0, error: 'Connection reset while downloading shard 2 of 3. Retry resumes verified partial files.', created_at: nowSeconds - 900, updated_at: nowSeconds - 300 }, { id: 'dl-completed', provider: 'huggingface', repo_id: 'google/gemma-3-12b-it-GGUF', revision: 'main', artifact_id: 'q5_k_m', name: 'Gemma 3 12B Q5_K_M', quantization: 'Q5_K_M', state: 'COMPLETED', total_bytes: 8230000000, downloaded_bytes: 8230000000, speed_bps: 0, created_at: nowSeconds - 7200, updated_at: nowSeconds - 3600 }]
+  if (pathname === '/api/v1/downloads' && method === 'GET') return [
+    {
+      id: 'dl-active', provider: 'huggingface', repo_id: 'Qwen/Qwen3-8B-GGUF', revision: 'main', artifact_id: 'q4_k_m',
+      name: 'Qwen3 8B Q4_K_M', quantization: 'Q4_K_M', state: 'DOWNLOADING', total_bytes: 5420000000, downloaded_bytes: 2168000000,
+      speed_bps: 84000000, created_at: nowSeconds - 240, updated_at: nowSeconds,
+      files: [
+        { path: 'Qwen3-8B-Q4_K_M-00001-of-00002.gguf', size: 2710000000, state: 'COMPLETED', downloaded_bytes: 2710000000 },
+        { path: 'Qwen3-8B-Q4_K_M-00002-of-00002.gguf', size: 2710000000, state: 'DOWNLOADING', downloaded_bytes: 1610000000 }
+      ]
+    },
+    {
+      id: 'dl-verifying', provider: 'huggingface', repo_id: 'mistralai/Mistral-Small-GGUF', revision: 'main', artifact_id: 'q4',
+      name: 'Mistral Small Q4_K_M', quantization: 'Q4_K_M', state: 'VERIFYING', total_bytes: 12900000000, downloaded_bytes: 12900000000,
+      speed_bps: 0, created_at: nowSeconds - 1500, updated_at: nowSeconds - 20,
+      files: [{ path: 'Mistral-Small-Q4_K_M.gguf', size: 12900000000, state: 'VERIFYING', downloaded_bytes: 12900000000 }]
+    },
+    {
+      id: 'dl-failed', provider: 'huggingface', repo_id: 'example/failed-model', revision: 'main', artifact_id: 'q5',
+      name: 'Failed model import', quantization: 'Q5_K_M', state: 'FAILED', total_bytes: 7200000000, downloaded_bytes: 1100000000,
+      speed_bps: 0, error: 'Connection reset while downloading shard 2 of 3. Retry resumes verified partial files.',
+      created_at: nowSeconds - 900, updated_at: nowSeconds - 300
+    },
+    {
+      id: 'dl-cancelled', provider: 'huggingface', repo_id: 'example/cancelled-model', revision: 'main', artifact_id: 'q6',
+      name: 'Cancelled model import', quantization: 'Q6_K', state: 'CANCELLED', total_bytes: 9300000000, downloaded_bytes: 3400000000,
+      speed_bps: 0, created_at: nowSeconds - 1800, updated_at: nowSeconds - 600,
+      files: [{ path: 'cancelled-model-Q6_K.gguf', size: 9300000000, state: 'CANCELLED', downloaded_bytes: 3400000000 }]
+    },
+    {
+      id: 'dl-completed', provider: 'huggingface', repo_id: 'google/gemma-3-12b-it-GGUF', revision: 'main', artifact_id: 'q5_k_m',
+      name: 'Gemma 3 12B Q5_K_M', quantization: 'Q5_K_M', state: 'COMPLETED', total_bytes: 8230000000, downloaded_bytes: 8230000000,
+      speed_bps: 0, created_at: nowSeconds - 7200, updated_at: nowSeconds - 3600
+    }
+  ]
   if (/\/observability\/requests\//.test(pathname)) return requests[0]
   if (pathname === '/api/v1/logs') return { entries: systemLogs }
   if (/\/logs(?:\/|$)/.test(pathname)) return { items: [] }
@@ -325,6 +358,22 @@ for (const [name, path] of pages) {
     })
   })
 }
+
+
+test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
+  await page.goto('/downloads', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const queue = page.locator('[data-testid="download-queue"]')
+  await expect(queue).toContainText('DOWNLOADING')
+  await expect(queue).toContainText('VERIFYING')
+  await expect(queue).toContainText('FAILED')
+  await expect(queue).toContainText('CANCELLED')
+  await page.locator('[data-testid="toggle-completed-downloads"]').click()
+  await expect(queue).toContainText('COMPLETED')
+  await page.getByRole('button', { name: /2 files/ }).first().click()
+  await expect(page.locator('[data-testid="download-files"]').first()).toContainText('00002-of-00002.gguf')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/downloads-lifecycle.png`, fullPage: true, animations: 'disabled' })
+})
 
 
 test('playground generating and completed screenshots', async ({ page }, testInfo) => {
