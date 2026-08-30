@@ -77,12 +77,12 @@ defineExpose({ request })
 
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton data-testid="confirmation-cancel" color="neutral" variant="soft" @click="finish(false)">
+        <AppButton data-testid="confirmation-cancel" intent="secondary" @click="finish(false)">
           Cancel
-        </UButton>
-        <UButton data-testid="confirmation-confirm" color="error" @click="finish(true)">
+        </AppButton>
+        <AppButton data-testid="confirmation-confirm" intent="primary" tone="destructive" @click="finish(true)">
           {{ deleteFiles ? 'Delete Model and Files' : 'Delete Model' }}
-        </UButton>
+        </AppButton>
       </div>
     </template>
   </UModal>

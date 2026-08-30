@@ -64,7 +64,7 @@ async function submit() {
       title: 'Confirm Instance rename',
       description: `Renaming this Instance changes the OpenAI model ID from “${originalID.value}” to “${nextID}”. Existing clients using the old model ID will break.`,
       confirmLabel: 'Continue',
-      color: 'warning'
+      confirmTone: 'destructive'
     })
     if (!confirmed) return
   }
@@ -75,7 +75,7 @@ async function submit() {
       title: 'Restart running Instance',
       description: 'This Instance is running. Saving runtime-affecting configuration will drain, stop and restart it, causing temporary unavailability.',
       confirmLabel: 'Save & apply',
-      color: 'warning'
+      confirmTone: 'destructive'
     })
     if (!confirmed) return
   }

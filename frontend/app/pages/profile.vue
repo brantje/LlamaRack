@@ -97,7 +97,7 @@ async function unlinkIdentity(identity: ExternalIdentity) {
     title: 'Unlink authentication source',
     description: `Unlink ${name} from this account? You will no longer be able to sign in with this source unless it is linked again.`,
     confirmLabel: 'Unlink source',
-    color: 'error'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   try {
@@ -114,7 +114,7 @@ async function revokeSession(session: Session) {
     await manager.logout()
     return
   }
-  const confirmed = await confirmation.value?.request({ title: 'Revoke session', description: 'Sign this session out immediately?', confirmLabel: 'Revoke session', color: 'error' })
+  const confirmed = await confirmation.value?.request({ title: 'Revoke session', description: 'Sign this session out immediately?', confirmLabel: 'Revoke session', confirmTone: 'destructive' })
   if (!confirmed) return
   try {
     await manager.request(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
@@ -125,7 +125,7 @@ async function revokeSession(session: Session) {
 }
 
 async function revokeOthers() {
-  const confirmed = await confirmation.value?.request({ title: 'Revoke other sessions', description: 'Sign out every session except this browser?', confirmLabel: 'Revoke others', color: 'error' })
+  const confirmed = await confirmation.value?.request({ title: 'Revoke other sessions', description: 'Sign out every session except this browser?', confirmLabel: 'Revoke others', confirmTone: 'destructive' })
   if (!confirmed) return
   try {
     await manager.request('/api/v1/me/sessions/revoke-others', { method: 'POST' })
@@ -136,7 +136,7 @@ async function revokeOthers() {
 }
 
 async function revokeAll() {
-  const confirmed = await confirmation.value?.request({ title: 'Log out everywhere', description: 'Revoke every session, including this browser?', confirmLabel: 'Log out everywhere', color: 'error' })
+  const confirmed = await confirmation.value?.request({ title: 'Log out everywhere', description: 'Revoke every session, including this browser?', confirmLabel: 'Log out everywhere', confirmTone: 'destructive' })
   if (!confirmed) return
   try {
     await manager.request('/api/v1/me/sessions/revoke-all', { method: 'POST' })
@@ -233,7 +233,7 @@ async function revokeAll() {
         </div>
         <div class="flex flex-wrap gap-2 md:justify-end">
           <AppButton intent="secondary" size="sm" :disabled="otherSessionCount === 0" @click="revokeOthers">Revoke others</AppButton>
-          <AppButton intent="destructive" size="sm" :disabled="sessions.length === 0" @click="revokeAll">Log out everywhere</AppButton>
+          <AppButton intent="secondary" tone="destructive" size="sm" :disabled="sessions.length === 0" @click="revokeAll">Log out everywhere</AppButton>
         </div>
       </div>
 

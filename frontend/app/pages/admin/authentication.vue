@@ -198,7 +198,7 @@ async function deleteProvider(provider: Provider) {
     title: `Delete ${provider.name}?`,
     description: 'External identities linked to this provider will also be removed. This action can affect sign-in availability.',
     confirmLabel: 'Delete provider',
-    color: 'error'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   providerBusy.value = provider.id
@@ -307,7 +307,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
                 <div class="flex justify-end gap-1">
                   <AppButton intent="ghost" :loading="providerBusy === provider.id" @click="testProvider(provider)">Test</AppButton>
                   <AppButton intent="ghost" @click="setProviderForm(provider)">Edit</AppButton>
-                  <AppButton intent="destructive" @click="deleteProvider(provider)">Delete</AppButton>
+                  <AppButton intent="secondary" tone="destructive" @click="deleteProvider(provider)">Delete</AppButton>
                 </div>
               </div>
             </div>

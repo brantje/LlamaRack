@@ -127,6 +127,7 @@ describe('frontend design rules', () => {
     const registry = readFileSync(resolve(themeRoot, 'index.ts'), 'utf8')
     const requiredVariables = [
       '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',
+      '--color-danger', '--color-on-danger', '--danger-100', '--danger-700',
       '--neutral-100', '--neutral-200', '--neutral-300', '--neutral-400', '--neutral-500', '--neutral-600', '--neutral-700', '--neutral-800', '--neutral-900',
       '--accent-100', '--accent-200', '--accent-300', '--accent-400', '--accent-500', '--accent-600', '--accent-700', '--accent-800', '--accent-900',
       '--shadow-sm', '--shadow-md', '--shadow-lg'
@@ -156,6 +157,31 @@ describe('frontend design rules', () => {
       return matches.map(match => `${relative(appRoot, file)}: ${match}`)
     })
     expect(violations).toEqual([])
+  })
+
+  it('keeps destructive action tone separate from button priority', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const legacyIntent = /<AppButton\b[^>]*\bintent=["']destructive["']/g
+    const directDangerButton = /<UButton\b[^>]*(?:\bcolor=["'](?:error|warning)["']|:color=[^>]*(?:error|warning))/g
+    const legacyIntentViolations = vueFiles(appRoot).flatMap(file => (readFileSync(file, 'utf8').match(legacyIntent) || []).map(match => `${relative(appRoot, file)}: ${match}`))
+    const directDangerViolations = vueFiles(appRoot).flatMap(file => (readFileSync(file, 'utf8').match(directDangerButton) || []).map(match => `${relative(appRoot, file)}: ${match}`))
+    expect(legacyIntentViolations).toEqual([])
+    expect(directDangerViolations).toEqual([])
+
+    const confirmationColorViolations = vueFiles(appRoot).flatMap(file => {
+      const source = readFileSync(file, 'utf8')
+      return [...source.matchAll(/confirmation\.value\?\.request\(\{[\s\S]*?\}\)/g)]
+        .filter(match => /\bcolor\s*:/.test(match[0]))
+        .map(() => relative(appRoot, file))
+    })
+    expect(confirmationColorViolations).toEqual([])
+
+    const confirmationModal = readFileSync(resolve(appRoot, 'components/AppConfirmationModal.vue'), 'utf8')
+    expect(confirmationModal).toContain('confirmTone')
+    expect(confirmationModal).not.toContain('<UButton')
+    const modelDeleteModal = readFileSync(resolve(appRoot, 'components/ModelDeleteModal.vue'), 'utf8')
+    expect(modelDeleteModal).toContain('tone="destructive"')
+    expect(modelDeleteModal).not.toContain('<UButton')
   })
 
   it('keeps redesign foundation surfaces on StatusTag and square flat primitives', () => {

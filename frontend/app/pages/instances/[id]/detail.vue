@@ -319,11 +319,11 @@ async function loadCompanions() {
 async function runtimeAction(operation: 'start' | 'stop' | 'kill') {
   if (!instance.value) return
   if (operation === 'start' && instance.value.eviction_enabled) {
-    const confirmed = await confirmation.value?.request({ title: 'Launch Instance', description: 'Launching this Instance may stop other idle Instances if resource-pressure eviction is required.', confirmLabel: 'Launch Instance', color: 'primary' })
+    const confirmed = await confirmation.value?.request({ title: 'Launch Instance', description: 'Launching this Instance may stop other idle Instances if resource-pressure eviction is required.', confirmLabel: 'Launch Instance', confirmTone: 'default' })
     if (!confirmed) return
   }
   if (operation === 'kill') {
-    const confirmed = await confirmation.value?.request({ title: 'Kill Instance', description: 'Kill this Instance immediately? Active requests may fail.', confirmLabel: 'Kill Instance', color: 'error' })
+    const confirmed = await confirmation.value?.request({ title: 'Kill Instance', description: 'Kill this Instance immediately? Active requests may fail.', confirmLabel: 'Kill Instance', confirmTone: 'destructive' })
     if (!confirmed) return
   }
   pending.value = operation
@@ -339,7 +339,7 @@ async function runtimeAction(operation: 'start' | 'stop' | 'kill') {
 }
 async function removeInstance() {
   if (!instance.value) return
-  const confirmed = await confirmation.value?.request({ title: 'Delete Instance', description: `Delete Instance “${instance.value.name}”? The registered Model and GGUF file are kept.`, confirmLabel: 'Delete Instance', color: 'error' })
+  const confirmed = await confirmation.value?.request({ title: 'Delete Instance', description: `Delete Instance “${instance.value.name}”? The registered Model and GGUF file are kept.`, confirmLabel: 'Delete Instance', confirmTone: 'destructive' })
   if (!confirmed) return
   pending.value = 'delete'
   error.value = ''
@@ -396,8 +396,8 @@ defineExpose({ setSelectedWindow })
       <div v-if="instance" class="flex flex-wrap items-center justify-end gap-2">
         <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
         <AppButton :to="`/instances/${encodeURIComponent(instance.id)}/edit`" intent="secondary">Edit</AppButton>
-        <AppButton intent="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
-        <AppButton intent="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
+        <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
+        <AppButton intent="secondary" tone="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
         <AppButton v-if="!isRunning" intent="primary" :loading="pending === 'start'" @click="runtimeAction('start')">Launch</AppButton>
         <AppButton v-else intent="primary" :loading="pending === 'stop'" @click="runtimeAction('stop')">Stop</AppButton>
       </div>

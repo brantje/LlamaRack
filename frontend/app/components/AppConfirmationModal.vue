@@ -4,7 +4,8 @@ type ConfirmationOptions = {
   description: string
   confirmLabel?: string
   cancelLabel?: string
-  color?: 'primary' | 'error' | 'warning'
+  confirmIntent?: 'primary' | 'secondary' | 'ghost'
+  confirmTone?: 'default' | 'destructive'
 }
 
 const open = ref(false)
@@ -13,7 +14,8 @@ const dialog = reactive({
   description: '',
   confirmLabel: 'Confirm',
   cancelLabel: 'Cancel',
-  color: 'primary' as 'primary' | 'error' | 'warning'
+  confirmIntent: 'primary' as 'primary' | 'secondary' | 'ghost',
+  confirmTone: 'default' as 'default' | 'destructive'
 })
 let resolver: ((confirmed: boolean) => void) | null = null
 
@@ -31,7 +33,8 @@ function request(options: ConfirmationOptions) {
     description: options.description,
     confirmLabel: options.confirmLabel || 'Confirm',
     cancelLabel: options.cancelLabel || 'Cancel',
-    color: options.color || 'primary'
+    confirmIntent: options.confirmIntent || 'primary',
+    confirmTone: options.confirmTone || 'default'
   })
   open.value = true
   return new Promise<boolean>((resolve) => {
@@ -53,12 +56,12 @@ defineExpose({ request })
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton data-testid="confirmation-cancel" color="neutral" variant="soft" @click="finish(false)">
+        <AppButton data-testid="confirmation-cancel" intent="secondary" @click="finish(false)">
           {{ dialog.cancelLabel }}
-        </UButton>
-        <UButton data-testid="confirmation-confirm" :color="dialog.color" @click="finish(true)">
+        </AppButton>
+        <AppButton data-testid="confirmation-confirm" :intent="dialog.confirmIntent" :tone="dialog.confirmTone" @click="finish(true)">
           {{ dialog.confirmLabel }}
-        </UButton>
+        </AppButton>
       </div>
     </template>
   </UModal>

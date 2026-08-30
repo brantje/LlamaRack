@@ -68,7 +68,7 @@ async function toggleUser(user: UserRow) {
     title: `${action === 'disable' ? 'Disable' : 'Enable'} user`,
     description: action === 'disable' ? `Disable “${user.username}”? All of that user’s active sessions will be revoked.` : `Enable “${user.username}”?`,
     confirmLabel: action === 'disable' ? 'Disable user' : 'Enable user',
-    color: action === 'disable' ? 'warning' : 'primary'
+    confirmTone: action === 'disable' ? 'destructive' : 'default'
   })
   if (!confirmed) return
   try {
