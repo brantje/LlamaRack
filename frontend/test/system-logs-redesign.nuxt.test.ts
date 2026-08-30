@@ -142,6 +142,9 @@ describe('Administration system logs', () => {
     await output.trigger('scroll')
     await flushPromises()
     expect(follow.props('modelValue')).toBe(false)
+    follow.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    expect(follow.props('modelValue')).toBe(true)
     wrapper.unmount()
   })
 
@@ -184,5 +187,52 @@ describe('Administration system logs', () => {
     expect(FakeEventSource.instances[1]!.url).toContain('ticket=ticket-2')
     wrapper.unmount()
     expect(FakeEventSource.instances[1]!.closed).toBe(true)
+  })
+
+  it('surfaces snapshot error fallbacks and keeps unknown Instance source selections visible', async () => {
+    vi.stubGlobal('EventSource', undefined)
+    const failures = [
+      { value: { data: { error: 'Snapshot denied' } }, text: 'Snapshot denied' },
+      { value: new Error('Snapshot message'), text: 'Snapshot message' },
+      { value: {}, text: 'Unable to load manager logs' }
+    ]
+    for (const failure of failures) {
+      mocks.request.mockRejectedValueOnce(failure.value)
+      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=not-yet-seen' })
+      await flushPromises()
+      expect(wrapper.text()).toContain(failure.text)
+      expect(wrapper.text()).toContain('not-yet-seen')
+      wrapper.unmount()
+    }
+
+    mocks.request.mockResolvedValueOnce({ entries: null })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=not-yet-seen' })
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('No log lines match this filter.')
+    wrapper.unmount()
+  })
+
+  it('handles live authentication errors and missing tickets without opening EventSource', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    const failures = [
+      { value: { data: { error: 'Ticket denied' } }, text: 'Ticket denied' },
+      { value: new Error('Ticket message'), text: 'Ticket message' },
+      { value: {}, text: 'Unable to authenticate live log stream' }
+    ]
+    for (const failure of failures) {
+      mocks.request.mockRejectedValueOnce(failure.value)
+      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+      await flushPromises()
+      expect(wrapper.text()).toContain(failure.text)
+      wrapper.unmount()
+    }
+
+    mocks.request.mockResolvedValueOnce({ ticket: '' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to authenticate live log stream')
+    expect(FakeEventSource.instances).toHaveLength(0)
+    wrapper.unmount()
   })
 })
