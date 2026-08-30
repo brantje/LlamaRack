@@ -395,7 +395,7 @@ watch(selectedWindow, (next, previous) => {
             size="sm"
           />
         </div>
-        <AppButton to="/admin/logs" intent="secondary" data-testid="dashboard-system-logs">Logs</AppButton>
+        <AppButton to="/admin/system-logs" intent="secondary" data-testid="dashboard-system-logs">Logs</AppButton>
         <AppButton intent="secondary" :loading="loading" @click="refreshDashboard">Refresh</AppButton>
         <AppButton to="/playground" intent="primary">Playground</AppButton>
       </div>
@@ -405,7 +405,12 @@ watch(selectedWindow, (next, previous) => {
       History is retained for {{ retentionDays }} day{{ retentionDays === 1 ? '' : 's' }}; longer ranges are unavailable.
     </p>
 
-    <UAlert v-if="dashboardError" color="neutral" variant="outline" title="Observability data unavailable" :description="dashboardError" />
+    <Frame v-if="dashboardError" class="p-3" data-testid="dashboard-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Observability data unavailable</StatusTag>
+        <p class="min-w-0 flex-1 text-xs text-muted">{{ dashboardError }}</p>
+      </div>
+    </Frame>
 
     <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <Frame data-testid="dashboard-running" class="p-4">
