@@ -1,0 +1,111 @@
+name: Apply redesign feedback round seven
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/apply-redesign-feedback-round7.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply guarded Edit Instance state patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          NL = chr(10)
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              source = p.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:180]!r}')
+              p.write_text(source.replace(old, new, 1))
+
+          form = 'frontend/app/components/InstanceForm.vue'
+          replace_once(
+              form,
+              "  launchAfterCreate?: boolean\n}>(), {\n  busy: false,\n  error: '',\n  loading: false,\n  showLaunchAfterCreate: false,\n  launchAfterCreate: false\n})",
+              "  launchAfterCreate?: boolean\n  submitDisabled?: boolean\n  submitDisabledReason?: string\n  dirty?: boolean\n}>(), {\n  busy: false,\n  error: '',\n  loading: false,\n  showLaunchAfterCreate: false,\n  launchAfterCreate: false,\n  submitDisabled: false,\n  submitDisabledReason: '',\n  dirty: false\n})"
+          )
+          replace_once(
+              form,
+              "companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : companionState(definition) === 'none' ? 'border-[var(--color-divider)] opacity-60' : 'border-[var(--color-divider)]'",
+              "companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'"
+          )
+          replace_once(
+              form,
+              "        <span v-else />\n        <p v-if=\"!canSubmit\" class=\"max-w-xl text-xs leading-5 text-[var(--neutral-700)]\" data-testid=\"instance-submit-requirements\">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>\n        <div class=\"flex items-center gap-2\"><AppButton to=\"/instances\" intent=\"secondary\">Cancel</AppButton><AppButton type=\"submit\" intent=\"primary\" :loading=\"busy\" :disabled=\"!canSubmit\">{{ submitLabel }}</AppButton></div>",
+              "        <span v-else />\n        <div class=\"flex min-w-0 flex-1 flex-wrap items-center gap-3\">\n          <StatusTag v-if=\"dirty\" data-testid=\"instance-dirty-state\" variant=\"pending\">Unsaved changes</StatusTag>\n          <p v-if=\"!canSubmit\" class=\"max-w-xl text-xs leading-5 text-[var(--neutral-700)]\" data-testid=\"instance-submit-requirements\">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>\n          <p v-else-if=\"submitDisabled && submitDisabledReason\" class=\"max-w-xl text-xs leading-5 text-[var(--neutral-700)]\" data-testid=\"instance-submit-requirements\">{{ submitDisabledReason }}</p>\n        </div>\n        <div class=\"flex items-center gap-2\"><AppButton to=\"/instances\" intent=\"secondary\">Cancel</AppButton><AppButton type=\"submit\" intent=\"primary\" :loading=\"busy\" :disabled=\"!canSubmit || submitDisabled\">{{ submitLabel }}</AppButton></div>"
+          )
+
+          edit = 'frontend/app/pages/instances/[id]/edit.vue'
+          replace_once(edit, "const error = ref('')\nconst confirmation", "const error = ref('')\nconst baseline = ref('')\nconst confirmation")
+          replace_once(
+              edit,
+              "function slugify(value: string) {\n  return value.toLowerCase().trim().replace(/[^\\p{L}\\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')\n}\n\nonMounted(async () => {",
+              "function slugify(value: string) {\n  return value.toLowerCase().trim().replace(/[^\\p{L}\\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')\n}\n\nfunction serializeForm() {\n  const options = Object.fromEntries(Object.entries(form.options).sort(([left], [right]) => left.localeCompare(right)))\n  return JSON.stringify({\n    model_id: form.model_id, name: form.name, slug: form.slug, enabled: form.enabled,\n    always_on: form.always_on, autoload_enabled: form.autoload_enabled, priority: form.priority,\n    eviction_enabled: form.eviction_enabled, idle_unload_seconds: form.idle_unload_seconds, gpu_mode: form.gpu_mode,\n    gpu_devices: form.gpu_mode === 'manual' ? [...form.gpu_devices] : [],\n    tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '',\n    request_log_mode: form.request_log_mode, options\n  })\n}\n\nconst hasChanges = computed(() => Boolean(baseline.value) && serializeForm() !== baseline.value)\n\nonMounted(async () => {"
+          )
+          replace_once(edit, "    loaded.value = true", "    baseline.value = serializeForm()\n    loaded.value = true")
+          replace_once(edit, "  if (!form.model_id || !form.name.trim() || !form.slug.trim()) return", "  if (!form.model_id || !form.name.trim() || !form.slug.trim() || !hasChanges.value) return")
+          replace_once(
+              edit,
+              "    :error=\"error\"\n    @submit=\"submit\"",
+              "    :error=\"error\"\n    :submit-disabled=\"!hasChanges\"\n    submit-disabled-reason=\"No changes to save.\"\n    :dirty=\"hasChanges\"\n    @submit=\"submit\""
+          )
+
+          cleanup = 'frontend/test/instance-form-redesign-cleanup.nuxt.test.ts'
+          replace_once(
+              cleanup,
+              "    expect(formSource).toContain(':disabled=\"!canSubmit\"')",
+              "    expect(formSource).toContain(':disabled=\"!canSubmit || submitDisabled\"')\n    expect(formSource).toContain('data-testid=\"instance-dirty-state\"')\n    expect(formSource).not.toContain(\"'border-[var(--color-divider)] opacity-60'\")\n    expect(editSource).toContain('submit-disabled-reason=\"No changes to save.\"')\n    expect(editSource).toContain('const hasChanges = computed')"
+          )
+
+          config_test = 'frontend/test/configuration-pages.nuxt.test.ts'
+          replace_once(
+              config_test,
+              "    expect(wrapper.text()).toContain('Edit Instance')\n    expect(wrapper.findComponent(InstanceOverridesEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })\n    inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')",
+              "    expect(wrapper.text()).toContain('Edit Instance')\n    expect(wrapper.findComponent(InstanceOverridesEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })\n    expect(wrapper.text()).toContain('No changes to save.')\n    await wrapper.find('form').trigger('submit')\n    await flushPromises()\n    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))\n\n    inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')"
+          )
+          replace_once(
+              config_test,
+              "    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })\n    await flushPromises()\n\n    await wrapper.find('form').trigger('submit')",
+              "    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })\n    await flushPromises()\n    expect(wrapper.text()).toContain('Unsaved changes')\n    expect(wrapper.text()).not.toContain('No changes to save.')\n\n    await wrapper.find('form').trigger('submit')"
+          )
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated fixes and remove helper
+        run: |
+          rm .github/workflows/apply-redesign-feedback-round7.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ui): distinguish unchanged Edit Instance state" -m "Disable Save until the loaded Instance actually changes, explain the unchanged state, surface unsaved changes near the submit actions, and keep undetected companion guidance readable instead of fading the entire card."
+          git push origin HEAD:feature/redesign
