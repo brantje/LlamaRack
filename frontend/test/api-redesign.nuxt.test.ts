@@ -36,7 +36,7 @@ describe('API redesign', () => {
     const lastUsed = 1_700_003_600
     mocks.request.mockResolvedValue([
       { id: 'enabled', name: 'LiteLLM', prefix: 'live1234', enabled: true, created_at: created, last_used_at: lastUsed, created_by_user_id: 99 },
-      { id: 'disabled', name: 'SDK', prefix: 'off12345', enabled: false, created_at: created, created_by_user_id: 99 },
+      { id: 'disabled', name: 'SDK', prefix: 'off12345', enabled: false, created_at: created, last_used_at: Number.POSITIVE_INFINITY, created_by_user_id: 99 },
       { id: 'revoked', name: 'Old client', prefix: 'old12345', enabled: false, created_at: created, revoked_at: lastUsed, created_by_user_id: 99 }
     ])
 
