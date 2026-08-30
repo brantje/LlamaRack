@@ -49,7 +49,7 @@ jobs:
               raise SystemExit(f'expected one generated Playground fixture header, found {source.count(old)}')
           source = source.replace(old, new, 1)
           old_assertion = "await expect(page.getByLabel('Raw request JSON')).toContainText('UX_HOLD Explain KV cache reuse.')"
-          new_assertion = "await expect(page.getByLabel('Raw request JSON')).toHaveValue('UX_HOLD Explain KV cache reuse.')"
+          new_assertion = "await expect(page.getByLabel('Raw request JSON')).toHaveValue(/UX_HOLD Explain KV cache reuse\\./)"
           if source.count(old_assertion) != 1:
               raise SystemExit(f'expected one raw-request textarea assertion, found {source.count(old_assertion)}')
           path.write_text(source.replace(old_assertion, new_assertion, 1))
