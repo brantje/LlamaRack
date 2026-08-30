@@ -76,6 +76,14 @@ func (w *diagnosticResponseWriter) Write(body []byte) (int, error) {
 	}
 	return w.ResponseWriter.Write(body)
 }
+func (w *diagnosticResponseWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
 func (w *diagnosticResponseWriter) StatusCode() int {
 	if w.status == 0 {
 		return http.StatusOK
