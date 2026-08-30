@@ -11,6 +11,7 @@ type Model = {
   id: string
   author?: string
   description?: string
+  revision?: string
   downloads: number
   likes: number
   last_modified?: string
@@ -101,6 +102,7 @@ function formatUpdated(value?: string) {
         <div v-if="model.parameter_count"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Model size</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatParameters(model.parameter_count) }}</dd></div>
         <div v-if="architecture"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 font-mono font-semibold">{{ architecture }}</dd></div>
         <div v-if="contextCapability"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(contextCapability) }}</dd></div>
+        <div v-if="model.revision"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Revision</dt><dd class="mt-1 font-mono font-semibold">{{ model.revision }}</dd></div>
         <div v-if="model.card_metadata?.pipeline_tag"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Task</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.pipeline_tag }}</dd></div>
         <div v-if="model.card_metadata?.license"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">License</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.license }}</dd></div>
         <div v-if="model.card_metadata?.library_name"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Library</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.library_name }}</dd></div>
