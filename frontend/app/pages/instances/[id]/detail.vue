@@ -399,7 +399,7 @@ defineExpose({ setSelectedWindow })
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
         <AppButton v-if="!isRunning" intent="primary" :loading="pending === 'start'" @click="runtimeAction('start')">Launch</AppButton>
-        <AppButton v-else intent="primary" :loading="pending === 'stop'" @click="runtimeAction('stop')">Stop</AppButton>
+        <AppButton v-else intent="secondary" :loading="pending === 'stop'" @click="runtimeAction('stop')">Stop</AppButton>
       </div>
     </div>
 
