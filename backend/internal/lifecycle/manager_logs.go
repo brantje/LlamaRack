@@ -56,6 +56,14 @@ func (s *Service) AddManagerLog(instanceID, line string) {
 	}
 }
 
+func (s *Service) logAlwaysOnReconcile(satisfied int) {
+	label := "Instances"
+	if satisfied == 1 {
+		label = "Instance"
+	}
+	systemlog.Log(systemlog.Info, "manager", fmt.Sprintf("reconcile: %d Always On %s satisfied", satisfied, label))
+}
+
 func (s *Service) noteStartFailure(instanceID string) {
 	key := failureBackoffKey{service: s, id: instanceID}
 	failureBackoffMu.Lock()
