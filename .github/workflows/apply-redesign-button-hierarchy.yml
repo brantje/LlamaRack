@@ -1,0 +1,290 @@
+name: Apply redesign button hierarchy
+
+on:
+  push:
+    branches:
+      - fix/redesign-button-hierarchy
+    paths:
+      - .github/workflows/apply-redesign-button-hierarchy.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/redesign-button-hierarchy
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Refactor button hierarchy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str):
+              file = Path(path)
+              source = file.read_text()
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:140]!r}')
+              file.write_text(source.replace(old, new, 1))
+
+          Path('frontend/app/components/AppButton.vue').write_text('''<script setup lang="ts">
+defineOptions({ inheritAttrs: false })
+
+type ButtonIntent = 'primary' | 'secondary' | 'ghost'
+type ButtonTone = 'default' | 'destructive'
+
+const props = withDefaults(defineProps<{
+  intent?: ButtonIntent
+  tone?: ButtonTone
+}>(), { intent: 'secondary', tone: 'default' })
+
+const treatment = computed(() => {
+  if (props.tone === 'destructive') {
+    if (props.intent === 'primary') return {
+      color: 'neutral' as const,
+      variant: 'solid' as const,
+      class: 'bg-[var(--color-danger)] text-[var(--color-on-danger)] hover:bg-[var(--danger-700)]'
+    }
+    if (props.intent === 'ghost') return {
+      color: 'neutral' as const,
+      variant: 'ghost' as const,
+      class: 'text-[var(--danger-700)] hover:bg-[var(--danger-100)]'
+    }
+    return {
+      color: 'neutral' as const,
+      variant: 'outline' as const,
+      class: 'border-[var(--color-danger)] text-[var(--danger-700)] hover:bg-[var(--danger-100)]'
+    }
+  }
+  if (props.intent === 'primary') return { color: 'primary' as const, variant: 'solid' as const, class: '' }
+  if (props.intent === 'ghost') return { color: 'neutral' as const, variant: 'ghost' as const, class: '' }
+  return { color: 'neutral' as const, variant: 'outline' as const, class: '' }
+})
+</script>
+
+<template>
+  <UButton v-bind="$attrs" :color="treatment.color" :variant="treatment.variant" :class="treatment.class">
+    <slot />
+  </UButton>
+</template>
+''')
+
+          Path('frontend/app/components/AppConfirmationModal.vue').write_text('''<script setup lang="ts">
+type ConfirmationOptions = {
+  title: string
+  description: string
+  confirmLabel?: string
+  cancelLabel?: string
+  confirmIntent?: 'primary' | 'secondary' | 'ghost'
+  confirmTone?: 'default' | 'destructive'
+}
+
+const open = ref(false)
+const dialog = reactive({
+  title: '',
+  description: '',
+  confirmLabel: 'Confirm',
+  cancelLabel: 'Cancel',
+  confirmIntent: 'primary' as 'primary' | 'secondary' | 'ghost',
+  confirmTone: 'default' as 'default' | 'destructive'
+})
+let resolver: ((confirmed: boolean) => void) | null = null
+
+function finish(confirmed: boolean) {
+  const resolve = resolver
+  resolver = null
+  open.value = false
+  resolve?.(confirmed)
+}
+
+function request(options: ConfirmationOptions) {
+  if (resolver) finish(false)
+  Object.assign(dialog, {
+    title: options.title,
+    description: options.description,
+    confirmLabel: options.confirmLabel || 'Confirm',
+    cancelLabel: options.cancelLabel || 'Cancel',
+    confirmIntent: options.confirmIntent || 'primary',
+    confirmTone: options.confirmTone || 'default'
+  })
+  open.value = true
+  return new Promise<boolean>((resolve) => {
+    resolver = resolve
+  })
+}
+
+watch(open, (value) => {
+  if (!value && resolver) finish(false)
+})
+
+defineExpose({ request })
+</script>
+
+<template>
+  <UModal v-model:open="open" :title="dialog.title">
+    <template #body>
+      <p class="text-sm leading-6 text-muted">{{ dialog.description }}</p>
+    </template>
+    <template #footer>
+      <div class="flex w-full justify-end gap-2">
+        <AppButton data-testid="confirmation-cancel" intent="secondary" @click="finish(false)">
+          {{ dialog.cancelLabel }}
+        </AppButton>
+        <AppButton data-testid="confirmation-confirm" :intent="dialog.confirmIntent" :tone="dialog.confirmTone" @click="finish(true)">
+          {{ dialog.confirmLabel }}
+        </AppButton>
+      </div>
+    </template>
+  </UModal>
+</template>
+''')
+
+          replace_once(
+              'frontend/app/themes/dark.css',
+              '  --color-divider: #303030;\n\n  --neutral-100:',
+              '  --color-divider: #303030;\n  --color-danger: #d85b66;\n  --color-on-danger: #181818;\n  --danger-100: #3a2226;\n  --danger-700: #e9858e;\n\n  --neutral-100:'
+          )
+          replace_once(
+              'frontend/app/themes/light.css',
+              '  --color-divider: #dedede;\n\n  --neutral-100:',
+              '  --color-divider: #dedede;\n  --color-danger: #b4232f;\n  --color-on-danger: #ffffff;\n  --danger-100: #fff0f1;\n  --danger-700: #9f1d2a;\n\n  --neutral-100:'
+          )
+
+          model_delete = Path('frontend/app/components/ModelDeleteModal.vue')
+          source = model_delete.read_text()
+          source = source.replace('<UButton data-testid="confirmation-cancel" color="neutral" variant="soft" @click="finish(false)">', '<AppButton data-testid="confirmation-cancel" intent="secondary" @click="finish(false)">')
+          source = source.replace('</UButton>\n        <UButton data-testid="confirmation-confirm" color="error" @click="finish(true)">', '</AppButton>\n        <AppButton data-testid="confirmation-confirm" intent="primary" tone="destructive" @click="finish(true)">')
+          source = source.replace('</UButton>\n      </div>\n    </template>\n  </UModal>', '</AppButton>\n      </div>\n    </template>\n  </UModal>')
+          if '<UButton' in source:
+              raise SystemExit('ModelDeleteModal still contains UButton')
+          model_delete.write_text(source)
+
+          changed_destructive = 0
+          for path in Path('frontend/app').rglob('*.vue'):
+              source = path.read_text()
+              count = source.count('intent="destructive"')
+              if count:
+                  source = source.replace('intent="destructive"', 'intent="secondary" tone="destructive"')
+                  path.write_text(source)
+                  changed_destructive += count
+          if changed_destructive != 5:
+              raise SystemExit(f'expected 5 legacy destructive intents, migrated {changed_destructive}')
+
+          confirmation_files = [
+              'frontend/app/pages/admin/authentication.vue',
+              'frontend/app/pages/admin/users.vue',
+              'frontend/app/pages/api.vue',
+              'frontend/app/pages/instances/[id]/detail.vue',
+              'frontend/app/pages/instances/[id]/edit.vue',
+              'frontend/app/pages/instances/index.vue',
+              'frontend/app/pages/profile.vue'
+          ]
+          for file_name in confirmation_files:
+              path = Path(file_name)
+              source = path.read_text()
+              source = source.replace("color: action === 'disable' ? 'warning' : 'primary'", "confirmTone: action === 'disable' ? 'destructive' : 'default'")
+              source = source.replace("color: 'error'", "confirmTone: 'destructive'")
+              source = source.replace("color: 'warning'", "confirmTone: 'destructive'")
+              source = source.replace("color: 'primary'", "confirmTone: 'default'")
+              path.write_text(source)
+
+          replace_once(
+              'frontend/test/theme-foundations.nuxt.test.ts',
+              "    for (const intent of ['primary', 'secondary', 'ghost', 'destructive'] as const) {",
+              "    for (const intent of ['primary', 'secondary', 'ghost'] as const) {"
+          )
+          replace_once(
+              'frontend/test/theme-foundations.nuxt.test.ts',
+              "      expect(wrapper.find(`[aria-label=\"${intent} action\"]`).exists()).toBe(true)\n    }\n  })",
+              "      expect(wrapper.find(`[aria-label=\"${intent} action\"]`).exists()).toBe(true)\n    }\n\n    const destructiveSecondary = await mountSuspended(AppButton, {\n      route: false,\n      props: { intent: 'secondary', tone: 'destructive' },\n      attrs: { 'aria-label': 'destructive secondary action' },\n      slots: { default: 'Delete' }\n    })\n    expect(destructiveSecondary.attributes('class')).toContain('danger-700')\n\n    const destructivePrimary = await mountSuspended(AppButton, {\n      route: false,\n      props: { intent: 'primary', tone: 'destructive' },\n      attrs: { 'aria-label': 'destructive primary action' },\n      slots: { default: 'Confirm delete' }\n    })\n    expect(destructivePrimary.attributes('class')).toContain('color-danger')\n  })"
+          )
+
+          confirmation_test = Path('frontend/test/confirmation-modal.nuxt.test.ts')
+          source = confirmation_test.read_text()
+          source = source.replace("uses default labels and color when optional values are omitted", "uses default labels and tone when optional values are omitted")
+          source = source.replace("color: 'warning'", "confirmTone: 'destructive'")
+          source = source.replace("color: 'error'", "confirmTone: 'destructive'")
+          source = source.replace("    expect(button('confirm').textContent).toContain('Second confirm')\n", "    expect(button('confirm').textContent).toContain('Second confirm')\n    expect(button('confirm').className).toContain('color-danger')\n")
+          confirmation_test.write_text(source)
+
+          redesign_feedback = Path('frontend/test/redesign-feedback.nuxt.test.ts')
+          source = redesign_feedback.read_text()
+          old = "      expect(contrast(variable(source, '--color-accent'), variable(source, '--color-on-accent')), `${name} on-accent`).toBeGreaterThanOrEqual(4.5)\n      expect(contrast(variable(source, '--color-bg'), variable(source, '--neutral-700')), `${name} muted on page`).toBeGreaterThanOrEqual(4.5)"
+          new = "      expect(contrast(variable(source, '--color-accent'), variable(source, '--color-on-accent')), `${name} on-accent`).toBeGreaterThanOrEqual(4.5)\n      expect(contrast(variable(source, '--color-danger'), variable(source, '--color-on-danger')), `${name} on-danger`).toBeGreaterThanOrEqual(4.5)\n      expect(contrast(variable(source, '--color-bg'), variable(source, '--danger-700')), `${name} danger on page`).toBeGreaterThanOrEqual(4.5)\n      expect(contrast(variable(source, '--color-surface'), variable(source, '--danger-700')), `${name} danger on surface`).toBeGreaterThanOrEqual(4.5)\n      expect(contrast(variable(source, '--color-bg'), variable(source, '--neutral-700')), `${name} muted on page`).toBeGreaterThanOrEqual(4.5)"
+          if source.count(old) != 1:
+              raise SystemExit('redesign feedback contrast marker mismatch')
+          redesign_feedback.write_text(source.replace(old, new, 1))
+
+          rules = Path('frontend/test/design-rules.nuxt.test.ts')
+          source = rules.read_text()
+          source = source.replace(
+              "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',",
+              "      '--color-bg', '--color-surface', '--color-text', '--color-accent', '--color-on-accent', '--color-divider',\n      '--color-danger', '--color-on-danger', '--danger-100', '--danger-700',"
+          )
+          marker = "  it('keeps redesign foundation surfaces on StatusTag and square flat primitives', () => {"
+          addition = '''  it('keeps destructive action tone separate from button priority', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const legacyIntent = /<AppButton\\b[^>]*\\bintent=["']destructive["']/g
+    const directDangerButton = /<UButton\\b[^>]*(?:\\bcolor=["'](?:error|warning)["']|:color=[^>]*(?:error|warning))/g
+    const legacyIntentViolations = vueFiles(appRoot).flatMap(file => (readFileSync(file, 'utf8').match(legacyIntent) || []).map(match => `${relative(appRoot, file)}: ${match}`))
+    const directDangerViolations = vueFiles(appRoot).flatMap(file => (readFileSync(file, 'utf8').match(directDangerButton) || []).map(match => `${relative(appRoot, file)}: ${match}`))
+    expect(legacyIntentViolations).toEqual([])
+    expect(directDangerViolations).toEqual([])
+
+    const confirmationColorViolations = vueFiles(appRoot).flatMap(file => {
+      const source = readFileSync(file, 'utf8')
+      return [...source.matchAll(/confirmation\\.value\\?\\.request\\(\\{[\\s\\S]*?\\}\\)/g)]
+        .filter(match => /\\bcolor\\s*:/.test(match[0]))
+        .map(() => relative(appRoot, file))
+    })
+    expect(confirmationColorViolations).toEqual([])
+
+    const confirmationModal = readFileSync(resolve(appRoot, 'components/AppConfirmationModal.vue'), 'utf8')
+    expect(confirmationModal).toContain('confirmTone')
+    expect(confirmationModal).not.toContain('<UButton')
+    const modelDeleteModal = readFileSync(resolve(appRoot, 'components/ModelDeleteModal.vue'), 'utf8')
+    expect(modelDeleteModal).toContain('tone="destructive"')
+    expect(modelDeleteModal).not.toContain('<UButton')
+  })
+
+'''
+          if source.count(marker) != 1:
+              raise SystemExit('design rules insertion marker mismatch')
+          rules.write_text(source.replace(marker, addition + marker, 1))
+
+          # Guard the migration itself before running the test suite.
+          app_sources = '\n'.join(path.read_text() for path in Path('frontend/app').rglob('*.vue'))
+          if 'intent="destructive"' in app_sources:
+              raise SystemExit('legacy destructive AppButton intent remains')
+          if re.search(r'<UButton[^>]*(?:color="(?:error|warning)"|:color=[^>]*(?:error|warning))', app_sources):
+              raise SystemExit('direct danger-colored UButton remains')
+          for file_name in confirmation_files:
+              source = Path(file_name).read_text()
+              for match in re.finditer(r'confirmation\.value\?\.request\(\{[\s\S]*?\}\)', source):
+                  if re.search(r'\bcolor\s*:', match.group(0)):
+                      raise SystemExit(f'{file_name}: legacy confirmation color remains')
+          PY
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Commit validated hierarchy refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend
+          git commit -m "refactor(ui): separate destructive tone from button priority" -m "Introduce theme-backed destructive colors, migrate legacy destructive intents and confirmation colors, route confirmation/delete buttons through AppButton, and enforce the hierarchy in design-rule tests."
+          git push origin HEAD:fix/redesign-button-hierarchy
