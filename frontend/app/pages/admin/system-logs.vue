@@ -32,7 +32,11 @@ const instanceSources = computed(() => Array.from(new Set(
     .filter((source) => source && !fixedSources.includes(source))
 )).sort())
 
-const sourceItems = computed(() => ['all', ...fixedSources, ...instanceSources.value])
+const sourceItems = computed(() => {
+  const items = ['all', ...fixedSources, ...instanceSources.value]
+  if (selectedSource.value !== 'all' && !items.includes(selectedSource.value)) items.push(selectedSource.value)
+  return items
+})
 
 const visibleEntries = computed(() => {
   const needle = grep.value.trim().toLowerCase()
@@ -66,7 +70,7 @@ function formatTime(value: string) {
 
 function levelClass(level: LogLevel) {
   if (level === 'INFO') return 'text-[var(--accent-700)]'
-  if (level === 'DEBUG') return 'text-[color:color-mix(in_srgb,var(--neutral-900)_45%,transparent)]'
+  if (level === 'DEBUG') return 'opacity-45'
   if (level === 'WARN') return 'font-bold text-[var(--accent-800)]'
   return 'font-bold text-[var(--accent-900)]'
 }
@@ -183,9 +187,9 @@ onBeforeUnmount(closeStream)
     title="Logs"
     description="Live manager, gateway, telemetry and Instance diagnostics from this manager process."
   >
-    <div class="flex min-h-[calc(100vh-10rem)] flex-col gap-4" data-testid="system-log-viewer">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-y border-[var(--color-divider)] py-3">
-        <div class="flex flex-wrap items-center gap-1" aria-label="Log level">
+    <template #actions>
+      <div class="flex flex-wrap items-center justify-end gap-3" data-testid="system-log-header-controls">
+        <div class="flex items-center gap-1" aria-label="Log level">
           <button
             v-for="level in levels"
             :key="level"
@@ -202,8 +206,10 @@ onBeforeUnmount(closeStream)
         </div>
         <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />
       </div>
+    </template>
 
-      <div class="flex flex-wrap items-center gap-2">
+    <div class="flex min-h-[calc(100vh-10rem)] flex-col gap-4" data-testid="system-log-viewer">
+      <div class="flex flex-wrap items-center gap-2 border-y border-[var(--color-divider)] py-3">
         <button
           v-for="source in sourceItems"
           :key="source"
@@ -244,9 +250,9 @@ onBeforeUnmount(closeStream)
             class="grid grid-cols-[auto_52px_150px_minmax(0,1fr)] gap-3 border-b border-[var(--color-divider)] px-3 py-1 last:border-b-0"
             data-testid="system-log-row"
           >
-            <time :datetime="entry.timestamp" class="whitespace-nowrap text-[color:color-mix(in_srgb,var(--neutral-900)_45%,transparent)]">{{ formatTime(entry.timestamp) }}</time>
+            <time :datetime="entry.timestamp" class="whitespace-nowrap opacity-45">{{ formatTime(entry.timestamp) }}</time>
             <span :class="levelClass(entry.level)">{{ entry.level }}</span>
-            <span class="truncate text-[color:color-mix(in_srgb,var(--neutral-900)_55%,transparent)]">{{ entry.source }}</span>
+            <span class="truncate opacity-55">{{ entry.source }}</span>
             <span class="min-w-0 whitespace-pre-wrap break-words text-[var(--neutral-900)]">{{ entry.message }}</span>
           </div>
           <div v-if="!visibleEntries.length && !loading" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">
