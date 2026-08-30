@@ -96,7 +96,12 @@ async function submit() {
       <UPageHeader headline="CONTROL PLANE" title="Edit Instance" description="Configure one durable llama-server process. The slug is the exact OpenAI model ID and defaults from the Instance name." />
       <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
     </div>
-    <UAlert color="error" variant="subtle" :description="error" />
+    <Frame class="p-3" data-testid="instance-edit-load-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Unable to load Instance</StatusTag>
+        <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
+      </div>
+    </Frame>
   </div>
   <InstanceForm
     v-else
