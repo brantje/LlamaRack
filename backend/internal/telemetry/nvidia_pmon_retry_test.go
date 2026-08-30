@@ -4,9 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 )
 
 func TestNVIDIAProcessUtilizationRetriesPlainPMon(t *testing.T) {
+	systemlog.Default.Reset()
+	defer systemlog.Default.Reset()
 	collector := New(nil)
 	calls := make([]string, 0, 2)
 	collector.run = func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -26,6 +30,10 @@ func TestNVIDIAProcessUtilizationRetriesPlainPMon(t *testing.T) {
 	}
 	if got[gpuProcessKey{pid: 2708472, deviceID: "CUDA0"}] != 97 {
 		t.Fatalf("plain pmon result=%+v", got)
+	}
+	logs := systemlog.Default.Snapshot(10)
+	if len(logs) != 1 || logs[0].Level != systemlog.Warn || logs[0].Source != "telemetry" || logs[0].Message != "nvidia-smi pmon -s u returned no process rows, retrying plain pmon" {
+		t.Fatalf("diagnostics=%+v", logs)
 	}
 }
 
