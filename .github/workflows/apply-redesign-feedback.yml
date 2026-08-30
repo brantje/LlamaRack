@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/redesign
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
@@ -27,119 +28,65 @@ jobs:
       - name: Apply audited feedback fixes
         shell: bash
         run: |
+          git show HEAD^:.github/workflows/apply-redesign-feedback.yml > /tmp/previous-workflow.yml
           python3 <<'PY'
           from pathlib import Path
 
-          def replace(path: str, old: str, new: str, count: int = 1) -> None:
-              file = Path(path)
-              source = file.read_text()
-              found = source.count(old)
-              if found != count:
-                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {found}: {old[:100]!r}')
-              file.write_text(source.replace(old, new, count))
+          workflow = Path('/tmp/previous-workflow.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = workflow[start:end]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script.splitlines())
+          Path('/tmp/apply-redesign-feedback.py').write_text(script + '\n')
+          PY
+          python3 /tmp/apply-redesign-feedback.py
 
-          logs = 'frontend/app/pages/logs/index.vue'
-          replace(
-              logs,
-              """const liveState = computed(() => {\n  if (!liveStreamingEnabled.value) return { label: 'Live off', color: 'neutral' as const }\n  if (!manager.runtimeEventsConnected.value) return { label: 'Disconnected', color: 'neutral' as const }\n  if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }\n  return { label: 'Live', color: 'success' as const }\n})""",
-              """const liveState = computed(() => {\n  if (!liveStreamingEnabled.value) return { label: 'Live off', color: 'neutral' as const }\n  if (!manager.runtimeEventsConnected.value) return { label: 'Disconnected', color: 'neutral' as const }\n  if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }\n  return { label: 'Live', color: 'success' as const }\n})\nconst liveAction = computed(() => {\n  if (!liveStreamingEnabled.value) return { label: 'Enable live', icon: 'i-lucide-play' }\n  if (!manager.runtimeEventsConnected.value) return { label: 'Reconnect', icon: 'i-lucide-refresh-cw' }\n  if (offset.value > 0) return { label: 'Return to live', icon: 'i-lucide-arrow-up' }\n  return { label: 'Pause live', icon: 'i-lucide-pause' }\n})"""
-          )
-          replace(
-              logs,
-              """async function toggleLiveStreaming() {\n  liveStreamingEnabled.value = !liveStreamingEnabled.value\n  if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()\n}""",
-              """async function handleLiveAction() {\n  if (!liveStreamingEnabled.value) {\n    liveStreamingEnabled.value = true\n    if (routeReady.value && manager.user.value && offset.value === 0) await loadRequests()\n    return\n  }\n  if (!manager.runtimeEventsConnected.value) {\n    await manager.connectRuntimeEvents()\n    return\n  }\n  if (offset.value > 0) {\n    offset.value = 0\n    await loadRequests()\n    return\n  }\n  liveStreamingEnabled.value = false\n}"""
-          )
-          replace(
-              logs,
-              """      <div class=\"flex flex-wrap items-center justify-end gap-2\">\n        <StatusTag data-testid=\"request-logs-live-state\" :variant=\"liveState.label === 'Live' ? 'ready' : liveState.label.includes('paused') ? 'pending' : 'neutral'\">{{ liveState.label }}</StatusTag>\n        <AppButton data-testid=\"request-logs-live-toggle\" intent=\"secondary\" :icon=\"liveStreamingEnabled ? 'i-lucide-pause' : 'i-lucide-play'\" @click=\"toggleLiveStreaming\">{{ liveStreamingEnabled ? 'Pause live' : 'Enable live' }}</AppButton>""",
-              """      <div class=\"flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end\">\n        <StatusTag data-testid=\"request-logs-live-state\" :variant=\"liveState.label === 'Live' ? 'ready' : liveState.label.includes('paused') ? 'pending' : 'neutral'\">{{ liveState.label }}</StatusTag>\n        <AppButton data-testid=\"request-logs-live-toggle\" intent=\"secondary\" :icon=\"liveAction.icon\" @click=\"handleLiveAction\">{{ liveAction.label }}</AppButton>"""
-          )
-          replace(
-              logs,
-              """      <div v-else class=\"overflow-x-auto\">\n        <UTable :data=\"displayRequests\" :columns=\"columns\" class=\"min-w-[1580px]\">""",
-              """      <div v-else class=\"overflow-x-auto\" role=\"region\" aria-label=\"Request history table. Scroll horizontally to view all columns on small screens.\" tabindex=\"0\">\n        <UTable :data=\"displayRequests\" :columns=\"columns\" class=\"min-w-[1580px]\">"""
-          )
+          python3 <<'PY'
+          from pathlib import Path
 
-          instance = 'frontend/app/pages/instances/[id]/detail.vue'
-          replace(instance, "const historyLoading = ref(false)\nconst pending = ref('')", "const historyLoading = ref(false)\nconst historyError = ref('')\nconst pending = ref('')")
-          replace(
-              instance,
-              """  const sequence = ++historySequence\n  historyLoading.value = true\n  try {""",
-              """  const sequence = ++historySequence\n  historyLoading.value = true\n  historyError.value = ''\n  try {"""
-          )
-          replace(
-              instance,
-              """  } catch (value: any) {\n    if (sequence === historySequence) error.value = value?.data?.error || value?.message || 'Unable to load Instance history'\n  } finally {""",
-              """  } catch (value: any) {\n    if (sequence === historySequence) historyError.value = value?.data?.error || value?.message || 'Unable to load Instance history'\n  } finally {"""
-          )
-          replace(
-              instance,
-              """      <div class=\"flex flex-wrap items-center justify-between gap-3\">\n        <div><h2 class=\"text-base font-semibold\">Performance history</h2><p class=\"mt-1 text-xs text-[var(--neutral-700)]\">Server-bucketed history for this Instance only.</p></div>\n        <div class=\"flex items-center gap-2\"><span v-if=\"historyLoading\" class=\"text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]\">Refreshing</span><USelect v-model=\"selectedWindow\" data-testid=\"instance-detail-history-range\" aria-label=\"Instance history range\" :items=\"selectableRanges\" value-key=\"value\" label-key=\"label\" size=\"sm\" class=\"min-w-28\" /></div>\n      </div>\n\n      <section class=\"grid gap-4 md:grid-cols-2 xl:grid-cols-4\">""",
-              """      <div class=\"flex flex-wrap items-center justify-between gap-3\">\n        <div><h2 class=\"text-base font-semibold\">Performance history</h2><p class=\"mt-1 text-xs text-[var(--neutral-700)]\">Server-bucketed history for this Instance only.</p></div>\n        <div class=\"flex items-center gap-2\"><span v-if=\"historyLoading\" class=\"text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]\">Refreshing</span><USelect v-model=\"selectedWindow\" data-testid=\"instance-detail-history-range\" aria-label=\"Instance history range\" :items=\"selectableRanges\" value-key=\"value\" label-key=\"label\" size=\"sm\" class=\"min-w-28\" /></div>\n      </div>\n\n      <Frame v-if=\"historyError\" class=\"p-3\" data-testid=\"instance-detail-history-error\">\n        <div class=\"flex flex-wrap items-center gap-2\">\n          <StatusTag variant=\"failed\">Performance history unavailable</StatusTag>\n          <p class=\"min-w-0 flex-1 text-xs text-muted\">{{ historyError }}</p>\n          <AppButton intent=\"secondary\" size=\"xs\" :loading=\"historyLoading\" @click=\"loadHistory\">Retry history</AppButton>\n        </div>\n      </Frame>\n\n      <section class=\"grid gap-4 md:grid-cols-2 xl:grid-cols-4\">"""
-          )
-
-          chart = 'frontend/app/components/InstanceHistoryChart.vue'
-          replace(
-              chart,
-              """    <svg :viewBox=\"`0 0 ${width} ${height}`\" class=\"h-40 w-full overflow-visible\" role=\"img\" aria-label=\"History line chart\">""",
-              """    <svg v-if=\"presentValues.length\" :viewBox=\"`0 0 ${width} ${height}`\" class=\"h-40 w-full overflow-visible\" role=\"img\" aria-label=\"History line chart\">"""
-          )
-          replace(
-              chart,
-              """    </svg>\n    <p v-if=\"!presentValues.length\" class=\"text-center text-[11px] text-[var(--neutral-700)]\">No retained samples in this range.</p>""",
-              """    </svg>\n    <div v-else class=\"grid min-h-24 place-items-center border border-dashed border-[var(--color-divider)] px-3 py-4\">\n      <p class=\"text-center text-[11px] text-[var(--neutral-800)]\">No retained samples in this range.</p>\n    </div>"""
-          )
-
-          live_test = 'frontend/test/request-logs-live.nuxt.test.ts'
-          replace(
-              live_test,
-              """    expect(wrapper.get('[data-testid=\"request-logs-live-state\"]').text()).toContain('paused')\n\n    const callsBeforeLive""",
-              """    expect(wrapper.get('[data-testid=\"request-logs-live-state\"]').text()).toContain('paused')\n    expect(wrapper.get('[data-testid=\"request-logs-live-toggle\"]').text()).toContain('Return to live')\n\n    const callsBeforeLive"""
-          )
-          replace(
-              live_test,
-              """    const previous = wrapper.findAll('button').find(button => button.text().trim() === 'Previous')\n    await previous!.trigger('click')\n    await flushPromises()\n    expect(wrapper.get('[data-testid=\"request-log-table\"]').text()).toContain('lcm_3')\n    expect(wrapper.get('[data-testid=\"request-logs-live-state\"]').text()).toBe('Live')\n    wrapper.unmount()""",
-              """    await wrapper.get('[data-testid=\"request-logs-live-toggle\"]').trigger('click')\n    await flushPromises()\n    expect(wrapper.get('[data-testid=\"request-log-table\"]').text()).toContain('lcm_3')\n    expect(wrapper.get('[data-testid=\"request-logs-live-state\"]').text()).toBe('Live')\n    expect(wrapper.get('[data-testid=\"request-logs-live-toggle\"]').text()).toContain('Pause live')\n    wrapper.unmount()"""
-          )
-          replace(
-              live_test,
-              """  it('waits for authentication before loading protected request history', async () => {""",
-              """  it('offers reconnect instead of pause while the shared live stream is disconnected', async () => {\n    const manager = resetManager()\n    manager.runtimeEventsConnected.value = false\n    mocks.request.mockResolvedValue({ items: [], has_more: false })\n\n    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })\n    await flushPromises()\n    expect(wrapper.get('[data-testid=\"request-logs-live-state\"]').text()).toBe('Disconnected')\n    expect(wrapper.get('[data-testid=\"request-logs-live-toggle\"]').text()).toContain('Reconnect')\n    expect(wrapper.get('[data-testid=\"request-logs-live-toggle\"]').text()).not.toContain('Pause live')\n    wrapper.unmount()\n  })\n\n  it('waits for authentication before loading protected request history', async () => {"""
-          )
-
-          instance_test = 'frontend/test/instance-detail-branches.nuxt.test.ts'
-          replace(
-              instance_test,
-              """    expect(wrapper.text()).toContain('history offline')\n\n    const manager = useManager()""",
-              """    expect(wrapper.text()).toContain('history offline')\n    expect(wrapper.get('[data-testid=\"instance-detail-history-error\"]').text()).toContain('Performance history unavailable')\n    expect(wrapper.get('[data-testid=\"instance-detail-summary\"]').text()).toContain('READY')\n    expect(wrapper.find('[data-testid=\"instance-detail-error\"]').exists()).toBe(false)\n\n    const manager = useManager()"""
-          )
-          replace(
-              instance_test,
-              """    expect(missing.text()).toContain('Instance “missing” was not found.')\n  })""",
-              """    expect(missing.text()).toContain('Instance “missing” was not found.')\n    expect(missing.find('[data-testid=\"instance-detail-summary\"]').exists()).toBe(false)\n    expect(missing.text()).not.toContain('READY')\n  })"""
-          )
-
-          screenshots = 'frontend/e2e/redesign-screenshots.spec.ts'
-          replace(
-              screenshots,
-              "request_id: 'req_a1b2c3', accepted_at:",
-              "request_id: 'req_a1b2c3', trace_id: 'trace_fixture', session_id: 'session_fixture', session_total_count: 2, model_name: 'Qwen3 8B', call_type: 'chat_completion', request_body: '{\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"Explain KV cache reuse\\\"}]}', response_body: '{\\\"choices\\\":[{\\\"message\\\":{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":\\\"Reuse avoids repeated prompt evaluation.\\\"}}]}', accepted_at:"
-          )
-          replace(
-              screenshots,
-              "request_id: 'req_d4e5f6', accepted_at:",
-              "request_id: 'req_d4e5f6', trace_id: 'trace_fixture', session_id: 'session_fixture', session_total_count: 2, model_name: 'Gemma 3 12B', call_type: 'response', accepted_at:"
-          )
-          replace(
-              screenshots,
-              "if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [] }",
-              "if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [{ timestamp: now - 120_000, value: 18 }, { timestamp: now - 60_000, value: 31 }, { timestamp: now, value: 24 }] }"
-          )
-          replace(
-              screenshots,
-              "  ['request-logs', '/logs'],",
-              "  ['request-logs', '/logs'],\n  ['request-logs-trace', '/logs?trace_id=trace_fixture'],\n  ['request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture'],"
-          )
+          path = Path('frontend/app/pages/logs/index.vue')
+          source = path.read_text()
+          old = """async function handleLiveAction() {
+  if (!liveStreamingEnabled.value) {
+    liveStreamingEnabled.value = true
+    if (routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
+    return
+  }
+  if (!manager.runtimeEventsConnected.value) {
+    await manager.connectRuntimeEvents()
+    return
+  }
+  if (offset.value > 0) {
+    offset.value = 0
+    await loadRequests()
+    return
+  }
+  liveStreamingEnabled.value = false
+}"""
+          new = """async function toggleLiveStreaming() {
+  liveStreamingEnabled.value = !liveStreamingEnabled.value
+  if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
+}
+async function handleLiveAction() {
+  if (!liveStreamingEnabled.value) {
+    await toggleLiveStreaming()
+    return
+  }
+  if (!manager.runtimeEventsConnected.value) {
+    await manager.connectRuntimeEvents()
+    return
+  }
+  if (offset.value > 0) {
+    offset.value = 0
+    await loadRequests()
+    return
+  }
+  await toggleLiveStreaming()
+}"""
+          if source.count(old) != 1:
+              raise SystemExit('expected exactly one patched live action block')
+          path.write_text(source.replace(old, new, 1))
           PY
 
       - name: Install frontend dependencies
