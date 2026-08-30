@@ -76,6 +76,8 @@ const recentRequests = ref<RequestRecord[]>([])
 const settings = ref<GeneralSettings | null>(null)
 const selectedWindow = ref<number>(900)
 const loading = ref(false)
+const refreshing = ref(false)
+const lastUpdatedAt = ref<number | null>(null)
 const dashboardError = ref('')
 let windowRequestSequence = 0
 
@@ -100,6 +102,11 @@ const gatewaySummary = computed<GatewaySummary | null>(() => summary.value)
 const currentActivity = computed(() => observabilityLive.value?.gateway ?? summary.value)
 const liveRequests = computed<RequestRecord[]>(() => (observabilityLive.value?.requests as RequestRecord[] | undefined) ?? [])
 const streamingCount = computed(() => liveRequests.value.filter(request => request.streaming && request.result === 'pending').length)
+const isUpdating = computed(() => loading.value || refreshing.value)
+const lastUpdatedLabel = computed(() => {
+  if (isUpdating.value) return 'Updating…'
+  return lastUpdatedAt.value ? `Last updated ${formatTime(lastUpdatedAt.value)}` : 'Not updated yet'
+})
 
 const emptyHardware = (): HardwareSnapshot => ({
   ram_total_bytes: 0,
@@ -112,15 +119,17 @@ const hardware = computed(() => observabilityLive.value?.hardware || summary.val
 const telemetry = computed(() => observabilityLive.value?.telemetry || summary.value?.hardware?.telemetry || [])
 const totalVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + Math.max(0, gpu.total_bytes), 0))
 const committedVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + gpuCommittedBytes(gpu), 0))
+const deviceUsedVRAM = computed(() => hardware.value.gpus.reduce((total, gpu) => total + Math.min(Math.max(0, gpu.used_bytes), Math.max(0, gpu.total_bytes)), 0))
+const unattributedVRAM = computed(() => Math.max(0, deviceUsedVRAM.value - committedVRAM.value))
 const vramPercent = computed(() => totalVRAM.value > 0 ? Math.min(100, (committedVRAM.value / totalVRAM.value) * 100) : 0)
 const ramUsed = computed(() => Math.max(0, hardware.value.ram_total_bytes - hardware.value.ram_available_bytes))
 const ramPercent = computed(() => hardware.value.ram_total_bytes > 0 ? Math.min(100, (ramUsed.value / hardware.value.ram_total_bytes) * 100) : 0)
 const idleSeconds = computed(() => Number(settings.value?.idle_unload_seconds?.value || 0))
 const idleOverrides = computed(() => instances.value.filter(instance => instance.idle_unload_seconds > 0).length)
 const tokenTotalK = computed(() => formatThousands(gatewaySummary.value?.total_tokens || 0))
-const successRate = computed(() => {
+const successRate = computed<number | null>(() => {
   const requests = gatewaySummary.value?.requests || 0
-  return requests > 0 ? Math.round(((gatewaySummary.value?.successes || 0) / requests) * 1000) / 10 : 0
+  return requests > 0 ? Math.round(((gatewaySummary.value?.successes || 0) / requests) * 1000) / 10 : null
 })
 const meanAutoloadDuration = computed(() => {
   const lifecycle = summary.value?.lifecycle
@@ -325,6 +334,7 @@ async function loadWindowData() {
     if (sequence !== windowRequestSequence) return
     summary.value = summaryValue
     recentRequests.value = requestsValue.items || []
+    lastUpdatedAt.value = Date.now()
   } catch (error: any) {
     if (sequence !== windowRequestSequence) return
     dashboardError.value = error?.data?.error || error?.message || 'Unable to load Dashboard observability data'
@@ -344,8 +354,13 @@ async function loadDashboard() {
 }
 
 async function refreshDashboard() {
-  if (!manager.initialized.value || !manager.user.value) return
-  await Promise.allSettled([manager.refresh(), loadDashboard()])
+  if (!manager.initialized.value || !manager.user.value || refreshing.value) return
+  refreshing.value = true
+  try {
+    await Promise.allSettled([manager.refresh(), loadDashboard()])
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function setSelectedWindow(value: number) {
@@ -376,28 +391,36 @@ watch(selectedWindow, (next, previous) => {
 
 <template>
   <div class="space-y-8" data-testid="observability-dashboard">
-    <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between" data-testid="dashboard-header">
       <UPageHeader
-        class="min-w-0 flex-1"
+        class="w-full min-w-0 md:flex-1"
         headline="CONTROL PLANE"
         title="Dashboard"
         description="Live inference traffic, runtime health and accelerator allocation."
       />
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <div class="min-w-28">
-          <USelect
-            v-model="selectedWindow"
-            data-testid="dashboard-range"
-            aria-label="Observability time range"
-            :items="selectableRanges"
-            value-key="value"
-            label-key="label"
-            size="sm"
-          />
+      <div class="flex w-full flex-col gap-2 md:w-auto md:items-end" data-testid="dashboard-actions">
+        <div class="flex flex-wrap items-center gap-2 md:justify-end">
+          <div class="min-w-28">
+            <USelect
+              v-model="selectedWindow"
+              data-testid="dashboard-range"
+              aria-label="Observability time range"
+              :items="selectableRanges"
+              value-key="value"
+              label-key="label"
+              size="sm"
+            />
+          </div>
+          <AppButton to="/admin/system-logs" intent="secondary" data-testid="dashboard-system-logs">Logs</AppButton>
+          <AppButton intent="secondary" :loading="isUpdating" data-testid="dashboard-refresh" @click="refreshDashboard">Refresh</AppButton>
+          <AppButton to="/playground" intent="primary">Playground</AppButton>
         </div>
-        <AppButton to="/admin/system-logs" intent="secondary" data-testid="dashboard-system-logs">Logs</AppButton>
-        <AppButton intent="secondary" :loading="loading" @click="refreshDashboard">Refresh</AppButton>
-        <AppButton to="/playground" intent="primary">Playground</AppButton>
+        <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 md:justify-end">
+          <AppButton v-if="attention.length" to="#needs-attention" intent="ghost" size="xs" data-testid="dashboard-attention-link">
+            Needs attention · {{ attention.length }}
+          </AppButton>
+          <span class="font-mono text-xs text-muted" data-testid="dashboard-last-updated" aria-live="polite">{{ lastUpdatedLabel }}</span>
+        </div>
       </div>
     </div>
 
@@ -414,81 +437,84 @@ watch(selectedWindow, (next, previous) => {
 
     <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
       <Frame data-testid="dashboard-running" class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Ready</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Ready</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ readyCount }}</strong>{{ ' ' }}<span class="text-sm text-muted">/ {{ instances.length }} Instances</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ startingCount }} loading · {{ failedCount }} failed</p>
+        <p class="mt-1 text-xs text-muted">{{ startingCount }} loading · {{ failedCount }} failed</p>
       </Frame>
 
       <Frame data-testid="dashboard-vram" class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">VRAM committed</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="VRAM attributed to managed llama.cpp Instances; other device processes are excluded.">Managed VRAM</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ formatBytes(committedVRAM) }}</strong>
           <span class="text-sm text-muted">/ {{ formatBytes(totalVRAM) }}</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ Math.round(vramPercent) }}% of observed accelerator memory</p>
+        <p class="mt-1 text-xs text-muted">
+          {{ Math.round(vramPercent) }}% of total device capacity attributed to managed Instances<span v-if="unattributedVRAM > 0"> · {{ formatBytes(unattributedVRAM) }} device use unattributed</span>
+        </p>
       </Frame>
 
       <Frame data-testid="dashboard-gateway" class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Gateway · {{ selectedRangeLabel }}</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Gateway · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ gatewaySummary?.requests || 0 }}</strong>
           <span class="text-sm text-muted">req</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ gatewaySummary?.active_api_keys || 0 }} key{{ gatewaySummary?.active_api_keys === 1 ? '' : 's' }} active</p>
+        <p class="mt-1 text-xs text-muted">{{ gatewaySummary?.active_api_keys || 0 }} key{{ gatewaySummary?.active_api_keys === 1 ? '' : 's' }} active</p>
       </Frame>
 
       <Frame data-testid="dashboard-idle" class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Idle unload</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="How long an idle Instance may remain loaded before automatic unload.">Idle unload</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ formatIdle(idleSeconds) }}</strong>
           <span class="text-sm text-muted">global</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ idleOverrides }} Instance override{{ idleOverrides === 1 ? '' : 's' }}</p>
+        <p class="mt-1 text-xs text-muted">{{ idleOverrides }} Instance override{{ idleOverrides === 1 ? '' : 's' }}</p>
       </Frame>
     </div>
 
     <div class="grid grid-cols-2 gap-3 xl:grid-cols-4" data-testid="dashboard-observability-kpis">
       <Frame class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Tokens · {{ selectedRangeLabel }}</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Tokens · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ tokenTotalK }}</strong>
           <span class="text-sm text-muted">k total</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ gatewaySummary?.prompt_tokens || 0 }} prompt · {{ gatewaySummary?.generated_tokens || 0 }} generated</p>
+        <p class="mt-1 text-xs text-muted">{{ gatewaySummary?.prompt_tokens || 0 }} prompt · {{ gatewaySummary?.generated_tokens || 0 }} generated</p>
       </Frame>
 
       <Frame class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">In flight</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Requests currently running or waiting at the inference gateway.">In flight</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ currentActivity?.active || 0 }}</strong>{{ ' ' }}<span class="text-sm text-muted">active</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ currentActivity?.queued || 0 }} queued · {{ streamingCount }} streaming</p>
+        <p class="mt-1 text-xs text-muted">{{ currentActivity?.queued || 0 }} queued · {{ streamingCount }} streaming</p>
       </Frame>
 
       <Frame class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Autoloads · {{ selectedRangeLabel }}</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Automatic cold starts triggered when a request targets an unloaded Instance.">Autoloads · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ summary?.lifecycle?.autoloads || 0 }}</strong>
           <span class="text-sm text-muted">cold starts</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ summary?.lifecycle?.failed_starts || 0 }} failed start · {{ formatDuration(meanAutoloadDuration) }} mean load</p>
+        <p class="mt-1 text-xs text-muted">{{ summary?.lifecycle?.failed_starts || 0 }} failed start · {{ formatDuration(meanAutoloadDuration) }} mean load</p>
       </Frame>
 
-      <Frame class="p-4">
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Success rate · {{ selectedRangeLabel }}</p>
+      <Frame class="p-4" data-testid="dashboard-success-rate">
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Success rate · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ successRate }}</strong>
-          <span class="text-sm text-muted">%</span>
+          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ successRate === null ? '—' : successRate }}</strong>
+          <span v-if="successRate !== null" class="text-sm text-muted">%</span>
         </div>
-        <p class="mt-1 text-[11px] text-muted">{{ gatewaySummary?.successes || 0 }} ok · {{ gatewaySummary?.errors || 0 }} errors</p>
+        <p v-if="(gatewaySummary?.requests || 0) > 0" class="mt-1 text-xs text-muted">{{ gatewaySummary?.successes || 0 }} ok · {{ gatewaySummary?.errors || 0 }} errors</p>
+        <p v-else class="mt-1 text-xs text-muted">No requests in {{ selectedRangeLabel }}</p>
       </Frame>
     </div>
 
     <section class="space-y-3" data-testid="dashboard-vram-allocation">
       <div>
-        <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">VRAM ALLOCATION</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">VRAM ALLOCATION</p>
         <h2 class="mt-1 text-[30px]">VRAM allocation</h2>
         <p class="mt-1 text-xs text-muted">Manager-attributed Instance VRAM; Free is device capacity not attributed to managed Instances.</p>
       </div>
@@ -504,7 +530,7 @@ watch(selectedWindow, (next, previous) => {
         <Frame v-for="gpu in hardware.gpus" :key="gpu.id" class="flex h-full flex-col p-4" :data-testid="`gpu-card-${gpu.id}`">
           <div class="flex flex-wrap items-start justify-between gap-3 text-xs">
             <span class="font-mono text-muted">{{ gpu.id }} · {{ gpu.name }}</span>
-            <span class="ml-auto font-mono text-highlighted">{{ formatBytes(Math.min(Math.max(gpu.used_bytes, 0), Math.max(gpu.total_bytes, 0))) }} / {{ formatBytes(gpu.total_bytes) }} · {{ Math.round(gpu.utilization_pct) }}% util</span>
+            <span class="ml-auto font-mono text-highlighted">{{ formatBytes(Math.min(Math.max(gpu.used_bytes, 0), Math.max(gpu.total_bytes, 0))) }} / {{ formatBytes(gpu.total_bytes) }} · {{ Math.round(gpu.utilization_pct) }}% GPU util</span>
           </div>
 
           <div :data-testid="`gpu-progress-${gpu.id}`" class="mt-4">
@@ -520,7 +546,7 @@ watch(selectedWindow, (next, previous) => {
               <div
                 v-for="segment in gpuSegments(gpu)"
                 :key="`legend-${segment.label}`"
-                class="flex items-center justify-between gap-4 text-[10px] font-mono"
+                class="flex items-center justify-between gap-4 font-mono text-xs"
                 :data-vram-label="segment.label"
                 :data-vram-color="segment.colorKey"
               >
@@ -538,7 +564,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame v-if="hardware.ram_total_bytes > 0" class="p-4" data-testid="dashboard-host-ram">
         <div class="grid gap-3 lg:grid-cols-[minmax(0,340px)_auto] lg:items-end">
           <div>
-            <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">Host RAM</p>
+            <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Host RAM</p>
             <div class="mt-2 h-2 w-full bg-[var(--neutral-400)]">
               <div class="h-full bg-[var(--color-accent)]" :style="{ width: `${ramPercent}%` }" />
             </div>
@@ -550,10 +576,10 @@ watch(selectedWindow, (next, previous) => {
     </section>
 
     <div class="grid gap-3 xl:grid-cols-[2fr_1fr]">
-      <Frame data-testid="dashboard-gateway-traffic" class="min-w-0 overflow-hidden">
+      <Frame data-testid="dashboard-gateway-traffic" class="min-w-0 overflow-hidden" :class="attention.length ? 'order-2 xl:order-1' : 'order-1'">
         <div class="flex items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-3">
           <div>
-            <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">GATEWAY TRAFFIC</p>
+            <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">GATEWAY TRAFFIC</p>
             <h3 class="mt-1 text-xl">Gateway traffic · last {{ selectedRangeLabel }}</h3>
           </div>
           <div class="flex items-center gap-2">
@@ -562,7 +588,10 @@ watch(selectedWindow, (next, previous) => {
           </div>
         </div>
 
-        <UEmpty v-if="!recentRequests.length" variant="naked" title="No recent gateway traffic" description="Requests in the selected history window will appear here." />
+        <div v-if="!recentRequests.length" class="flex flex-col items-center gap-3 px-4 py-8 text-center">
+          <UEmpty variant="naked" title="No recent gateway traffic" description="Requests in the selected history window will appear here." />
+          <AppButton to="/playground" intent="secondary" size="xs">Send a test request</AppButton>
+        </div>
         <UTable v-else :data="recentRequests" :columns="gatewayColumns" class="w-full">
           <template #started_at-cell="{ row }">
             <NuxtLink :to="requestDetailTarget(row.original)" class="font-mono text-xs hover:text-[var(--color-accent)] hover:underline">{{ formatTime(row.original.started_at) }}</NuxtLink>
@@ -570,7 +599,7 @@ watch(selectedWindow, (next, previous) => {
           <template #instance_id-cell="{ row }">
             <div>
               <NuxtLink :to="`/instances/${encodeURIComponent(row.original.instance_id)}/detail`" class="font-mono text-xs text-[var(--color-accent)] hover:underline">{{ row.original.instance_id }}</NuxtLink>
-              <div class="mt-0.5 font-mono text-[10px] text-muted">{{ row.original.streaming ? 'stream' : 'unary' }}</div>
+              <div class="mt-0.5 font-mono text-xs text-muted">{{ row.original.streaming ? 'stream' : 'unary' }}</div>
             </div>
           </template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
@@ -588,9 +617,9 @@ watch(selectedWindow, (next, previous) => {
         </UTable>
       </Frame>
 
-      <Frame data-testid="dashboard-attention" class="p-4">
+      <Frame id="needs-attention" data-testid="dashboard-attention" class="p-4" :class="attention.length ? 'order-1 xl:order-2' : 'order-2'">
         <div class="mb-4">
-          <p class="text-[10px] font-medium uppercase tracking-[.1em] text-muted">OPERATIONS</p>
+          <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">OPERATIONS</p>
           <h3 class="mt-1 text-xl">Needs attention</h3>
         </div>
         <UEmpty v-if="!attention.length" variant="naked" title="Nothing needs attention." />
@@ -599,7 +628,7 @@ watch(selectedWindow, (next, previous) => {
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-[13px] font-medium text-highlighted">{{ item.title }}</p>
-                <p class="mt-1 text-[11.5px] text-muted">{{ item.detail }}</p>
+                <p class="mt-1 text-xs text-muted">{{ item.detail }}</p>
               </div>
               <AppButton v-if="item.to" :to="item.to" intent="ghost" size="xs">Review</AppButton>
             </div>
