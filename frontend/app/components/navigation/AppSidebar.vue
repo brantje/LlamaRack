@@ -10,6 +10,7 @@ const navigation: NavigationMenuItem[] = [
   { label: 'Models', icon: 'i-lucide-box', to: '/models' },
   { label: 'Instances', icon: 'i-lucide-server', to: '/instances' },
   { label: 'Downloads', icon: 'i-lucide-download', to: '/downloads' },
+  { label: 'Playground', icon: 'i-lucide-terminal-square', to: '/playground' },
   { label: 'Logs', icon: 'i-lucide-list-start', to: '/logs' },
   { label: 'API', icon: 'i-lucide-key-round', to: '/api' }
 ]
