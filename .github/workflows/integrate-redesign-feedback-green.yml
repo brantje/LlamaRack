@@ -1,0 +1,53 @@
+name: Integrate validated redesign feedback
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/integrate-redesign-feedback-green.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Integrate green production and regression commits
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git cherry-pick \
+            4fa48f94d450c6d1925679e7e949b177660b511f \
+            cf62f95d75ae250d4bde46509e62af5707a261b7 \
+            1d4664f37e67dc3c4ac63f1ec10dac34b212af80 \
+            1bae01fc3e83bb45a22d9c24dc3e51b9f14b7050 \
+            bca1f42f80feb31595ebedb171fd47541d8f3a7e
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Remove integration workflow and push
+        run: |
+          git rm .github/workflows/integrate-redesign-feedback-green.yml
+          git commit -m "chore: remove redesign integration helper"
+          git push origin HEAD:feature/redesign
