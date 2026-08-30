@@ -68,7 +68,7 @@ describe('Dashboard redesign', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('CONTROL PLANE')
-    expect(wrapper.get('[data-testid="dashboard-system-logs"]').attributes('href')).toBe('/admin/logs')
+    expect(wrapper.get('[data-testid="dashboard-system-logs"]').attributes('href')).toBe('/admin/system-logs')
     expect(wrapper.get('[data-testid="open-request-logs"]').attributes('href')).toBe('/logs')
     expect(wrapper.get('[data-testid="dashboard-range"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="dashboard-retention-note"]').text()).toContain('1 day')
