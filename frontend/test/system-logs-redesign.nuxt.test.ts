@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import SystemLogsPage from '~/pages/admin/logs.vue'
+import SystemLogsPage from '~/pages/admin/system-logs.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -92,7 +92,7 @@ describe('Administration system logs', () => {
       { timestamp: 'not-a-time', level: 'INFO', source: 'manager', message: 'invalid timestamp' }
     ] })
 
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs?source=qwen-coder-ci' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=qwen-coder-ci' })
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=4000')
@@ -156,7 +156,7 @@ describe('Administration system logs', () => {
       return {}
     })
 
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     expect(FakeEventSource.instances).toHaveLength(1)
@@ -198,7 +198,7 @@ describe('Administration system logs', () => {
     ]
     for (const failure of failures) {
       mocks.request.mockRejectedValueOnce(failure.value)
-      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs?source=not-yet-seen' })
+      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=not-yet-seen' })
       await flushPromises()
       expect(wrapper.text()).toContain(failure.text)
       expect(wrapper.text()).toContain('not-yet-seen')
@@ -206,7 +206,7 @@ describe('Administration system logs', () => {
     }
 
     mocks.request.mockResolvedValueOnce({ entries: null })
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs?source=not-yet-seen' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=not-yet-seen' })
     await flushPromises()
     expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('No log lines match this filter.')
@@ -222,14 +222,14 @@ describe('Administration system logs', () => {
     ]
     for (const failure of failures) {
       mocks.request.mockRejectedValueOnce(failure.value)
-      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
+      const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
       await flushPromises()
       expect(wrapper.text()).toContain(failure.text)
       wrapper.unmount()
     }
 
     mocks.request.mockResolvedValueOnce({ ticket: '' })
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
     await flushPromises()
     expect(wrapper.text()).toContain('Unable to authenticate live log stream')
     expect(FakeEventSource.instances).toHaveLength(0)
