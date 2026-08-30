@@ -20,11 +20,20 @@ type logEntry struct {
 	Text      string `json:"text"`
 }
 
-type phase11LogHandler struct{ source phase11LogSource }
+type phase11LogHandler struct {
+	source phase11LogSource
+	system http.Handler
+}
 
-func NewPhase11LogHandler(source phase11LogSource) http.Handler { return &phase11LogHandler{source: source} }
+func NewPhase11LogHandler(source phase11LogSource) http.Handler {
+	return &phase11LogHandler{source: source, system: NewSystemLogHandler(nil)}
+}
 
 func (h *phase11LogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("scope") == "system" {
+		h.system.ServeHTTP(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
