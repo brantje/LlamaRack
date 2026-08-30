@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { prepareFullPageScreenshot } from './full-page-screenshot'
 
 const now = Date.now()
 const nowSeconds = Math.floor(now / 1000)
@@ -291,6 +292,7 @@ for (const [name, path] of pages) {
     }
     if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
     await page.waitForTimeout(800)
+    await prepareFullPageScreenshot(page)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
       fullPage: true,
