@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import SystemLogsPage from '~/pages/admin/system-logs.vue'
+import SystemLogsPage from '~/pages/admin/logs.vue'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
@@ -63,7 +63,7 @@ describe('System diagnostics logs', () => {
       { timestamp: 'bad', level: 'INFO', source: 'manager', message: 'ignored' }
     ] })
 
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=worker-a' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs?source=worker-a' })
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=4000')
@@ -99,7 +99,7 @@ describe('System diagnostics logs', () => {
     vi.stubGlobal('EventSource', FakeEventSource as any)
     mocks.request.mockResolvedValue({ ticket: 'diag-ticket' })
 
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=worker-b' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs?source=worker-b' })
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
@@ -132,7 +132,7 @@ describe('System diagnostics logs', () => {
   it('covers stream authentication errors, empty tickets, follow scrolling and snapshot errors', async () => {
     vi.stubGlobal('EventSource', FakeEventSource as any)
     mocks.request.mockRejectedValueOnce({ data: { error: 'ticket denied' } })
-    const denied = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    const denied = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
     await flushPromises()
     expect(denied.text()).toContain('ticket denied')
     expect(FakeEventSource.instances).toHaveLength(0)
@@ -140,7 +140,7 @@ describe('System diagnostics logs', () => {
 
     mocks.request.mockReset()
     mocks.request.mockResolvedValueOnce({ ticket: '' })
-    const empty = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    const empty = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
     await flushPromises()
     expect(empty.text()).toContain('Unable to authenticate live log stream')
     empty.unmount()
@@ -148,14 +148,14 @@ describe('System diagnostics logs', () => {
     vi.stubGlobal('EventSource', undefined)
     mocks.request.mockReset()
     mocks.request.mockRejectedValueOnce(new Error('snapshot unavailable'))
-    const failed = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    const failed = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
     await flushPromises()
     expect(failed.text()).toContain('snapshot unavailable')
     failed.unmount()
 
     mocks.request.mockReset()
     mocks.request.mockResolvedValueOnce({ entries: [log('INFO', 'manager', 'ready')] })
-    const scrolling = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    const scrolling = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
     await flushPromises()
     const output = scrolling.get('[data-testid="system-log-output"]').element as HTMLElement
     Object.defineProperty(output, 'scrollHeight', { configurable: true, value: 1000 })
@@ -175,7 +175,7 @@ describe('System diagnostics logs', () => {
     vi.stubGlobal('EventSource', undefined)
     mocks.request.mockResolvedValueOnce({ entries: null })
 
-    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/logs' })
     await flushPromises()
 
     expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(0)
