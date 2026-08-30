@@ -123,6 +123,12 @@ const liveState = computed(() => {
   if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }
   return { label: 'Live', color: 'success' as const }
 })
+const liveAction = computed(() => {
+  if (!liveStreamingEnabled.value) return { label: 'Enable live', icon: 'i-lucide-play' }
+  if (!manager.runtimeEventsConnected.value) return { label: 'Reconnect', icon: 'i-lucide-refresh-cw' }
+  if (offset.value > 0) return { label: 'Return to live', icon: 'i-lucide-arrow-up' }
+  return { label: 'Pause live', icon: 'i-lucide-pause' }
+})
 
 function callTypeLabel(value?: string) {
   return ({ chat_completion: 'Chat Completion', completion: 'Completion', response: 'Responses', embedding: 'Embedding' } as Record<string, string>)[value || ''] || '—'
@@ -213,6 +219,22 @@ async function clearTrace() {
 async function toggleLiveStreaming() {
   liveStreamingEnabled.value = !liveStreamingEnabled.value
   if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
+}
+async function handleLiveAction() {
+  if (!liveStreamingEnabled.value) {
+    await toggleLiveStreaming()
+    return
+  }
+  if (!manager.runtimeEventsConnected.value) {
+    await manager.connectRuntimeEvents()
+    return
+  }
+  if (offset.value > 0) {
+    offset.value = 0
+    await loadRequests()
+    return
+  }
+  await toggleLiveStreaming()
 }
 async function loadRequestDetail(requestID: string): Promise<RequestDetail | null> {
   const generation = ++detailLoadGeneration
@@ -364,9 +386,9 @@ watch(liveRequestFingerprint, (next, previous) => {
   <div class="space-y-5" data-testid="request-logs-page">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent inference request history with request/session correlation and performance metadata." />
-      <div class="flex flex-wrap items-center justify-end gap-2">
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
         <StatusTag data-testid="request-logs-live-state" :variant="liveState.label === 'Live' ? 'ready' : liveState.label.includes('paused') ? 'pending' : 'neutral'">{{ liveState.label }}</StatusTag>
-        <AppButton data-testid="request-logs-live-toggle" intent="secondary" :icon="liveStreamingEnabled ? 'i-lucide-pause' : 'i-lucide-play'" @click="toggleLiveStreaming">{{ liveStreamingEnabled ? 'Pause live' : 'Enable live' }}</AppButton>
+        <AppButton data-testid="request-logs-live-toggle" intent="secondary" :icon="liveAction.icon" @click="handleLiveAction">{{ liveAction.label }}</AppButton>
         <AppButton intent="secondary" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</AppButton>
       </div>
     </div>
@@ -418,7 +440,7 @@ watch(liveRequestFingerprint, (next, previous) => {
         <p class="font-heading text-lg font-semibold text-[var(--color-text)]">No matching requests</p>
         <p class="mt-2 text-sm text-[var(--neutral-800)]">Adjust the filters or send inference traffic through the gateway.</p>
       </div>
-      <div v-else class="overflow-x-auto">
+      <div v-else class="overflow-x-auto" role="region" aria-label="Request history table. Scroll horizontally to view all columns on small screens." tabindex="0">
         <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]">
           <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatTime(row.original.started_at) }}</span></template>
           <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>

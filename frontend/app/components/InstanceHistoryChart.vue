@@ -93,7 +93,7 @@ function formatTime(timestamp?: number) {
         <span class="h-px w-4" :class="strokeClass(item.token).replace('stroke-', 'bg-')" />{{ item.label }}
       </span>
     </div>
-    <svg :viewBox="`0 0 ${width} ${height}`" class="h-40 w-full overflow-visible" role="img" aria-label="History line chart">
+    <svg v-if="presentValues.length" :viewBox="`0 0 ${width} ${height}`" class="h-40 w-full overflow-visible" role="img" aria-label="History line chart">
       <g v-for="value in gridValues" :key="value">
         <line :x1="left" :x2="width - right" :y1="yFor(value)" :y2="yFor(value)" class="stroke-[var(--color-divider)]" stroke-width="1" vector-effect="non-scaling-stroke" />
         <text :x="left - 5" :y="yFor(value) + 3" text-anchor="end" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatValue(value) }}</text>
@@ -118,6 +118,8 @@ function formatTime(timestamp?: number) {
       <text v-if="timestamps.length" :x="left" :y="height - 5" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatTime(timestamps[0]) }}</text>
       <text v-if="timestamps.length > 1" :x="width - right" :y="height - 5" text-anchor="end" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatTime(timestamps[timestamps.length - 1]) }}</text>
     </svg>
-    <p v-if="!presentValues.length" class="text-center text-[11px] text-[var(--neutral-700)]">No retained samples in this range.</p>
+    <div v-else class="grid min-h-24 place-items-center border border-dashed border-[var(--color-divider)] px-3 py-4">
+      <p class="text-center text-[11px] text-[var(--neutral-800)]">No retained samples in this range.</p>
+    </div>
   </div>
 </template>

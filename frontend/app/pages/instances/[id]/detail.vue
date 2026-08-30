@@ -38,6 +38,7 @@ const route = useRoute()
 const instanceID = computed(() => String(route.params.id || ''))
 const loading = ref(true)
 const historyLoading = ref(false)
+const historyError = ref('')
 const pending = ref('')
 const error = ref('')
 const settings = ref<GeneralSettings | null>(null)
@@ -274,13 +275,14 @@ async function loadHistory() {
   if (!instance.value) return
   const sequence = ++historySequence
   historyLoading.value = true
+  historyError.value = ''
   try {
     const metrics = ['requests', 'prompt_tokens', 'generated_tokens', 'latency', 'latency_p50', 'latency_p95', 'instance_context_tokens_max']
     const results = await Promise.all(metrics.map(metric => manager.request<SeriesResponse>(historyPath(metric))))
     if (sequence !== historySequence) return
     ;[requestSeries.value, promptSeries.value, generatedSeries.value, latencyAverageSeries.value, latencyP50Series.value, latencyP95Series.value, contextSeries.value] = results.map(result => result.items || [])
   } catch (value: any) {
-    if (sequence === historySequence) error.value = value?.data?.error || value?.message || 'Unable to load Instance history'
+    if (sequence === historySequence) historyError.value = value?.data?.error || value?.message || 'Unable to load Instance history'
   } finally {
     if (sequence === historySequence) historyLoading.value = false
   }
@@ -437,6 +439,14 @@ defineExpose({ setSelectedWindow })
         <div><h2 class="text-base font-semibold">Performance history</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Server-bucketed history for this Instance only.</p></div>
         <div class="flex items-center gap-2"><span v-if="historyLoading" class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Refreshing</span><USelect v-model="selectedWindow" data-testid="instance-detail-history-range" aria-label="Instance history range" :items="selectableRanges" value-key="value" label-key="label" size="sm" class="min-w-28" /></div>
       </div>
+
+      <Frame v-if="historyError" class="p-3" data-testid="instance-detail-history-error">
+        <div class="flex flex-wrap items-center gap-2">
+          <StatusTag variant="failed">Performance history unavailable</StatusTag>
+          <p class="min-w-0 flex-1 text-xs text-muted">{{ historyError }}</p>
+          <AppButton intent="secondary" size="xs" :loading="historyLoading" @click="loadHistory">Retry history</AppButton>
+        </div>
+      </Frame>
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Frame class="p-4" data-testid="instance-detail-chart-requests">

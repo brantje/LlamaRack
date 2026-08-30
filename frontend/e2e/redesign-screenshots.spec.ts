@@ -97,8 +97,8 @@ const telemetry = [
 ]
 
 const requests = [
-  { id: 501, request_id: 'req_a1b2c3', accepted_at: now - 18_000, started_at: now - 17_700, finished_at: now - 15_300, instance_id: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' }, streaming: true, status_code: 200, result: 'success', duration_ms: 2400, ttft_ms: 186, prompt_tokens: 814, generated_tokens: 246, total_tokens: 1060, tokens_per_second: 61.4, queue_duration_ms: 18, load_duration_ms: 0, autoloaded: false },
-  { id: 500, request_id: 'req_d4e5f6', accepted_at: now - 54_000, started_at: now - 53_600, finished_at: now - 50_100, instance_id: 'gemma-always-on', endpoint: '/v1/responses', api_key: { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34' }, streaming: false, status_code: 200, result: 'success', duration_ms: 3500, ttft_ms: 242, prompt_tokens: 1280, generated_tokens: 302, total_tokens: 1582, tokens_per_second: 48.1, queue_duration_ms: 31, load_duration_ms: 0, autoloaded: false }
+  { id: 501, request_id: 'req_a1b2c3', trace_id: 'trace_fixture', session_id: 'session_fixture', session_total_count: 2, model_name: 'Qwen3 8B', call_type: 'chat_completion', request_body: '{\"messages\":[{\"role\":\"user\",\"content\":\"Explain KV cache reuse\"}]}', response_body: '{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Reuse avoids repeated prompt evaluation.\"}}]}', accepted_at: now - 18_000, started_at: now - 17_700, finished_at: now - 15_300, instance_id: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' }, streaming: true, status_code: 200, result: 'success', duration_ms: 2400, ttft_ms: 186, prompt_tokens: 814, generated_tokens: 246, total_tokens: 1060, tokens_per_second: 61.4, queue_duration_ms: 18, load_duration_ms: 0, autoloaded: false },
+  { id: 500, request_id: 'req_d4e5f6', trace_id: 'trace_fixture', session_id: 'session_fixture', session_total_count: 2, model_name: 'Gemma 3 12B', call_type: 'response', accepted_at: now - 54_000, started_at: now - 53_600, finished_at: now - 50_100, instance_id: 'gemma-always-on', endpoint: '/v1/responses', api_key: { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34' }, streaming: false, status_code: 200, result: 'success', duration_ms: 3500, ttft_ms: 242, prompt_tokens: 1280, generated_tokens: 302, total_tokens: 1582, tokens_per_second: 48.1, queue_duration_ms: 31, load_duration_ms: 0, autoloaded: false }
 ]
 
 const apiKeys = [
@@ -181,7 +181,7 @@ function responseFor(pathname: string, method: string): unknown {
     hardware: { hardware, telemetry }
   }
   if (pathname === '/api/v1/observability/requests') return { items: requests, next_cursor: '' }
-  if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [] }
+  if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [{ timestamp: now - 120_000, value: 18 }, { timestamp: now - 60_000, value: 31 }, { timestamp: now, value: 24 }] }
   if (pathname === '/api/v1/hardware' || pathname === '/api/v1/hardware/snapshot') return hardware
   if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys
   if (pathname === '/api/v1/system') return {
@@ -237,6 +237,8 @@ const pages = [
   ['downloads', '/downloads'],
   ['playground', '/playground'],
   ['request-logs', '/logs'],
+  ['request-logs-trace', '/logs?trace_id=trace_fixture'],
+  ['request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture'],
   ['api-keys', '/api'],
   ['profile', '/profile'],
   ['admin-overview', '/admin'],

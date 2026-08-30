@@ -244,6 +244,9 @@ describe('Instance detail edge branches', () => {
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/detail/detail' })
     await flushPromises()
     expect(wrapper.text()).toContain('history offline')
+    expect(wrapper.get('[data-testid="instance-detail-history-error"]').text()).toContain('Performance history unavailable')
+    expect(wrapper.get('[data-testid="instance-detail-summary"]').text()).toContain('READY')
+    expect(wrapper.find('[data-testid="instance-detail-error"]').exists()).toBe(false)
 
     const manager = useManager()
     manager.instances.value = []
@@ -257,6 +260,8 @@ describe('Instance detail edge branches', () => {
     const missing = await mountSuspended(InstanceDetailPage, { route: '/instances/missing/detail' })
     await flushPromises()
     expect(missing.text()).toContain('Instance “missing” was not found.')
+    expect(missing.find('[data-testid="instance-detail-summary"]').exists()).toBe(false)
+    expect(missing.text()).not.toContain('READY')
   })
 })
 
