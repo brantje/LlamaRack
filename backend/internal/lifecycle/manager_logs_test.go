@@ -28,6 +28,9 @@ func TestAlwaysOnReconcileDiagnosticGrammar(t *testing.T) {
 func TestStartFailureBackoffAndReset(t *testing.T) {
 	systemlog.Default.Reset()
 	oldBackoff := startFailureBackoffFor
+	if oldBackoff != 60*time.Second {
+		t.Fatalf("production backoff=%s", oldBackoff)
+	}
 	startFailureBackoffFor = 5 * time.Millisecond
 	defer func() { startFailureBackoffFor = oldBackoff }()
 
@@ -44,7 +47,7 @@ func TestStartFailureBackoffAndReset(t *testing.T) {
 	// Repeated failures while backing off must not create another timer/message.
 	s.noteStartFailure("worker-a")
 	entries := systemlog.Default.Snapshot(10)
-	if len(entries) != 1 || entries[0].Level != systemlog.Warn || !strings.Contains(entries[0].Message, "3 consecutive start failures, backing off 60s") {
+	if len(entries) != 1 || entries[0].Level != systemlog.Warn || !strings.Contains(entries[0].Message, "3 consecutive start failures, backing off 0s") {
 		t.Fatalf("backoff entries=%v", entries)
 	}
 
