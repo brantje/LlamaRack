@@ -56,7 +56,7 @@ describe('downloads redesign', () => {
 
     expect(wrapper.text()).toContain('model-q4.gguf')
     expect(wrapper.text()).toContain('DOWNLOADING')
-    expect(wrapper.text()).toContain('512 B / 1 KB · 50%')
+    expect(wrapper.text()).toContain('512 B / 1.0 KB · 50%')
     expect(wrapper.find('[data-testid="download-progress-fill"]').attributes('style')).toContain('width: 50%')
     expect(wrapper.find('[data-testid="download-job"]').exists()).toBe(true)
     wrapper.unmount()
