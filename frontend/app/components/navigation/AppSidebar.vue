@@ -6,7 +6,7 @@ const manager = useManager()
 const { user } = manager
 
 const navigation: NavigationMenuItem[] = [
-  { label: 'Overview', icon: 'i-lucide-layout-dashboard', to: '/' },
+  { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
   { label: 'Models', icon: 'i-lucide-box', to: '/models' },
   { label: 'Instances', icon: 'i-lucide-server', to: '/instances' },
   { label: 'Downloads', icon: 'i-lucide-download', to: '/downloads' },
