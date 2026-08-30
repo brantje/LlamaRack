@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const modelInspectFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -202,8 +203,36 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/me/sessions') return profileSessions
   if (pathname === '/api/v1/me/identities') return profileIdentities
   if (pathname === '/api/v1/models' && method === 'GET') return models
-  if (pathname === '/api/v1/models/available') return []
-  if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
+  if (pathname === '/api/v1/models/available') return [{
+    path: '/models/Qwen3-Vision-8B-Q4_K_M.gguf', name: 'Qwen3 Vision 8B', total_bytes: 5_420_000_000,
+    modified_at: new Date(now - 300_000).toISOString(), quantization: 'Q4_K_M',
+    suggested_options: {
+      mmproj: '/models/mmproj-Qwen3-Vision-F16.gguf',
+      'spec-draft-model': '/models/Qwen3-0.6B-MTP-Q8_0.gguf',
+      'spec-type': 'draft-mtp'
+    }
+  }]
+  if (pathname === '/api/v1/models/inspect') return {
+    id: 'local-qwen3-vision', name: 'Qwen3-Vision-8B-Q4_K_M.gguf', model_name: 'Qwen3 Vision 8B',
+    architecture: 'qwen3', context_length: 32768, gguf_version: 3, metadata_count: 42,
+    model_bytes: 5_420_000_000, total_bytes: 6_340_000_000, shard_count: 1, expected_shards: 1, complete: true,
+    files: [{ path: '/models/Qwen3-Vision-8B-Q4_K_M.gguf', size: 5_420_000_000 }],
+    suggested_options: {
+      mmproj: '/models/mmproj-Qwen3-Vision-F16.gguf',
+      'spec-draft-model': '/models/Qwen3-0.6B-MTP-Q8_0.gguf',
+      'spec-type': 'draft-mtp'
+    },
+    dependencies: [
+      { kind: 'mmproj', name: 'mmproj-Qwen3-Vision-F16.gguf', total_bytes: 620_000_000, files: [{ path: '/models/mmproj-Qwen3-Vision-F16.gguf', size: 620_000_000 }], option_path: '/models/mmproj-Qwen3-Vision-F16.gguf' },
+      { kind: 'mtp', name: 'Qwen3-0.6B-MTP-Q8_0.gguf', quantization: 'Q8_0', total_bytes: 300_000_000, files: [{ path: '/models/Qwen3-0.6B-MTP-Q8_0.gguf', size: 300_000_000 }], option_path: '/models/Qwen3-0.6B-MTP-Q8_0.gguf' }
+    ],
+    dependency_candidates: [
+      { kind: 'mmproj', name: 'mmproj-Qwen3-Vision-F16.gguf', total_bytes: 620_000_000, files: [{ path: '/models/mmproj-Qwen3-Vision-F16.gguf', size: 620_000_000 }], option_path: '/models/mmproj-Qwen3-Vision-F16.gguf' },
+      { kind: 'mmproj', name: 'mmproj-Qwen3-Vision-Q8_0.gguf', quantization: 'Q8_0', total_bytes: 410_000_000, files: [{ path: '/models/mmproj-Qwen3-Vision-Q8_0.gguf', size: 410_000_000 }], option_path: '/models/mmproj-Qwen3-Vision-Q8_0.gguf' },
+      { kind: 'mtp', name: 'Qwen3-0.6B-MTP-Q8_0.gguf', quantization: 'Q8_0', total_bytes: 300_000_000, files: [{ path: '/models/Qwen3-0.6B-MTP-Q8_0.gguf', size: 300_000_000 }], option_path: '/models/Qwen3-0.6B-MTP-Q8_0.gguf' },
+      { kind: 'mtp', name: 'Qwen3-0.6B-MTP-Q4_K_M.gguf', quantization: 'Q4_K_M', total_bytes: 185_000_000, files: [{ path: '/models/Qwen3-0.6B-MTP-Q4_K_M.gguf', size: 185_000_000 }], option_path: '/models/Qwen3-0.6B-MTP-Q4_K_M.gguf' }
+    ]
+  }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details/value') return { key: 'tokenizer.ggml.tokens', type: 'array[string]', items: ['<|endoftext|>', '<|im_start|>', '<|im_end|>', 'hello'], offset: 0, limit: 100, total: 4, has_more: false }
   if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)
@@ -297,6 +326,10 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (modelInspectFailurePages.has(page) && url.pathname === '/api/v1/models/inspect' && request.method() === 'POST') {
+      await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative GGUF metadata inspection failure for visual QA.' }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -407,6 +440,13 @@ for (const [name, path] of pages) {
     if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     await waitForManagerPanel(page)
+    if (name === 'model-new') {
+      const option = page.locator('[data-testid="gguf-option"]').first()
+      await expect(option).toBeVisible()
+      await option.click()
+      await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3 Vision 8B')
+      await expect(page.locator('[data-testid^="companion-candidate-"]')).toHaveCount(4)
+    }
     if (name === 'profile') {
       await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
       await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
@@ -414,7 +454,7 @@ for (const [name, path] of pages) {
     if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
     const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
     expect(documentOverflow, `${name} document should not overflow horizontally`).toBeLessThanOrEqual(1)
-    await page.waitForTimeout(800)
+    if (name !== 'model-new') await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
       fullPage: true,
@@ -433,6 +473,30 @@ test('model details expanded metadata screenshot', async ({ page }, testInfo) =>
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
 })
 
+
+
+test('model-new metadata inspection failure screenshot', async ({ page }, testInfo) => {
+  modelInspectFailurePages.add(page)
+  await page.goto('/models/new', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const option = page.locator('[data-testid="gguf-option"]').first()
+  await expect(option).toBeVisible()
+  await option.click()
+  await expect(page.locator('[data-testid="metadata-warning"]')).toContainText('Representative GGUF metadata inspection failure for visual QA.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-metadata-failure.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('model-new Hugging Face remote screenshot', async ({ page }, testInfo) => {
+  await page.goto('/models/new?repo=Qwen%2FQwen3-8B-GGUF&artifact=q4_k_m', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const artifact = page.locator('[data-testid="remote-artifact-summary"]')
+  await expect(artifact).toContainText('Qwen/Qwen3-8B-GGUF')
+  await expect(artifact).toContainText('Qwen3-8B-Q4_K_M.gguf')
+  await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3-8B-GGUF Q4_K_M')
+  await expect(page.locator('[data-testid="model-form-first-instance"]')).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-remote.png`, fullPage: true, animations: 'disabled' })
+})
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await page.goto('/downloads', { waitUntil: 'domcontentloaded' })
