@@ -47,7 +47,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
       <Frame class="p-5" data-testid="admin-system-manager">
         <h2 class="text-base font-semibold">Manager</h2>
         <dl class="mt-4 text-sm">
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd>{{ info.manager.uptime_seconds }} seconds</dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd><code class="font-mono text-[12.5px] tabular-nums">{{ info.manager.uptime_seconds }} seconds</code></dd></div>
           <div v-for="(value, key) in info.manager.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono text-[12.5px]">{{ value }}</code></dd></div>
         </dl>
       </Frame>
@@ -69,8 +69,8 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
         </div>
         <dl v-else class="mt-4 text-sm">
           <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Path</dt><dd><code class="break-all font-mono text-[12.5px]">{{ info.llamacpp.path }}</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd>{{ info.llamacpp.version || 'unknown' }}</dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd>{{ info.llamacpp.options || 0 }}</dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd><code class="font-mono text-[12.5px]">{{ info.llamacpp.version || 'unknown' }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd><code class="font-mono text-[12.5px] tabular-nums">{{ info.llamacpp.options || 0 }}</code></dd></div>
         </dl>
       </Frame>
     </div>
