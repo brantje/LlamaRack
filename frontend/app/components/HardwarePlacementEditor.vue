@@ -367,6 +367,8 @@ onBeforeUnmount(() => {
         class="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4 text-left transition-colors hover:bg-[var(--neutral-100)] focus-visible:outline-none"
         :class="isSelected(gpu.id) ? 'border-[var(--color-accent)] bg-[var(--accent-100)]' : ''"
         @click="selectGpu(gpu.id)"
+        @keydown.enter.prevent="selectGpu(gpu.id)"
+        @keydown.space.prevent="selectGpu(gpu.id)"
       >
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0"><p class="font-mono text-sm font-bold">{{ gpu.id }}</p><p class="truncate text-xs text-muted">{{ gpu.name }}</p></div>
