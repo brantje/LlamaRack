@@ -489,7 +489,7 @@ watch(liveRequestFingerprint, (next, previous) => {
               <div v-else-if="detailError" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3" data-testid="request-detail-error"><StatusTag variant="failed">Request details unavailable</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detailError }}</p></div>
               <template v-else-if="detail">
                 <div v-if="detail.result === 'error'" data-testid="request-failure-banner" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3">
-                  <StatusTag variant="failed">Request failed</StatusTag>
+                  <StatusTag variant="failed">Request Failed</StatusTag>
                   <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detail.error || `HTTP ${detail.status_code || 'error'}` }}</p>
                 </div>
 
