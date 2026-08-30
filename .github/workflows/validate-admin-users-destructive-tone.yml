@@ -1,0 +1,51 @@
+name: Validate Administration Users feedback
+
+on:
+  push:
+    branches:
+      - fix/admin-users-destructive-tone
+    paths:
+      - .github/workflows/validate-admin-users-destructive-tone.yml
+      - .github/scripts/patch-admin-users-destructive-tone.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/admin-users-destructive-tone
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply Administration Users fixes
+        run: |
+          python .github/scripts/patch-admin-users-destructive-tone.py
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Administration Users fix
+        run: |
+          rm .github/workflows/validate-admin-users-destructive-tone.yml .github/scripts/patch-admin-users-destructive-tone.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): distinguish destructive user actions" -m "Give Disable the shared destructive ghost tone and cover realistic bootstrap/disabled users, Add user, reset-password, and disable/enable confirmation states across all screenshot viewports."
+          git push origin HEAD:fix/admin-users-destructive-tone
