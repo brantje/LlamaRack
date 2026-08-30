@@ -36,6 +36,8 @@ function resetManager() {
   mocks.telemetry = { instance_id: 'coder', pid: 77, gpu_devices: ['CUDA0'], collected_at: '2026-08-30T00:00:00Z', gpus: [], vram_used_bytes: 4 * 1024 ** 3 }
   mocks.request.mockReset()
   sessionStorage.clear()
+  localStorage.clear()
+  sessionStorage.setItem('lcm_management_token', 'management-branch')
   vi.unstubAllGlobals()
 }
 
@@ -46,7 +48,6 @@ function button(wrapper: any, text: string) {
 }
 
 async function prepareRaw(wrapper: any, body: unknown) {
-  await wrapper.get('#playground-api-key').setValue('lcm_branch')
   await button(wrapper, 'Request').trigger('click')
   await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(body))
 }
@@ -94,7 +95,6 @@ describe('Playground edge branches', () => {
     const publicFetch = vi.fn()
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
-    await wrapper.get('#playground-api-key').setValue('lcm_branch')
     await button(wrapper, 'Request').trigger('click')
 
     for (const raw of ['[]', 'null']) {
@@ -121,7 +121,6 @@ describe('Playground edge branches', () => {
       .mockResolvedValueOnce(new Response('', { status: 500 }))
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
-    await wrapper.get('#playground-api-key').setValue('lcm_branch')
 
     const expected = ['nested failure', 'string failure', 'Request failed with HTTP 503', 'plain failure', 'Request failed with HTTP 500']
     for (const message of expected) {
@@ -148,7 +147,6 @@ describe('Playground edge branches', () => {
       .mockRejectedValueOnce({})
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
-    await wrapper.get('#playground-api-key').setValue('lcm_branch')
 
     await button(wrapper, 'Send').trigger('click')
     await flushPromises()
@@ -210,18 +208,17 @@ describe('Playground edge branches', () => {
     wrapper.unmount()
   })
 
-  it('covers clipboard success/failure, tab credential removal, clear and keyboard send behavior', async () => {
+  it('covers clipboard success/failure, clear and keyboard send behavior without a Playground credential field', async () => {
     const writeText = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('denied'))
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 200 })))
-    sessionStorage.setItem('lcm-playground-api-key', 'lcm_saved')
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
-    expect((wrapper.get('#playground-api-key').element as HTMLInputElement).value).toBe('lcm_saved')
+    expect(wrapper.find('#playground-api-key').exists()).toBe(false)
 
     await button(wrapper, 'Copy as curl').trigger('click')
     await flushPromises()
@@ -240,10 +237,6 @@ describe('Playground edge branches', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Unable to copy sdk example.')
 
-    await wrapper.get('#playground-api-key').setValue('')
-    await flushPromises()
-    expect(sessionStorage.getItem('lcm-playground-api-key')).toBeNull()
-    await wrapper.get('#playground-api-key').setValue('lcm_keyboard')
     const composer = wrapper.get('textarea[aria-label="Playground message"]')
     await composer.setValue('keyboard message')
     await composer.trigger('keydown', { key: 'Enter', shiftKey: true })
