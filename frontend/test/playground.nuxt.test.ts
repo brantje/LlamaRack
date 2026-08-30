@@ -64,7 +64,8 @@ describe('Playground', () => {
           'Content-Type': 'text/event-stream',
           'X-LlamaCPP-Manager-Request-ID': 'req-1',
           'X-LlamaCPP-Manager-Instance': 'coder',
-          'X-LlamaCPP-Manager-Autoloaded': 'true'
+          'X-LlamaCPP-Manager-Autoloaded': 'true',
+          'X-LlamaCPP-Manager-Upstream-Port': '9101'
         }
       }
     ))
