@@ -40,6 +40,14 @@ jobs:
             text = text.replace(old, new, 1)
           path.write_text(text)
 
+          feedback = Path('frontend/test/redesign-feedback.nuxt.test.ts')
+          feedback_text = feedback.read_text()
+          old = "    expect(logs).toContain('text-[var(--color-on-accent)]')"
+          new = "    expect(logs).toContain(\":color=\\\"selectedSource === source ? 'primary' : 'neutral'\\\"\")\n    expect(logs).toContain(\":variant=\\\"selectedSource === source ? 'soft' : 'ghost'\\\"\")"
+          if old not in feedback_text:
+            raise SystemExit('missing stale Admin Logs accent assertion')
+          feedback.write_text(feedback_text.replace(old, new, 1))
+
           test = Path('frontend/test/admin-logs-accessibility.nuxt.test.ts')
           test.write_text('''import { readFileSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { describe, expect, it } from 'vitest'\n\ndescribe('Administration Logs accessibility contract', () => {\n  it('uses Nuxt UI buttons for log filters and readable metadata tokens', () => {\n    const source = readFileSync(resolve(process.cwd(), 'app/pages/admin/system-logs.vue'), 'utf8')\n    expect(source).toContain('<UButton\\n            v-for="level in levels"')\n    expect(source).toContain('<UButton\\n          v-for="source in sourceItems"')\n    expect(source).toContain("intent=\\"ghost\\" size=\\"xs\\" class=\\"ml-2\\"")\n    expect(source).toContain("if (level === 'DEBUG') return 'text-[var(--neutral-700)]'")\n    expect(source).toContain('class="whitespace-nowrap text-[var(--neutral-700)]"')\n    expect(source).toContain('class="truncate text-[var(--neutral-800)]"')\n    expect(source).not.toContain('opacity-45')\n    expect(source).not.toContain('opacity-55')\n  })\n})\n''')
           PY
@@ -63,6 +71,6 @@ jobs:
           rm .github/workflows/validate-admin-logs-accessibility.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add frontend/app/pages/admin/system-logs.vue frontend/test/admin-logs-accessibility.nuxt.test.ts .github/workflows/validate-admin-logs-accessibility.yml
+          git add frontend/app/pages/admin/system-logs.vue frontend/test/admin-logs-accessibility.nuxt.test.ts frontend/test/redesign-feedback.nuxt.test.ts .github/workflows/validate-admin-logs-accessibility.yml
           git commit -m "fix(ui): improve Administration Logs accessibility"
           git push origin HEAD:fix/redesign-admin-logs-accessibility
