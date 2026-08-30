@@ -2,12 +2,15 @@ package observability
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
 )
 
@@ -312,11 +315,14 @@ func applyHardwareFallback(samples []telemetry.Sample, snapshot hardware.Snapsho
 		}
 		if samples[index].GPUUtilizationPct == nil {
 			var utilization float64
+			deviceIDs := make([]string, 0, len(gpus))
 			for _, gpu := range gpus {
 				utilization += gpu.UtilizationPct
+				deviceIDs = append(deviceIDs, gpu.ID)
 			}
 			utilization /= float64(len(gpus))
 			samples[index].GPUUtilizationPct = &utilization
+			systemlog.Log(systemlog.Debug, "telemetry", fmt.Sprintf("GPU util for %s unavailable, using %s device-wide (global fallback)", samples[index].InstanceID, strings.Join(deviceIDs, ",")))
 		}
 		if samples[index].VRAMUsedBytes == nil {
 			var used int64
