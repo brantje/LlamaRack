@@ -1,6 +1,13 @@
 name: UI E2E screenshots
 
 on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/ui-e2e-screenshots.yml'
   pull_request:
     paths:
       - 'frontend/**'
