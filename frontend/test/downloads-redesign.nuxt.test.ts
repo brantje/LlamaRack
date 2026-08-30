@@ -62,12 +62,12 @@ describe('downloads redesign', () => {
     wrapper.unmount()
   })
 
-  it('maps completed, cancelled and failed states to the approved semantic variants', () => {
+  it('maps completed, failed, active and all other states to the approved semantic variants', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/pages/downloads.vue'), 'utf8')
 
     expect(source).toContain("if (state === 'COMPLETED') return 'ready'")
     expect(source).toContain("if (state === 'FAILED') return 'failed'")
-    expect(source).toContain("if (state === 'CANCELLED') return 'neutral'")
-    expect(source).toContain("return 'pending'")
+    expect(source).toContain("if (activeStates.has(state)) return 'pending'")
+    expect(source).toContain("return 'neutral'")
   })
 })
