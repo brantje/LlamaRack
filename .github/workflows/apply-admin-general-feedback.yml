@@ -22,7 +22,9 @@ jobs:
         with:
           node-version: '24'
       - name: Apply Administration General feedback fixes
-        run: python .github/scripts/apply-admin-general-feedback.py
+        run: |
+          python .github/scripts/apply-admin-general-feedback.py
+          python .github/scripts/fix-admin-general-typography-test.py
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -42,6 +44,7 @@ jobs:
         run: |
           rm .github/workflows/apply-admin-general-feedback.yml
           rm .github/scripts/apply-admin-general-feedback.py
+          rm .github/scripts/fix-admin-general-typography-test.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
