@@ -185,6 +185,7 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	securedManagement := api.ManagementSecurity(authService, network, managementAPI)
 	openAI := gateway.WithUpstreamPortHeader(lifecycleService, gateway.WithRequestLogContext(gateway.New(authService, modelService, lifecycleService, observabilityService), observabilityService))
+	managementAPI.Handle("POST /api/v1/playground/chat/completions", gateway.NewManagementPlaygroundProxy(openAI))
 	metrics := observability.NewMetricsHandler(observabilityService, func(requestCtx context.Context) string {
 		value, resolveErr := managerSettings.String(requestCtx, settings.PrometheusAuthToken)
 		if resolveErr != nil {
