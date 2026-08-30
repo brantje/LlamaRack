@@ -15,7 +15,7 @@ describe('Request logs semantic cleanup', () => {
     expect(source).toContain('data-testid="request-detail-error"')
     expect(source).toContain('<StatusTag variant="failed">Request details unavailable</StatusTag>')
     expect(source).toContain('data-testid="request-failure-banner"')
-    expect(source).toContain('<StatusTag variant="failed">Request failed</StatusTag>')
+    expect(source).toContain('<StatusTag variant="failed">Request Failed</StatusTag>')
     expect(source).not.toContain('border-[var(--accent-800)]')
   })
 
