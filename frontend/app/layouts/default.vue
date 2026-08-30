@@ -104,7 +104,7 @@ async function submitAuth() {
   <UDashboardGroup v-show="initialized && !backendError && !!user" class="relative inset-auto min-h-svh overflow-visible">
     <AppSidebar />
 
-    <UDashboardPanel id="manager-main" :ui="{ body: 'overflow-visible' }">
+    <UDashboardPanel id="manager-main" :ui="{ body: 'overflow-y-visible' }">
       <template #header>
         <UDashboardNavbar title="llamacpp-manager" class="lg:hidden">
           <template #leading><UDashboardSidebarToggle /></template>
