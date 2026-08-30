@@ -12,82 +12,19 @@ permissions:
 
 jobs:
   patch-and-validate:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/redesign
-          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      - name: Apply audited feedback fixes
-        shell: bash
-        run: |
-          git show HEAD^:.github/workflows/apply-redesign-feedback.yml > /tmp/previous-workflow.yml
-          python3 <<'PY'
-          from pathlib import Path
-
-          workflow = Path('/tmp/previous-workflow.yml').read_text()
-          marker = "          python3 <<'PY'\n"
-          start = workflow.index(marker) + len(marker)
-          end = workflow.index("\n          PY\n", start)
-          script = workflow[start:end]
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script.splitlines())
-          Path('/tmp/apply-redesign-feedback.py').write_text(script + '\n')
-          PY
-          python3 /tmp/apply-redesign-feedback.py
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('frontend/app/pages/logs/index.vue')
-          source = path.read_text()
-          old = """async function handleLiveAction() {
-  if (!liveStreamingEnabled.value) {
-    liveStreamingEnabled.value = true
-    if (routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
-    return
-  }
-  if (!manager.runtimeEventsConnected.value) {
-    await manager.connectRuntimeEvents()
-    return
-  }
-  if (offset.value > 0) {
-    offset.value = 0
-    await loadRequests()
-    return
-  }
-  liveStreamingEnabled.value = false
-}"""
-          new = """async function toggleLiveStreaming() {
-  liveStreamingEnabled.value = !liveStreamingEnabled.value
-  if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
-}
-async function handleLiveAction() {
-  if (!liveStreamingEnabled.value) {
-    await toggleLiveStreaming()
-    return
-  }
-  if (!manager.runtimeEventsConnected.value) {
-    await manager.connectRuntimeEvents()
-    return
-  }
-  if (offset.value > 0) {
-    offset.value = 0
-    await loadRequests()
-    return
-  }
-  await toggleLiveStreaming()
-}"""
-          if source.count(old) != 1:
-              raise SystemExit('expected exactly one patched live action block')
-          path.write_text(source.replace(old, new, 1))
-          PY
+      - name: Apply guarded feedback patch
+        run: python3 .github/scripts/apply-redesign-feedback.py
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -111,12 +48,13 @@ async function handleLiveAction() {
           NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
         run: npm run test:e2e:screenshots
 
-      - name: Commit validated fixes and remove helper workflow
+      - name: Commit validated fixes and remove helpers
         shell: bash
         run: |
           rm .github/workflows/apply-redesign-feedback.yml
+          rm .github/scripts/apply-redesign-feedback.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add frontend .github/workflows/apply-redesign-feedback.yml
+          git add -A
           git commit -m 'fix(frontend): correct redesign runtime states'
           git push origin HEAD:feature/redesign
