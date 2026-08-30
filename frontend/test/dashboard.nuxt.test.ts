@@ -110,7 +110,7 @@ describe('Phase 11 Dashboard', () => {
     expect(wrapper.get('[data-testid="observability-dashboard"]').text()).toContain('Dashboard')
     expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('1 / 2 Instances')
     expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('20 GiB')
-    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('83% of observed accelerator memory')
+    expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('83% of total device capacity')
     expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('12')
     expect(wrapper.get('[data-testid="dashboard-idle"]').text()).toContain('5 min')
     const allocation = wrapper.get('[data-testid="dashboard-vram-allocation"]')
