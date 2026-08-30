@@ -153,6 +153,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
 	managementAPI.Handle("GET /api/v1/observability/requests", observability.NewRequestLogsHandler(observabilityService))
 	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewRequestLogDetailHandler(observabilityService))
+	managementAPI.Handle("GET /api/v1/observability/playground/{request_id}", observability.NewPlaygroundDiagnosticsHandler(observabilityService))
 	managementAPI.Handle("/api/v1/observability/", observability.NewManagementHandler(observabilityService))
 	phase8 := api.NewPhase8Handler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", phase8)
