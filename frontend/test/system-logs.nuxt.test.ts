@@ -165,9 +165,11 @@ describe('System diagnostics logs', () => {
     await flushPromises()
     const follow = scrolling.findComponent({ name: 'UCheckbox' })
     expect((follow.props() as any).modelValue).toBe(false)
-    follow.vm.$emit('update:modelValue', true)
+    expect(scrolling.text()).toContain('Follow paused')
+    await button(scrolling, 'Resume').trigger('click')
     await flushPromises()
     expect((follow.props() as any).modelValue).toBe(true)
+    expect(scrolling.text()).not.toContain('Follow paused')
     scrolling.unmount()
   })
 

@@ -14,6 +14,10 @@ const error = ref('')
 const success = ref('')
 const busy = ref(false)
 const password = reactive({ current: '', next: '', confirmation: '' })
+const passwordVisible = reactive({ current: false, next: false, confirmation: false })
+const passwordMismatch = computed(() => Boolean(password.confirmation && password.next !== password.confirmation))
+const passwordReady = computed(() => Boolean(password.current && password.next.length >= 10 && password.confirmation.length >= 10 && !passwordMismatch.value))
+const otherSessionCount = computed(() => sessions.value.filter(session => !session.current).length)
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 
 function dateTime(value?: number) {
@@ -158,9 +162,7 @@ async function revokeAll() {
 
     <Frame v-if="profile" class="p-5" data-testid="profile-account">
       <div class="flex flex-col gap-5 sm:flex-row sm:items-start">
-        <Frame class="flex h-[66px] w-[66px] shrink-0 items-center justify-center p-0 font-mono text-xl font-semibold text-[var(--accent-700)]" data-testid="profile-avatar">
-          {{ initials(profile.username) }}
-        </Frame>
+        <UAvatar :text="initials(profile.username)" size="xl" class="h-[66px] w-[66px] shrink-0 font-mono text-xl font-semibold text-[var(--accent-700)]" data-testid="profile-avatar" />
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <h2 class="text-base font-semibold">Account</h2>
@@ -177,12 +179,24 @@ async function revokeAll() {
 
     <Frame class="max-w-[720px] p-5" data-testid="profile-password">
       <h2 class="text-base font-semibold">Change password</h2>
-      <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Changing the password signs out every other session.</p>
+      <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Changing the password signs out every other session. Use at least 10 characters for the new password.</p>
       <UForm :state="password" class="mt-5 space-y-4" @submit="changePassword">
-        <UFormField label="Current password" required><UInput v-model="password.current" class="w-full" type="password" autocomplete="current-password" required /></UFormField>
-        <UFormField label="New password" required><UInput v-model="password.next" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
-        <UFormField label="Confirm new password" required><UInput v-model="password.confirmation" class="w-full" type="password" autocomplete="new-password" minlength="10" required /></UFormField>
-        <AppButton type="submit" intent="primary" :loading="busy">Change password</AppButton>
+        <UFormField label="Current password" required>
+          <UInput v-model="password.current" data-testid="profile-current-password" class="w-full" :type="passwordVisible.current ? 'text' : 'password'" autocomplete="current-password" required>
+            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.current ? 'i-lucide-eye-off' : 'i-lucide-eye'" :aria-label="passwordVisible.current ? 'Hide current password' : 'Show current password'" :aria-pressed="passwordVisible.current" data-testid="toggle-current-password" @click="passwordVisible.current = !passwordVisible.current" /></template>
+          </UInput>
+        </UFormField>
+        <UFormField label="New password" help="At least 10 characters." required>
+          <UInput v-model="password.next" data-testid="profile-new-password" class="w-full" :type="passwordVisible.next ? 'text' : 'password'" autocomplete="new-password" minlength="10" required>
+            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.next ? 'i-lucide-eye-off' : 'i-lucide-eye'" :aria-label="passwordVisible.next ? 'Hide new password' : 'Show new password'" :aria-pressed="passwordVisible.next" data-testid="toggle-new-password" @click="passwordVisible.next = !passwordVisible.next" /></template>
+          </UInput>
+        </UFormField>
+        <UFormField label="Confirm new password" :error="passwordMismatch ? 'New password confirmation does not match.' : undefined" required>
+          <UInput v-model="password.confirmation" data-testid="profile-confirm-password" class="w-full" :type="passwordVisible.confirmation ? 'text' : 'password'" autocomplete="new-password" minlength="10" required>
+            <template #trailing><UButton type="button" color="neutral" variant="link" size="xs" :icon="passwordVisible.confirmation ? 'i-lucide-eye-off' : 'i-lucide-eye'" :aria-label="passwordVisible.confirmation ? 'Hide password confirmation' : 'Show password confirmation'" :aria-pressed="passwordVisible.confirmation" data-testid="toggle-confirm-password" @click="passwordVisible.confirmation = !passwordVisible.confirmation" /></template>
+          </UInput>
+        </UFormField>
+        <AppButton type="submit" intent="primary" :loading="busy" :disabled="!passwordReady">Change password</AppButton>
       </UForm>
     </Frame>
 
@@ -190,7 +204,7 @@ async function revokeAll() {
       <div>
         <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">SIGN-IN</p>
         <h2 class="mt-1 text-base font-semibold">Authentication sources</h2>
-        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account.</p>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account. Provider configuration is managed in <NuxtLink to="/admin/authentication" class="font-semibold text-[var(--accent-700)] hover:underline">Administration → Authentication</NuxtLink>.</p>
       </div>
       <div v-if="identities.length" class="mt-4 divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
         <div v-for="identity in identities" :key="identity.id" class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -218,8 +232,8 @@ async function revokeAll() {
           <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Session identifiers and cookies are never exposed here.</p>
         </div>
         <div class="flex flex-wrap gap-2 md:justify-end">
-          <AppButton intent="secondary" size="sm" @click="revokeOthers">Revoke others</AppButton>
-          <AppButton intent="destructive" size="sm" @click="revokeAll">Log out everywhere</AppButton>
+          <AppButton intent="secondary" size="sm" :disabled="otherSessionCount === 0" @click="revokeOthers">Revoke others</AppButton>
+          <AppButton intent="destructive" size="sm" :disabled="sessions.length === 0" @click="revokeAll">Log out everywhere</AppButton>
         </div>
       </div>
 

@@ -206,6 +206,7 @@ onBeforeUnmount(closeStream)
           </button>
         </div>
         <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />
+        <div v-if="!follow && entries.length" class="flex items-center gap-1" data-testid="system-log-follow-paused"><StatusTag variant="neutral">Follow paused</StatusTag><AppButton intent="ghost" size="xs" @click="follow = true">Resume</AppButton></div>
       </div>
     </template>
 

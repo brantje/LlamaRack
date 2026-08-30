@@ -106,7 +106,18 @@ const apiKeys = [
   { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 }
 ]
 
-const user = { id: 1, username: 'admin', enabled: true }
+const user = { id: 1, username: 'admin', enabled: true, created_at: nowSeconds - 86400 * 120, last_login_at: nowSeconds - 300 }
+const profileSessions = [
+  { id: 'session-current', user_id: 1, created_at: nowSeconds - 7200, expires_at: nowSeconds + 43200, remote_address: '192.0.2.24', user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36', current: true },
+  { id: 'session-other', user_id: 1, created_at: nowSeconds - 86400, expires_at: nowSeconds + 21600, remote_address: '198.51.100.18', user_agent: 'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/142.0' }
+]
+const profileIdentities = [{ id: 'identity-authentik', provider_id: 'authentik', issuer: 'https://auth.example.test/application/o/llamacpp-manager/', subject: 'admin-subject', user_id: 1, created_at: nowSeconds - 86400 * 30 }]
+const systemLogs = [
+  { timestamp: new Date(now - 90000).toISOString(), level: 'INFO', source: 'manager', message: 'reconcile: 2 Always On Instances satisfied' },
+  { timestamp: new Date(now - 60000).toISOString(), level: 'WARN', source: 'gateway', message: 'request queue depth reached 4 while qwen3-primary was loading' },
+  { timestamp: new Date(now - 30000).toISOString(), level: 'ERROR', source: 'qwen3-primary', message: 'worker exited unexpectedly after llama-server reported a representative long diagnostic message that verifies wrapping remains readable on narrow viewports' },
+  { timestamp: new Date(now - 10000).toISOString(), level: 'DEBUG', source: 'telemetry', message: 'mapped host PID 1421 to managed Instance qwen3-primary' }
+]
 const setting = <T>(value: T, source = 'database', editable = true) => ({ value, source, editable })
 const generalSettings = {
   session_lifetime_seconds: setting(86400),
@@ -162,6 +173,8 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/auth/bootstrap') return { required: false }
   if (pathname === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [{ id: 'authentik', name: 'Authentik' }] }
   if (pathname === '/api/v1/me') return user
+  if (pathname === '/api/v1/me/sessions') return profileSessions
+  if (pathname === '/api/v1/me/identities') return profileIdentities
   if (pathname === '/api/v1/models' && method === 'GET') return models
   if (pathname === '/api/v1/models/available') return []
   if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
@@ -195,6 +208,7 @@ function responseFor(pathname: string, method: string): unknown {
   if (/\/api-keys(?:\/|$)/.test(pathname)) return apiKeys
   if (pathname === '/api/v1/downloads' && method === 'GET') return [{ id: 'dl-active', provider: 'huggingface', repo_id: 'Qwen/Qwen3-8B-GGUF', revision: 'main', artifact_id: 'q4_k_m', name: 'Qwen3 8B Q4_K_M', quantization: 'Q4_K_M', state: 'DOWNLOADING', total_bytes: 5420000000, downloaded_bytes: 2168000000, speed_bps: 84000000, created_at: nowSeconds - 240, updated_at: nowSeconds, files: [{ path: 'Qwen3-8B-Q4_K_M.gguf', size: 5420000000, state: 'DOWNLOADING', downloaded_bytes: 2168000000 }] }, { id: 'dl-failed', provider: 'huggingface', repo_id: 'example/failed-model', revision: 'main', artifact_id: 'q5', name: 'Failed model import', quantization: 'Q5_K_M', state: 'FAILED', total_bytes: 7200000000, downloaded_bytes: 1100000000, speed_bps: 0, error: 'Connection reset while downloading shard 2 of 3. Retry resumes verified partial files.', created_at: nowSeconds - 900, updated_at: nowSeconds - 300 }, { id: 'dl-completed', provider: 'huggingface', repo_id: 'google/gemma-3-12b-it-GGUF', revision: 'main', artifact_id: 'q5_k_m', name: 'Gemma 3 12B Q5_K_M', quantization: 'Q5_K_M', state: 'COMPLETED', total_bytes: 8230000000, downloaded_bytes: 8230000000, speed_bps: 0, created_at: nowSeconds - 7200, updated_at: nowSeconds - 3600 }]
   if (/\/observability\/requests\//.test(pathname)) return requests[0]
+  if (pathname === '/api/v1/logs') return { entries: systemLogs }
   if (/\/logs(?:\/|$)/.test(pathname)) return { items: [] }
   if (pathname === '/api/v1/huggingface/token') return { configured: true, prefix: 'hf_demo' }
   if (pathname === '/api/v1/huggingface/search') return { items: [{ id: 'Qwen/Qwen3-8B-GGUF', author: 'Qwen', downloads: 420000, likes: 980, last_modified: new Date(now - 3600000).toISOString(), parameter_count: 8000000000, tags: ['gguf', 'text-generation'], private: false, gated: false }], next_cursor: '' }
@@ -264,12 +278,18 @@ test.beforeEach(async ({ page }) => {
 
 for (const [name, path] of pages) {
   test(`${name} screenshot`, async ({ page }, testInfo) => {
+    if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     const panel = page.locator('#dashboard-panel-manager-main')
     await expect(panel).toBeVisible({ timeout: 15_000 })
     await expect(panel).not.toBeEmpty()
     await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
+    if (name === 'profile') {
+      await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
+      await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
+    }
+    if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
     await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
