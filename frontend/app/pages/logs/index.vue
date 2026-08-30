@@ -380,9 +380,11 @@ watch(liveRequestFingerprint, (next, previous) => {
       <AppButton intent="secondary" size="xs" @click="clearTrace">Clear trace</AppButton>
     </div>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-4" data-testid="request-log-error">
-      <p class="text-sm font-semibold text-[var(--color-text)]">Request history unavailable</p>
-      <p class="mt-1 text-sm text-[var(--neutral-800)]">{{ error }}</p>
+    <Frame v-if="error" class="p-3" data-testid="request-log-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Request history unavailable</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
     </Frame>
 
     <Frame class="p-4" data-testid="request-log-filters">
@@ -455,8 +457,8 @@ watch(liveRequestFingerprint, (next, previous) => {
               <AppButton intent="ghost" size="xs" icon="i-lucide-chevron-right" aria-label="Collapse session sidebar" @click="sessionSidebarOpen = false" />
             </div>
             <USelectMenu v-if="activeSessionID && sessionRequests.length > 1" v-model="sessionSortMode" :items="sessionSortItems" label-key="label" value-key="value" class="mb-3 w-full" />
-            <div v-if="sessionError" class="mb-3 border-l-2 border-[var(--accent-800)] pl-3 text-xs"><p class="font-semibold">Session unavailable</p><p class="mt-1 text-[var(--neutral-800)]">{{ sessionError }}</p></div>
-            <div v-if="sessionTruncated" class="mb-3 border-l-2 border-[var(--color-accent)] pl-3 text-xs"><p class="font-semibold">Session truncated</p><p class="mt-1 text-[var(--neutral-800)]">Showing {{ sessionRequests.length }} of {{ sessionTotalCount }} retained requests.</p></div>
+            <div v-if="sessionError" class="mb-3 flex items-start gap-2 border border-[var(--color-divider)] p-3 text-xs" data-testid="request-session-error"><StatusTag variant="failed">Session unavailable</StatusTag><p class="min-w-0 flex-1 leading-5 text-[var(--neutral-800)]">{{ sessionError }}</p></div>
+            <div v-if="sessionTruncated" class="mb-3 flex items-start gap-2 border border-[var(--color-divider)] p-3 text-xs" data-testid="request-session-truncated"><StatusTag variant="pending">Session truncated</StatusTag><p class="min-w-0 flex-1 leading-5 text-[var(--neutral-800)]">Showing {{ sessionRequests.length }} of {{ sessionTotalCount }} retained requests.</p></div>
             <USkeleton v-if="activeSessionID && sessionLoading" class="h-32 w-full" />
             <UScrollArea v-else class="h-[calc(100vh-13rem)] pr-1">
               <div class="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
@@ -484,11 +486,11 @@ watch(liveRequestFingerprint, (next, previous) => {
             <div v-if="(detail || sessionRequests.length) && !sessionSidebarOpen" class="mb-3"><AppButton intent="secondary" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">{{ activeSessionID ? 'Show session requests' : 'Show requests' }}</AppButton></div>
             <div class="space-y-0">
               <USkeleton v-if="detailLoading" class="h-40 w-full" />
-              <div v-else-if="detailError" class="border-y border-[var(--accent-800)] px-4 py-3"><p class="text-sm font-semibold">Request details unavailable</p><p class="mt-1 text-sm text-[var(--neutral-800)]">{{ detailError }}</p></div>
+              <div v-else-if="detailError" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3" data-testid="request-detail-error"><StatusTag variant="failed">Request details unavailable</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detailError }}</p></div>
               <template v-else-if="detail">
-                <div v-if="detail.result === 'error'" data-testid="request-failure-banner" class="border-y border-[var(--accent-800)] bg-[var(--accent-100)] px-4 py-3">
-                  <p class="text-sm font-semibold text-[var(--accent-900)]">Request Failed</p>
-                  <p class="mt-1 text-sm text-[var(--accent-900)]">{{ detail.error || `HTTP ${detail.status_code || 'error'}` }}</p>
+                <div v-if="detail.result === 'error'" data-testid="request-failure-banner" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3">
+                  <StatusTag variant="failed">Request failed</StatusTag>
+                  <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detail.error || `HTTP ${detail.status_code || 'error'}` }}</p>
                 </div>
 
                 <section data-testid="request-detail-overview" class="border-b border-[var(--color-divider)] py-5">
