@@ -4,6 +4,7 @@ const route = useRoute()
 const navigation = [
   { label: 'Dashboard', description: 'Security, provider and runtime status', to: '/admin' },
   { label: 'General', description: 'Security, network and lifecycle defaults', to: '/admin/general' },
+  { label: 'Authentication', description: 'Local login and OIDC providers', to: '/admin/authentication' },
   { label: 'llama.cpp', description: 'Binary capabilities and global defaults', to: '/admin/llamacpp' },
   { label: 'Hugging Face', description: 'Provider credential', to: '/admin/huggingface' },
   { label: 'Users', description: 'Local management accounts', to: '/admin/users' },
