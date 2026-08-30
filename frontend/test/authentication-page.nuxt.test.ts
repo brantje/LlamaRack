@@ -92,8 +92,10 @@ describe('Admin authentication page', () => {
     expect(wrapper.text()).toContain('Enabled')
     expect(wrapper.text()).toContain('Tested')
     expect(wrapper.text()).toContain('https://manager.example.test/api/v1/auth/oidc/primary%2Fprovider/callback')
+    expect(wrapper.get('[data-testid="authentication-sign-in-policy"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="authentication-providers"]').exists()).toBe(true)
 
-    await wrapperButton(wrapper, 'Save authentication settings').trigger('click')
+    await wrapperButton(wrapper, 'Save settings').trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/admin/auth/settings', {
       method: 'PUT',
@@ -229,7 +231,7 @@ describe('Admin authentication page', () => {
     await flushPromises()
 
     mode = 'settings'
-    await wrapperButton(wrapper, 'Save authentication settings').trigger('click')
+    await wrapperButton(wrapper, 'Save settings').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('settings denied')
 
