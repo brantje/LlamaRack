@@ -106,6 +106,7 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		{http.MethodGet, "/api/v1/observability/summary", "getObservabilitySummary", "Get observability summary", "Observability", true, false, "200"},
 		{http.MethodGet, "/api/v1/observability/requests", "listObservabilityRequests", "List inference request history", "Observability", true, false, "200"},
 		{http.MethodGet, "/api/v1/observability/requests/{request_id}", "getObservabilityRequestByID", "Get an inference request by manager request ID", "Observability", true, false, "200"},
+		{http.MethodGet, "/api/v1/observability/playground/{request_id}", "getPlaygroundDiagnostics", "Get correlated Playground request diagnostics", "Observability", true, false, "200"},
 		{http.MethodGet, "/api/v1/observability/timeseries", "getObservabilityTimeseries", "Get observability timeseries data", "Observability", true, false, "200"},
 		{http.MethodGet, "/api/v1/ws", "streamRuntimeEvents", "Stream runtime events over WebSocket", "Observability", true, false, "101"},
 	}
@@ -208,11 +209,12 @@ func managerMetricHeaders(embeddings bool) map[string]manageropenapi.Header {
 
 func preResponseMetricHeaders() map[string]manageropenapi.Header {
 	return map[string]manageropenapi.Header{
-		"x-llamacpp-manager-request-id": {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamacpp-manager-instance":   {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamacpp-manager-autoloaded": {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
-		"x-llamacpp-manager-queue-ms":   numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
-		"x-llamacpp-manager-load-ms":    numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
+		"x-llamacpp-manager-request-id":    {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamacpp-manager-instance":      {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamacpp-manager-autoloaded":    {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
+		"x-llamacpp-manager-upstream-port": {Description: "Resolved internal llama.cpp worker port. This is diagnostic metadata only; clients must continue to use the manager gateway.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
+		"x-llamacpp-manager-queue-ms":      numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
+		"x-llamacpp-manager-load-ms":       numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
 	}
 }
 
