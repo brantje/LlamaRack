@@ -153,7 +153,6 @@ text = text.replace(old, new, 1)
 
 marker = '''    if (playgroundColdPages.has(page) && /^\\/api\\/v1\\/instances\\/[^/]+\\/runtime$/.test(url.pathname)) {'''
 fixture = '''    if (discoverDetailFailurePages.has(page) && url.pathname === '/api/v1/huggingface/model') {
-      discoverDetailFailurePages.delete(page)
       await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify({ error: 'Repository temporarily unavailable for visual QA.' }) })
       return
     }
@@ -174,6 +173,7 @@ visual = '''test('discover repository failure and retry screenshot', async ({ pa
   await expect(page.locator('[data-testid="discover-detail-retry"]')).toBeVisible()
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/discover-detail-error.png`, fullPage: true, animations: 'disabled' })
 
+  discoverDetailFailurePages.delete(page)
   await page.locator('[data-testid="discover-detail-retry"]').click()
   await expect(page.getByRole('heading', { name: 'Qwen/Qwen3-8B-GGUF' })).toBeVisible()
   await expect(page.locator('[data-testid="discover-detail-error"]')).toBeHidden()
