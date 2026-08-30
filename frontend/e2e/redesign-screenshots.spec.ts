@@ -202,6 +202,10 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/me') return user
   if (pathname === '/api/v1/me/sessions') return profileSessions
   if (pathname === '/api/v1/me/identities') return profileIdentities
+  if (pathname === '/api/v1/users' && method === 'GET') return [
+    { id: 1, username: 'admin', enabled: true, bootstrap_admin: true, created_at: nowSeconds - 86400 * 120, last_login_at: nowSeconds - 300 },
+    { id: 2, username: 'operator', enabled: false, bootstrap_admin: false, created_at: nowSeconds - 86400 * 21, last_login_at: nowSeconds - 86400 * 2 }
+  ]
   if (pathname === '/api/v1/models' && method === 'GET') return models
   if (pathname === '/api/v1/models/available') return [{
     path: '/models/Qwen3-Vision-8B-Q4_K_M.gguf', name: 'Qwen3 Vision 8B', total_bytes: 5_420_000_000,
@@ -496,6 +500,45 @@ test('model-new Hugging Face remote screenshot', async ({ page }, testInfo) => {
   await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3-8B-GGUF Q4_K_M')
   await expect(page.locator('[data-testid="model-form-first-instance"]')).toBeVisible()
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-remote.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('Administration users create and reset modal screenshots', async ({ page }, testInfo) => {
+  await page.goto('/admin/users', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const table = page.locator('[data-testid="admin-users-table"]')
+  await expect(table).toContainText('bootstrap admin')
+  await expect(table).toContainText('Disabled')
+
+  await page.getByRole('button', { name: 'Add user' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Add user')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-users-add.png`, fullPage: true, animations: 'disabled' })
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+
+  await table.getByRole('button', { name: 'Reset password' }).first().click()
+  await expect(page.getByRole('dialog')).toContainText('Reset password for admin')
+  await expect(page.getByRole('dialog')).toContainText('revokes all sessions')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-users-reset-password.png`, fullPage: true, animations: 'disabled' })
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
+})
+
+
+test('Administration users disable and enable confirmation screenshots', async ({ page }, testInfo) => {
+  await page.goto('/admin/users', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const table = page.locator('[data-testid="admin-users-table"]')
+  await expect(table).toContainText('operator')
+
+  await table.getByRole('button', { name: 'Disable' }).click()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Disable user')
+  await expect(page.getByText('All of that user’s active sessions will be revoked.', { exact: false })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-users-disable-confirmation.png`, fullPage: true, animations: 'disabled' })
+  await page.locator('[data-testid="confirmation-cancel"]').click()
+
+  await table.getByRole('button', { name: 'Enable' }).click()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Enable user')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-users-enable-confirmation.png`, fullPage: true, animations: 'disabled' })
+  await page.locator('[data-testid="confirmation-cancel"]').click()
 })
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {

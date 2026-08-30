@@ -305,6 +305,8 @@ describe('Phase 10 users', () => {
     expect(wrapper.text()).toContain('operator')
     expect(wrapper.text()).toContain('Never')
     expect(wrapper.text()).toContain('Inference API keys are managed separately under API')
+    const operatorRow = tableRow(wrapper, 'operator')
+    expect(rowButton(operatorRow, 'Disable').attributes('class')).toContain('text-[var(--danger-700)]')
 
     await button(wrapper, 'Add user').trigger('click')
     await flushPromises()

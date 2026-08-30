@@ -123,7 +123,7 @@ async function submitReset() {
         <template #actions-cell="{ row }">
           <div class="flex justify-end gap-1">
             <AppButton intent="ghost" size="xs" @click="openReset(row.original)">Reset password</AppButton>
-            <AppButton intent="ghost" size="xs" @click="toggleUser(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
+            <AppButton intent="ghost" :tone="row.original.enabled ? 'destructive' : 'default'" size="xs" @click="toggleUser(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
           </div>
         </template>
         </UTable>
