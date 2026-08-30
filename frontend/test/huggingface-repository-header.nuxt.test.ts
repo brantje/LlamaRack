@@ -15,6 +15,7 @@ function model(overrides: Record<string, any> = {}) {
     id: 'kai-os/Carnice-V3-GGUF',
     author: 'kai-os',
     description: longDescription,
+    revision: 'main',
     downloads: 577,
     likes: 20,
     last_modified: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
@@ -48,6 +49,8 @@ describe('Discover repository metadata header', () => {
     expect(metadata.text()).toContain('27.3B params')
     expect(metadata.text()).toContain('qwen35')
     expect(metadata.text()).toContain('256K')
+    expect(metadata.text()).toContain('Revision')
+    expect(metadata.text()).toContain('main')
     expect(metadata.text()).toContain('image-text-to-text')
     expect(metadata.text()).toContain('apache-2.0')
     expect(metadata.text()).toContain('gguf')
@@ -76,6 +79,7 @@ describe('Discover repository metadata header', () => {
       props: {
         model: model({
           description: 'Short provider description.',
+          revision: '',
           author: '',
           last_modified: 'invalid',
           parameter_count: 0,
@@ -95,6 +99,7 @@ describe('Discover repository metadata header', () => {
     expect(wrapper.text()).toContain('Private')
     expect(wrapper.text()).toContain('Gated')
     expect(wrapper.text()).not.toContain('Architecture')
+    expect(wrapper.text()).not.toContain('Revision')
     wrapper.unmount()
   })
 })
