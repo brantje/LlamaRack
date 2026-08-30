@@ -52,6 +52,18 @@ jobs:
             frontend/test/request-logs-branches.nuxt.test.ts | git apply --3way
 
           git show 73e26d3b2e47f4915ad65af9291c229b21039f09:.github/scripts/patch-dashboard-attention-state.py > /tmp/patch-dashboard-attention-state.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/patch-dashboard-attention-state.py')
+          text = path.read_text()
+          old_old = "old = '''}\n\n\ntest('playground generating and completed screenshots', async ({ page }, testInfo) => {'''"
+          new_old = "old = '''test('playground generating and completed screenshots', async ({ page }, testInfo) => {'''"
+          old_new = "new = '''}\n\ntest('dashboard failure recovery screenshot', async ({ page }, testInfo) => {"
+          new_new = "new = '''test('dashboard failure recovery screenshot', async ({ page }, testInfo) => {"
+          if old_old not in text or old_new not in text:
+              raise SystemExit('Dashboard script insertion rewrite marker not found')
+          path.write_text(text.replace(old_old, new_old, 1).replace(old_new, new_new, 1))
+          PY
           python /tmp/patch-dashboard-attention-state.py
 
           python - <<'PY'
