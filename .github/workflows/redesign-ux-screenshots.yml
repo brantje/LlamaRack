@@ -86,6 +86,10 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      - name: Download backend modules
+        working-directory: backend
+        run: go mod download
+
       - name: Build manager backend
         working-directory: backend
         run: go build -o ../artifacts/bin/llamacpp-manager ./cmd/llamacpp-manager
