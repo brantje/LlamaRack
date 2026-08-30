@@ -64,7 +64,8 @@ describe('redesign feedback regressions', () => {
     expect(users).toContain('Administration users. Scroll horizontally for status, dates and actions.')
     expect(dashboard).toContain('Gateway traffic. Scroll horizontally for request metrics and result.')
     expect(logs).toContain("'WARN+'")
-    expect(logs).toContain('text-[var(--color-on-accent)]')
+    expect(logs).toContain(":color=\"selectedSource === source ? 'primary' : 'neutral'\"")
+    expect(logs).toContain(":variant=\"selectedSource === source ? 'soft' : 'ghost'\"")
   })
 
   it('distinguishes empty model metadata from an empty search result', () => {
