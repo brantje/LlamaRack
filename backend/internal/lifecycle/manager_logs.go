@@ -78,7 +78,8 @@ func (s *Service) noteStartFailure(instanceID string) {
 	// that gate for the short automatic failure backoff while still allowing an
 	// explicit user/inference start to override it immediately.
 	s.markManualStop(instanceID)
-	systemlog.Log(systemlog.Warn, "manager", fmt.Sprintf("%s: 3 consecutive start failures, backing off %s", instanceID, startFailureBackoffFor))
+	backoffLabel := fmt.Sprintf("%.0fs", startFailureBackoffFor.Seconds())
+	systemlog.Log(systemlog.Warn, "manager", fmt.Sprintf("%s: 3 consecutive start failures, backing off %s", instanceID, backoffLabel))
 	go func() {
 		timer := time.NewTimer(startFailureBackoffFor)
 		defer timer.Stop()
@@ -112,7 +113,7 @@ func (s *Service) cancelStartFailureBackoff(instanceID string) {
 	state := failureBackoffs[key]
 	if state != nil {
 		state.generation++
-		state.backingOff = false
+		delete(failureBackoffs, key)
 	}
 	failureBackoffMu.Unlock()
 }
