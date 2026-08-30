@@ -207,9 +207,16 @@ describe('Instance configuration pages', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Edit Instance')
     expect(wrapper.findComponent(InstanceOverridesEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
+    expect(wrapper.text()).toContain('No changes to save.')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))
+
     inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')
     wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
     await flushPromises()
+    expect(wrapper.text()).toContain('Unsaved changes')
+    expect(wrapper.text()).not.toContain('No changes to save.')
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -259,6 +266,7 @@ describe('Instance configuration pages', () => {
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))
 
     inputWithValue(wrapper, 'Breaking Rename').vm.$emit('update:modelValue', 'Primary Coder')
+    checkbox(wrapper, 'Always On').vm.$emit('update:modelValue', true)
     failSave = true
     await flushPromises()
     await wrapper.find('form').trigger('submit')

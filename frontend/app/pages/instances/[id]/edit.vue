@@ -7,6 +7,7 @@ const busy = ref(false)
 const loading = ref(true)
 const loaded = ref(false)
 const error = ref('')
+const baseline = ref('')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 const form = reactive({
   model_id: '', name: '', slug: '', enabled: true, always_on: false, autoload_enabled: true,
@@ -17,6 +18,20 @@ const form = reactive({
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
 }
+
+function serializeForm() {
+  const options = Object.fromEntries(Object.entries(form.options).sort(([left], [right]) => left.localeCompare(right)))
+  return JSON.stringify({
+    model_id: form.model_id, name: form.name, slug: form.slug, enabled: form.enabled,
+    always_on: form.always_on, autoload_enabled: form.autoload_enabled, priority: form.priority,
+    eviction_enabled: form.eviction_enabled, idle_unload_seconds: form.idle_unload_seconds, gpu_mode: form.gpu_mode,
+    gpu_devices: form.gpu_mode === 'manual' ? [...form.gpu_devices] : [],
+    tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '',
+    request_log_mode: form.request_log_mode, options
+  })
+}
+
+const hasChanges = computed(() => Boolean(baseline.value) && serializeForm() !== baseline.value)
 
 onMounted(async () => {
   try {
@@ -30,6 +45,7 @@ onMounted(async () => {
       request_log_mode: instance.request_log_mode || 'metadata',
       options: { ...(options || {}) }
     })
+    baseline.value = serializeForm()
     loaded.value = true
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Instance'
@@ -39,7 +55,7 @@ onMounted(async () => {
 })
 
 async function submit() {
-  if (!form.model_id || !form.name.trim() || !form.slug.trim()) return
+  if (!form.model_id || !form.name.trim() || !form.slug.trim() || !hasChanges.value) return
   error.value = ''
   const nextID = slugify(form.slug || form.name)
   const rename = nextID !== originalID.value
@@ -110,6 +126,9 @@ async function submit() {
     submit-label="Save Instance"
     :busy="busy"
     :error="error"
+    :submit-disabled="!hasChanges"
+    submit-disabled-reason="No changes to save."
+    :dirty="hasChanges"
     @submit="submit"
   />
   <AppConfirmationModal ref="confirmation" />

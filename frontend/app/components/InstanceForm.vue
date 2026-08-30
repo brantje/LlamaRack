@@ -34,12 +34,18 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   showLaunchAfterCreate?: boolean
   launchAfterCreate?: boolean
+  submitDisabled?: boolean
+  submitDisabledReason?: string
+  dirty?: boolean
 }>(), {
   busy: false,
   error: '',
   loading: false,
   showLaunchAfterCreate: false,
-  launchAfterCreate: false
+  launchAfterCreate: false,
+  submitDisabled: false,
+  submitDisabledReason: '',
+  dirty: false
 })
 const emit = defineEmits<{
   submit: []
@@ -266,7 +272,7 @@ onMounted(() => {
             v-for="definition in companionDefinitions"
             :key="definition.key"
             class="border p-4"
-            :class="companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : companionState(definition) === 'none' ? 'border-[var(--color-divider)] opacity-60' : 'border-[var(--color-divider)]'"
+            :class="companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'"
             :data-testid="`companion-${definition.key}`"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
@@ -359,8 +365,12 @@ onMounted(() => {
       <div class="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-5">
         <UCheckbox v-if="showLaunchAfterCreate" :model-value="launchAfterCreate" label="Launch after creation" @update:model-value="emit('update:launchAfterCreate', Boolean($event))" />
         <span v-else />
-        <p v-if="!canSubmit" class="max-w-xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="instance-submit-requirements">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>
-        <div class="flex items-center gap-2"><AppButton to="/instances" intent="secondary">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">{{ submitLabel }}</AppButton></div>
+        <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <StatusTag v-if="dirty" data-testid="instance-dirty-state" variant="pending">Unsaved changes</StatusTag>
+          <p v-if="!canSubmit" class="max-w-xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="instance-submit-requirements">Select a registered Model and enter an Instance name and slug to enable {{ submitLabel }}.</p>
+          <p v-else-if="submitDisabled && submitDisabledReason" class="max-w-xl text-xs leading-5 text-[var(--neutral-700)]" data-testid="instance-submit-requirements">{{ submitDisabledReason }}</p>
+        </div>
+        <div class="flex items-center gap-2"><AppButton to="/instances" intent="secondary">Cancel</AppButton><AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit || submitDisabled">{{ submitLabel }}</AppButton></div>
       </div>
     </UForm>
   </div>
