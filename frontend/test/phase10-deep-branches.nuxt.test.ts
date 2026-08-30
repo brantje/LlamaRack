@@ -313,6 +313,10 @@ describe('Phase 10 llama and general branch variants', () => {
       return []
     })
     const general = await mountSuspended(AdminGeneralPage, { route: false })
+    await flushPromises()
+    const generalStartup = components(general, ['InputNumber', 'UInputNumber']).find(component => component.props('modelValue') === 120)
+    expect(generalStartup).toBeTruthy()
+    generalStartup!.vm.$emit('update:modelValue', 121)
     await flushPromises(); await button(general, 'Save changes').trigger('click'); await flushPromises()
     expect(general.text()).toContain('Invalid manager settings response')
     general.unmount()

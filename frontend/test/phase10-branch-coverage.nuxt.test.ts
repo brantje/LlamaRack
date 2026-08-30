@@ -228,10 +228,16 @@ describe('Phase 10 branch coverage', () => {
     expect(wrapper.text()).toContain('default')
 
     settings = { ...settingsResponse(), allowed_origins: { value: 'https://locked', source: 'environment', editable: false } }
+    const sessionLifetime = components(wrapper, ['InputNumber', 'UInputNumber']).find(component => component.props('modelValue') === 3600)
+    expect(sessionLifetime).toBeTruthy()
+    sessionLifetime!.vm.$emit('update:modelValue', 3601)
+    await flushPromises()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
 
     settings = []
+    sessionLifetime!.vm.$emit('update:modelValue', 3602)
+    await flushPromises()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Invalid manager settings response')

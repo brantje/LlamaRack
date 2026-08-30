@@ -19,7 +19,8 @@ describe('Administration machine typography', () => {
 
   it('keeps setting provenance readable while preserving machine typography', () => {
     const content = source('app/components/AdminSettingField.vue')
-    expect(content).toContain('font-mono text-[11.5px] font-normal')
+    expect(content).toContain('font-mono text-xs font-normal')
+    expect(content).toContain('source: {{ source }}')
     expect(content).toContain("'text-[var(--neutral-800)]'")
     expect(content).toContain("'text-[var(--accent-800)]'")
   })

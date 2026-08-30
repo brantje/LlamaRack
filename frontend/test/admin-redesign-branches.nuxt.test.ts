@@ -79,7 +79,7 @@ describe('Administration redesign branches', () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/settings/general' && options?.method === 'PUT') {
         expect(options.body.observability_retention_days).toBeUndefined()
-        expect(options.body.prometheus_auth_token).toBe('metrics-secret')
+        expect(options.body.prometheus_auth_token).toBe('metrics-secret-2')
         return general
       }
       if (path === '/api/v1/settings/discover' && options?.method === 'PUT') {
@@ -104,6 +104,8 @@ describe('Administration redesign branches', () => {
     expect(wrapper.text()).toContain('Enabled')
 
     system = {}
+    await wrapper.find('input[type="password"]').setValue('metrics-secret-2')
+    await flushPromises()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Manager settings saved')
@@ -140,6 +142,8 @@ describe('Administration redesign branches', () => {
         return []
       })
       const wrapper = await mountSuspended(AdminGeneralPage, { route: false })
+      await flushPromises()
+      await wrapper.find('input[placeholder="https://manager.example.com"]').setValue('https://changed.test')
       await flushPromises()
       await button(wrapper, 'Save changes').trigger('click')
       await flushPromises()

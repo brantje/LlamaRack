@@ -10,9 +10,9 @@ const sourceClass = computed(() => props.source === 'environment' ? 'text-[var(-
 <template>
   <UFormField>
     <template #label>
-      <span class="flex w-full items-center justify-between gap-3 text-xs font-semibold">
+      <span class="flex w-full flex-col items-start gap-1 text-xs font-semibold sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <span>{{ label }}</span>
-        <span class="font-mono text-[11.5px] font-normal" :class="sourceClass" data-testid="setting-source">{{ source }}</span>
+        <span class="font-mono text-xs font-normal" :class="sourceClass" data-testid="setting-source">source: {{ source }}</span>
       </span>
     </template>
     <slot />
