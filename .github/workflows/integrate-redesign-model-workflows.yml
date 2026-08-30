@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Apply remaining Model workflow UX fixes
+      - name: Apply corrected remaining Model workflow UX fixes
         run: |
           git fetch origin 9f1963cc27c5f5e3326b3496681e921deb6cc4ba
           git show 9f1963cc27c5f5e3326b3496681e921deb6cc4ba:.github/scripts/patch-model-edit-dirty-state.py > /tmp/patch-model-edit-dirty-state.py
