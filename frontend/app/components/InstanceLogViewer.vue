@@ -22,6 +22,11 @@ const sourceItems = [
   { label: 'Manager lifecycle', value: 'manager' }
 ]
 
+const aggregateLogsTo = computed(() => ({
+  path: '/admin/system-logs',
+  query: { source: props.instanceId }
+}))
+
 const visibleEntries = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return entries.value.filter((entry) => {
@@ -160,7 +165,10 @@ onBeforeUnmount(closeStream)
           <p class="text-sm font-semibold text-highlighted">Current-session logs</p>
           <p class="mt-1 text-xs text-muted">Live llama-server stdout/stderr plus manager lifecycle events. Raw log lines stay in memory and are not persisted across manager restarts.</p>
         </div>
-        <UBadge :color="live ? 'success' : 'neutral'" variant="subtle">{{ live ? 'Live' : 'Snapshot / disconnected' }}</UBadge>
+        <div class="flex items-center gap-2">
+          <AppButton :to="aggregateLogsTo" intent="ghost" size="xs" data-testid="open-aggregate-logs">Open diagnostics</AppButton>
+          <UBadge :color="live ? 'success' : 'neutral'" variant="subtle">{{ live ? 'Live' : 'Snapshot / disconnected' }}</UBadge>
+        </div>
       </div>
     </template>
 
