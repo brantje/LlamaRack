@@ -16,4 +16,5 @@
   --font-body: 'Barlow', ui-sans-serif, system-ui, sans-serif;
   --font-heading: 'Barlow Condensed', ui-sans-serif, system-ui, sans-serif;
   --font-machine: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-size-table-header: 0.75rem;
 }
