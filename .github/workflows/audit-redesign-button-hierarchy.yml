@@ -19,11 +19,28 @@ jobs:
           ref: audit/redesign-button-hierarchy
       - name: Inventory button semantics
         run: |
-          echo '=== AppButton destructive intent ==='
-          rg -n --glob '*.vue' 'intent="destructive"|:intent=.*destructive' frontend/app || true
-          echo '=== Direct UButton error/warning colors ==='
-          rg -n --glob '*.vue' '<UButton[^>]*(color="(error|warning)"|:color=.*(error|warning))' frontend/app || true
-          echo '=== Confirmation legacy colors ==='
-          rg -n --glob '*.{vue,ts}' "color:\s*'(error|warning)'|color:\s*[^,\n]*\?\s*'(error|warning)'" frontend/app || true
-          echo '=== All direct UButton occurrences in confirmation/delete surfaces ==='
-          rg -n '<UButton' frontend/app/components/AppConfirmationModal.vue frontend/app/components/ModelDeleteModal.vue || true
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('frontend/app')
+          groups = [
+              ('AppButton destructive intent', '*.vue', re.compile(r'intent="destructive"|:intent=[^>]*destructive')),
+              ('Direct UButton error/warning colors', '*.vue', re.compile(r'<UButton[^>]*(?:color="(?:error|warning)"|:color=[^>]*(?:error|warning))')),
+              ('Confirmation legacy colors', '*', re.compile(r"color:\s*'(?:error|warning)'|color:\s*[^,\n]*\?\s*'(?:error|warning)'")),
+          ]
+          for title, glob, pattern in groups:
+              print(f'=== {title} ===')
+              for path in sorted(root.rglob(glob)):
+                  if path.suffix not in {'.vue', '.ts'}:
+                      continue
+                  for number, line in enumerate(path.read_text().splitlines(), 1):
+                      if pattern.search(line):
+                          print(f'{path}:{number}:{line.strip()}')
+          print('=== All direct UButton occurrences in confirmation/delete surfaces ===')
+          for rel in ['components/AppConfirmationModal.vue', 'components/ModelDeleteModal.vue']:
+              path = root / rel
+              for number, line in enumerate(path.read_text().splitlines(), 1):
+                  if '<UButton' in line:
+                      print(f'{path}:{number}:{line.strip()}')
+          PY
