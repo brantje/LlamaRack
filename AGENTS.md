@@ -105,8 +105,11 @@ Test coverage is a hard repository rule.
 - Backend Go coverage is measured with `go test ./... -covermode=atomic -coverprofile=coverage.out` and MUST report total statement coverage of at least 90.0%.
 - Frontend coverage is measured with `npm run test:coverage` from `frontend/`. Vitest/V8 MUST report at least 90.0% for **statements, branches, functions, and lines** across `app/**/*.{ts,vue}`.
 - Any new frontend logic or view behavior MUST add or extend frontend tests in the same change.
+- Every new frontend page, route, or user-visible feature/surface MUST include a Playwright E2E test under `frontend/e2e/` in the same change. Unit/component tests do not replace this requirement.
+- New or renamed frontend routes MUST be added to the reusable UI screenshot catalogue and exercised across the configured Playwright browser-resolution matrix.
+- Changes to existing user-visible frontend behavior MUST update the relevant Playwright coverage whenever the affected behavior is already covered or the change creates a new interaction/state that can regress visually or functionally.
 - CI MUST fail when either backend or frontend coverage is below the enforced threshold.
-- Before considering implementation complete, run the relevant test suite, coverage gate, formatter/linter/type checks, and build checks.
+- Before considering implementation complete, run the relevant test suite, coverage gate, formatter/linter/type checks, Playwright E2E tests when frontend UI is touched, and build checks.
 
 ## Repository layout
 
