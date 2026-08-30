@@ -1,4 +1,10 @@
 export default defineAppConfig({
+  icon: {
+    customize: (content: string, _name: string, prefix: string, _provider: string) => {
+      if (prefix !== 'lucide') return content
+      return content.replace(/stroke-width="[^"]*"/g, 'stroke-width="1.5"')
+    }
+  },
   ui: {
     colors: {
       primary: 'accent',

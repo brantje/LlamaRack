@@ -407,7 +407,15 @@ async function createModel() {
     </Frame>
 
     <UForm :state="form" class="space-y-5" @submit="createModel">
-      <Frame class="p-5" data-testid="model-form-gguf">
+      <nav class="flex flex-wrap gap-2 border-y border-[var(--color-divider)] py-3" aria-label="Model form sections" data-testid="model-form-section-nav">
+        <AppButton to="#model-artifact" intent="ghost" size="xs">Artifact</AppButton>
+        <AppButton to="#model-companions" intent="ghost" size="xs">Companions</AppButton>
+        <AppButton to="#model-identity" intent="ghost" size="xs">Identity</AppButton>
+        <AppButton to="#model-defaults" intent="ghost" size="xs">Defaults</AppButton>
+        <AppButton to="#model-first-instance" intent="ghost" size="xs">First Instance</AppButton>
+      </nav>
+
+      <Frame id="model-artifact" class="p-5 scroll-mt-4" data-testid="model-form-gguf">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">ARTIFACT</p>
@@ -458,7 +466,7 @@ async function createModel() {
         <p v-if="!remoteMode" class="mt-2 text-xs text-[var(--neutral-700)]">Already-registered GGUF files and detected helper GGUFs are hidden.</p>
       </Frame>
 
-      <Frame class="p-5" data-testid="detected-gguf-helpers">
+      <Frame id="model-companions" class="p-5 scroll-mt-4" data-testid="detected-gguf-helpers">
         <div class="mb-4">
           <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">COMPANIONS</p>
           <h2 class="mt-1 text-base font-semibold">Companion files</h2>
@@ -509,22 +517,25 @@ async function createModel() {
             <div v-if="candidateList(definition).length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-3">
               <p class="mb-2 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
               <div class="flex flex-wrap gap-2">
-                <button
+                <UButton
                   v-for="candidate in candidateList(definition)"
                   :key="candidate.option_path || candidate.name"
                   type="button"
-                  class="border border-[var(--color-divider)] px-2 py-1 font-mono text-[10.5px]"
-                  :class="activeCandidate(definition)?.option_path === candidate.option_path ? 'bg-[var(--accent-100)]' : 'bg-transparent'"
+                  size="xs"
+                  :color="activeCandidate(definition)?.option_path === candidate.option_path ? 'primary' : 'neutral'"
+                  :variant="activeCandidate(definition)?.option_path === candidate.option_path ? 'soft' : 'ghost'"
+                  class="font-mono"
+                  :aria-pressed="activeCandidate(definition)?.option_path === candidate.option_path"
                   :data-testid="`companion-candidate-${definition.kind}`"
                   @click="chooseCompanionCandidate(definition, candidate)"
-                >{{ candidate.quantization || candidate.name }}</button>
+                >{{ candidate.quantization || candidate.name }}</UButton>
               </div>
             </div>
           </div>
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="model-form-identity">
+      <Frame id="model-identity" class="p-5 scroll-mt-4" data-testid="model-form-identity">
         <div class="mb-4">
           <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">IDENTITY</p>
           <h2 class="mt-1 text-base font-semibold">Model identity</h2>
@@ -545,7 +556,7 @@ async function createModel() {
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="model-form-defaults">
+      <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
@@ -557,7 +568,7 @@ async function createModel() {
         <ModelOverridesEditor ref="overridesEditor" v-model="form.options" :exclude-keys="companionOptionKeys" :show-add-button="false" />
       </Frame>
 
-      <Frame class="p-5" data-testid="model-form-first-instance">
+      <Frame id="model-first-instance" class="p-5 scroll-mt-4" data-testid="model-form-first-instance">
         <div class="mb-4">
           <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BOOTSTRAP</p>
           <h2 class="mt-1 text-base font-semibold">First Instance</h2>

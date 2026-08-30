@@ -411,6 +411,8 @@ for (const [name, path] of pages) {
       await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
     }
     if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
+    const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
+    expect(documentOverflow, `${name} document should not overflow horizontally`).toBeLessThanOrEqual(1)
     await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,

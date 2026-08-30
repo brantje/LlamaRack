@@ -212,6 +212,11 @@ describe('frontend design rules', () => {
       expect(readFileSync(resolve(appRoot, path), 'utf8'), `${path} still uses UCard option surfaces`).not.toContain('<UCard')
     }
 
+    const instanceForm = readFileSync(resolve(appRoot, 'components/InstanceForm.vue'), 'utf8')
+    const hardwarePlacement = readFileSync(resolve(appRoot, 'components/HardwarePlacementEditor.vue'), 'utf8')
+    expect(instanceForm).toContain('<HardwarePlacementEditor')
+    expect(hardwarePlacement, 'HardwarePlacementEditor is embedded inside the Placement Frame and must not create nested Frames').not.toContain('<Frame')
+
     const deleteModal = readFileSync(resolve(appRoot, 'components/ModelDeleteModal.vue'), 'utf8')
     expect(deleteModal).not.toContain('rounded-lg')
 

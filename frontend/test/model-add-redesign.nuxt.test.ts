@@ -48,6 +48,11 @@ describe('Add model redesign', () => {
     expect(empty.text()).toContain('No unregistered GGUF files found')
     expect(empty.text()).toContain('Create model is unavailable until a GGUF artifact is selected.')
     expect(empty.text()).toContain('Open Discover')
+    const sectionNav = wrapper.get('[data-testid="model-form-section-nav"]')
+    expect(sectionNav.attributes('aria-label')).toBe('Model form sections')
+    expect(sectionNav.findAll('a').map(link => link.attributes('href'))).toEqual([
+      '#model-artifact', '#model-companions', '#model-identity', '#model-defaults', '#model-first-instance'
+    ])
     expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
   })
 
@@ -122,6 +127,7 @@ describe('Add model redesign', () => {
     expect(wrapper.get('[data-testid="companion-mtp"]').text()).toContain('Auto-detected')
     expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-testid="companion-candidate-mtp"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[0]!.attributes('aria-pressed')).toBe('true')
     expect(modelOptions(wrapper)).toMatchObject({
       mmproj: selectedProjector,
       'spec-draft-model': selectedDraft,
@@ -130,6 +136,7 @@ describe('Add model redesign', () => {
 
     await wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[1]!.trigger('click')
     expect(modelOptions(wrapper).mmproj).toBe(alternateProjector)
+    expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[1]!.attributes('aria-pressed')).toBe('true')
 
     const projectorSlot = wrapper.get('[data-testid="companion-mmproj"]')
     await projectorSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')

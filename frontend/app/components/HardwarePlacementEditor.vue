@@ -279,12 +279,12 @@ onBeforeUnmount(() => {
       <UButton size="xs" color="neutral" variant="soft" :loading="loading || recommendationLoading" @click="refresh">Refresh hardware</UButton>
     </div>
 
-    <Frame v-if="error" class="p-3">
+    <div v-if="error" class="border border-[var(--color-divider)] p-3">
       <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div>
-    </Frame>
-    <Frame v-if="recommendationError" class="p-3">
+    </div>
+    <div v-if="recommendationError" class="border border-[var(--color-divider)] p-3">
       <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendationError }}</p></div>
-    </Frame>
+    </div>
 
     <UFormField
       v-if="modelId"
@@ -317,12 +317,12 @@ onBeforeUnmount(() => {
       </div>
     </UFormField>
 
-    <Frame v-if="executionFit" data-testid="execution-fit" class="p-3">
+    <div v-if="executionFit" data-testid="execution-fit" class="border border-[var(--color-divider)] p-3">
       <div class="flex items-start gap-2">
         <StatusTag :variant="executionFit.variant">{{ executionFit.title }}</StatusTag>
         <p class="text-xs leading-5 text-[var(--neutral-800)]">{{ executionFit.description }}</p>
       </div>
-    </Frame>
+    </div>
 
     <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 border-t border-default pt-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -349,12 +349,12 @@ onBeforeUnmount(() => {
         <span v-if="recommendation.offload.mode !== 'cpu'" class="text-muted">KV cache: <strong>{{ recommendation.offload.kv_on_gpu === false ? 'system RAM' : 'GPU' }}</strong></span>
       </div>
       <p class="text-xs text-muted"><strong>{{ recommendation.quantization.summary }}</strong> {{ recommendation.quantization.tradeoff }}</p>
-      <Frame v-if="recommendation.metadata_warning" class="p-3">
+      <div v-if="recommendation.metadata_warning" class="border border-[var(--color-divider)] p-3">
         <div class="flex items-start gap-2"><StatusTag variant="neutral">Metadata estimate fallback</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.metadata_warning }}</p></div>
-      </Frame>
-      <Frame v-if="recommendation.hardware_warning" class="p-3">
+      </div>
+      <div v-if="recommendation.hardware_warning" class="border border-[var(--color-divider)] p-3">
         <div class="flex items-start gap-2"><StatusTag variant="pending">Hardware probe warning</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.hardware_warning }}</p></div>
-      </Frame>
+      </div>
     </div>
 
     <div v-if="snapshot" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -384,9 +384,9 @@ onBeforeUnmount(() => {
           <div><dt class="text-dimmed">VRAM used</dt><dd class="font-semibold">{{ formatBytes(gpu.used_bytes) }}</dd></div>
         </dl>
       </button>
-      <Frame v-if="!gpus.length" class="p-3 sm:col-span-2">
+      <div v-if="!gpus.length" class="border border-[var(--color-divider)] p-3 sm:col-span-2">
         <div class="flex items-start gap-2"><StatusTag variant="neutral">No GPU</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">No NVIDIA or ROCm GPUs were detected. Automatic mode will leave device placement to CPU/other available llama.cpp backends.</p></div>
-      </Frame>
+      </div>
     </div>
 
     <div class="grid gap-4 md:grid-cols-2">
@@ -400,8 +400,8 @@ onBeforeUnmount(() => {
         <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
       </UFormField>
     </div>
-    <Frame v-if="gpuMode === 'auto'" class="p-3">
+    <div v-if="gpuMode === 'auto'" class="border border-[var(--color-divider)] p-3">
       <div class="flex items-start gap-2"><StatusTag variant="pending">Single-GPU first</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">At launch the manager reads fresh VRAM state, binds one adequate GPU when possible, and only then considers multi-GPU placement and eligible resource-pressure eviction.</p></div>
-    </Frame>
+    </div>
   </div>
 </template>

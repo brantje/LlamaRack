@@ -241,7 +241,16 @@ onMounted(() => {
     <div v-if="loading" class="space-y-3"><USkeleton class="h-12 w-full" /><USkeleton class="h-56 w-full" /></div>
 
     <UForm v-else :state="form" class="space-y-5" @submit="emit('submit')">
-      <Frame class="p-5" data-testid="instance-form-identity">
+      <nav class="flex flex-wrap gap-2 border-y border-[var(--color-divider)] py-3" aria-label="Instance form sections" data-testid="instance-form-section-nav">
+        <AppButton to="#instance-identity" intent="ghost" size="xs">Identity</AppButton>
+        <AppButton to="#instance-companions" intent="ghost" size="xs">Companions</AppButton>
+        <AppButton to="#instance-lifecycle" intent="ghost" size="xs">Lifecycle</AppButton>
+        <AppButton to="#instance-placement" intent="ghost" size="xs">Placement</AppButton>
+        <AppButton to="#instance-overrides" intent="ghost" size="xs">Overrides</AppButton>
+        <AppButton to="#instance-observability" intent="ghost" size="xs">Observability</AppButton>
+      </nav>
+
+      <Frame id="instance-identity" class="p-5 scroll-mt-4" data-testid="instance-form-identity">
         <div class="mb-4"><h2 class="text-base font-semibold">Model + identity</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Choose the registered GGUF and define the OpenAI-facing Instance identity.</p></div>
         <div class="grid gap-5 lg:grid-cols-2">
           <fieldset>
@@ -265,7 +274,7 @@ onMounted(() => {
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="instance-form-companions">
+      <Frame id="instance-companions" class="p-5 scroll-mt-4" data-testid="instance-form-companions">
         <div class="mb-4"><div class="flex flex-wrap items-center gap-2"><h2 class="text-base font-semibold">Companion files</h2><span v-if="companionLoading" class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Resolving</span></div><p class="mt-1 text-xs text-[var(--neutral-700)]">Detected next to the Model's GGUF and inherited from its llama.cpp defaults. Disable to run this Instance without them.</p></div>
         <div class="grid gap-3 lg:grid-cols-2">
           <div
@@ -295,13 +304,24 @@ onMounted(() => {
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="instance-form-lifecycle">
+      <Frame id="instance-lifecycle" class="p-5 scroll-mt-4" data-testid="instance-form-lifecycle">
         <div class="mb-4"><h2 class="text-base font-semibold">Lifecycle & scheduling</h2></div>
         <div class="grid gap-5 lg:grid-cols-2">
           <div>
             <p class="mb-2 text-xs font-semibold">Priority</p>
             <div class="inline-flex border border-[var(--color-divider)]" data-testid="instance-priority">
-              <button v-for="priority in ['low', 'normal', 'high']" :key="priority" type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold last:border-r-0" :class="form.priority === priority ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" :data-testid="`priority-${priority}`" @click="form.priority = priority">{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</button>
+              <UButton
+                v-for="priority in ['low', 'normal', 'high']"
+                :key="priority"
+                type="button"
+                size="sm"
+                :color="form.priority === priority ? 'primary' : 'neutral'"
+                :variant="form.priority === priority ? 'solid' : 'ghost'"
+                class="border-r border-[var(--color-divider)] last:border-r-0"
+                :aria-pressed="form.priority === priority"
+                :data-testid="`priority-${priority}`"
+                @click="form.priority = priority"
+              >{{ priority.charAt(0).toUpperCase() + priority.slice(1) }}</UButton>
             </div>
           </div>
           <UFormField :label="`Idle unload timeout (seconds · 0 inherits the global ${globalIdleSeconds} s)`" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
@@ -314,11 +334,11 @@ onMounted(() => {
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="instance-form-placement">
+      <Frame id="instance-placement" class="p-5 scroll-mt-4" data-testid="instance-form-placement">
         <div class="mb-4"><h2 class="text-base font-semibold">Placement</h2></div>
         <div class="mb-4 inline-flex border border-[var(--color-divider)]" data-testid="placement-mode">
-          <button type="button" class="border-r border-[var(--color-divider)] px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'auto' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" data-testid="placement-mode-auto" @click="setPlacementMode('auto')">Auto</button>
-          <button type="button" class="px-4 py-2 text-xs font-semibold" :class="form.gpu_mode === 'manual' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</button>
+          <UButton type="button" size="sm" :color="form.gpu_mode === 'auto' ? 'primary' : 'neutral'" :variant="form.gpu_mode === 'auto' ? 'solid' : 'ghost'" class="border-r border-[var(--color-divider)]" :aria-pressed="form.gpu_mode === 'auto'" data-testid="placement-mode-auto" @click="setPlacementMode('auto')">Auto</UButton>
+          <UButton type="button" size="sm" :color="form.gpu_mode === 'manual' ? 'primary' : 'neutral'" :variant="form.gpu_mode === 'manual' ? 'solid' : 'ghost'" :aria-pressed="form.gpu_mode === 'manual'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</UButton>
         </div>
         <p v-if="form.gpu_mode === 'auto'" class="mb-4 text-xs text-[var(--neutral-700)]">The scheduler picks devices from fresh VRAM state at launch time.</p>
         <div v-else class="mb-5 space-y-4" data-testid="manual-placement-controls">
@@ -343,12 +363,12 @@ onMounted(() => {
         </div>
       </Frame>
 
-      <Frame class="p-5" data-testid="instance-form-overrides">
+      <Frame id="instance-overrides" class="p-5 scroll-mt-4" data-testid="instance-form-overrides">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-base font-semibold">Instance llama.cpp overrides</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Applied over the Model defaults, which are applied over the global defaults.</p></div><AppButton type="button" intent="secondary" size="xs" @click="overridesEditor?.addOption()">Add option</AppButton></div>
         <InstanceOverridesEditor ref="overridesEditor" v-model="form.options" :exclude-keys="detectedCompanionKeys" :show-add-button="false" />
       </Frame>
 
-      <Frame class="p-5" data-testid="instance-form-observability">
+      <Frame id="instance-observability" class="p-5 scroll-mt-4" data-testid="instance-form-observability">
         <div class="mb-4"><h2 class="text-base font-semibold">Observability & privacy</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Preserves per-Instance inference request logging controls.</p></div>
         <UFormField label="Inference request logging" name="request_log_mode" description="Metadata-only is the privacy-preserving default and still records timing, tokens, result, endpoint, streaming state and safe API-key attribution.">
           <select v-model="form.request_log_mode" class="w-full max-w-xl border border-[var(--color-divider)] bg-[var(--color-surface)] px-3 py-2 text-sm">

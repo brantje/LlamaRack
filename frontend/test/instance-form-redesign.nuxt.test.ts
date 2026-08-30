@@ -65,6 +65,13 @@ describe('shared Instance form redesign', () => {
     await flushPromises()
 
     expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(true)
+    const sectionNav = wrapper.get('[data-testid="instance-form-section-nav"]')
+    expect(sectionNav.attributes('aria-label')).toBe('Instance form sections')
+    expect(sectionNav.findAll('a').map(link => link.attributes('href'))).toEqual([
+      '#instance-identity', '#instance-companions', '#instance-lifecycle', '#instance-placement', '#instance-overrides', '#instance-observability'
+    ])
+    expect(wrapper.get('[data-testid="priority-normal"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="placement-mode-auto"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.text()).toContain('Q4_K_M · 0 B · ctx 8,192')
     expect(wrapper.text()).toContain('— · 5.0 GiB · ctx 4,096')
 
@@ -82,6 +89,7 @@ describe('shared Instance form redesign', () => {
 
     await wrapper.get('[data-testid="priority-low"]').trigger('click')
     expect(state.priority).toBe('low')
+    expect(wrapper.get('[data-testid="priority-low"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[data-testid="priority-high"]').trigger('click')
     expect(state.priority).toBe('high')
 
@@ -190,6 +198,7 @@ describe('shared Instance form redesign', () => {
     expect(wrapper.text()).toContain('The scheduler picks devices from fresh VRAM state at launch time.')
     await wrapper.get('[data-testid="placement-mode-manual"]').trigger('click')
     expect(state.gpu_mode).toBe('manual')
+    expect(wrapper.get('[data-testid="placement-mode-manual"]').attributes('aria-pressed')).toBe('true')
   })
 
   it('uses live GPU data and renders the full-content logging warning', async () => {
