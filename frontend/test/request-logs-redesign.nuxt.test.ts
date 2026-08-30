@@ -36,7 +36,7 @@ describe('request logs redesign hierarchy', () => {
     expect(source).toContain("query.set('trace_id', traceID.value)")
     expect(source).toContain("query.request_id = item.request_id")
     expect(source).toContain("query.session_id = selection.sessionID")
-    expect(source).toContain("'/api/v1/observability/requests'")
+    expect(source).toContain('/api/v1/observability/requests')
     expect(source).toContain('liveRequestFingerprint')
     expect(source).toContain('toggleLiveStreaming')
     expect(source).toContain('previousPage')
