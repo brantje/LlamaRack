@@ -6,6 +6,7 @@ on:
       - fix/discover-recovery-responsive
     paths:
       - .github/workflows/validate-discover-recovery-responsive.yml
+      - .github/scripts/patch-discover-recovery-responsive.py
 
 permissions:
   contents: write
