@@ -141,7 +141,10 @@ async function rotate(key: ManagedAPIKey) {
       </div>
 
       <p class="mt-4 text-sm text-[var(--neutral-700)]">Disable keeps a key for later. Revoke invalidates it permanently while retaining safe metadata. Rotation returns replacement plaintext once. Keys authenticate clients, not users.</p>
-      <UAlert v-if="error" class="mt-4" color="error" variant="subtle" :description="error" />
+      <Frame v-if="error" class="mt-4 border-[var(--accent-800)] p-3" data-testid="api-key-error">
+        <p class="text-sm font-semibold text-[var(--accent-900)]">API key operation failed</p>
+        <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+      </Frame>
 
       <section v-if="secret" class="mt-4 border-y border-[var(--color-divider)] py-4" data-testid="fresh-api-key">
         <div class="space-y-3">
