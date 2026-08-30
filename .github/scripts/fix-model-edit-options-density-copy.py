@@ -14,6 +14,11 @@ replacements = [
         "Effective inherited value: <code>{{ effectiveValue(option.key) }}</code>",
         "inherited value label",
     ),
+    (
+        ">Override</AppButton>",
+        ">Override here</AppButton>",
+        "inherited override action label",
+    ),
 ]
 
 for old, new, label in replacements:
