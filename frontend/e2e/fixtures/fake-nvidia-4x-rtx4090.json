@@ -1,0 +1,24 @@
+{
+  "system": {
+    "driver_version": "580.173.02",
+    "cuda_version": "13.0"
+  },
+  "devices": [
+    {
+      "profile": "rtx4090-24gb",
+      "vram_mib": 24576
+    },
+    {
+      "profile": "rtx4090-24gb",
+      "vram_mib": 24576
+    },
+    {
+      "profile": "rtx4090-24gb",
+      "vram_mib": 24576
+    },
+    {
+      "profile": "rtx4090-24gb",
+      "vram_mib": 24576
+    }
+  ]
+}
