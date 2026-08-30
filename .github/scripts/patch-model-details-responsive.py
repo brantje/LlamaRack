@@ -34,7 +34,7 @@ marker = "test('downloads lifecycle and files screenshot', async ({ page }, test
 visual_test = """test('model details expanded metadata screenshot', async ({ page }, testInfo) => {
   await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
   await waitForManagerPanel(page)
-  await expect(page.locator('[data-testid=\"model-details-summary\"]')).toContainText('Qwen3 8B')
+  await expect(page.getByRole('heading', { name: 'Qwen3 8B' })).toBeVisible()
   await page.locator('[data-testid=\"metadata-expand\"]').first().click()
   await expect(page.locator('[data-testid=\"metadata-expanded-items\"]')).toContainText('<|endoftext|>')
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
