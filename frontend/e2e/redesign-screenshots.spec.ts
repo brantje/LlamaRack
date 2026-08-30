@@ -107,6 +107,50 @@ const apiKeys = [
 ]
 
 const user = { id: 1, username: 'admin', enabled: true }
+const setting = <T>(value: T, source = 'database', editable = true) => ({ value, source, editable })
+const generalSettings = {
+  session_lifetime_seconds: setting(86400),
+  login_protection_enabled: setting(true),
+  login_failure_threshold: setting(5),
+  login_lockout_seconds: setting(900),
+  trusted_proxies: setting('127.0.0.1/32'),
+  allowed_origins: setting('http://127.0.0.1:3000'),
+  external_url: setting('http://127.0.0.1:8888'),
+  startup_timeout_seconds: setting(180),
+  idle_unload_seconds: setting(900),
+  always_on_reconcile_seconds: setting(15),
+  observability_retention_days: setting(30),
+  prometheus_auth_token: setting(''),
+  runtime: {
+    data_dir: '/var/lib/llamacpp-manager',
+    models_dir: '/models',
+    database_path: '/var/lib/llamacpp-manager/manager.db',
+    listen_addr: ':8888',
+    llama_server_path: '/usr/local/bin/llama-server'
+  }
+}
+const authSettings = {
+  local_login_enabled: setting(true),
+  oidc_jit_provisioning_enabled: setting(true),
+  oidc_auto_link_enabled: setting(false),
+  external_url: setting('http://127.0.0.1:8888'),
+  frontend_url: setting('http://127.0.0.1:3000')
+}
+const adminAuthProviders = [
+  {
+    id: 'authentik', name: 'Authentik', enabled: true, issuer: 'https://auth.example.test/application/o/llamacpp-manager/',
+    client_id: 'llamacpp-manager', scopes: ['openid', 'profile', 'email'], username_claim: 'preferred_username',
+    secret_configured: true, last_tested_at: nowSeconds - 3600, last_test_succeeded: true
+  }
+]
+const llamaProfile = {
+  path: '/usr/local/bin/llama-server', version: 'b6124', fingerprint: 'fixture-b6124',
+  options: [
+    { key: 'ctx-size', value_hint: 'N', description: 'Size of the prompt context', kind: 'number' },
+    { key: 'parallel', value_hint: 'N', description: 'Number of parallel sequences', kind: 'number' },
+    { key: 'flash-attn', description: 'Enable Flash Attention', kind: 'boolean' }
+  ]
+}
 const corsHeaders = {
   'access-control-allow-origin': 'http://127.0.0.1:3000',
   'access-control-allow-headers': 'authorization,content-type',
@@ -119,26 +163,17 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [{ id: 'authentik', name: 'Authentik' }] }
   if (pathname === '/api/v1/me') return user
   if (pathname === '/api/v1/models' && method === 'GET') return models
+  if (pathname === '/api/v1/models/available') return []
+  if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
   if (pathname === '/api/v1/instances' && method === 'GET') return instances
   if (/^\/api\/v1\/instances\/[^/]+\/runtime$/.test(pathname)) return runtimes[decodeURIComponent(pathname.split('/')[4] || '')] || { state: 'UNLOADED' }
   if (pathname === '/api/v1/auth/ws-ticket') return { error: 'disabled in screenshot fixture' }
-  if (pathname === '/api/v1/llamacpp/profile') return {
-    available: true,
-    profile: {
-      path: '/usr/local/bin/llama-server', version: 'b6124', fingerprint: 'fixture-b6124',
-      options: [
-        { key: 'ctx-size', value_hint: 'N', description: 'Size of the prompt context', kind: 'number' },
-        { key: 'parallel', value_hint: 'N', description: 'Number of parallel sequences', kind: 'number' },
-        { key: 'flash-attn', description: 'Enable Flash Attention', kind: 'boolean' }
-      ]
-    }
-  }
-  if (pathname === '/api/v1/settings/general') return {
-    idle_unload_seconds: { value: 900, source: 'database', editable: true },
-    observability_retention_days: { value: 30, source: 'database', editable: true },
-    external_url: { value: 'http://127.0.0.1:8888', source: 'environment', editable: false },
-    cors_allowed_origins: { value: 'http://127.0.0.1:3000', source: 'database', editable: true }
-  }
+  if (pathname === '/api/v1/llamacpp/profile') return { available: true, profile: llamaProfile }
+  if (pathname === '/api/v1/llamacpp/config') return { profile: llamaProfile, effective: { global: {}, values: {}, sources: {} } }
+  if (pathname === '/api/v1/settings/general') return generalSettings
+  if (pathname === '/api/v1/settings/discover') return { hybrid_recommendations_enabled: setting(true) }
+  if (pathname === '/api/v1/admin/auth/settings') return authSettings
+  if (pathname === '/api/v1/admin/auth/providers') return adminAuthProviders
   if (pathname === '/api/v1/observability/summary') return {
     since: now - 900_000, requests: 1842, successes: 1829, errors: 13, active: 3, queued: 1, active_api_keys: 2,
     prompt_tokens: 1_488_420, generated_tokens: 624_980, total_tokens: 2_113_400,
@@ -146,11 +181,12 @@ function responseFor(pathname: string, method: string): unknown {
     hardware: { hardware, telemetry }
   }
   if (pathname === '/api/v1/observability/requests') return { items: requests, next_cursor: '' }
+  if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [] }
   if (pathname === '/api/v1/hardware' || pathname === '/api/v1/hardware/snapshot') return hardware
   if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys
   if (pathname === '/api/v1/system') return {
     manager: { uptime_seconds: 104_822, runtime: { go_version: 'go1.25.0', os: 'linux', arch: 'amd64' } },
-    network: { effective_scheme: 'http', secure_cookie: false, allowed_origins: { value: 'http://127.0.0.1:3000' }, trusted_proxies: { value: '127.0.0.1/32' }, external_url: { value: 'http://127.0.0.1:8888' } },
+    network: { effective_scheme: 'http', secure_cookie: false, allowed_origins: 'http://127.0.0.1:3000', trusted_proxies: '127.0.0.1/32', external_url: 'http://127.0.0.1:8888' },
     llamacpp: { available: true, path: '/usr/local/bin/llama-server', version: 'b6124', fingerprint: 'fixture-b6124', options: 146 }
   }
   if (/\/users(?:\/|$)/.test(pathname)) return [user, { id: 2, username: 'operator', enabled: true }]
@@ -208,7 +244,7 @@ const pages = [
   ['admin-general', '/admin/general'],
   ['admin-huggingface', '/admin/huggingface'],
   ['admin-llamacpp', '/admin/llamacpp'],
-  ['admin-logs', '/admin/logs'],
+  ['admin-logs', '/admin/system-logs'],
   ['admin-system', '/admin/system'],
   ['admin-users', '/admin/users']
 ] as const
@@ -221,10 +257,11 @@ test.beforeEach(async ({ page }) => {
 for (const [name, path] of pages) {
   test(`${name} screenshot`, async ({ page }, testInfo) => {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 10_000 })
-    await expect(page.locator('#dashboard-panel-manager-main')).not.toBeEmpty()
-    await expect(page.locator('body')).not.toContainText('Manager connection failed')
-    await expect(page.locator('body')).not.toContainText('Welcome back')
+    const panel = page.locator('#dashboard-panel-manager-main')
+    await expect(panel).toBeVisible({ timeout: 15_000 })
+    await expect(panel).not.toBeEmpty()
+    await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
     await page.waitForTimeout(800)
     await page.screenshot({
       path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
