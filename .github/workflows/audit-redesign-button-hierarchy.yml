@@ -23,23 +23,24 @@ jobs:
           from pathlib import Path
           import re
 
-          root = Path('frontend/app')
-          groups = [
-              ('AppButton destructive intent', '*.vue', re.compile(r'intent="destructive"|:intent=[^>]*destructive')),
-              ('Direct UButton error/warning colors', '*.vue', re.compile(r'<UButton[^>]*(?:color="(?:error|warning)"|:color=[^>]*(?:error|warning))')),
-              ('Confirmation legacy colors', '*', re.compile(r"color:\s*'(?:error|warning)'|color:\s*[^,\n]*\?\s*'(?:error|warning)'")),
-          ]
-          for title, glob, pattern in groups:
+          def scan(root: Path, title: str, pattern: re.Pattern[str]):
               print(f'=== {title} ===')
-              for path in sorted(root.rglob(glob)):
+              for path in sorted(root.rglob('*')):
                   if path.suffix not in {'.vue', '.ts'}:
                       continue
                   for number, line in enumerate(path.read_text().splitlines(), 1):
                       if pattern.search(line):
                           print(f'{path}:{number}:{line.strip()}')
+
+          app = Path('frontend/app')
+          tests = Path('frontend/test')
+          scan(app, 'AppButton destructive intent', re.compile(r'intent="destructive"|:intent=[^>]*destructive'))
+          scan(app, 'Direct UButton error/warning colors', re.compile(r'<UButton[^>]*(?:color="(?:error|warning)"|:color=[^>]*(?:error|warning))'))
+          scan(app, 'Confirmation legacy colors', re.compile(r"color:\s*'(?:error|warning)'|color:\s*[^,\n]*\?\s*'(?:error|warning)'"))
+          scan(tests, 'Test references to destructive intent/tone/color', re.compile(r"destructive|color:\s*'(?:error|warning)'|intent=\\?['\"]destructive"))
           print('=== All direct UButton occurrences in confirmation/delete surfaces ===')
           for rel in ['components/AppConfirmationModal.vue', 'components/ModelDeleteModal.vue']:
-              path = root / rel
+              path = app / rel
               for number, line in enumerate(path.read_text().splitlines(), 1):
                   if '<UButton' in line:
                       print(f'{path}:{number}:{line.strip()}')
