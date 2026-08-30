@@ -57,7 +57,7 @@ async function save() {
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 first:border-t-0 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Binary</dt><dd><code class="break-all font-mono text-[12.5px]">{{ profile.path }}</code></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd><code class="font-mono text-[12.5px]">{{ profile.version || 'unknown' }}</code></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Fingerprint</dt><dd><code class="break-all font-mono text-[12.5px]">{{ profile.fingerprint }}</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd>{{ profile.options.length }}</dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd><code class="font-mono text-[12.5px] tabular-nums">{{ profile.options.length }}</code></dd></div>
         </dl>
         <div v-else class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] p-4" data-testid="llamacpp-unavailable-warning">
           <StatusTag variant="pending">Unavailable</StatusTag>
