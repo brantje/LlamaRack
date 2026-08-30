@@ -78,6 +78,17 @@ describe('useManagerApi', () => {
     expect(readManagementToken()).toBe('')
   })
 
+  it('clears both stores when an empty management token is saved', () => {
+    window.sessionStorage.setItem('lcm_management_token', 'stale-session')
+    window.localStorage.setItem('lcm_management_token', 'stale-local')
+
+    storeManagementToken('', true)
+
+    expect(window.sessionStorage.getItem('lcm_management_token')).toBeNull()
+    expect(window.localStorage.getItem('lcm_management_token')).toBeNull()
+    expect(readManagementToken()).toBe('')
+  })
+
   it('propagates request failures', async () => {
     fetchMock.mockRejectedValue(new Error('network down'))
     const { request } = useManagerApi(fetchMock as any)
