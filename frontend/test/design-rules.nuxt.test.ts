@@ -157,4 +157,40 @@ describe('frontend design rules', () => {
     })
     expect(violations).toEqual([])
   })
+
+  it('keeps redesign foundation surfaces on StatusTag and square flat primitives', () => {
+    const appRoot = resolve(process.cwd(), 'app')
+    const noBadgeOrAlert = [
+      'components/HardwarePlacementEditor.vue',
+      'components/LlamaCppOptionsEditor.vue',
+      'components/InstanceRuntimeTelemetry.vue',
+      'components/ModelDeleteModal.vue',
+      'layouts/default.vue',
+      'pages/admin/index.vue',
+      'pages/admin/general.vue',
+      'pages/admin/huggingface.vue',
+      'pages/admin/llamacpp.vue',
+      'pages/admin/system.vue',
+      'pages/admin/users.vue'
+    ]
+
+    for (const path of noBadgeOrAlert) {
+      const source = readFileSync(resolve(appRoot, path), 'utf8')
+      expect(source, `${path} still uses UAlert`).not.toContain('<UAlert')
+      if (path.includes('HardwarePlacementEditor') || path.includes('LlamaCppOptionsEditor') || path.includes('InstanceRuntimeTelemetry')) {
+        expect(source, `${path} still uses UBadge`).not.toContain('<UBadge')
+      }
+    }
+
+    for (const path of ['components/HardwarePlacementEditor.vue', 'components/LlamaCppOptionsEditor.vue']) {
+      expect(readFileSync(resolve(appRoot, path), 'utf8'), `${path} still uses UCard option surfaces`).not.toContain('<UCard')
+    }
+
+    const deleteModal = readFileSync(resolve(appRoot, 'components/ModelDeleteModal.vue'), 'utf8')
+    expect(deleteModal).not.toContain('rounded-lg')
+
+    const layout = readFileSync(resolve(appRoot, 'layouts/default.vue'), 'utf8')
+    expect(layout).not.toContain('rounded-full')
+    expect(layout).toContain('rounded-none')
+  })
 })

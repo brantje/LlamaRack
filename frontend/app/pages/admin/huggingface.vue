@@ -66,8 +66,12 @@ async function remove() {
         <p class="mt-1 text-xs text-[var(--neutral-700)]">The stored token is encrypted at rest and is never returned by the API.</p>
       </div>
 
-      <UAlert v-if="error" class="mt-4" color="error" variant="subtle" :description="error" />
-      <UAlert v-if="saved" class="mt-4" color="success" variant="subtle" description="Hugging Face token saved." />
+      <div v-if="error" class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
+        <StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
+      <div v-if="saved" class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
+        <StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Hugging Face token saved.</p>
+      </div>
 
       <div class="mt-5 flex flex-wrap items-end gap-2">
         <UFormField class="min-w-0 flex-1" :label="tokenStatus.configured ? `Replace token (${tokenStatus.prefix || 'configured'}…)` : 'Access token'">

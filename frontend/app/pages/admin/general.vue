@@ -138,8 +138,8 @@ function editable(key: keyof typeof form) {
   <AdminShell title="General" description="Manager security, network and lifecycle defaults.">
     <template #actions><AppButton intent="primary" :loading="busy" :disabled="!settings || !discoverSettings" @click="save">Save changes</AppButton></template>
 
-    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="saved" class="mb-5" color="success" variant="subtle" description="Manager settings saved." />
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
+    <Frame v-if="saved" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Manager settings saved.</p></div></Frame>
 
     <div v-if="settings && discoverSettings" class="space-y-5">
       <Frame class="p-5" data-testid="admin-general-authentication">

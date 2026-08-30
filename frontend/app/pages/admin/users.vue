@@ -104,8 +104,8 @@ async function submitReset() {
   <AdminShell title="Users" description="Local management accounts with equivalent manager access.">
     <template #actions><AppButton intent="primary" @click="openCreate">Add user</AppButton></template>
 
-    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="success" class="mb-5" color="success" variant="subtle" :description="success" />
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
+    <Frame v-if="success" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ success }}</p></div></Frame>
 
     <Frame data-testid="admin-users-table">
       <UTable :data="users" :columns="columns">

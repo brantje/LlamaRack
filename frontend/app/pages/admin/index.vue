@@ -36,7 +36,9 @@ watch(manager.user, user => {
   <AdminShell title="Dashboard" description="Security, provider and runtime status for the manager.">
     <template #actions><AppButton intent="secondary" @click="load">Refresh</AppButton></template>
 
-    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="mb-5 p-3">
+      <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div>
+    </Frame>
 
     <div v-if="summary" class="grid gap-4 lg:grid-cols-3" data-testid="admin-summary-cards">
       <NuxtLink to="/admin/users" class="block">

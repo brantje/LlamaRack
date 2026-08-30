@@ -55,16 +55,14 @@ defineExpose({ request })
           />
         </div>
 
-        <UAlert
-          v-if="deleteFiles"
-          data-testid="model-delete-warning"
-          color="error"
-          variant="subtle"
-          title="Permanent file deletion"
-          description="The registered Model and its Instance definitions will be deleted. Associated model files will be permanently removed. If the primary GGUF is stored in a nested model folder, that entire folder and all of its contents will also be removed. This cannot be undone."
-        />
+        <Frame v-if="deleteFiles" data-testid="model-delete-warning" class="p-3">
+          <div class="flex items-start gap-2">
+            <StatusTag variant="failed">Permanent file deletion</StatusTag>
+            <p class="text-xs leading-5 text-[var(--neutral-800)]">The registered Model and its Instance definitions will be deleted. Associated model files will be permanently removed. If the primary GGUF is stored in a nested model folder, that entire folder and all of its contents will also be removed. This cannot be undone.</p>
+          </div>
+        </Frame>
 
-        <dl v-if="deleteFiles" class="grid gap-2 rounded-lg border border-error/30 bg-error/5 p-3 text-sm">
+        <dl v-if="deleteFiles" class="grid gap-2 border border-[var(--color-divider)] bg-[var(--neutral-100)] p-3 text-sm">
           <div class="grid gap-1">
             <dt class="font-medium text-highlighted">Backing artifact</dt>
             <dd class="break-all font-mono text-xs text-muted">{{ dialog.path }}</dd>

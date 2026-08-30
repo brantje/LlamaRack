@@ -47,8 +47,8 @@ async function save() {
       <AppButton intent="primary" :loading="saving" :disabled="loading" @click="save">Save defaults</AppButton>
     </template>
 
-    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="saved" class="mb-5" color="success" variant="subtle" description="Global llama.cpp defaults saved." />
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
+    <Frame v-if="saved" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Global llama.cpp defaults saved.</p></div></Frame>
 
     <div class="space-y-5">
       <Frame class="p-5" data-testid="admin-llamacpp-capabilities">
@@ -59,9 +59,9 @@ async function save() {
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Fingerprint</dt><dd><code class="break-all font-mono text-[12.5px]">{{ profile.fingerprint }}</code></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd>{{ profile.options.length }}</dd></div>
         </dl>
-        <div v-else class="mt-4 border border-[var(--color-divider)] p-4" data-testid="llamacpp-unavailable-warning">
-          <p class="text-sm font-semibold">llama-server could not be discovered.</p>
-          <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Management features remain available, but workers cannot start until the binary path is valid.</p>
+        <div v-else class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] p-4" data-testid="llamacpp-unavailable-warning">
+          <StatusTag variant="pending">Unavailable</StatusTag>
+          <div><p class="text-sm font-semibold">llama-server could not be discovered.</p><p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Management features remain available, but workers cannot start until the binary path is valid.</p></div>
         </div>
       </Frame>
 

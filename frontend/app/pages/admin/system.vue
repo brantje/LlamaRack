@@ -41,7 +41,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
   <AdminShell title="System" description="Read-only manager, network and llama.cpp diagnostics.">
     <template #actions><AppButton intent="secondary" @click="load">Refresh</AppButton></template>
 
-    <UAlert v-if="error" class="mb-5" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
 
     <div v-if="info" class="space-y-5">
       <Frame class="p-5" data-testid="admin-system-manager">
@@ -64,8 +64,8 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
       <Frame class="p-5" data-testid="admin-system-llamacpp">
         <h2 class="text-base font-semibold">llama.cpp</h2>
-        <div v-if="!info.llamacpp.available" class="mt-4 border border-[var(--color-divider)] p-4" data-testid="system-llamacpp-warning">
-          <p class="text-sm font-semibold">llama-server is unavailable.</p>
+        <div v-if="!info.llamacpp.available" class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] p-4" data-testid="system-llamacpp-warning">
+          <StatusTag variant="pending">Unavailable</StatusTag><p class="text-sm font-semibold">llama-server is unavailable.</p>
         </div>
         <dl v-else class="mt-4 text-sm">
           <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Path</dt><dd><code class="break-all font-mono text-[12.5px]">{{ info.llamacpp.path }}</code></dd></div>

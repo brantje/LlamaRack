@@ -72,9 +72,9 @@ function gpuDetail(device: RuntimeTelemetry['gpus'][number]) {
       </div>
     </dl>
     <div v-if="telemetry?.gpus?.length" class="flex flex-wrap gap-1.5" data-testid="instance-gpu-details">
-      <UBadge v-for="gpu in telemetry.gpus" :key="gpu.device_id" color="neutral" variant="soft" size="sm">
+      <StatusTag v-for="gpu in telemetry.gpus" :key="gpu.device_id" variant="neutral">
         {{ gpuDetail(gpu) }}
-      </UBadge>
+      </StatusTag>
     </div>
   </div>
 </template>
