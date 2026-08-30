@@ -416,8 +416,16 @@ watch(selectedWindow, (next, previous) => {
           <AppButton to="/playground" intent="primary">Playground</AppButton>
         </div>
         <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 md:justify-end">
-          <AppButton v-if="attention.length" to="#needs-attention" intent="ghost" size="xs" data-testid="dashboard-attention-link">
-            Needs attention · {{ attention.length }}
+          <AppButton
+            v-if="attention.length"
+            to="#needs-attention"
+            intent="secondary"
+            size="xs"
+            icon="i-lucide-triangle-alert"
+            :aria-label="`${attention.length} ${attention.length === 1 ? 'item needs' : 'items need'} attention`"
+            data-testid="dashboard-attention-link"
+          >
+            Needs attention <span class="font-mono tabular-nums">· {{ attention.length }}</span>
           </AppButton>
           <span class="font-mono text-xs text-muted" data-testid="dashboard-last-updated" aria-live="polite">{{ lastUpdatedLabel }}</span>
         </div>

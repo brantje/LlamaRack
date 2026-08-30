@@ -4,6 +4,8 @@ const now = Date.now()
 const nowSeconds = Math.floor(now / 1000)
 const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
+const instancesStatePages = new WeakSet<Page>()
+const dashboardFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -70,6 +72,18 @@ const instances = [
     gpu_devices: ['cuda:1'],
     tensor_split: '1.0',
     request_log_mode: 'full'
+  },
+  {
+    id: 'qwen3-failed', model_id: 'qwen3-8b-q4km', name: 'Qwen3 failed', enabled: true, autoload_enabled: true,
+    always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 900, gpu_mode: 'auto', gpu_devices: ['cuda:0'], tensor_split: '', request_log_mode: 'metadata'
+  },
+  {
+    id: 'qwen3-unloaded', model_id: 'qwen3-8b-q4km', name: 'Qwen3 unloaded', enabled: true, autoload_enabled: true,
+    always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 900, gpu_mode: 'auto', gpu_devices: ['cuda:0'], tensor_split: '', request_log_mode: 'metadata'
+  },
+  {
+    id: 'qwen3-downloading', model_id: 'qwen3-8b-q4km', name: 'Qwen3 downloading', enabled: true, autoload_enabled: true,
+    always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 900, gpu_mode: 'auto', gpu_devices: ['cuda:0'], tensor_split: '', request_log_mode: 'metadata'
   }
 ]
 
@@ -79,6 +93,15 @@ const runtimes: Record<string, Record<string, unknown>> = {
   },
   'gemma-always-on': {
     instance_id: 'gemma-always-on', model_id: 'gemma-3-12b-q5km', state: 'READY', pid: 1428, port: 11002
+  },
+  'qwen3-failed': {
+    instance_id: 'qwen3-failed', model_id: 'qwen3-8b-q4km', state: 'FAILED', last_error: 'CUDA out of memory while allocating the KV cache.'
+  },
+  'qwen3-unloaded': {
+    instance_id: 'qwen3-unloaded', model_id: 'qwen3-8b-q4km', state: 'UNLOADED'
+  },
+  'qwen3-downloading': {
+    instance_id: 'qwen3-downloading', model_id: 'qwen3-8b-q4km', state: 'UNLOADED'
   }
 }
 
@@ -182,7 +205,8 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/models/available') return []
   if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }
-  if (pathname === '/api/v1/instances' && method === 'GET') return instances
+  if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)
+  if (pathname === '/api/v1/imports') return []
   if (/^\/api\/v1\/instances\/[^/]+\/runtime$/.test(pathname)) return runtimes[decodeURIComponent(pathname.split('/')[4] || '')] || { state: 'UNLOADED' }
   if (pathname === '/api/v1/auth/ws-ticket') return { error: 'disabled in screenshot fixture' }
   if (pathname === '/api/v1/llamacpp/profile') return { available: true, profile: llamaProfile }
@@ -272,6 +296,43 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
+      return
+    }
+    if (instancesStatePages.has(page) && url.pathname === '/api/v1/imports') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify([{ id: 'import-qwen3-downloading', job_id: 'dl-qwen3-downloading', model_id: 'qwen3-8b-q4km', instance_id: 'qwen3-downloading', state: 'DOWNLOADING', start_when_ready: true }]) })
+      return
+    }
+    if (dashboardFailurePages.has(page) && /^\/api\/v1\/instances\/[^/]+\/runtime$/.test(url.pathname)) {
+      const instanceID = decodeURIComponent(url.pathname.split('/')[4] || '')
+      const runtime = instanceID === 'qwen3-primary'
+        ? { instance_id: 'qwen3-primary', model_id: 'qwen3-8b-q4km', state: 'FAILED', last_error: 'CUDA out of memory while allocating the KV cache.' }
+        : responseFor(url.pathname, request.method())
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(runtime) })
+      return
+    }
+    if (dashboardFailurePages.has(page) && url.pathname === '/api/v1/observability/summary') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({
+        since: now - 900_000, requests: 12, successes: 10, errors: 2, active: 0, queued: 0, active_api_keys: 2,
+        prompt_tokens: 14_220, generated_tokens: 6_480, total_tokens: 20_700,
+        lifecycle: { autoloads: 3, failed_starts: 1, load_duration_ms_total: 19_200 },
+        hardware: { hardware, telemetry }
+      }) })
+      return
+    }
+    if (dashboardFailurePages.has(page) && url.pathname === '/api/v1/observability/requests') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ items: [{
+        id: 599, request_id: 'req_dashboard_failure', trace_id: 'trace_dashboard_failure', session_id: 'session_dashboard_failure',
+        accepted_at: now - 9_000, started_at: now - 8_900, finished_at: now - 8_100,
+        instance_id: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' },
+        streaming: true, status_code: 503, result: 'error', duration_ms: 800, ttft_ms: 0,
+        prompt_tokens: 128, generated_tokens: 0, total_tokens: 128, tokens_per_second: 0,
+        queue_duration_ms: 22, load_duration_ms: 0, autoloaded: false,
+        error: 'CUDA out of memory while allocating the KV cache.'
+      }], next_cursor: '' }) })
+      return
+    }
     if (playgroundColdPages.has(page) && /^\/api\/v1\/instances\/[^/]+\/runtime$/.test(url.pathname)) {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ instance_id: 'qwen3-primary', model_id: 'qwen3-8b-q4km', state: 'UNLOADED' }) })
       return
@@ -373,6 +434,35 @@ test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await page.getByRole('button', { name: /2 files/ }).first().click()
   await expect(page.locator('[data-testid="download-files"]').first()).toContainText('00002-of-00002.gguf')
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/downloads-lifecycle.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('instances operational card states screenshot', async ({ page }, testInfo) => {
+  instancesStatePages.add(page)
+  await page.goto('/instances', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await page.locator('[data-testid="instances-view-cards"]').click()
+  const cards = page.locator('[data-testid="instances-card-view"]')
+  await expect(cards).toContainText('READY')
+  await expect(cards).toContainText('FAILED')
+  await expect(cards).toContainText('UNLOADED')
+  await expect(cards).toContainText('DOWNLOADING')
+  await expect(cards).toContainText('CUDA out of memory')
+  await expect(cards).toContainText('launch automatically when the verified GGUF download completes')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/instances-card-states.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('dashboard failure recovery screenshot', async ({ page }, testInfo) => {
+  dashboardFailurePages.add(page)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="dashboard-attention-link"]')).toContainText('Needs attention · 2')
+  const attention = page.locator('[data-testid="dashboard-attention"]')
+  await expect(attention).toContainText('qwen3-primary failed to start')
+  await expect(attention).toContainText('qwen3-primary returned 503')
+  await expect(attention.getByRole('link', { name: 'Review' })).toHaveCount(2)
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/dashboard-failure-recovery.png`, fullPage: true, animations: 'disabled' })
 })
 
 

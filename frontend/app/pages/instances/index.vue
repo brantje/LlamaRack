@@ -346,8 +346,8 @@ onBeforeUnmount(() => {
       />
       <div class="flex flex-wrap items-center justify-end gap-2">
         <div class="flex border border-[var(--color-divider)]" data-testid="instances-view-toggle" aria-label="Instance view">
-          <button type="button" class="px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'table' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-table" @click="viewMode = 'table'">Table</button>
-          <button type="button" class="border-l border-[var(--color-divider)] px-3 py-1.5 text-xs font-semibold transition-colors" :class="viewMode === 'cards' ? 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'bg-transparent text-[var(--neutral-800)] hover:text-[var(--color-text)]'" data-testid="instances-view-cards" @click="viewMode = 'cards'">Cards</button>
+          <UButton type="button" :color="viewMode === 'table' ? 'primary' : 'neutral'" :variant="viewMode === 'table' ? 'soft' : 'ghost'" size="sm" data-testid="instances-view-table" :aria-pressed="viewMode === 'table'" @click="viewMode = 'table'">Table</UButton>
+          <UButton type="button" :color="viewMode === 'cards' ? 'primary' : 'neutral'" :variant="viewMode === 'cards' ? 'soft' : 'ghost'" size="sm" class="border-l border-[var(--color-divider)]" data-testid="instances-view-cards" :aria-pressed="viewMode === 'cards'" @click="viewMode = 'cards'">Cards</UButton>
         </div>
         <AppButton intent="secondary" :loading="refreshing" @click="refreshPage">Refresh</AppButton>
         <AppButton to="/instances/new" intent="primary">New Instance</AppButton>
@@ -356,15 +356,17 @@ onBeforeUnmount(() => {
 
     <div class="flex flex-wrap items-center justify-between gap-3 border-y border-[var(--color-divider)] py-3">
       <div class="flex flex-wrap gap-2" data-testid="instances-filters">
-        <button
+        <UButton
           v-for="filter in filterOptions"
           :key="filter.value"
           type="button"
-          class="border px-3 py-1.5 text-xs font-semibold transition-colors"
-          :class="stateFilter === filter.value ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'border-[var(--color-divider)] bg-transparent text-[var(--neutral-800)] hover:border-[var(--neutral-600)] hover:text-[var(--color-text)]'"
+          :color="stateFilter === filter.value ? 'primary' : 'neutral'"
+          :variant="stateFilter === filter.value ? 'soft' : 'ghost'"
+          size="sm"
+          :aria-pressed="stateFilter === filter.value"
           :data-testid="`instances-filter-${filter.value}`"
           @click="stateFilter = filter.value"
-        >{{ filter.label }}</button>
+        >{{ filter.label }}</UButton>
       </div>
       <span class="font-mono text-[10.5px] text-[var(--neutral-700)]" data-testid="instances-telemetry-snapshot">{{ snapshotLabel(telemetrySnapshot) }}</span>
     </div>

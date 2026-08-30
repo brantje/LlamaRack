@@ -53,6 +53,7 @@ const error = ref('')
 const traceID = ref(String(route.query.trace_id || '').trim())
 const routeReady = ref(false)
 const liveStreamingEnabled = ref(true)
+const filtersOpen = ref(true)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
@@ -94,6 +95,10 @@ const columns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'session_id', header: 'Session' }, { accessorKey: 'endpoint', header: 'Endpoint' }
 ]
 const displayRequests = computed(() => requests.value)
+const activeFilterCount = computed(() => [
+  filters.window !== '1h', filters.instance_id, filters.endpoint, filters.api_key_id,
+  filters.result, filters.status_code, filters.streaming, filters.search
+].filter(Boolean).length)
 const sortedSessionRequests = computed(() => {
   const rows = [...sessionRequests.value]
   if (sessionSortMode.value === 'start_time') return rows.sort((a, b) => a.started_at - b.started_at)
@@ -206,7 +211,7 @@ async function loadSessionRequests(sessionID: string) {
     if (generation === sessionLoadGeneration) sessionLoading.value = false
   }
 }
-async function applyFilters() { offset.value = 0; await loadRequests() }
+async function applyFilters() { offset.value = 0; await loadRequests(); filtersOpen.value = false }
 async function previousPage() { offset.value = Math.max(0, offset.value - pageSize); await loadRequests() }
 async function nextPage() { offset.value += pageSize; await loadRequests() }
 async function clearTrace() {
@@ -410,21 +415,34 @@ watch(liveRequestFingerprint, (next, previous) => {
     </Frame>
 
     <Frame class="p-4" data-testid="request-log-filters">
-      <div class="mb-4">
-        <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">FILTERS</p>
-        <p class="mt-1 text-xs text-[var(--neutral-800)]">Filters are applied server-side to retained request history. Sessions are grouped only in the request inspector.</p>
+      <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">FILTERS</p>
+          <p class="mt-1 text-xs text-[var(--neutral-800)]">Filters are applied server-side to retained request history. Sessions are grouped only in the request inspector.</p>
+        </div>
+        <StatusTag variant="neutral" data-testid="request-log-active-filter-count">{{ activeFilterCount }} active</StatusTag>
       </div>
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <UFormField label="Time window"><USelectMenu v-model="filters.window" :items="windowItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Instance"><USelectMenu v-model="filters.instance_id" :items="instanceItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Endpoint"><USelectMenu v-model="filters.endpoint" :items="endpointItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="API key ID"><UInput v-model="filters.api_key_id" class="w-full font-mono" placeholder="Key ID" /></UFormField>
-        <UFormField label="Result"><USelectMenu v-model="filters.result" :items="resultItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="HTTP status"><UInput v-model="filters.status_code" type="number" min="100" max="599" class="w-full font-mono tabular-nums" placeholder="Any status" /></UFormField>
-        <UFormField label="Streaming"><USelectMenu v-model="filters.streaming" :items="streamingItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Search"><UInput v-model="filters.search" class="w-full font-mono" icon="i-lucide-search" placeholder="Request ID, session, trace, model…" @keyup.enter="applyFilters" /></UFormField>
-      </div>
-      <div class="mt-4 flex justify-end"><AppButton data-testid="apply-request-log-filters" intent="primary" :loading="loading" @click="applyFilters">Apply filters</AppButton></div>
+      <UCollapsible v-model:open="filtersOpen" data-testid="request-log-filter-collapsible">
+        <AppButton
+          data-testid="request-log-filters-toggle"
+          intent="secondary"
+          size="sm"
+          :trailing-icon="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+        >{{ filtersOpen ? 'Hide filters' : 'Edit filters' }}</AppButton>
+        <template #content>
+          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <UFormField label="Time window"><USelectMenu v-model="filters.window" :items="windowItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Instance"><USelectMenu v-model="filters.instance_id" :items="instanceItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Endpoint"><USelectMenu v-model="filters.endpoint" :items="endpointItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="API key ID"><UInput v-model="filters.api_key_id" class="w-full font-mono" placeholder="Key ID" /></UFormField>
+            <UFormField label="Result"><USelectMenu v-model="filters.result" :items="resultItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="HTTP status"><UInput v-model="filters.status_code" type="number" min="100" max="599" class="w-full font-mono tabular-nums" placeholder="Any status" /></UFormField>
+            <UFormField label="Streaming"><USelectMenu v-model="filters.streaming" :items="streamingItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Search"><UInput v-model="filters.search" class="w-full font-mono" icon="i-lucide-search" placeholder="Request ID, session, trace, model…" @keyup.enter="applyFilters" /></UFormField>
+          </div>
+          <div class="mt-4 flex justify-end"><AppButton data-testid="apply-request-log-filters" intent="primary" :loading="loading" @click="applyFilters">Apply filters</AppButton></div>
+        </template>
+      </UCollapsible>
     </Frame>
 
     <Frame data-testid="request-log-table">

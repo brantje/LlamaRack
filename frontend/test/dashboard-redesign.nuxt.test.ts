@@ -171,6 +171,7 @@ describe('Dashboard redesign', () => {
     const attentionLink = wrapper.get('[data-testid="dashboard-attention-link"]')
     expect(attentionLink.text()).toContain('Needs attention · 1')
     expect(attentionLink.attributes('href')).toBe('#needs-attention')
+    expect(attentionLink.attributes('aria-label')).toBe('1 item needs attention')
     expect(wrapper.get('[data-testid="dashboard-attention"]').classes()).toEqual(expect.arrayContaining(['order-1', 'xl:order-2']))
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').classes()).toEqual(expect.arrayContaining(['order-2', 'xl:order-1']))
 

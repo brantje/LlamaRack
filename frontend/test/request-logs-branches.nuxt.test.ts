@@ -119,6 +119,10 @@ describe('Request logs branch coverage', () => {
 
     for (const window of ['15m', '24h', '7d']) {
       vm.filters.window = window
+      if (wrapper.get('[data-testid="request-log-filters-toggle"]').text().includes('Edit filters')) {
+        await wrapper.get('[data-testid="request-log-filters-toggle"]').trigger('click')
+        await flushPromises()
+      }
       await wrapper.get('[data-testid="apply-request-log-filters"]').trigger('click')
       await flushPromises()
     }
