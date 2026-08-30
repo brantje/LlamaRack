@@ -79,6 +79,7 @@ async function remove(id: string) {
 
     <Frame v-else class="overflow-hidden p-0">
       <div class="overflow-x-auto" role="region" aria-label="Registered models table. Scroll horizontally to view all columns on small screens." tabindex="0" data-testid="models-table-scroll">
+        <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for path, context and actions.</p>
         <table class="min-w-[920px] w-full border-collapse text-left" data-testid="models-table">
           <thead class="border-b border-[var(--color-divider)] bg-[var(--neutral-100)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
             <tr>

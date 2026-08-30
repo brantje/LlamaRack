@@ -52,7 +52,7 @@ const diagnostics = ref<PlaygroundDiagnostics | null>(null)
 const error = ref('')
 const notice = ref('')
 const inFlight = ref(false)
-const phase = ref<'cold' | 'generating' | 'completed' | ''>('')
+const phase = ref<'cold' | 'generating' | 'completed' | 'failed' | ''>('')
 const mobileParametersOpen = ref(false)
 let controller: AbortController | null = null
 
@@ -76,7 +76,7 @@ const selectedTelemetry = computed<RuntimeTelemetry | undefined>(() => selectedI
 const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
 const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
-const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', '': '' }[phase.value]))
+const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Failed', '': '' }[phase.value]))
 
 const panelItems = [
   { id: 'parameters' as const, label: 'Parameters' },
@@ -373,14 +373,14 @@ async function send() {
         // Keep the raw response visible even when it is not JSON.
       }
     }
-    phase.value = 'completed'
+    phase.value = response.ok ? 'completed' : 'failed'
   } catch (value: any) {
     if (value?.name === 'AbortError') {
       error.value = 'Request stopped.'
       phase.value = ''
     } else {
       error.value = value?.message || 'Inference request failed.'
-      phase.value = ''
+      phase.value = 'failed'
     }
   } finally {
     inFlight.value = false
@@ -460,7 +460,7 @@ onBeforeUnmount(() => controller?.abort())
         <div class="flex flex-wrap items-center gap-2">
           <h1 class="min-w-0 break-all font-mono text-[16px] font-semibold text-[var(--neutral-900)] sm:text-[18px]">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
           <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
-          <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : 'pending'">{{ phaseLabel }}</StatusTag>
+          <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : phase === 'failed' ? 'failed' : 'pending'">{{ phaseLabel }}</StatusTag>
         </div>
         <div class="flex flex-wrap gap-1">
           <AppButton intent="ghost" size="sm" @click="copyText(curlExample, 'curl')">Copy as curl</AppButton>

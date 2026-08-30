@@ -53,6 +53,7 @@ describe('Models registry redesign', () => {
     expect(scrollRegion.attributes('role')).toBe('region')
     expect(scrollRegion.attributes('tabindex')).toBe('0')
     expect(scrollRegion.attributes('aria-label')).toContain('Scroll horizontally')
+    expect(scrollRegion.text()).toContain('Scroll horizontally for path, context and actions.')
 
     const nameLink = table.findAll('a').find(link => link.text().includes('Coder 7B'))!
     expect(nameLink.attributes('href')).toBe('/models/coder/details')

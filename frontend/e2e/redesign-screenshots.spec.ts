@@ -2,6 +2,8 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 
 const now = Date.now()
 const nowSeconds = Math.floor(now / 1000)
+const playgroundHoldRelease = new WeakMap<Page, () => void>()
+const playgroundColdPages = new WeakSet<Page>()
 
 const models = [
   {
@@ -103,7 +105,8 @@ const requests = [
 
 const apiKeys = [
   { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12', enabled: true, created_at: nowSeconds - 86400 * 21, last_used_at: nowSeconds - 18 },
-  { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 }
+  { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 },
+  { id: 'key-revoked', name: 'Retired integration', prefix: 'lcm_sk_ef56', enabled: false, revoked_at: nowSeconds - 7200, created_at: nowSeconds - 86400 * 45, last_used_at: nowSeconds - 10800 }
 ]
 
 const user = { id: 1, username: 'admin', enabled: true, created_at: nowSeconds - 86400 * 120, last_login_at: nowSeconds - 300 }
@@ -196,9 +199,11 @@ function responseFor(pathname: string, method: string): unknown {
     hardware: { hardware, telemetry }
   }
   if (pathname === '/api/v1/observability/requests') return { items: requests, next_cursor: '' }
+  if (pathname === '/api/v1/observability/playground/req_playground_fixture') return { request: { request_id: 'req_playground_fixture', instance_id: 'qwen3-primary', status_code: 200, result: 'success', duration_ms: 1680, ttft_ms: 182, prompt_tokens: 42, generated_tokens: 96, total_tokens: 138, tokens_per_second: 57.1, load_duration_ms: 0, autoloaded: false }, state_trace: ['READY', 'GENERATING', 'READY'], evictions_triggered: [] }
   if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [{ timestamp: now - 120_000, value: 18 }, { timestamp: now - 60_000, value: 31 }, { timestamp: now, value: 24 }] }
   if (pathname === '/api/v1/hardware' || pathname === '/api/v1/hardware/snapshot') return hardware
   if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys
+  if (pathname === '/api/v1/api-keys' && method === 'POST') return { key: { id: 'key-visual', name: 'Visual QA', prefix: 'lcm_sk_vis', enabled: true, created_at: nowSeconds, last_used_at: 0 }, secret: 'lcm_sk_visual_fixture_secret' }
   if (pathname === '/api/v1/system') return {
     manager: { uptime_seconds: 104_822, runtime: { go_version: 'go1.25.0', os: 'linux', arch: 'amd64' } },
     network: { effective_scheme: 'http', secure_cookie: false, allowed_origins: 'http://127.0.0.1:3000', trusted_proxies: '127.0.0.1/32', external_url: 'http://127.0.0.1:8888' },
@@ -234,12 +239,38 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (playgroundColdPages.has(page) && /^\/api\/v1\/instances\/[^/]+\/runtime$/.test(url.pathname)) {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ instance_id: 'qwen3-primary', model_id: 'qwen3-8b-q4km', state: 'UNLOADED' }) })
+      return
+    }
+    if (url.pathname === '/api/v1/playground/chat/completions' && request.method() === 'POST') {
+      const payload = request.postData() || ''
+      if (payload.includes('UX_ERROR')) {
+        await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify({ error: { message: 'Representative gateway failure for visual QA.' } }) })
+        return
+      }
+      if (payload.includes('UX_HOLD')) await new Promise<void>(resolve => playgroundHoldRelease.set(page, resolve))
+      await route.fulfill({
+        status: 200,
+        headers: { ...corsHeaders, 'access-control-expose-headers': 'x-llamacpp-manager-request-id', 'content-type': 'text/event-stream', 'x-llamacpp-manager-request-id': 'req_playground_fixture' },
+        body: ['data: {"choices":[{"delta":{"content":"KV cache reuse "}}]}', 'data: {"choices":[{"delta":{"content":"avoids repeated prompt evaluation."}}]}', 'data: [DONE]'].join('\n\n') + '\n\n'
+      })
+      return
+    }
     if (url.pathname === '/api/v1/auth/ws-ticket') {
       await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify(responseFor(url.pathname, request.method())) })
       return
     }
     await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(responseFor(url.pathname, request.method())) })
   })
+}
+
+async function waitForManagerPanel(page: Page) {
+  const panel = page.locator('#dashboard-panel-manager-main')
+  await expect(panel).toBeVisible({ timeout: 15_000 })
+  await expect(panel).not.toBeEmpty()
+  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
 }
 
 const pages = [
@@ -280,11 +311,7 @@ for (const [name, path] of pages) {
   test(`${name} screenshot`, async ({ page }, testInfo) => {
     if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
     await page.goto(path, { waitUntil: 'domcontentloaded' })
-    const panel = page.locator('#dashboard-panel-manager-main')
-    await expect(panel).toBeVisible({ timeout: 15_000 })
-    await expect(panel).not.toBeEmpty()
-    await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()
-    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
+    await waitForManagerPanel(page)
     if (name === 'profile') {
       await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
       await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
@@ -298,3 +325,66 @@ for (const [name, path] of pages) {
     })
   })
 }
+
+
+test('playground generating and completed screenshots', async ({ page }, testInfo) => {
+  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await page.getByLabel('Playground message').fill('UX_HOLD Explain KV cache reuse.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+  await expect(page.getByText('Generating', { exact: true })).toBeVisible()
+  await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-generating.png`, fullPage: true, animations: 'disabled' })
+
+  playgroundHoldRelease.get(page)?.()
+  await expect(page.getByText('Completed', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-testid="playground-diagnostics"]')).toContainText('57.10 tok/s')
+  await expect(page.locator('[data-testid="playground-thread"]')).toContainText('avoids repeated prompt evaluation.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-completed.png`, fullPage: true, animations: 'disabled' })
+
+  await page.getByRole('button', { name: 'Request', exact: true }).click()
+  await expect(page.getByLabel('Raw request JSON')).toHaveValue(/UX_HOLD Explain KV cache reuse\./)
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-request.png`, fullPage: true, animations: 'disabled' })
+})
+
+test('playground cold-start screenshot', async ({ page }, testInfo) => {
+  playgroundColdPages.add(page)
+  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.getByText('UNLOADED', { exact: true }).first()).toBeVisible()
+  await page.getByLabel('Playground message').fill('UX_HOLD Trigger autoload.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+  await expect(page.getByText('Cold start — autoload in progress', { exact: true })).toBeVisible()
+  await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-cold-start.png`, fullPage: true, animations: 'disabled' })
+  playgroundHoldRelease.get(page)?.()
+  await expect(page.getByText('Completed', { exact: true })).toBeVisible()
+})
+
+test('playground error screenshot', async ({ page }, testInfo) => {
+  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await page.getByLabel('Playground message').fill('UX_ERROR Trigger representative failure.')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('[data-testid="playground-error"]')).toContainText('Representative gateway failure for visual QA.')
+  await expect(page.getByText('Failed', { exact: true })).toBeVisible()
+  await expect(page.getByText('Completed', { exact: true })).toBeHidden()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-error.png`, fullPage: true, animations: 'disabled' })
+})
+
+test('api key secret and revoke confirmation screenshots', async ({ page }, testInfo) => {
+  await page.goto('/api', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Retired integration')
+  await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Revoked')
+  await page.locator('[data-testid="key-name"]').fill('Visual QA')
+  await page.locator('[data-testid="create-key"]').click()
+  await expect(page.locator('[data-testid="fresh-api-key"]')).toContainText('lcm_sk_visual_fixture_secret')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-fresh-secret.png`, fullPage: true, animations: 'disabled' })
+
+  await page.getByRole('button', { name: 'Revoke', exact: true }).first().click()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Revoke key')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-revoke-confirmation.png`, fullPage: true, animations: 'disabled' })
+})
