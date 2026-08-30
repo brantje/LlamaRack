@@ -723,13 +723,11 @@ Do not include unrelated dependency upgrades in a feature or bug-fix PR.
 
 Follow normal Go conventions.
 
-Use:
+Format changed Go files in place before committing:
 
 ```bash
-gofmt
+gofmt -w <changed-go-files>
 ```
-
-for Go source.
 
 Prefer names and structures consistent with surrounding code.
 
