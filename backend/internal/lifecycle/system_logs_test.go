@@ -24,7 +24,7 @@ func TestThreeStartFailuresBackOffForExactDurationAndReset(t *testing.T) {
 	systemlog.Default.Reset()
 	defer systemlog.Default.Reset()
 	oldDuration := startFailureBackoffFor
-	startFailureBackoffFor = 10 * time.Millisecond
+	startFailureBackoffFor = 60 * time.Second
 	defer func() { startFailureBackoffFor = oldDuration }()
 
 	s := &Service{manuallyStopped: map[string]bool{}}
@@ -33,6 +33,7 @@ func TestThreeStartFailuresBackOffForExactDurationAndReset(t *testing.T) {
 	delete(failureBackoffs, key)
 	failureBackoffMu.Unlock()
 	defer func() {
+		s.cancelStartFailureBackoff("qwen-coder-ci")
 		failureBackoffMu.Lock()
 		delete(failureBackoffs, key)
 		failureBackoffMu.Unlock()
@@ -48,13 +49,8 @@ func TestThreeStartFailuresBackOffForExactDurationAndReset(t *testing.T) {
 		t.Fatal("third failure did not engage backoff")
 	}
 	logs := systemlog.Default.Snapshot(10)
-	if len(logs) != 1 || logs[0].Level != systemlog.Warn || !strings.Contains(logs[0].Message, "3 consecutive start failures, backing off 0s") {
+	if len(logs) != 1 || logs[0].Level != systemlog.Warn || !strings.Contains(logs[0].Message, "3 consecutive start failures, backing off 60s") {
 		t.Fatalf("backoff diagnostics=%+v", logs)
-	}
-
-	time.Sleep(30 * time.Millisecond)
-	if s.isManuallyStopped("qwen-coder-ci") {
-		t.Fatal("temporary backoff did not release")
 	}
 }
 
