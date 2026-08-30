@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
+import { prepareFullPageScreenshot } from './full-page-screenshot'
 
 const backendURL = 'http://127.0.0.1:8888'
 const username = 'ux-review-admin'
@@ -55,6 +56,7 @@ test('dashboard shows real fake-nvidia pressure state', async ({ page, request }
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
   await expect(page.getByText(/RTX 4090/i).first()).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(1500)
+  await prepareFullPageScreenshot(page)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/dashboard-pressure.png`,
     fullPage: true,
@@ -67,6 +69,7 @@ test('system diagnostics render against fake-nvidia manager', async ({ page }, t
   await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: 'System' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'llama.cpp', exact: true })).toBeVisible()
+  await prepareFullPageScreenshot(page)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/admin-system.png`,
     fullPage: true,
