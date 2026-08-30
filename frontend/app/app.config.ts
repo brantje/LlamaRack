@@ -11,7 +11,12 @@ export default defineAppConfig({
     },
     button: {
       slots: {
-        base: 'cursor-pointer font-semibold rounded-none'
+        base: 'cursor-pointer font-semibold rounded-none max-lg:min-h-11 max-lg:min-w-11'
+      }
+    },
+    select: {
+      slots: {
+        base: 'rounded-none max-lg:min-h-11'
       }
     },
     badge: {
@@ -27,7 +32,7 @@ export default defineAppConfig({
     pageHeader: {
       slots: {
         root: 'border-0 py-0',
-        headline: 'text-[10px] uppercase tracking-[.1em] text-muted',
+        headline: 'text-xs uppercase tracking-[.1em] text-muted',
         title: 'font-[var(--font-heading)] text-[30px] font-semibold tracking-[-.015em] text-highlighted',
         description: 'text-[15px] leading-[1.55] text-muted'
       }
