@@ -226,9 +226,11 @@ onMounted(() => {
       <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
     </div>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="instance-form-error">
-      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to save Instance</p>
-      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+    <Frame v-if="error" class="p-3" data-testid="instance-form-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Unable to save Instance</StatusTag>
+        <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
+      </div>
     </Frame>
     <div v-if="loading" class="space-y-3"><USkeleton class="h-12 w-full" /><USkeleton class="h-56 w-full" /></div>
 
