@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Instance, Model, RuntimeTelemetry } from '~/composables/useManager'
+import { readManagementToken } from '~/composables/useManagerApi'
 
 type Role = 'system' | 'user' | 'assistant'
 type MessageStats = { prompt: number; completion: number; rate?: number; ttft?: number }
@@ -40,7 +41,6 @@ type Parameters = {
 const manager = useManager()
 const route = useRoute()
 const selectedInstanceID = ref('')
-const apiKey = ref('')
 const activePanel = ref<'parameters' | 'request' | 'response'>('parameters')
 const composer = ref('')
 const conversation = ref<ThreadMessage[]>([])
@@ -295,12 +295,13 @@ async function send() {
   if (inFlight.value) return
   error.value = ''
   notice.value = ''
-  if (!apiKey.value.trim()) {
-    error.value = 'Enter an inference API key. It is sent only to the public /v1 endpoint and kept in this tab.'
-    return
-  }
   if (!selectedInstance.value) {
     error.value = 'Select an Instance first.'
+    return
+  }
+  const managementToken = readManagementToken()
+  if (!managementToken) {
+    error.value = 'Management session is unavailable. Sign in again.'
     return
   }
 
@@ -333,10 +334,10 @@ async function send() {
   let requestID = ''
 
   try {
-    const response = await fetch(`${manager.apiBase.value}/v1/chat/completions`, {
+    const response = await fetch(`${manager.apiBase.value}/api/v1/playground/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey.value.trim()}`,
+        Authorization: `Bearer ${managementToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(body),
@@ -438,16 +439,6 @@ watch(runtimeState, state => {
 
 watch([selectedInstanceID, () => parameters.temperature, () => parameters.topP, () => parameters.maxTokens, () => parameters.seed, () => parameters.topK, () => parameters.minP, () => parameters.repeatPenalty, () => parameters.stop, () => parameters.stream, () => parameters.systemPrompt, conversation], syncRawRequest, { deep: true, immediate: true })
 
-watch(apiKey, value => {
-  if (!import.meta.client) return
-  if (value) sessionStorage.setItem('lcm-playground-api-key', value)
-  else sessionStorage.removeItem('lcm-playground-api-key')
-})
-
-onMounted(() => {
-  apiKey.value = sessionStorage.getItem('lcm-playground-api-key') || ''
-})
-
 onBeforeUnmount(() => controller?.abort())
 </script>
 
@@ -506,7 +497,7 @@ onBeforeUnmount(() => controller?.abort())
           <div v-if="!parameters.systemPrompt.trim() && !conversation.length" class="grid min-h-56 place-items-center text-center">
             <div>
               <p class="text-sm font-semibold">Exercise an Instance through the real gateway.</p>
-              <p class="mt-1 max-w-lg text-xs leading-5 text-[var(--neutral-700)]">Requests here use the public OpenAI-compatible endpoint and are recorded by the same lifecycle and observability path as external clients.</p>
+              <p class="mt-1 max-w-lg text-xs leading-5 text-[var(--neutral-700)]">Requests here use the signed-in management session to re-enter the public OpenAI-compatible gateway, preserving the same lifecycle and observability path as external clients.</p>
             </div>
           </div>
         </div>
@@ -546,12 +537,6 @@ onBeforeUnmount(() => controller?.abort())
                 <span class="mt-0.5 block text-[10px] opacity-75">{{ manager.instanceState(instance) }} · {{ manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id }}</span>
               </button>
             </div>
-          </div>
-
-          <div class="border-b border-[var(--color-divider)] p-4">
-            <label class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]" for="playground-api-key">API key — public /v1 credential</label>
-            <UInput id="playground-api-key" v-model="apiKey" type="password" class="mt-2 font-mono" placeholder="lcm_…" autocomplete="off" />
-            <p class="mt-2 text-[10px] leading-4 text-[var(--neutral-700)]">Kept in session storage for this tab. The management token is never substituted for an inference key.</p>
           </div>
 
           <div class="grid grid-cols-3 border-b border-[var(--color-divider)]">
@@ -634,6 +619,6 @@ onBeforeUnmount(() => controller?.abort())
       </aside>
     </div>
 
-    <p class="border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Requests go through the public inference endpoint, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
+    <p class="border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
   </div>
 </template>
