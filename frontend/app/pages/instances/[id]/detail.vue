@@ -37,6 +37,7 @@ const manager = useManager()
 const route = useRoute()
 const instanceID = computed(() => String(route.params.id || ''))
 const loading = ref(true)
+const loadError = ref('')
 const historyLoading = ref(false)
 const historyError = ref('')
 const pending = ref('')
@@ -354,17 +355,19 @@ async function removeInstance() {
   }
 }
 async function loadPage() {
+  loading.value = true
+  loadError.value = ''
   try {
     if (!instance.value) await manager.refresh()
     if (!instance.value) {
-      error.value = `Instance “${instanceID.value}” was not found.`
+      loadError.value = `Instance “${instanceID.value}” was not found.`
       return
     }
     try { settings.value = await manager.request<GeneralSettings>('/api/v1/settings/general') } catch { settings.value = null }
     if (selectedWindow.value > retentionSeconds.value) selectedWindow.value = [...rangeOptions].reverse().find(option => option.value <= retentionSeconds.value)?.value ?? 900
     await Promise.all([loadHistory(), loadCompanions()])
   } catch (value: any) {
-    error.value = value?.data?.error || value?.message || 'Unable to load Instance details'
+    loadError.value = value?.data?.error || value?.message || 'Unable to load Instance details'
   } finally {
     loading.value = false
   }
@@ -388,12 +391,12 @@ defineExpose({ setSelectedWindow })
       <div class="min-w-0 flex-1">
         <p class="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--accent-700)]">INSTANCE DETAIL</p>
         <div class="mt-2 flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance?.name || instanceID }}</h1>
-          <StatusTag v-if="instance" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
+          <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance && !loadError ? instance.name : instanceID }}</h1>
+          <StatusTag v-if="instance && !loadError" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
         </div>
         <p class="mt-2 max-w-3xl text-sm text-[var(--neutral-800)]">Live runtime resources and llama.cpp performance for this Instance.</p>
       </div>
-      <div v-if="instance" class="flex flex-wrap items-center justify-end gap-2">
+      <div v-if="instance && !loadError" class="flex flex-wrap items-center justify-end gap-2">
         <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
         <AppButton :to="`/instances/${encodeURIComponent(instance.id)}/edit`" intent="secondary">Edit</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
@@ -403,15 +406,28 @@ defineExpose({ setSelectedWindow })
       </div>
     </div>
 
-    <Frame v-if="error" class="p-3" data-testid="instance-detail-error">
-      <div class="flex flex-wrap items-start gap-2">
-        <StatusTag variant="failed">Instance detail unavailable</StatusTag>
-        <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
-      </div>
-    </Frame>
     <div v-if="loading" class="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><USkeleton v-for="n in 4" :key="n" class="h-36 w-full" /></div>
 
+    <Frame v-else-if="loadError" class="p-4" data-testid="instance-detail-error">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <StatusTag variant="failed">Instance detail unavailable</StatusTag>
+          <p class="mt-2 text-xs leading-5 text-muted">{{ loadError }}</p>
+        </div>
+        <div class="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+          <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
+          <AppButton intent="primary" :loading="loading" @click="loadPage">Retry</AppButton>
+        </div>
+      </div>
+    </Frame>
+
     <template v-else-if="instance">
+      <Frame v-if="error" class="mb-4 p-3" data-testid="instance-detail-action-error">
+        <div class="flex flex-wrap items-start gap-2">
+          <StatusTag variant="failed">Instance action failed</StatusTag>
+          <p class="min-w-0 flex-1 text-xs text-muted">{{ error }}</p>
+        </div>
+      </Frame>
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="instance-detail-summary">
         <Frame class="p-4">
           <p class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Status</p>

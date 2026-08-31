@@ -9,6 +9,7 @@ const dashboardFailurePages = new WeakSet<Page>()
 const modelInspectFailurePages = new WeakSet<Page>()
 const modelDetailsFailurePages = new WeakSet<Page>()
 const modelDetailsPageTwoPages = new WeakSet<Page>()
+const instanceDetailMissingPages = new WeakSet<Page>()
 
 const models = [
   {
@@ -332,6 +333,10 @@ async function installApiFixture(page: Page) {
       await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative GGUF metadata inspection failure for visual QA.' }) })
       return
     }
+    if (instanceDetailMissingPages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances.filter(item => item.id !== 'qwen3-primary').slice(0, 1)) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -490,6 +495,24 @@ for (const [name, path] of pages) {
 }
 
 
+
+test('instance detail fatal load and retry screenshot', async ({ page }, testInfo) => {
+  instanceDetailMissingPages.add(page)
+  await page.goto('/instances/qwen3-primary/detail', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const failure = page.locator('[data-testid="instance-detail-error"]')
+  await expect(failure).toContainText('Instance detail unavailable')
+  await expect(failure).toContainText('qwen3-primary')
+  await expect(page.getByText('READY', { exact: true })).toHaveCount(0)
+  await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/instance-detail-fatal.png`, fullPage: true, animations: 'disabled' })
+
+  instanceDetailMissingPages.delete(page)
+  await failure.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByRole('heading', { name: 'Qwen3 primary' })).toBeVisible()
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-testid="instance-detail-error"]')).toBeHidden()
+})
 
 test('model details filtered no-match screenshot', async ({ page }, testInfo) => {
   await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
