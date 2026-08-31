@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test'
 
 const now = Date.now()
 const nowSeconds = Math.floor(now / 1000)
@@ -10,6 +10,10 @@ const discoverDetailFailurePages = new WeakSet<Page>()
 const modelInspectFailurePages = new WeakSet<Page>()
 const modelDetailsFailurePages = new WeakSet<Page>()
 const modelDetailsPageTwoPages = new WeakSet<Page>()
+const bootstrapRequiredPages = new WeakSet<Page>()
+const backendUnavailablePages = new WeakSet<Page>()
+const loginErrorPages = new WeakSet<Page>()
+const emptyModelsPages = new WeakSet<Page>()
 
 const models = [
   {
@@ -147,6 +151,11 @@ const systemLogs = [
   { timestamp: new Date(now - 60000).toISOString(), level: 'WARN', source: 'gateway', message: 'request queue depth reached 4 while qwen3-primary was loading' },
   { timestamp: new Date(now - 30000).toISOString(), level: 'ERROR', source: 'qwen3-primary', message: 'worker exited unexpectedly after llama-server reported a representative long diagnostic message that verifies wrapping remains readable on narrow viewports' },
   { timestamp: new Date(now - 10000).toISOString(), level: 'DEBUG', source: 'telemetry', message: 'mapped host PID 1421 to managed Instance qwen3-primary' }
+]
+const instanceLogs = [
+  { source: 'manager', timestamp: new Date(now - 8000).toISOString(), text: 'starting llama-server for qwen3-primary on port 11001' },
+  { source: 'stdout', timestamp: new Date(now - 5000).toISOString(), text: 'llama_model_load: loaded meta data with 36 key-value pairs and 291 tensors from Qwen3-8B-Q4_K_M.gguf' },
+  { source: 'stderr', timestamp: new Date(now - 2000).toISOString(), text: 'slot get_available: id 0 | task 12 | selected slot for continuous batching' }
 ]
 const setting = <T>(value: T, source = 'database', editable = true) => ({ value, source, editable })
 const generalSettings = {
@@ -337,6 +346,26 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (backendUnavailablePages.has(page) && (url.pathname === '/api/v1/auth/bootstrap' || url.pathname === '/api/v1/auth/providers')) {
+      await route.abort('failed')
+      return
+    }
+    if (bootstrapRequiredPages.has(page) && url.pathname === '/api/v1/auth/bootstrap' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ required: true }) })
+      return
+    }
+    if (loginErrorPages.has(page) && url.pathname === '/api/v1/auth/login' && request.method() === 'POST') {
+      await route.fulfill({ status: 401, headers: corsHeaders, body: JSON.stringify({ error: 'Invalid username or password.' }) })
+      return
+    }
+    if (emptyModelsPages.has(page) && url.pathname === '/api/v1/models' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify([]) })
+      return
+    }
+    if (url.pathname === '/api/v1/logs' && url.searchParams.get('instance_id')) {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ instance_id: url.searchParams.get('instance_id'), entries: instanceLogs }) })
+      return
+    }
     if (modelInspectFailurePages.has(page) && url.pathname === '/api/v1/models/inspect' && request.method() === 'POST') {
       await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative GGUF metadata inspection failure for visual QA.' }) })
       return
@@ -440,157 +469,190 @@ async function waitForManagerPanel(page: Page) {
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
 }
 
-const pages = [
-  ['dashboard', '/'],
-  ['instances', '/instances'],
-  ['instance-new', '/instances/new'],
-  ['instance-detail', '/instances/qwen3-primary/detail'],
-  ['instance-edit', '/instances/qwen3-primary/edit'],
-  ['models', '/models'],
-  ['model-new', '/models/new'],
-  ['model-details', '/models/qwen3-8b-q4km/details'],
-  ['model-edit', '/models/qwen3-8b-q4km/edit'],
-  ['models-discover', '/models/discover'],
-  ['model-repository', '/models/discover/Qwen/Qwen3-8B-GGUF'],
-  ['downloads', '/downloads'],
-  ['playground', '/playground'],
-  ['request-logs', '/logs'],
-  ['request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture'],
-  ['request-logs-trace', '/logs?trace_id=trace_fixture'],
-  ['api-keys', '/api'],
-  ['profile-account', '/profile/account'],
-  ['profile-authentication', '/profile/authentication'],
-  ['profile-sessions', '/profile/sessions'],
-  ['admin-overview', '/admin'],
-  ['admin-authentication', '/admin/authentication'],
-  ['admin-general', '/admin/general'],
-  ['admin-huggingface', '/admin/huggingface'],
-  ['admin-llamacpp', '/admin/llamacpp'],
-  ['admin-logs', '/admin/system-logs'],
-  ['admin-system', '/admin/system'],
-  ['admin-users', '/admin/users']
-] as const
+const shotIndexByProject = new Map<string, number>()
+
+async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {
+  const next = (shotIndexByProject.get(testInfo.project.name) || 0) + 1
+  shotIndexByProject.set(testInfo.project.name, next)
+  const filename = `${String(next).padStart(2, '0')}-${name}`
+  const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
+  expect(documentOverflow, `${filename} document should not overflow horizontally`).toBeLessThanOrEqual(1)
+  if (name !== 'model-new') await page.waitForTimeout(800)
+  await page.screenshot({
+    path: `artifacts/ux-screenshots/${testInfo.project.name}/${filename}.png`,
+    fullPage: true,
+    animations: 'disabled'
+  })
+}
+
+async function openAuthenticated(page: Page, path: string) {
+  await page.goto(path, { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+}
+
+async function withoutSession(page: Page) {
+  await page.addInitScript(() => { window.sessionStorage.removeItem('lcm_management_token') })
+}
+
+function authenticatedShot(name: string, path: string, after?: (page: Page) => Promise<void>) {
+  test(`${name} screenshot`, async ({ page }, testInfo) => {
+    if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
+    await openAuthenticated(page, path)
+    await after?.(page)
+    await captureScreenshot(page, testInfo, name)
+  })
+}
 
 test.beforeEach(async ({ page }) => {
   await installApiFixture(page)
   await page.emulateMedia({ reducedMotion: 'reduce' })
 })
 
-for (const [name, path] of pages) {
-  test(`${name} screenshot`, async ({ page }, testInfo) => {
-    if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
-    await page.goto(path, { waitUntil: 'domcontentloaded' })
-    await waitForManagerPanel(page)
-    if (name === 'model-new') {
-      const option = page.locator('[data-testid="gguf-option"]').first()
-      await expect(option).toBeVisible()
-      await option.click()
-      await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3 Vision 8B')
-      await expect(page.locator('[data-testid^="companion-candidate-"]')).toHaveCount(4)
-    }
-    if (name === 'profile-account') {
-      await expect(page.locator('[data-testid="profile-account"]')).toBeVisible()
-      await expect(page.locator('[data-testid="profile-password"]')).toBeVisible()
-    }
-    if (name === 'profile-authentication') {
-      await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
-    }
-    if (name === 'profile-sessions') {
-      await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
-    }
-    if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
-    const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
-    expect(documentOverflow, `${name} document should not overflow horizontally`).toBeLessThanOrEqual(1)
-    if (name !== 'model-new') await page.waitForTimeout(800)
-    await page.screenshot({
-      path: `artifacts/ux-screenshots/${testInfo.project.name}/${name}.png`,
-      fullPage: true,
-      animations: 'disabled'
-    })
-  })
-}
+test('create-account screenshot', async ({ page }, testInfo) => {
+  bootstrapRequiredPages.add(page)
+  await withoutSession(page)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
+  await expect(page.getByText('Create the first local management account.')).toBeVisible()
+  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await captureScreenshot(page, testInfo, 'create-account')
+})
 
+test('login screenshot', async ({ page }, testInfo) => {
+  await withoutSession(page)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue with Authentik' })).toBeVisible()
+  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await captureScreenshot(page, testInfo, 'login')
+})
 
+test('login-error screenshot', async ({ page }, testInfo) => {
+  loginErrorPages.add(page)
+  await withoutSession(page)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible({ timeout: 15_000 })
+  await page.locator('input[autocomplete="username"]').fill('admin')
+  await page.locator('input[type="password"]').fill('wrong-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByText('Invalid username or password.')).toBeVisible()
+  await captureScreenshot(page, testInfo, 'login-error')
+})
+
+test('backend-unavailable screenshot', async ({ page }, testInfo) => {
+  backendUnavailablePages.add(page)
+  await withoutSession(page)
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await captureScreenshot(page, testInfo, 'backend-unavailable')
+})
+
+authenticatedShot('dashboard', '/')
+
+test('dashboard failure recovery screenshot', async ({ page }, testInfo) => {
+  dashboardFailurePages.add(page)
+  await openAuthenticated(page, '/')
+  await expect(page.locator('[data-testid="dashboard-attention-link"]')).toContainText('Needs attention · 2')
+  const attention = page.locator('[data-testid="dashboard-attention"]')
+  await expect(attention).toContainText('qwen3-primary failed to start')
+  await expect(attention).toContainText('qwen3-primary returned 503')
+  await expect(attention.getByRole('link', { name: 'Review' })).toHaveCount(2)
+  await captureScreenshot(page, testInfo, 'dashboard-failure-recovery')
+})
+
+authenticatedShot('models', '/models')
+
+test('models empty screenshot', async ({ page }, testInfo) => {
+  emptyModelsPages.add(page)
+  await openAuthenticated(page, '/models')
+  await expect(page.locator('[data-testid="models-empty-state"]')).toContainText('No models registered')
+  await captureScreenshot(page, testInfo, 'models-empty')
+})
+
+test('model delete confirmation screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/models')
+  await page.getByRole('button', { name: 'Delete', exact: true }).first().click()
+  await expect(page.getByRole('dialog', { name: 'Delete Model' })).toBeVisible()
+  await page.locator('[data-testid="model-delete-files"]').click()
+  await expect(page.locator('[data-testid="model-delete-warning"]')).toBeVisible()
+  await captureScreenshot(page, testInfo, 'model-delete-confirmation')
+})
+
+authenticatedShot('model-new', '/models/new', async (page) => {
+  const option = page.locator('[data-testid="gguf-option"]').first()
+  await expect(option).toBeVisible()
+  await option.click()
+  await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3 Vision 8B')
+  await expect(page.locator('[data-testid^="companion-candidate-"]')).toHaveCount(4)
+})
+
+test('model-new metadata inspection failure screenshot', async ({ page }, testInfo) => {
+  modelInspectFailurePages.add(page)
+  await openAuthenticated(page, '/models/new')
+  const option = page.locator('[data-testid="gguf-option"]').first()
+  await expect(option).toBeVisible()
+  await option.click()
+  await expect(page.locator('[data-testid="metadata-warning"]')).toContainText('Representative GGUF metadata inspection failure for visual QA.')
+  await captureScreenshot(page, testInfo, 'model-new-metadata-failure')
+})
+
+authenticatedShot('model-details', '/models/qwen3-8b-q4km/details')
+
+test('model details expanded metadata screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/models/qwen3-8b-q4km/details')
+  await expect(page.getByRole('heading', { name: 'Qwen3 8B' })).toBeVisible()
+  await page.locator('[data-testid="metadata-expand"]').first().click()
+  await expect(page.locator('[data-testid="metadata-expanded-items"]')).toContainText('<|endoftext|>')
+  await captureScreenshot(page, testInfo, 'model-details-expanded')
+})
+
+test('model details second page screenshot', async ({ page }, testInfo) => {
+  modelDetailsPageTwoPages.add(page)
+  await openAuthenticated(page, '/models/qwen3-8b-q4km/details')
+  await expect(page.getByText('Showing 1–100 of 103 matching keys', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+  await expect(page.getByText('Showing 101–103 of 103 matching keys', { exact: true })).toBeVisible()
+  await expect(page.getByText('metadata.page2.first', { exact: true })).toBeVisible()
+  await captureScreenshot(page, testInfo, 'model-details-page-2')
+})
 
 test('model details filtered no-match screenshot', async ({ page }, testInfo) => {
-  await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/models/qwen3-8b-q4km/details')
   await expect(page.getByRole('heading', { name: 'Qwen3 8B' })).toBeVisible()
   await page.locator('[data-testid="metadata-search"]').fill('tokenizer.missing')
   await page.locator('[data-testid="metadata-search-button"]').click()
   await expect(page.getByText('No matching GGUF metadata', { exact: true })).toBeVisible()
   await expect(page.getByText('No keys match “tokenizer.missing”. Clear the filter to see all metadata.', { exact: true })).toBeVisible()
   await expect(page.getByText('No matching keys', { exact: true })).toBeVisible()
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-no-match.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'model-details-no-match')
 })
-
-
-test('model details second page screenshot', async ({ page }, testInfo) => {
-  modelDetailsPageTwoPages.add(page)
-  await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
-  await expect(page.getByText('Showing 1–100 of 103 matching keys', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Next', exact: true }).click()
-  await expect(page.getByText('Showing 101–103 of 103 matching keys', { exact: true })).toBeVisible()
-  await expect(page.getByText('metadata.page2.first', { exact: true })).toBeVisible()
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-page-2.png`, fullPage: true, animations: 'disabled' })
-})
-
 
 test('model details API failure screenshot', async ({ page }, testInfo) => {
   modelDetailsFailurePages.add(page)
-  await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/models/qwen3-8b-q4km/details')
   const failure = page.locator('[data-testid="model-details-error"]')
   await expect(failure).toContainText('Unable to load GGUF metadata')
   await expect(failure).toContainText('Representative GGUF details failure for visual QA.')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-api-failure.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'model-details-api-failure')
 })
 
-test('model details expanded metadata screenshot', async ({ page }, testInfo) => {
-  await page.goto('/models/qwen3-8b-q4km/details', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
-  await expect(page.getByRole('heading', { name: 'Qwen3 8B' })).toBeVisible()
-  await page.locator('[data-testid="metadata-expand"]').first().click()
-  await expect(page.locator('[data-testid="metadata-expanded-items"]')).toContainText('<|endoftext|>')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
-})
-
-
-
-test('model-new metadata inspection failure screenshot', async ({ page }, testInfo) => {
-  modelInspectFailurePages.add(page)
-  await page.goto('/models/new', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
-  const option = page.locator('[data-testid="gguf-option"]').first()
-  await expect(option).toBeVisible()
-  await option.click()
-  await expect(page.locator('[data-testid="metadata-warning"]')).toContainText('Representative GGUF metadata inspection failure for visual QA.')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-metadata-failure.png`, fullPage: true, animations: 'disabled' })
-})
-
-
-test('model-new Hugging Face remote screenshot', async ({ page }, testInfo) => {
-  await page.goto('/models/new?repo=Qwen%2FQwen3-8B-GGUF&artifact=q4_k_m', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
-  const artifact = page.locator('[data-testid="remote-artifact-summary"]')
-  await expect(artifact).toContainText('Qwen/Qwen3-8B-GGUF')
-  await expect(artifact).toContainText('Qwen3-8B-Q4_K_M.gguf')
-  await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3-8B-GGUF Q4_K_M')
-  await expect(page.locator('[data-testid="model-form-first-instance"]')).toBeVisible()
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-remote.png`, fullPage: true, animations: 'disabled' })
-})
+authenticatedShot('model-edit', '/models/qwen3-8b-q4km/edit')
+authenticatedShot('models-discover', '/models/discover')
+authenticatedShot('model-repository', '/models/discover/Qwen/Qwen3-8B-GGUF')
 
 test('discover repository failure and retry screenshot', async ({ page }, testInfo) => {
   discoverDetailFailurePages.add(page)
-  await page.goto('/models/discover/Qwen/Qwen3-8B-GGUF', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/models/discover/Qwen/Qwen3-8B-GGUF')
   const failure = page.locator('[data-testid="discover-detail-error"]')
   await expect(failure).toContainText('Repository temporarily unavailable for visual QA.')
   await expect(failure).toContainText('Qwen/Qwen3-8B-GGUF')
   await expect(page.locator('[data-testid="discover-detail-back"]')).toBeVisible()
   await expect(page.locator('[data-testid="discover-detail-retry"]')).toBeVisible()
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/discover-detail-error.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'discover-detail-error')
 
   discoverDetailFailurePages.delete(page)
   await page.locator('[data-testid="discover-detail-retry"]').click()
@@ -598,10 +660,20 @@ test('discover repository failure and retry screenshot', async ({ page }, testIn
   await expect(page.locator('[data-testid="discover-detail-error"]')).toBeHidden()
 })
 
+test('model-new Hugging Face remote screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/models/new?repo=Qwen%2FQwen3-8B-GGUF&artifact=q4_k_m')
+  const artifact = page.locator('[data-testid="remote-artifact-summary"]')
+  await expect(artifact).toContainText('Qwen/Qwen3-8B-GGUF')
+  await expect(artifact).toContainText('Qwen3-8B-Q4_K_M.gguf')
+  await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3-8B-GGUF Q4_K_M')
+  await expect(page.locator('[data-testid="model-form-first-instance"]')).toBeVisible()
+  await captureScreenshot(page, testInfo, 'model-new-remote')
+})
+
+authenticatedShot('downloads', '/downloads')
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
-  await page.goto('/downloads', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/downloads')
   const queue = page.locator('[data-testid="download-queue"]')
   await expect(queue).toContainText('DOWNLOADING')
   await expect(queue).toContainText('VERIFYING')
@@ -611,14 +683,14 @@ test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await expect(queue).toContainText('COMPLETED')
   await page.getByRole('button', { name: /2 files/ }).first().click()
   await expect(page.locator('[data-testid="download-files"]').first()).toContainText('00002-of-00002.gguf')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/downloads-lifecycle.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'downloads-lifecycle')
 })
 
+authenticatedShot('instances', '/instances')
 
 test('instances operational card states screenshot', async ({ page }, testInfo) => {
   instancesStatePages.add(page)
-  await page.goto('/instances', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/instances')
   await page.locator('[data-testid="instances-view-cards"]').click()
   const cards = page.locator('[data-testid="instances-card-view"]')
   await expect(cards).toContainText('READY')
@@ -627,81 +699,171 @@ test('instances operational card states screenshot', async ({ page }, testInfo) 
   await expect(cards).toContainText('DOWNLOADING')
   await expect(cards).toContainText('CUDA out of memory')
   await expect(cards).toContainText('launch automatically when the verified GGUF download completes')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/instances-card-states.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'instances-card-states')
 })
 
+authenticatedShot('instance-new', '/instances/new')
 
-test('dashboard failure recovery screenshot', async ({ page }, testInfo) => {
-  dashboardFailurePages.add(page)
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
-  await expect(page.locator('[data-testid="dashboard-attention-link"]')).toContainText('Needs attention · 2')
-  const attention = page.locator('[data-testid="dashboard-attention"]')
-  await expect(attention).toContainText('qwen3-primary failed to start')
-  await expect(attention).toContainText('qwen3-primary returned 503')
-  await expect(attention.getByRole('link', { name: 'Review' })).toHaveCount(2)
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/dashboard-failure-recovery.png`, fullPage: true, animations: 'disabled' })
+test('instance launch confirmation screenshot', async ({ page }, testInfo) => {
+  instancesStatePages.add(page)
+  await openAuthenticated(page, '/instances')
+  await page.getByRole('button', { name: 'Launch', exact: true }).first().click()
+  await expect(page.getByRole('dialog', { name: 'Launch Instance' })).toBeVisible()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Launch Instance')
+  await captureScreenshot(page, testInfo, 'instance-launch-confirmation')
 })
 
+test('instance kill confirmation screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/instances')
+  await page.locator('[data-testid="instance-table-more"]').first().click()
+  await page.getByRole('menuitem', { name: 'Kill' }).click()
+  await expect(page.getByRole('dialog', { name: 'Kill Instance' })).toBeVisible()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Kill Instance')
+  await captureScreenshot(page, testInfo, 'instance-kill-confirmation')
+})
+
+test('instance delete confirmation screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/instances')
+  await page.locator('[data-testid="instance-table-more"]').first().click()
+  await page.getByRole('menuitem', { name: 'Delete' }).click()
+  await expect(page.getByRole('dialog', { name: 'Delete Instance' })).toBeVisible()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Delete Instance')
+  await captureScreenshot(page, testInfo, 'instance-delete-confirmation')
+})
+
+test('instance logs screenshot', async ({ page }, testInfo) => {
+  await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
+  await openAuthenticated(page, '/instances')
+  await page.getByRole('button', { name: 'Logs', exact: true }).first().click()
+  await expect(page.getByRole('dialog', { name: 'Qwen3 primary logs' })).toBeVisible()
+  await expect(page.locator('[data-testid="instance-log-output"]')).toContainText('loaded meta data with 36 key-value pairs')
+  await captureScreenshot(page, testInfo, 'instance-logs')
+})
+
+authenticatedShot('instance-detail', '/instances/qwen3-primary/detail')
+authenticatedShot('instance-edit', '/instances/qwen3-primary/edit')
+authenticatedShot('playground', '/playground')
 
 test('playground generating and completed screenshots', async ({ page }, testInfo) => {
-  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/playground')
   await page.getByLabel('Playground message').fill('UX_HOLD Explain KV cache reuse.')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
   await expect(page.getByText('Generating', { exact: true })).toBeVisible()
   await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-generating.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'playground-generating')
 
   playgroundHoldRelease.get(page)?.()
   await expect(page.getByText('Completed', { exact: true })).toBeVisible()
   await expect(page.locator('[data-testid="playground-diagnostics"]')).toContainText('57.10 tok/s')
   await expect(page.locator('[data-testid="playground-thread"]')).toContainText('avoids repeated prompt evaluation.')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-completed.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'playground-completed')
 
   await page.getByRole('button', { name: 'Request', exact: true }).click()
   await expect(page.getByLabel('Raw request JSON')).toHaveValue(/UX_HOLD Explain KV cache reuse\./)
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-request.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'playground-request')
 })
 
 test('playground cold-start screenshot', async ({ page }, testInfo) => {
   playgroundColdPages.add(page)
-  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/playground')
   await expect(page.getByText('UNLOADED', { exact: true }).first()).toBeVisible()
   await page.getByLabel('Playground message').fill('UX_HOLD Trigger autoload.')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
   await expect(page.getByText('Cold start — autoload in progress', { exact: true })).toBeVisible()
   await expect.poll(() => playgroundHoldRelease.has(page)).toBe(true)
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-cold-start.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'playground-cold-start')
   playgroundHoldRelease.get(page)?.()
   await expect(page.getByText('Completed', { exact: true })).toBeVisible()
 })
 
 test('playground error screenshot', async ({ page }, testInfo) => {
-  await page.goto('/playground', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/playground')
   await page.getByLabel('Playground message').fill('UX_ERROR Trigger representative failure.')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(page.locator('[data-testid="playground-error"]')).toContainText('Representative gateway failure for visual QA.')
   await expect(page.getByText('Failed', { exact: true })).toBeVisible()
   await expect(page.getByText('Completed', { exact: true })).toBeHidden()
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/playground-error.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'playground-error')
 })
 
+authenticatedShot('request-logs', '/logs')
+authenticatedShot('request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture')
+authenticatedShot('request-logs-trace', '/logs?trace_id=trace_fixture')
+authenticatedShot('api-keys', '/api')
+
 test('api key secret and revoke confirmation screenshots', async ({ page }, testInfo) => {
-  await page.goto('/api', { waitUntil: 'domcontentloaded' })
-  await waitForManagerPanel(page)
+  await openAuthenticated(page, '/api')
   await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Retired integration')
   await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Revoked')
   await page.locator('[data-testid="key-name"]').fill('Visual QA')
   await page.locator('[data-testid="create-key"]').click()
   await expect(page.locator('[data-testid="fresh-api-key"]')).toContainText('lcm_sk_visual_fixture_secret')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-fresh-secret.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'api-key-fresh-secret')
 
   await page.getByRole('button', { name: 'Revoke', exact: true }).first().click()
   await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Revoke key')
-  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/api-key-revoke-confirmation.png`, fullPage: true, animations: 'disabled' })
+  await captureScreenshot(page, testInfo, 'api-key-revoke-confirmation')
+})
+
+authenticatedShot('profile-account', '/profile/account', async (page) => {
+  await expect(page.locator('[data-testid="profile-account"]')).toBeVisible()
+  await expect(page.locator('[data-testid="profile-password"]')).toBeVisible()
+})
+authenticatedShot('profile-authentication', '/profile/authentication', async (page) => {
+  await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
+})
+authenticatedShot('profile-sessions', '/profile/sessions', async (page) => {
+  await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
+})
+
+authenticatedShot('admin-overview', '/admin')
+authenticatedShot('admin-general', '/admin/general')
+authenticatedShot('admin-authentication', '/admin/authentication')
+
+test('admin oidc provider add screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/admin/authentication')
+  await page.getByRole('button', { name: 'Add provider' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add OIDC provider' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('Display name').fill('Keycloak')
+  await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/llamacpp')
+  await dialog.getByLabel('Client ID').fill('llamacpp-manager')
+  await captureScreenshot(page, testInfo, 'admin-oidc-provider-add')
+})
+
+test('admin oidc provider edit screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/admin/authentication')
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Edit OIDC provider' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByLabel('Display name')).toHaveValue('Authentik')
+  await captureScreenshot(page, testInfo, 'admin-oidc-provider-edit')
+})
+
+authenticatedShot('admin-llamacpp', '/admin/llamacpp')
+authenticatedShot('admin-huggingface', '/admin/huggingface')
+authenticatedShot('admin-users', '/admin/users')
+
+test('admin add user screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/admin/users')
+  await page.getByRole('button', { name: 'Add user' }).first().click()
+  const dialog = page.getByRole('dialog', { name: 'Add user' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('Username').fill('operator')
+  await captureScreenshot(page, testInfo, 'admin-add-user')
+})
+
+test('admin reset password screenshot', async ({ page }, testInfo) => {
+  await openAuthenticated(page, '/admin/users')
+  await page.getByRole('button', { name: 'Reset password' }).first().click()
+  const dialog = page.getByRole('dialog', { name: /Reset password for admin/ })
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('New password').fill('replacement-password')
+  await captureScreenshot(page, testInfo, 'admin-reset-password')
+})
+
+authenticatedShot('admin-system', '/admin/system')
+authenticatedShot('admin-logs', '/admin/system-logs', async (page) => {
+  await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
 })
