@@ -198,15 +198,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-wrap items-start justify-between gap-5">
-      <div class="min-w-0 flex-1">
+    <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between" data-testid="downloads-header">
+      <div class="w-full min-w-0 sm:flex-1">
         <div class="mb-1 text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL STORAGE</div>
         <h1 class="font-heading text-[30px] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Downloads</h1>
         <p class="mt-2 max-w-3xl text-[15px] leading-[1.55] text-[var(--neutral-800)]">
           Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts.
         </p>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2">
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
         <StatusTag :variant="liveUpdates ? 'ready' : 'pending'">{{ liveUpdates ? 'Live updates' : 'Reconnecting' }}</StatusTag>
         <AppButton
           data-testid="toggle-completed-downloads"

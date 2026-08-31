@@ -337,14 +337,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-6" data-testid="instances-page">
-    <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between" data-testid="instances-header">
       <UPageHeader
-        class="min-w-0 flex-1"
+        class="w-full min-w-0 sm:flex-1"
         headline="CONTROL PLANE"
         title="Instances"
         description="Durable llama-server definitions. Instance slugs are the model IDs used by OpenAI-compatible clients."
       />
-      <div class="flex flex-wrap items-center justify-end gap-2">
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
         <div class="flex border border-[var(--color-divider)]" data-testid="instances-view-toggle" aria-label="Instance view">
           <UButton type="button" :color="viewMode === 'table' ? 'primary' : 'neutral'" :variant="viewMode === 'table' ? 'soft' : 'ghost'" size="sm" data-testid="instances-view-table" :aria-pressed="viewMode === 'table'" @click="viewMode = 'table'">Table</UButton>
           <UButton type="button" :color="viewMode === 'cards' ? 'primary' : 'neutral'" :variant="viewMode === 'cards' ? 'soft' : 'ghost'" size="sm" class="border-l border-[var(--color-divider)]" data-testid="instances-view-cards" :aria-pressed="viewMode === 'cards'" @click="viewMode = 'cards'">Cards</UButton>
