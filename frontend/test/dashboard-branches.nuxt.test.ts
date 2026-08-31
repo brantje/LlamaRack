@@ -135,6 +135,7 @@ describe('Dashboard edge branches', () => {
     expect(attention).toContain('managed llama-server process is in FAILED state')
     expect(attention).toContain('starting returned an error')
     expect(attention).toContain('/v1/chat/completions failed during the last 15 min')
+    expect(attention).not.toContain('loading returned 500')
     expect(attention).toContain('always-idle is Always-On but unloaded')
     expect(attention).toContain('CUDA0 is at 100% VRAM')
     expect(attention).toContain('Host RAM is at 95%')

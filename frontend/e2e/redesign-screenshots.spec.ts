@@ -425,7 +425,7 @@ async function installApiFixture(page: Page) {
         id: 599, request_id: 'req_dashboard_failure', trace_id: 'trace_dashboard_failure', session_id: 'session_dashboard_failure',
         accepted_at: now - 9_000, started_at: now - 8_900, finished_at: now - 8_100,
         instance_id: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' },
-        streaming: true, status_code: 500, result: 'error', duration_ms: 800, ttft_ms: 0,
+        streaming: true, status_code: 503, result: 'error', duration_ms: 800, ttft_ms: 0,
         prompt_tokens: 128, generated_tokens: 0, total_tokens: 128, tokens_per_second: 0,
         queue_duration_ms: 22, load_duration_ms: 0, autoloaded: false,
         error: 'CUDA out of memory while allocating the KV cache.'
@@ -561,7 +561,7 @@ test('dashboard failure recovery screenshot', async ({ page }, testInfo) => {
   await expect(page.locator('[data-testid="dashboard-attention-link"]')).toContainText('Needs attention · 2')
   const attention = page.locator('[data-testid="dashboard-attention"]')
   await expect(attention).toContainText('qwen3-primary failed to start')
-  await expect(attention).toContainText('qwen3-primary returned 500')
+  await expect(attention).toContainText('qwen3-primary returned 503')
   await expect(attention.getByRole('link', { name: 'Review' })).toHaveCount(2)
   await captureScreenshot(page, testInfo, 'dashboard-failure-recovery')
 })

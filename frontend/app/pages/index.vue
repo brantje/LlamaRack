@@ -282,7 +282,7 @@ const attention = computed<AttentionItem[]>(() => {
       to: `/instances/${encodeURIComponent(runtime.instance_id)}/detail`
     })
   }
-  for (const request of recentRequests.value.filter(request => request.result !== 'success' && request.result !== 'pending' && request.status_code !== 503).slice(0, 2)) {
+  for (const request of recentRequests.value.filter(request => request.result !== 'success' && request.result !== 'pending' && request.status_code !== 500).slice(0, 2)) {
     items.push({
       key: `request-${request.request_id || request.id}`,
       title: `${request.instance_id} returned ${request.status_code || 'an error'}`,
