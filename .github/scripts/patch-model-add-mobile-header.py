@@ -23,5 +23,13 @@ if count != 1:
     raise SystemExit(f'Add model Back action marker: expected one match, found {count}')
 page.write_text(source.replace(old, new, 1))
 
+existing = Path('frontend/test/model-add-redesign.nuxt.test.ts')
+text = existing.read_text()
+old = "    expect(wrapper.get('[data-testid=\"model-add-header\"]').classes()).toContain('flex-wrap')\n"
+new = "    expect(wrapper.get('[data-testid=\"model-add-header\"]').classes()).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-4', 'sm:flex-row']))\n"
+if text.count(old) != 1:
+    raise SystemExit(f'Add model existing header assertion: expected one match, found {text.count(old)}')
+existing.write_text(text.replace(old, new, 1))
+
 unit = Path('frontend/test/model-add-mobile-header.nuxt.test.ts')
 unit.write_text('''import { readFileSync } from 'node:fs'\nimport { resolve } from 'node:path'\nimport { describe, expect, it } from 'vitest'\n\nconst source = readFileSync(resolve(process.cwd(), 'app/pages/models/new.vue'), 'utf8')\n\ndescribe('Add model responsive header', () => {\n  it('stacks Back below the intro before narrow viewports can squeeze the copy', () => {\n    expect(source).toContain('data-testid="model-add-header"')\n    expect(source).toContain('flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between')\n    expect(source).toContain('class="w-full min-w-0 sm:flex-1"')\n    expect(source).toContain('w-full sm:w-auto sm:shrink-0')\n  })\n})\n''')
