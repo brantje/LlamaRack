@@ -77,10 +77,18 @@ describe('Instances redesign', () => {
     expect(readyRow.text()).toContain('Always On · idle 10 min')
     expect(readyRow.text()).toContain('42')
     expect(readyRow.text()).toContain('9010')
+    expect(readyRow.find('[data-testid="instance-table-more"]').exists()).toBe(true)
+    expect(readyRow.text()).not.toContain('Kill')
+    expect(readyRow.text()).not.toContain('Duplicate')
 
     const stoppedRow = wrapper.get('tr[data-instance-state="UNLOADED"]')
     expect(stoppedRow.text()).toContain('On demand')
     expect(stoppedRow.text().match(/—/g)?.length).toBeGreaterThanOrEqual(6)
+    expect(stoppedRow.find('[data-testid="instance-table-more"]').exists()).toBe(true)
+
+    const downloadingRow = wrapper.get('tr[data-instance-state="DOWNLOADING"]')
+    expect(downloadingRow.find('[data-testid="instance-table-more"]').exists()).toBe(false)
+    expect(downloadingRow.text()).toContain('Delete')
 
     await wrapper.get('[data-testid="instances-filter-ready"]').trigger('click')
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)

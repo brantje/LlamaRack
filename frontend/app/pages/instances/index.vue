@@ -440,13 +440,17 @@ onBeforeUnmount(() => {
             <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).pid ?? '—') : '—' }}</td>
             <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).port ?? '—') : '—' }}</td>
             <td class="px-3 py-3 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ lifecycle(instance) }}</td>
-            <td class="px-3 py-3"><div class="flex flex-wrap gap-1">
+            <td class="px-3 py-3"><div class="flex flex-wrap items-center gap-1">
               <AppButton v-if="importBlocked(instance)" to="/downloads" intent="ghost" size="xs">View download</AppButton>
               <template v-else>
                 <AppButton v-if="['UNLOADED', 'FAILED'].includes(instanceState(instance))" intent="ghost" size="xs" :loading="pending === `${instance.id}:start`" @click="action(instance, 'start')">Launch</AppButton>
                 <AppButton v-else intent="ghost" size="xs" :loading="pending === `${instance.id}:stop`" @click="action(instance, 'stop')">Stop</AppButton>
                 <AppButton intent="ghost" size="xs" @click="showLogs(instance)">Logs</AppButton>
+                <UDropdownMenu :items="cardOverflowItems(instance)">
+                  <AppButton intent="ghost" size="xs" icon="i-lucide-ellipsis" data-testid="instance-table-more" aria-label="More instance actions" />
+                </UDropdownMenu>
               </template>
+              <AppButton v-if="importBlocked(instance)" intent="ghost" size="xs" :loading="pending === `${instance.id}:delete`" @click="remove(instance)">Delete</AppButton>
             </div></td>
           </tr>
         </tbody>

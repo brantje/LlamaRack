@@ -25,6 +25,7 @@ describe('Instances redesign cleanup', () => {
     expect(instancesSource).toContain('data-testid="instance-card"')
     expect(instancesSource).toContain('data-testid="instance-id"')
     expect(instancesSource).toContain('data-testid="instance-card-more"')
+    expect(instancesSource).toContain('data-testid="instance-table-more"')
     expect(instancesSource).toContain('cardOverflowItems')
   })
 })
