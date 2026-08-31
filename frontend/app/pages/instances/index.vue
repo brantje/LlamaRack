@@ -112,15 +112,17 @@ function globalVRAMFallback(sample?: RuntimeTelemetry) {
 }
 
 function gpuPercent(sample?: RuntimeTelemetry) {
-  if (sample?.gpu_utilization_pct !== undefined && Number.isFinite(sample.gpu_utilization_pct)) return sample.gpu_utilization_pct
   const values = sample?.gpus?.map(gpu => gpu.utilization_pct).filter((value): value is number => value !== undefined && Number.isFinite(value)) || []
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined
+  if (values.length) return values.reduce((sum, value) => sum + value, 0) / values.length
+  if (sample?.gpu_utilization_pct !== undefined && Number.isFinite(sample.gpu_utilization_pct)) return sample.gpu_utilization_pct
+  return undefined
 }
 
 function vramBytes(sample?: RuntimeTelemetry) {
-  if (sample?.vram_used_bytes !== undefined && Number.isFinite(sample.vram_used_bytes)) return sample.vram_used_bytes
   const values = sample?.gpus?.map(gpu => gpu.vram_used_bytes).filter((value): value is number => value !== undefined && Number.isFinite(value)) || []
-  return values.length ? values.reduce((sum, value) => sum + value, 0) : undefined
+  if (values.length) return values.reduce((sum, value) => sum + value, 0)
+  if (sample?.vram_used_bytes !== undefined && Number.isFinite(sample.vram_used_bytes)) return sample.vram_used_bytes
+  return undefined
 }
 
 function gpuCapacity(sample?: RuntimeTelemetry) {
