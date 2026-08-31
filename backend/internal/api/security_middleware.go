@@ -78,10 +78,11 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 		switch {
 		case token != "":
 			user, session, err = a.AuthenticateBearer(r.Context(), token)
-		case path == "/api/v1/logs/stream" && r.Method == http.MethodGet:
-			// Native EventSource cannot attach an Authorization header. Reuse the
-			// same short-lived, one-time ticket mechanism as the runtime WebSocket
-			// so bearer credentials never have to be placed in the stream URL.
+		case browserStreamTicketRequest(path, r.Method):
+			// Native EventSource and WebSocket cannot attach an Authorization
+			// header. Reuse the same short-lived, one-time ticket mechanism as
+			// the runtime WebSocket so bearer credentials never have to be
+			// placed in the stream URL.
 			user, session, err = a.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"))
 		default:
 			err = auth.ErrSessionInvalid
@@ -125,6 +126,13 @@ func lifecycleAction(path, method string) (instanceID, action string, ok bool) {
 		return "", "", false
 	}
 	return parts[0], action, true
+}
+
+func browserStreamTicketRequest(path, method string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	return path == "/api/v1/logs/stream" || path == "/api/v1/downloads/ws"
 }
 
 func publicManagementRequest(path, method string) bool {

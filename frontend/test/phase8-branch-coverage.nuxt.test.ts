@@ -146,15 +146,24 @@ describe('Downloads live-event and formatting branches', () => {
     }
   }
 
+  function downloadRequest(jobs: unknown[] = []) {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'download-ticket' }
+      if (path === '/api/v1/downloads') return jobs
+      return []
+    })
+  }
+
   it('handles websocket snapshots, updates, inserts, deletes, malformed messages and reconnects', async () => {
     vi.useFakeTimers()
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket as any)
-    mocks.request.mockResolvedValue([job('initial', 'QUEUED')])
+    downloadRequest([job('initial', 'QUEUED')])
     const wrapper = await mountSuspended(DownloadsPage, { route: false })
     await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     const socket = FakeWebSocket.instances[0]!
-    expect(socket.url).toContain('/api/v1/downloads/ws')
+    expect(socket.url).toBe('ws://manager.test:8888/api/v1/downloads/ws?ticket=download-ticket')
     socket.open(); await flushPromises()
     expect(wrapper.text()).toContain('Live updates')
     socket.message('{bad json'); await flushPromises()
@@ -171,6 +180,7 @@ describe('Downloads live-event and formatting branches', () => {
     socket.disconnect(); await flushPromises()
     expect(wrapper.text()).toContain('Reconnecting')
     await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
     expect(FakeWebSocket.instances.length).toBeGreaterThan(1)
     wrapper.unmount()
   })
@@ -224,10 +234,69 @@ describe('Downloads live-event and formatting branches', () => {
   it('survives WebSocket constructor failure', async () => {
     class ThrowingSocket { constructor() { throw new Error('blocked') } }
     vi.stubGlobal('WebSocket', ThrowingSocket as any)
-    mocks.request.mockResolvedValue([])
+    downloadRequest()
     const wrapper = await mountSuspended(DownloadsPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('Reconnecting')
+    wrapper.unmount()
+  })
+
+  it('retries after websocket ticket minting fails and ignores a ticket after unmount', async () => {
+    vi.useFakeTimers()
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket as any)
+    let ticketCalls = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        ticketCalls++
+        if (ticketCalls === 1) throw { message: 'ticket denied' }
+        return { ticket: 'retry-ticket' }
+      }
+      return []
+    })
+    const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(wrapper.text()).toContain('Reconnecting')
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(FakeWebSocket.instances[0]?.url).toContain('ticket=retry-ticket')
+    wrapper.unmount()
+
+    let resolveTicket: ((value: { ticket: string }) => void) | undefined
+    FakeWebSocket.instances = []
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        return await new Promise<{ ticket: string }>(resolve => { resolveTicket = resolve })
+      }
+      return []
+    })
+    const pending = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    pending.unmount()
+    resolveTicket?.({ ticket: 'late-ticket' })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
+  it('retries when the websocket ticket is empty', async () => {
+    vi.useFakeTimers()
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket as any)
+    let ticketCalls = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        ticketCalls++
+        return ticketCalls === 1 ? {} : { ticket: 'filled-ticket' }
+      }
+      return []
+    })
+    const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(FakeWebSocket.instances[0]?.url).toContain('ticket=filled-ticket')
     wrapper.unmount()
   })
 })

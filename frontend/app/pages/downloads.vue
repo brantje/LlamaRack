@@ -40,6 +40,7 @@ const showCompleted = ref(false)
 let fallbackTimer: ReturnType<typeof setInterval> | undefined
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let downloadSocket: WebSocket | null = null
+let downloadConnecting = false
 let disposed = false
 
 const activeStates = new Set(['QUEUED', 'RESOLVING', 'DOWNLOADING', 'VERIFYING'])
@@ -100,15 +101,44 @@ async function refresh(silent = false) {
   }
 }
 
-function connectDownloadEvents() {
-  if (!import.meta.client || disposed || downloadSocket || typeof WebSocket === 'undefined') return
+function scheduleDownloadReconnect() {
+  if (disposed || reconnectTimer) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined
+    void connectDownloadEvents()
+  }, 1000)
+}
+
+async function connectDownloadEvents() {
+  if (!import.meta.client || disposed || downloadSocket || downloadConnecting || typeof WebSocket === 'undefined') return
+  downloadConnecting = true
+  let ticket = ''
+  try {
+    const result = await manager.request<{ ticket: string }>('/api/v1/auth/ws-ticket', { method: 'POST' })
+    ticket = String(result?.ticket || '')
+  } catch {
+    downloadConnecting = false
+    scheduleDownloadReconnect()
+    return
+  }
+  if (disposed) {
+    downloadConnecting = false
+    return
+  }
+  if (!ticket) {
+    downloadConnecting = false
+    scheduleDownloadReconnect()
+    return
+  }
   let socket: WebSocket
   try {
-    socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws`)
+    socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws?ticket=${encodeURIComponent(ticket)}`)
   } catch {
+    downloadConnecting = false
     return
   }
   downloadSocket = socket
+  downloadConnecting = false
   socket.onopen = () => {
     if (downloadSocket === socket) liveUpdates.value = true
   }
@@ -132,10 +162,7 @@ function connectDownloadEvents() {
     downloadSocket = null
     liveUpdates.value = false
     if (disposed) return
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = undefined
-      connectDownloadEvents()
-    }, 1000)
+    scheduleDownloadReconnect()
   }
 }
 
@@ -180,7 +207,7 @@ async function remove(job: DownloadJob) {
 
 onMounted(() => {
   void refresh()
-  connectDownloadEvents()
+  void connectDownloadEvents()
   fallbackTimer = setInterval(() => {
     if (!liveUpdates.value && jobs.value.some(job => activeStates.has(job.state))) void refresh(true)
   }, 1500)
