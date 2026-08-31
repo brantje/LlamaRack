@@ -1,0 +1,15 @@
+services:
+  llamacpp-manager:
+    build:
+      context: .
+      args:
+        LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm}
+    image: ${LCM_ROCM_IMAGE:-llamacpp-manager:rocm}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    security_opt:
+      - seccomp=unconfined
