@@ -16,6 +16,11 @@ describe('Instance form redesign cleanup', () => {
     expect(editSource).not.toContain('<UAlert')
   })
 
+  it('stacks the Back action below Instance form header copy on narrow screens', () => {
+    expect(formSource).toContain('flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between')
+    expect(formSource).toContain('w-full sm:w-auto sm:shrink-0')
+  })
+
   it('retains the issue-required identity and placement hooks', () => {
     expect(formSource).toContain('data-testid="instance-name"')
     expect(formSource).toContain('data-testid="instance-slug"')

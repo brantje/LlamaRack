@@ -222,14 +222,14 @@ onMounted(() => {
 
 <template>
   <div class="space-y-6" data-testid="instance-form">
-    <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between" data-testid="instance-form-header">
       <UPageHeader
-        class="min-w-0 flex-1"
+        class="w-full min-w-0 sm:flex-1"
         headline="CONTROL PLANE"
         :title="title"
         description="Configure one durable llama-server process. The slug is the exact OpenAI model ID and defaults from the Instance name."
       />
-      <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
+      <div class="w-full sm:w-auto sm:shrink-0"><AppButton to="/instances" intent="secondary">Back to Instances</AppButton></div>
     </div>
 
     <Frame v-if="error" class="p-3" data-testid="instance-form-error">
