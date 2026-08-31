@@ -4,6 +4,14 @@ import { describe, expect, it } from 'vitest'
 
 const instancesSource = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')
 
+describe('Instances responsive header', () => {
+  it('stacks page actions below the header copy on narrow screens', () => {
+    const source = readFileSync(resolve(process.cwd(), 'app/pages/instances/index.vue'), 'utf8')
+    expect(source).toContain('flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between')
+    expect(source).toContain('w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end')
+  })
+})
+
 describe('Instances redesign cleanup', () => {
   it('uses the semantic error note instead of UAlert', () => {
     expect(instancesSource).toContain('data-testid="instances-error"')
