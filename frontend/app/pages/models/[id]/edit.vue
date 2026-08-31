@@ -58,15 +58,15 @@ async function submit() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-wrap items-start justify-between gap-5">
-      <div class="min-w-0 flex-1">
+    <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between" data-testid="model-edit-header">
+      <div class="w-full min-w-0 sm:flex-1">
         <div class="mb-1 text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL REGISTRY</div>
         <h1 class="font-heading text-[30px] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Edit model</h1>
         <p class="mt-2 max-w-3xl text-[15px] leading-[1.55] text-[var(--neutral-800)]">
           Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately.
         </p>
       </div>
-      <AppButton to="/models" intent="secondary">Back to Models</AppButton>
+      <div class="w-full sm:w-auto sm:shrink-0"><AppButton to="/models" intent="secondary">Back to Models</AppButton></div>
     </div>
 
     <Frame v-if="error" class="p-3" data-testid="model-edit-error">

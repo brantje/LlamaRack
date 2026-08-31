@@ -13,6 +13,11 @@ describe('Edit model semantic cleanup', () => {
     expect(source).not.toContain('<UAlert')
   })
 
+  it('stacks Back to Models below the header copy on narrow screens', () => {
+    expect(source).toContain('flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between')
+    expect(source).toContain('w-full sm:w-auto sm:shrink-0')
+  })
+
   it('keeps the two Model-only peer surfaces and update contract', () => {
     expect(source).toContain('data-testid="model-edit-metadata"')
     expect(source).toContain('data-testid="model-edit-defaults"')
