@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const systemUnavailableLlamaPages = new WeakSet<Page>()
 const modelInspectFailurePages = new WeakSet<Page>()
 
 const models = [
@@ -330,6 +331,11 @@ async function installApiFixture(page: Page) {
       await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative GGUF metadata inspection failure for visual QA.' }) })
       return
     }
+    if (systemUnavailableLlamaPages.has(page) && url.pathname === '/api/v1/system' && request.method() === 'GET') {
+      const base = responseFor(url.pathname, request.method()) as Record<string, any>
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ ...base, llamacpp: { available: false } }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -496,6 +502,16 @@ test('model-new Hugging Face remote screenshot', async ({ page }, testInfo) => {
   await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3-8B-GGUF Q4_K_M')
   await expect(page.locator('[data-testid="model-form-first-instance"]')).toBeVisible()
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-new-remote.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('Administration System unavailable llama.cpp screenshot', async ({ page }, testInfo) => {
+  systemUnavailableLlamaPages.add(page)
+  await page.goto('/admin/system', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="secure-cookie-explanation"]')).toContainText('effective scheme is http')
+  await expect(page.locator('[data-testid="system-llamacpp-warning"]')).toContainText('llama-server is unavailable')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-system-llamacpp-unavailable.png`, fullPage: true, animations: 'disabled' })
 })
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {

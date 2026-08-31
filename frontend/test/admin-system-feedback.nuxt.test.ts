@@ -86,6 +86,17 @@ describe('Administration System UX feedback', () => {
     wrapper.unmount()
   })
 
+  it('explains why secure cookies are disabled for an HTTP effective scheme', async () => {
+    const response: any = systemResponse()
+    response.network.effective_scheme = 'http'
+    response.network.secure_cookie = false
+    mocks.request.mockResolvedValue(response)
+    const wrapper = await mountSuspended(AdminSystemPage, { route: '/admin/system' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="secure-cookie-explanation"]').text()).toBe('Disabled because the effective scheme is http.')
+    wrapper.unmount()
+  })
+
   it('shows a stable pending refresh state and a clear empty proxy state', async () => {
     const initial: any = systemResponse()
     initial.network.trusted_proxies = { value: '' }
