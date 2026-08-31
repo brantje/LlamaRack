@@ -5,11 +5,14 @@ source = path.read_text()
 
 helper_marker = """function button(wrapper: any, text: string) {
   const found = wrapper.findAll('button').find((candidate: any) => candidate.text().trim() === text)
-  if (!found) throw new Error(`Missing button ${text}`)
+  if (!found) throw new Error(`Missing button: ${text}`)
   return found
 }
 """
-if helper_marker in source and 'async function confirmHuggingFaceRemoval()' not in source:
+if 'async function confirmHuggingFaceRemoval()' not in source:
+    count = source.count(helper_marker)
+    if count != 1:
+        raise SystemExit(f'phase10 button helper: expected one match, found {count}')
     source = source.replace(
         helper_marker,
         helper_marker + """
