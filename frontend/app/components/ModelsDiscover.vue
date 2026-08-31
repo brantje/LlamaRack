@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
         title="Discover"
         description="Search Hugging Face GGUF repositories and choose an artifact that fits this manager's hardware."
       />
-      <div class="flex flex-wrap gap-2">
+      <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-list-actions">
         <AppButton intent="secondary" to="/downloads">Downloads</AppButton>
         <AppButton intent="secondary" to="/models">Registered models</AppButton>
       </div>
@@ -389,7 +389,7 @@ onBeforeUnmount(() => {
       <p class="text-xs leading-5 text-[var(--neutral-700)] lg:col-span-3">Results update automatically as you type. Press Enter to search immediately.</p>
     </UForm>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]" data-testid="discover-error">
+    <Frame v-if="error && !(isDetail && !selected)" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]" data-testid="discover-error">
       {{ error }}
     </Frame>
     <Frame v-if="downloadNotice" class="p-4 text-sm text-[var(--neutral-900)]" data-testid="discover-download-notice">
@@ -446,6 +446,20 @@ onBeforeUnmount(() => {
       <USkeleton class="h-52 w-full" />
     </div>
 
+    <Frame v-else-if="isDetail && error && !selected" class="border-[var(--accent-800)] p-5" data-testid="discover-detail-error">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <StatusTag variant="failed">Repository unavailable</StatusTag>
+          <p class="mt-3 break-all font-mono text-[13px] font-semibold text-[var(--color-text)]">{{ repoID }}</p>
+          <p class="mt-2 text-sm leading-6 text-[var(--neutral-800)]">{{ error }}</p>
+        </div>
+        <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+          <AppButton data-testid="discover-detail-back" intent="secondary" icon="i-lucide-arrow-left" @click="backToResults">Back to Discover</AppButton>
+          <AppButton data-testid="discover-detail-retry" intent="primary" :loading="detailLoading" @click="openModel(repoID)">Retry</AppButton>
+        </div>
+      </div>
+    </Frame>
+
     <template v-else-if="isDetail && selected">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <UPageHeader
@@ -454,7 +468,7 @@ onBeforeUnmount(() => {
           :title="selected.id"
           :description="selected.description || 'GGUF repository metadata, hardware guidance and downloadable artifacts.'"
         />
-        <div class="flex flex-wrap gap-2">
+        <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-detail-actions">
           <AppButton intent="secondary" icon="i-lucide-arrow-left" @click="backToResults">Back to Discover</AppButton>
           <AppButton intent="secondary" to="/downloads">Downloads</AppButton>
         </div>
