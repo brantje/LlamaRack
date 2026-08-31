@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test'
+import { prepareFullPageScreenshot } from './full-page-screenshot'
 
 const now = Date.now()
 const nowSeconds = Math.floor(now / 1000)
@@ -478,6 +479,7 @@ async function captureScreenshot(page: Page, testInfo: TestInfo, name: string) {
   const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
   expect(documentOverflow, `${filename} document should not overflow horizontally`).toBeLessThanOrEqual(1)
   if (name !== 'model-new') await page.waitForTimeout(800)
+  await prepareFullPageScreenshot(page)
   await page.screenshot({
     path: `artifacts/ux-screenshots/${testInfo.project.name}/${filename}.png`,
     fullPage: true,
