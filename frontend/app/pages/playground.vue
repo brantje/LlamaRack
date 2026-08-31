@@ -706,10 +706,9 @@ onBeforeUnmount(() => {
   <div class="flex min-h-[calc(100dvh-12rem)] flex-col gap-4" data-testid="playground-page">
     <header class="shrink-0 border-b border-[var(--color-divider)] pb-4">
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div class="flex flex-col gap-1">
-          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
-          <p class="text-xs text-[var(--neutral-700)]">Exercise an Instance through the real gateway.</p>
-        </div>
+        <UPageHeader title="PLAYGROUND" headline="OpenAI-compatible gateway" description="Exercise an Instance through the real gateway." />
+
+      
         <div class="flex flex-wrap gap-1">
           <AppButton intent="ghost" size="sm" @click="copyText(curlExample, 'curl')">Copy as curl</AppButton>
           <AppButton intent="ghost" size="sm" @click="copyText(sdkExample, 'SDK example')">Copy SDK example</AppButton>
