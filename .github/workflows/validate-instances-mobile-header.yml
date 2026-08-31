@@ -1,0 +1,51 @@
+name: Validate Instances mobile header feedback
+
+on:
+  push:
+    branches:
+      - fix/instances-mobile-header
+    paths:
+      - .github/workflows/validate-instances-mobile-header.yml
+      - .github/scripts/patch-instances-mobile-header.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/instances-mobile-header
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply Instances mobile header fix
+        run: |
+          python .github/scripts/patch-instances-mobile-header.py
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Instances mobile header fix
+        run: |
+          rm .github/workflows/validate-instances-mobile-header.yml .github/scripts/patch-instances-mobile-header.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): stack Instances actions on mobile" -m "Prevent the 412px action group from squeezing the Instances title and description by stacking page actions below header copy on narrow layouts."
+          git push origin HEAD:fix/instances-mobile-header
