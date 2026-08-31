@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(resolve(process.cwd(), 'app/pages/downloads.vue'), 'utf8')
 
+describe('Downloads responsive header', () => {
+  it('stacks download utilities below the header copy on narrow screens', () => {
+    expect(source).toContain('flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between')
+    expect(source).toContain('w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end')
+  })
+})
+
 describe('Downloads redesign cleanup', () => {
   it('uses semantic framed notes without nesting a Frame inside download jobs', () => {
     expect(source).toContain('data-testid="downloads-error"')
