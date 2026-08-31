@@ -317,6 +317,10 @@ func TestLowLevelSkipAndBounds(t *testing.T) {
 	if _, err := readU64(bufio.NewReader(bytes.NewReader([]byte{1, 2, 3, 4}))); err == nil {
 		t.Fatal("truncated peek u64")
 	}
+	existing := bufio.NewReader(bytes.NewReader([]byte("x")))
+	if bufferedReader(existing) != existing {
+		t.Fatal("buffered reader should keep an existing bufio.Reader")
+	}
 }
 
 type zeroDiscarder struct{}

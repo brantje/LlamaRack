@@ -48,6 +48,7 @@ type Inspection struct {
 	MetadataCount uint64   `json:"metadata_count"`
 	Metadata      []Entry  `json:"metadata"`
 	Derived       Derived  `json:"derived"`
+	Features      Features `json:"features"`
 	Warnings      []string `json:"warnings,omitempty"`
 }
 
@@ -57,7 +58,14 @@ func Inspect(path string) (Inspection, error) {
 		return Inspection{}, err
 	}
 	defer f.Close()
-	return inspect(bufio.NewReaderSize(f, metadataReadBufferSize))
+	return inspect(bufferedReader(f))
+}
+
+func bufferedReader(r io.Reader) *bufio.Reader {
+	if br, ok := r.(*bufio.Reader); ok {
+		return br
+	}
+	return bufio.NewReaderSize(r, metadataReadBufferSize)
 }
 
 func inspect(r io.Reader) (Inspection, error) {
@@ -110,6 +118,14 @@ func inspect(r io.Reader) (Inspection, error) {
 	}
 	sort.Slice(result.Metadata, func(i, j int) bool { return result.Metadata[i].Key < result.Metadata[j].Key })
 	result.Derived = derive(scalars)
+	result.Features = summaryFeatures(result.Derived, scalars)
+	if result.Features.HasMTP && !result.Features.MTPOnly {
+		hasTrunk, err := tensorPrefixPresentCurrent(r, result.TensorCount, "blk.0.")
+		if err != nil {
+			return Inspection{}, err
+		}
+		result.Features.MTPOnly = !hasTrunk
+	}
 	return result, nil
 }
 

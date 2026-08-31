@@ -110,6 +110,58 @@ func benchmarkInspect(b *testing.B, path string) {
 	}
 }
 
+func BenchmarkInspectDerivedReaderRealistic(b *testing.B) {
+	path := writeBenchmarkGGUF(b, benchmarkGGUFSpec{tokens: 16384, tensors: 8, extraScalars: 8, derivedDims: true})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := InspectDerivedReader(bytes.NewReader(data)); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		derived, err := InspectDerivedReader(bytes.NewReader(data))
+		if err != nil {
+			b.Fatal(err)
+		}
+		if derived.Architecture == "" || derived.BlockCount == 0 {
+			b.Fatalf("derived=%+v", derived)
+		}
+	}
+}
+
+func BenchmarkReadValuePageEarlyKey(b *testing.B) {
+	path := writeBenchmarkGGUF(b, benchmarkGGUFSpec{tokens: 16384, tensors: 8, extraScalars: 8})
+	if _, err := ReadValuePage(path, "general.architecture", 0, 0); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		page, err := ReadValuePage(path, "general.architecture", 0, 0)
+		if err != nil || page.Value == "" {
+			b.Fatalf("page=%+v err=%v", page, err)
+		}
+	}
+}
+
+func BenchmarkReadValuePageLateKey(b *testing.B) {
+	path := writeBenchmarkGGUF(b, benchmarkGGUFSpec{tokens: 16384, tensors: 8, extraScalars: 8})
+	if _, err := ReadValuePage(path, "tokenizer.ggml.token_type", 0, 5); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		page, err := ReadValuePage(path, "tokenizer.ggml.token_type", 0, 5)
+		if err != nil || page.Total == 0 {
+			b.Fatalf("page=%+v err=%v", page, err)
+		}
+	}
+}
+
 func benchmarkReadSummary(b *testing.B, path string) {
 	b.Helper()
 	if _, err := ReadSummary(path); err != nil {
@@ -134,6 +186,7 @@ type benchmarkGGUFSpec struct {
 	extraScalars int
 	nextN        uint32
 	trunk        bool
+	derivedDims  bool
 }
 
 func writeBenchmarkGGUF(tb testing.TB, spec benchmarkGGUFSpec) string {
@@ -154,10 +207,18 @@ func writeBenchmarkGGUF(tb testing.TB, spec benchmarkGGUFSpec) string {
 	if spec.nextN > 0 {
 		metadataCount++
 	}
+	if spec.derivedDims {
+		metadataCount += 3
+	}
 	benchmarkBinary(&buf, metadataCount)
 
 	benchmarkMetaString(&buf, "general.architecture", "qwen35")
 	benchmarkMetaU32(&buf, "qwen35.context_length", 32768)
+	if spec.derivedDims {
+		benchmarkMetaU32(&buf, "qwen35.block_count", 40)
+		benchmarkMetaU32(&buf, "qwen35.embedding_length", 4096)
+		benchmarkMetaU32(&buf, "qwen35.attention.head_count", 32)
+	}
 	if spec.nextN > 0 {
 		benchmarkMetaU32(&buf, "qwen35.nextn_predict_layers", spec.nextN)
 	}

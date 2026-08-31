@@ -1,7 +1,6 @@
 package ggufmeta
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +30,7 @@ func ReadSummary(path string) (Summary, error) {
 		return Summary{}, err
 	}
 	defer f.Close()
-	return readSummary(bufio.NewReaderSize(f, metadataReadBufferSize))
+	return readSummary(bufferedReader(f))
 }
 
 func readSummary(r io.Reader) (Summary, error) {

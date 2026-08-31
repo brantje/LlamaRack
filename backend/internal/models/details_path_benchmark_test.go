@@ -13,15 +13,11 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
 
-// BenchmarkDetailsPathInspectAndSummary mirrors the pending model-details
-// handler: full InspectGGUF followed by GGUFSummary to attach features.
+// BenchmarkDetailsPathInspectAndSummary mirrors the model-details handler:
+// one InspectGGUF call that also carries GGUF feature flags.
 func BenchmarkDetailsPathInspectAndSummary(b *testing.B) {
 	s, path := setupDetailsPathService(b, 16384, 256)
-	ctx := context.Background()
 	if _, err := s.InspectGGUF(path); err != nil {
-		b.Fatal(err)
-	}
-	if _, err := s.GGUFSummary(ctx, path); err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
@@ -31,12 +27,8 @@ func BenchmarkDetailsPathInspectAndSummary(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		summary, err := s.GGUFSummary(ctx, path)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if inspection.MetadataCount == 0 || summary.Features.Architecture == "" {
-			b.Fatalf("inspection=%+v summary=%+v", inspection.MetadataCount, summary.Features)
+		if inspection.MetadataCount == 0 || inspection.Features.Architecture == "" {
+			b.Fatalf("inspection=%+v", inspection.Features)
 		}
 	}
 }

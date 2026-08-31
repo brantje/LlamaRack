@@ -14,7 +14,7 @@ func InspectDerivedReader(reader io.Reader) (Derived, error) {
 	if reader == nil {
 		return Derived{}, errors.New("GGUF metadata unavailable: empty reader")
 	}
-	r := &forwardReadSeeker{reader: reader}
+	r := bufferedReader(reader)
 	var magic [4]byte
 	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return Derived{}, err

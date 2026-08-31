@@ -165,12 +165,10 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		"metadata":                page,
 		"architecture":            inspection.Derived.Architecture,
 		"detected_context_length": inspection.Derived.ContextLength,
+		"features":                inspection.Features,
 		"offset":                  offset,
 		"limit":                   limit,
 		"warnings":                warnings,
-	}
-	if summary, summaryErr := h.models.GGUFSummary(r.Context(), model.GGUFPath); summaryErr == nil {
-		payload["features"] = summary.Features
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

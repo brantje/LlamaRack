@@ -20,11 +20,23 @@ func TestDetectFeaturesProjectorNativeMTPAndMTPOnly(t *testing.T) {
 	if err != nil || !features.HasMTP || features.MTPOnly || features.NextNPredictLayers != 1 {
 		t.Fatalf("native MTP=%+v err=%v", features, err)
 	}
+	inspection, err := Inspect(native)
+	if err != nil || inspection.Features != features {
+		t.Fatalf("inspect native features=%+v err=%v", inspection.Features, err)
+	}
+	summary, err := ReadSummary(native)
+	if err != nil || summary.Features != features {
+		t.Fatalf("summary native features=%+v err=%v", summary.Features, err)
+	}
 
 	draft := writeFeatureGGUF(t, "qwen35", 1, "token_embd.weight", "blk.40.nextn.eh_proj.weight")
 	features, err = DetectFeatures(draft)
 	if err != nil || !features.HasMTP || !features.MTPOnly {
 		t.Fatalf("MTP-only=%+v err=%v", features, err)
+	}
+	inspection, err = Inspect(draft)
+	if err != nil || inspection.Features != features {
+		t.Fatalf("inspect draft features=%+v err=%v", inspection.Features, err)
 	}
 }
 
