@@ -84,6 +84,7 @@ function seedManager() {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  localStorage.clear()
   seedManager()
 })
 
@@ -104,6 +105,10 @@ describe('Hugging Face GGUF hardware recommendations', () => {
 
     const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
     await flushPromises()
+
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+    expect(wrapper.get('[data-testid="discover-assume-idle"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Assume idle VRAM and RAM')
 
     const repositoryMetadata = wrapper.get('[data-testid="repository-metadata"]')
     expect(repositoryMetadata.text()).toContain('Model size')
@@ -139,6 +144,26 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     wrapper.unmount()
   })
 
+  it('persists assume-idle preference and refetches recommendations when toggled', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
+      if (path.startsWith('/api/v1/huggingface/recommendations?')) return recommendationResponse()
+      return []
+    })
+
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    expect(toggle).toBeTruthy()
+    toggle!.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(localStorage.getItem('llamacpp-manager-discover-assume-idle')).toBe('false')
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=false'))).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shows generic guidance when hardware telemetry is unavailable', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
@@ -152,6 +177,9 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Hardware-aware recommendation unavailable')
     expect(wrapper.get('[data-testid="artifact-hardware-fit"]').text()).toContain('Fit unknown')
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    expect(toggle).toBeTruthy()
+    expect(toggle!.props('disabled')).toBe(true)
     wrapper.unmount()
   })
 

@@ -89,11 +89,7 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 	result.Confidence = confidence(metadata, metadataErr)
 	result.CPUFit = fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes)
 	result.CurrentFit, result.Offload = recommendOffload(snapshot, memory, metadata)
-	total := snapshot
-	total.RAMAvailableBytes = total.RAMTotalBytes
-	for i := range total.GPUs {
-		total.GPUs[i].FreeBytes = total.GPUs[i].TotalBytes
-	}
+	total := assumeIdleSnapshot(snapshot)
 	if len(total.GPUs) > 0 {
 		result.TotalHardwareFit, _ = recommendOffload(total, memory, metadata)
 	} else {
@@ -108,6 +104,26 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 		}
 	}
 	return result
+}
+
+// assumeIdleSnapshot returns a copy of snapshot with free VRAM/RAM treated as
+// installed capacity. Only overwrites free/available when totals are known so
+// test fixtures that set FreeBytes alone keep working.
+func assumeIdleSnapshot(snapshot hardware.Snapshot) hardware.Snapshot {
+	idle := snapshot
+	if idle.RAMTotalBytes > 0 {
+		idle.RAMAvailableBytes = idle.RAMTotalBytes
+	}
+	if len(idle.GPUs) == 0 {
+		return idle
+	}
+	idle.GPUs = append([]hardware.GPU(nil), idle.GPUs...)
+	for i := range idle.GPUs {
+		if idle.GPUs[i].TotalBytes > 0 {
+			idle.GPUs[i].FreeBytes = idle.GPUs[i].TotalBytes
+		}
+	}
+	return idle
 }
 
 func chooseContext(requested int64) (int64, bool) {

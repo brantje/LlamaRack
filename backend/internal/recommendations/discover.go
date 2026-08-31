@@ -67,19 +67,27 @@ type DiscoverAnalysis struct {
 	HardwareWarning       string             `json:"hardware_warning,omitempty"`
 	HardwareAvailable     bool               `json:"hardware_available"`
 	HybridRecommendations bool               `json:"hybrid_recommendations_enabled"`
+	AssumeIdle            bool               `json:"assume_idle"`
 	Artifacts             []DiscoverArtifact `json:"artifacts"`
 }
 
 // AnalyzeDiscover evaluates remote GGUF artifacts using the same memory model
 // and scheduler-backed placement logic used by local-model recommendations.
-func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr error, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error, allowHybrid bool) DiscoverAnalysis {
+// When assumeIdle is true, fit and speed use installed VRAM/RAM capacity rather
+// than currently free memory.
+func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr error, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error, allowHybrid bool, assumeIdle bool) DiscoverAnalysis {
 	contextLength, assumed := chooseContext(requestedContext)
+	placement := snapshot
+	if assumeIdle {
+		placement = assumeIdleSnapshot(snapshot)
+	}
 	result := DiscoverAnalysis{
 		ContextLength:         contextLength,
 		ContextCapability:     metadata.ContextLength,
 		ContextAssumed:        assumed,
 		Metadata:              metadata,
 		HybridRecommendations: allowHybrid,
+		AssumeIdle:            assumeIdle,
 		HardwareAvailable:     hardwareTelemetryAvailable(snapshot, hardwareErr),
 		Artifacts:             make([]DiscoverArtifact, 0, len(inputs)),
 	}
@@ -122,11 +130,11 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			artifact.Reason = "The artifact size is unavailable, so a reliable memory estimate cannot be produced."
 		default:
 			artifact.Memory = estimateMemory(input.WeightsBytes, contextLength, metadata)
-			artifact.Runnable, artifact.Offload = discoverOffload(snapshot, artifact.Memory, metadata)
+			artifact.Runnable, artifact.Offload = discoverOffload(placement, artifact.Memory, metadata)
 			artifact.Fit, artifact.FitLabel = discoverFit(artifact.Runnable, artifact.Offload)
 			artifact.Reason = artifact.Offload.Reason
 			if artifact.Runnable {
-				artifact.EstimatedGenerationSpeed = estimateGenerationSpeed(snapshot, artifact.Memory, artifact.Offload, guide, metadata)
+				artifact.EstimatedGenerationSpeed = estimateGenerationSpeed(placement, artifact.Memory, artifact.Offload, guide, metadata)
 			}
 		}
 		result.Artifacts = append(result.Artifacts, artifact)

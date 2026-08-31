@@ -36,7 +36,7 @@ func TestQ1DiscoverProfileIsKnownAndRunnable(t *testing.T) {
 	}
 	result := AnalyzeDiscover([]ArtifactInput{{
 		ID: "bonsai-q1", Quantization: "Q1_0", WeightsBytes: 4 * gib, Complete: true,
-	}}, metadata, nil, snapshot, 4096, nil, true)
+	}}, metadata, nil, snapshot, 4096, nil, true, true)
 	if len(result.Artifacts) != 1 {
 		t.Fatalf("artifacts=%+v", result.Artifacts)
 	}
@@ -56,7 +56,7 @@ func TestQ1DoesNotOutrankHigherBitRunnableQuantization(t *testing.T) {
 	result := AnalyzeDiscover([]ArtifactInput{
 		{ID: "q1", Quantization: "Q1_0", WeightsBytes: 4 * gib, Complete: true},
 		{ID: "q2", Quantization: "Q2_K", WeightsBytes: 6 * gib, Complete: true},
-	}, metadata, nil, snapshot, 4096, nil, true)
+	}, metadata, nil, snapshot, 4096, nil, true, true)
 	if len(result.Artifacts) != 2 || result.Artifacts[0].ArtifactID != "q2" || !result.Artifacts[0].Recommended {
 		t.Fatalf("artifacts=%+v", result.Artifacts)
 	}

@@ -10,7 +10,9 @@ type MemoryEstimate = { weights_bytes: number; kv_cache_bytes: number; runtime_o
 type Offload = { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
 type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
 type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
-type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; artifacts: ArtifactAdvice[] }
+type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; assume_idle?: boolean; artifacts: ArtifactAdvice[] }
+
+const ASSUME_IDLE_STORAGE_KEY = 'llamacpp-manager-discover-assume-idle'
 
 const props = defineProps<{ repoId?: string }>()
 const manager = useManager()
@@ -34,11 +36,19 @@ const downloadNotice = ref('')
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 const contextIndex = ref(0)
 const contextExplicit = ref(false)
+const assumeIdle = ref(readAssumeIdlePreference())
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let recommendationTimer: ReturnType<typeof setTimeout> | undefined
 let searchVersion = 0
 let recommendationVersion = 0
 let loadObserver: IntersectionObserver | undefined
+
+function readAssumeIdlePreference(): boolean {
+  if (!import.meta.client) return true
+  const raw = localStorage.getItem(ASSUME_IDLE_STORAGE_KEY)
+  if (raw === 'false') return false
+  return true
+}
 
 const repoID = computed(() => String(props.repoId || '').trim())
 const isDetail = computed(() => Boolean(repoID.value))
@@ -263,6 +273,7 @@ async function loadRecommendations(contextLength?: number) {
   recommendationError.value = ''
   const params = new URLSearchParams({ repo: repoID.value })
   if (contextLength && contextLength > 0) params.set('context_length', String(contextLength))
+  params.set('assume_idle', assumeIdle.value ? 'true' : 'false')
   try {
     const value = await manager.request<DiscoverRecommendations>(`/api/v1/huggingface/recommendations?${params.toString()}`)
     if (version !== recommendationVersion) return
@@ -285,6 +296,14 @@ function selectContext(value: number | number[]) {
     recommendationTimer = undefined
     void loadRecommendations(contextOptions.value[index])
   }, 250)
+}
+function setAssumeIdle(value: boolean | 'indeterminate') {
+  const next = value === true
+  assumeIdle.value = next
+  if (import.meta.client) localStorage.setItem(ASSUME_IDLE_STORAGE_KEY, next ? 'true' : 'false')
+  if (!repoID.value) return
+  clearRecommendationDebounce()
+  void loadRecommendations(recommendations.value ? selectedContext.value : undefined)
 }
 
 async function openModel(id: string) {
@@ -507,6 +526,21 @@ onBeforeUnmount(() => {
           </div>
           <USlider :model-value="contextIndex" :min="0" :max="Math.max(0, contextOptions.length - 1)" :step="1" class="mt-4" data-testid="discover-context-slider" @update:model-value="selectContext" />
           <div class="mt-2 flex justify-between font-mono text-xs tabular-nums text-[var(--neutral-700)]"><span>{{ formatContext(contextOptions[0] || 4096) }}</span><span>{{ formatContext(contextOptions[contextOptions.length - 1] || 4096) }}</span></div>
+        </div>
+
+        <div class="mt-5" data-testid="discover-assume-idle-control">
+          <UFormField
+            label="Assume idle VRAM and RAM"
+            description="Fit, recommendation and estimated speed use installed capacity, not currently used memory."
+          >
+            <USwitch
+              :model-value="assumeIdle"
+              data-testid="discover-assume-idle"
+              aria-label="Assume idle VRAM and RAM"
+              :disabled="recommendations != null && !recommendations.hardware_available"
+              @update:model-value="setAssumeIdle"
+            />
+          </UFormField>
         </div>
 
         <div v-if="recommendations?.context_assumed && !contextExplicit" class="mt-4 border-l-2 border-[var(--color-accent)] pl-3 text-sm">

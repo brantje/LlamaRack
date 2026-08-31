@@ -24,6 +24,7 @@ describe('Discover redesign hierarchy', () => {
   it('keeps context and artifacts as peer top-level surfaces with semantic status', () => {
     expect(source).toContain('data-testid="discover-context-section"')
     expect(source).toContain('data-testid="discover-artifacts"')
+    expect(source).toContain('data-testid="discover-assume-idle"')
     expect(source).toContain('<StatusTag')
     expect(source).toContain('data-testid="recommended-badge"')
     expect(source).toContain('data-testid="artifact-hardware-fit"')
