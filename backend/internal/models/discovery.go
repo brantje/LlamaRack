@@ -41,6 +41,20 @@ type splitGroup struct {
 
 var localSplitPattern = regexp.MustCompile(`(?i)^(.*)-(\d{5})-of-(\d{5})\.gguf$`)
 
+func sameLocalSplitSet(a, b string) bool {
+	a = filepath.ToSlash(filepath.Clean(a))
+	b = filepath.ToSlash(filepath.Clean(b))
+	if filepath.Dir(a) != filepath.Dir(b) {
+		return false
+	}
+	left := localSplitPattern.FindStringSubmatch(filepath.Base(a))
+	right := localSplitPattern.FindStringSubmatch(filepath.Base(b))
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.EqualFold(left[1], right[1]) && left[3] == right[3]
+}
+
 func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 	root, err := filepath.Abs(s.modelsDir)
 	if err != nil {
@@ -292,6 +306,9 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		}
 		rel, err := filepath.Rel(root, absolute)
 		if err != nil {
+			continue
+		}
+		if sameLocalSplitSet(mainPath, rel) {
 			continue
 		}
 		summary, warning, err := s.cachedGGUFSummary(ctx, root, rel, info.Size(), info.ModTime().UnixNano(), index)
