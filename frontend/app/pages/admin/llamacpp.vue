@@ -16,7 +16,7 @@ async function load() {
   try {
     const result = await manager.request<{ profile?: Profile; effective: { global: Record<string, string> } }>('/api/v1/llamacpp/config')
     globalOptions.value = { ...(result.effective.global || {}) }
-    if (result.profile?.path && Array.isArray(result.profile.options)) profile.value = result.profile
+    profile.value = result.profile?.path && Array.isArray(result.profile.options) ? result.profile : null
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load llama.cpp configuration'
   } finally {

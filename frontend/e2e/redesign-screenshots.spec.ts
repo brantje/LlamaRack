@@ -6,6 +6,9 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const llamaCppMissingProfilePages = new WeakSet<Page>()
+const llamaCppPopulatedDefaultsPages = new WeakSet<Page>()
+const llamaCppSaveFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -297,6 +300,22 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (llamaCppMissingProfilePages.has(page) && url.pathname === '/api/v1/llamacpp/profile' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ available: false, profile: null }) })
+      return
+    }
+    if (llamaCppMissingProfilePages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ effective: { global: {}, values: {}, sources: {} } }) })
+      return
+    }
+    if (llamaCppPopulatedDefaultsPages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ profile: llamaProfile, effective: { global: { 'ctx-size': '32768', parallel: '4', 'flash-attn': 'true' }, values: {}, sources: {} } }) })
+      return
+    }
+    if (llamaCppSaveFailurePages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'PUT') {
+      await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative llama.cpp defaults validation failure for visual QA.' }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -433,6 +452,37 @@ test('model details expanded metadata screenshot', async ({ page }, testInfo) =>
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
 })
 
+
+
+test('Administration llama.cpp populated defaults screenshot', async ({ page }, testInfo) => {
+  llamaCppPopulatedDefaultsPages.add(page)
+  await page.goto('/admin/llamacpp', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="admin-global-default-row"]')).toHaveCount(3)
+  await expect(page.locator('[data-testid="admin-llamacpp-capabilities"]')).toContainText('b6124')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-populated-defaults.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('Administration llama.cpp unavailable binary screenshot', async ({ page }, testInfo) => {
+  llamaCppMissingProfilePages.add(page)
+  await page.goto('/admin/llamacpp', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="llamacpp-unavailable-warning"]')).toContainText('llama-server could not be discovered')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-unavailable.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('Administration llama.cpp save failure screenshot', async ({ page }, testInfo) => {
+  llamaCppPopulatedDefaultsPages.add(page)
+  llamaCppSaveFailurePages.add(page)
+  await page.goto('/admin/llamacpp', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="admin-global-default-row"]')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Save defaults' }).click()
+  await expect(page.getByText('Representative llama.cpp defaults validation failure for visual QA.', { exact: true })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-save-failure.png`, fullPage: true, animations: 'disabled' })
+})
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await page.goto('/downloads', { waitUntil: 'domcontentloaded' })

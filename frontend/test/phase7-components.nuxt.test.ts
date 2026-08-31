@@ -305,7 +305,7 @@ describe('Phase 7 global llama.cpp administration', () => {
         if (loadMode === 'message') throw new Error('load exploded')
         if (loadMode === 'fallback') throw {}
         return {
-          profile: { options: editorProfile.options },
+          profile: { ...editorProfile, version: undefined },
           effective: { global: { 'ctx-size': '4096' }, model: {}, instance: {}, values: {}, sources: {} }
         }
       }
