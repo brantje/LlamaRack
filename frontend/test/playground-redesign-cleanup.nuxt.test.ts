@@ -17,6 +17,9 @@ describe('Playground redesign cleanup', () => {
     expect(source).toContain('<UChatReasoning')
     expect(source).toContain('<UChatPrompt')
     expect(source).toContain('<UChatPromptSubmit')
+    expect(source).toContain('<UFormField label="temperature">')
+    expect(source).toContain('<UFormField label="system prompt">')
+    expect(source).toContain('<AppConfirmationModal')
     expect(source).toContain('data-testid="playground-composer"')
     expect(source).toContain('data-testid="playground-attach-files"')
     expect(source).toContain('data-testid="playground-file-input"')
@@ -30,7 +33,7 @@ describe('Playground redesign cleanup', () => {
   })
 
   it('uses mono tabular typography for numeric parameters and diagnostics', () => {
-    expect(source.match(/class="mt-1 font-mono tabular-nums"/g)).toHaveLength(7)
+    expect(source.match(/class="font-mono tabular-nums"/g)).toHaveLength(21)
     expect(source).toContain('messageStats(message.id)')
     expect(source).toContain('class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums')
     expect(source).toContain('Prompt tokens</dt><dd class="font-mono tabular-nums"')

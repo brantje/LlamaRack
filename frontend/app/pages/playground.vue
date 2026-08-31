@@ -11,6 +11,15 @@ import {
   readFileAsDataUrl,
   threadPartsToApiContent
 } from '~/utils/playgroundMessageContent'
+import {
+  PLAYGROUND_GENERATING_PLACEHOLDER,
+  PLAYGROUND_TRUNCATION_WARNING,
+  type ChatDelta,
+  extractChatDelta,
+  isLengthFinishReason,
+  parseSSEDataLine,
+  playgroundEmptyContentFallback
+} from '~/utils/playgroundChatStream'
 import { isPartStreaming } from '@nuxt/ui/utils/ai'
 
 type Role = 'system' | 'user' | 'assistant'
@@ -18,7 +27,7 @@ type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 type MessageStats = { prompt: number; completion: number; rate?: number; ttft?: number }
 type FileChatPart = { type: 'file', url: string, mediaType: string, filename: string }
 type ChatPart = { type: 'text' | 'reasoning', text: string, state?: 'streaming' } | FileChatPart
-type ThreadMessage = { id: string, role: Role, parts: ChatPart[], stats?: MessageStats }
+type ThreadMessage = { id: string, role: Role, parts: ChatPart[], stats?: MessageStats, finishReason?: string }
 type PendingAttachment = {
   id: string
   file: File
@@ -77,6 +86,14 @@ const notice = ref('')
 const inFlight = ref(false)
 const phase = ref<'cold' | 'generating' | 'completed' | 'failed' | ''>('')
 const mobileParametersOpen = ref(false)
+const confirmation = ref<{ request: (options: {
+  title: string
+  description: string
+  confirmLabel?: string
+  cancelLabel?: string
+  confirmIntent?: 'primary' | 'secondary' | 'ghost'
+  confirmTone?: 'default' | 'destructive'
+}) => Promise<boolean> } | null>(null)
 let controller: AbortController | null = null
 
 const parameters = reactive<Parameters>({
@@ -100,6 +117,7 @@ const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
 const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
 const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Last request failed', '': '' }[phase.value]))
+const chatIndicatorLabel = computed(() => phase.value === 'cold' ? 'Cold start — autoload in progress' : PLAYGROUND_GENERATING_PLACEHOLDER)
 const chatStatus = computed<ChatStatus>(() => {
   if (inFlight.value) {
     const last = conversation.value.at(-1)
@@ -112,7 +130,7 @@ const chatMessages = computed(() => conversation.value.map(message => ({
   id: message.id,
   role: message.role,
   parts: message.parts.length
-    ? message.parts
+    ? message.parts.map(part => ({ ...part }))
     : [{ type: 'text' as const, text: '', state: inFlight.value && message.role === 'assistant' ? 'streaming' as const : undefined }]
 })))
 
@@ -202,10 +220,6 @@ function parameterBody(messages: ThreadMessage[] = conversation.value) {
 function syncRawRequest() {
   if (rawDirty.value || !selectedInstanceID.value) return
   rawRequest.value = JSON.stringify(parameterBody(), null, 2)
-}
-
-function validMessages(value: unknown) {
-  return parseBodyMessages(value).filter(item => item.role !== 'system')
 }
 
 function adoptBody(body: Record<string, any>) {
@@ -366,47 +380,81 @@ function clearConversation() {
   syncRawRequest()
 }
 
+async function requestClearConversation() {
+  const confirmed = await confirmation.value?.request({
+    title: 'Clear conversation',
+    description: 'This removes all messages, diagnostics, and the captured raw request/response from this Playground session. This cannot be undone.',
+    confirmLabel: 'Clear conversation',
+    confirmTone: 'destructive'
+  })
+  if (!confirmed) return
+  stop()
+  clearConversation()
+}
+
+function replaceAssistantMessage(index: number, message: ThreadMessage) {
+  conversation.value = [...conversation.value.slice(0, index), message, ...conversation.value.slice(index + 1)]
+}
+
 function appendAssistantPart(type: 'text' | 'reasoning', content: string) {
   const index = conversation.value.length - 1
   const current = conversation.value[index]
   if (current?.role !== 'assistant' || current.stats) return
-  const lastPart = current.parts.at(-1)
-  if (lastPart && (lastPart.type === 'text' || lastPart.type === 'reasoning') && lastPart.type === type && lastPart.state === 'streaming') {
-    lastPart.text += content
+  const parts = current.parts.map(part => ({ ...part }))
+  const streamingMatch = [...parts].reverse().find(part => (part.type === 'text' || part.type === 'reasoning') && part.type === type && part.state === 'streaming')
+  const emptyMatch = parts.find(part => (part.type === 'text' || part.type === 'reasoning') && part.type === type && !part.text)
+  const target = streamingMatch || emptyMatch
+  if (target && (target.type === 'text' || target.type === 'reasoning')) {
+    target.text += content
+    target.state = 'streaming'
   } else {
-    current.parts.push({ type, text: content, state: 'streaming' })
+    parts.push({ type, text: content, state: 'streaming' })
   }
-  conversation.value = [...conversation.value]
+  replaceAssistantMessage(index, { ...current, parts })
+}
+
+function setAssistantFinishReason(reason: string) {
+  const index = conversation.value.length - 1
+  const current = conversation.value[index]
+  if (current?.role !== 'assistant' || current.stats) return
+  replaceAssistantMessage(index, { ...current, finishReason: reason })
 }
 
 function finalizeStreamingParts() {
-  const current = conversation.value.at(-1)
+  const index = conversation.value.length - 1
+  const current = conversation.value[index]
   if (current?.role !== 'assistant') return
-  for (const part of current.parts) {
-    if ((part.type === 'text' || part.type === 'reasoning') && part.state === 'streaming') delete part.state
+  const parts = current.parts
+    .map(part => {
+      if ((part.type === 'text' || part.type === 'reasoning') && part.state === 'streaming') {
+        const next = { ...part }
+        delete next.state
+        return next
+      }
+      return { ...part }
+    })
+    .filter(part => part.type === 'file' || Boolean(part.text))
+  if (!parts.length && phase.value !== 'completed') {
+    conversation.value = conversation.value.slice(0, index)
+    return
   }
-  conversation.value = [...conversation.value]
+  replaceAssistantMessage(index, { ...current, parts })
 }
 
-function consumeChoicePayload(choice: any) {
-  const delta = choice?.delta ?? choice?.message
-  const content = delta?.content ?? choice?.message?.content ?? choice?.text
-  const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? choice?.message?.reasoning_content ?? choice?.message?.reasoning
-  if (typeof reasoning === 'string' && reasoning) appendAssistantPart('reasoning', reasoning)
-  if (typeof content === 'string' && content) appendAssistantPart('text', content)
+function applyChatDelta(delta: ChatDelta) {
+  if (delta.reasoning) appendAssistantPart('reasoning', delta.reasoning)
+  if (delta.text) appendAssistantPart('text', delta.text)
+  if (delta.finishReason) setAssistantFinishReason(delta.finishReason)
+}
+
+function consumeChoicePayload(choice: unknown) {
+  applyChatDelta(extractChatDelta(choice))
 }
 
 function consumeSSELine(line: string) {
-  const trimmed = line.trim()
-  if (!trimmed.startsWith('data:')) return
-  const payload = trimmed.slice(5).trim()
-  if (!payload || payload === '[DONE]') return
-  try {
-    const event = JSON.parse(payload)
-    consumeChoicePayload(event?.choices?.[0])
-  } catch {
-    // Raw response remains available for malformed/non-OpenAI-compatible frames.
-  }
+  const delta = parseSSEDataLine(line)
+  if (!delta) return
+  applyChatDelta(delta)
 }
 
 async function readStreamingResponse(response: Response) {
@@ -426,9 +474,11 @@ async function readStreamingResponse(response: Response) {
     const lines = pending.split(/\r?\n/)
     pending = lines.pop() || ''
     for (const line of lines) consumeSSELine(line)
+    await nextTick()
   }
   pending += decoder.decode()
   if (pending) consumeSSELine(pending)
+  await nextTick()
 }
 
 function responseErrorMessage(response: Response, body: string) {
@@ -494,13 +544,12 @@ async function send() {
   }
   selectedInstanceID.value = target.id
 
-  conversation.value.push(toThreadMessage('assistant', [], nextMessageId('assistant')))
+  conversation.value.push(toThreadMessage('assistant', [{ type: 'text', text: '', state: 'streaming' }], nextMessageId('assistant')))
   composer.value = ''
   clearAttachments()
   rawResponse.value = ''
   responseHeaders.value = []
   diagnostics.value = null
-  activePanel.value = 'response'
   inFlight.value = true
   phase.value = manager.instanceState(target) === 'READY' ? 'generating' : 'cold'
   controller = new AbortController()
@@ -520,6 +569,7 @@ async function send() {
     requestID = response.headers.get('X-LlamaCPP-Manager-Request-ID') || ''
 
     if (!response.ok) {
+      activePanel.value = 'response'
       const text = await response.text()
       rawResponse.value = text
       error.value = responseErrorMessage(response, text)
@@ -568,6 +618,28 @@ function messageStats(id: string) {
 
 function messageContentParts(parts: ChatPart[]) {
   return parts.filter(part => part.type === 'text' || part.type === 'reasoning')
+}
+
+function assistantHasText(parts: ChatPart[]) {
+  return parts.some(part => part.type === 'text' && part.text)
+}
+
+function assistantHasReasoning(parts: ChatPart[]) {
+  return parts.some(part => part.type === 'reasoning' && part.text)
+}
+
+function generatingPlaceholder(message: { role: string, parts: ChatPart[] }) {
+  if (message.role !== 'assistant' || !inFlight.value || assistantHasText(message.parts) || assistantHasReasoning(message.parts)) return ''
+  return PLAYGROUND_GENERATING_PLACEHOLDER
+}
+
+function emptyContentFallback(message: { role: string, parts: ChatPart[] }) {
+  if (message.role !== 'assistant' || inFlight.value || assistantHasText(message.parts) || phase.value !== 'completed') return ''
+  return playgroundEmptyContentFallback(assistantHasReasoning(message.parts))
+}
+
+function messageTruncated(id: string) {
+  return isLengthFinishReason(conversation.value.find(item => item.id === id)?.finishReason)
 }
 
 function formatMS(value?: number) {
@@ -629,17 +701,15 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex min-h-[calc(100dvh-12rem)] flex-col gap-4" data-testid="playground-page">
     <header class="shrink-0 border-b border-[var(--color-divider)] pb-4">
-      <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div class="flex flex-wrap items-center gap-2">
-          <h1 class="min-w-0 truncate font-mono text-[length:var(--font-size-h5)] font-semibold text-[var(--neutral-900)] sm:text-[length:var(--font-size-h4)]" :title="selectedInstance?.id || undefined">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
-          <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState === 'READY' ? 'Instance READY' : runtimeState }}</StatusTag>
-          <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : phase === 'failed' ? 'failed' : 'pending'">{{ phaseLabel }}</StatusTag>
+        <div class="flex flex-col gap-1">
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
+          <p class="text-xs text-[var(--neutral-700)]">Exercise an Instance through the real gateway.</p>
         </div>
         <div class="flex flex-wrap gap-1">
           <AppButton intent="ghost" size="sm" @click="copyText(curlExample, 'curl')">Copy as curl</AppButton>
           <AppButton intent="ghost" size="sm" @click="copyText(sdkExample, 'SDK example')">Copy SDK example</AppButton>
-          <AppButton intent="ghost" size="sm" @click="clearConversation">Clear conversation</AppButton>
+          <AppButton intent="ghost" size="sm" data-testid="playground-clear-conversation" @click="requestClearConversation">Clear conversation</AppButton>
         </div>
       </div>
     </header>
@@ -656,6 +726,7 @@ onBeforeUnmount(() => {
           <div class="flex min-w-0 items-center gap-2">
             <USelect :model-value="selectedInstanceID" :items="instanceOptions" value-key="value" class="min-w-0 flex-1 font-mono" aria-label="Playground Instance" data-testid="playground-mobile-instance" @update:model-value="selectInstance" />
             <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
+            <StatusTag v-if="inFlight && phaseLabel" variant="pending" data-testid="playground-mobile-phase">{{ phaseLabel }}</StatusTag>
             <AppButton intent="secondary" size="sm" data-testid="playground-mobile-parameters-toggle" :aria-expanded="mobileParametersOpen" @click="mobileParametersOpen = !mobileParametersOpen">Parameters</AppButton>
           </div>
           <div v-if="mobileParametersOpen" class="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--color-divider)] pt-3" data-testid="playground-mobile-quick-parameters">
@@ -690,10 +761,13 @@ onBeforeUnmount(() => {
             :status="chatStatus"
             should-auto-scroll
             :assistant="{ side: 'left', variant: 'naked' }"
-            :user="{ side: 'right', variant: 'soft' }"
+            :user="{ side: 'right', variant: 'solid', ui: { content: 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' } }"
             class="min-h-0 flex-1"
             data-testid="playground-chat-messages"
           >
+            <template #indicator>
+              <p class="text-sm text-[var(--neutral-800)]" data-testid="playground-chat-indicator">{{ chatIndicatorLabel }}</p>
+            </template>
             <template #files="{ parts }">
               <img
                 v-for="(part, index) in parts"
@@ -712,14 +786,30 @@ onBeforeUnmount(() => {
                   v-if="part.type === 'reasoning'"
                   :text="part.text"
                   :streaming="isPartStreaming(part)"
+                  data-testid="playground-reasoning"
                 />
                 <p
-                  v-else-if="part.type === 'text'"
+                  v-else-if="part.type === 'text' && (part.text || generatingPlaceholder(message))"
                   class="whitespace-pre-wrap text-sm leading-6"
+                  :data-testid="message.role === 'assistant' ? 'playground-assistant-text' : 'playground-user-text'"
                 >
-                  {{ part.text || (message.role === 'assistant' && inFlight ? '…' : '') }}
+                  {{ part.text || generatingPlaceholder(message) }}
                 </p>
               </template>
+              <p
+                v-if="emptyContentFallback(message)"
+                class="whitespace-pre-wrap text-sm leading-6 text-[var(--neutral-800)]"
+                data-testid="playground-empty-content"
+              >
+                {{ emptyContentFallback(message) }}
+              </p>
+              <p
+                v-if="messageTruncated(message.id)"
+                class="mt-2 text-xs leading-5 text-[var(--neutral-800)]"
+                data-testid="playground-truncation-warning"
+              >
+                {{ PLAYGROUND_TRUNCATION_WARNING }}
+              </p>
               <p
                 v-if="message.role === 'assistant' && messageStats(message.id)"
                 class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]"
@@ -815,11 +905,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="grid grid-cols-3 border-b border-[var(--color-divider)]">
+          <div class="grid grid-cols-3 border-b border-[var(--color-divider)]" role="tablist" aria-label="Playground inspector">
             <button
               v-for="item in panelItems"
               :key="item.id"
               type="button"
+              role="tab"
+              :aria-selected="activePanel === item.id"
               class="border-r border-[var(--color-divider)] px-2 py-2 text-[length:var(--font-size-table-header)] font-semibold last:border-r-0"
               :class="activePanel === item.id ? 'bg-[var(--accent-100)] text-[var(--accent-800)]' : 'text-[var(--neutral-700)]'"
               @click="activePanel = item.id"
@@ -830,19 +922,19 @@ onBeforeUnmount(() => {
 
           <div v-if="activePanel === 'parameters'" class="space-y-4 p-4" data-testid="playground-parameters">
             <div class="grid grid-cols-2 gap-3">
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">temperature<UInput v-model.number="parameters.temperature" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">top_p<UInput v-model.number="parameters.topP" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">max_tokens<UInput v-model.number="parameters.maxTokens" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">seed<UInput v-model="parameters.seed" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">top_k<UInput v-model.number="parameters.topK" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">min_p<UInput v-model.number="parameters.minP" type="number" step="0.01" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">repeat_penalty<UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">stop<UInput v-model="parameters.stop" class="mt-1 font-mono" placeholder="one, two" /></label>
+              <UFormField label="temperature"><UInput v-model.number="parameters.temperature" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="top_p"><UInput v-model.number="parameters.topP" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="max_tokens"><UInput v-model.number="parameters.maxTokens" type="number" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="seed"><UInput v-model="parameters.seed" type="number" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="top_k"><UInput v-model.number="parameters.topK" type="number" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="min_p"><UInput v-model.number="parameters.minP" type="number" step="0.01" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="repeat_penalty"><UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+              <UFormField label="stop"><UInput v-model="parameters.stop" class="font-mono" placeholder="one, two" /></UFormField>
             </div>
             <UCheckbox v-model="parameters.stream" label="stream" />
-            <label class="block text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">system prompt
-              <textarea v-model="parameters.systemPrompt" class="mt-1 min-h-28 w-full resize-y border border-[var(--color-divider)] bg-transparent p-2 font-mono text-[length:var(--font-size-h6)] outline-none focus:border-[var(--color-accent)]" />
-            </label>
+            <UFormField label="system prompt">
+              <UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" />
+            </UFormField>
           </div>
 
           <div v-else-if="activePanel === 'request'" class="space-y-4 p-4" data-testid="playground-request">
@@ -896,5 +988,6 @@ onBeforeUnmount(() => {
     </div>
 
     <p class="shrink-0 border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
+    <AppConfirmationModal ref="confirmation" />
   </div>
 </template>

@@ -110,6 +110,9 @@ describe('Playground', () => {
 
     expect(wrapper.text()).toContain('Hello world')
     expect(wrapper.text()).toContain('12 prompt · 24 completion · 32.00 tok/s · ttft 150 ms')
+    expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="playground-model-name"]').text()).toBe('Qwen Coder')
+    await button(wrapper, 'Response').trigger('click')
     expect(wrapper.text()).toContain('UNLOADED → STARTING → READY')
     expect(wrapper.text()).toContain('yes — autoload')
     expect(wrapper.text()).toContain('victim-a')
@@ -172,6 +175,7 @@ describe('Playground', () => {
     await flushPromises()
     expect(seenSignal?.aborted).toBe(true)
     expect(wrapper.text()).toContain('Request stopped.')
+    expect(wrapper.find('[data-testid="playground-empty-content"]').exists()).toBe(false)
     expect(promptSubmit(wrapper).exists()).toBe(true)
     wrapper.unmount()
   })
