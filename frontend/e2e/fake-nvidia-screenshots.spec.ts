@@ -68,7 +68,7 @@ test('system diagnostics render against fake-nvidia manager', async ({ page }, t
   await page.goto('/admin/system', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('#dashboard-panel-manager-main')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('heading', { name: 'System' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'llama.cpp', exact: true })).toBeVisible()
+  await expect(page.getByTestId('admin-system-llamacpp').getByRole('heading', { name: 'llama.cpp' })).toBeVisible()
   await prepareFullPageScreenshot(page)
   await page.screenshot({
     path: `artifacts/ux-screenshots/fake-nvidia/${testInfo.project.name}/admin-system.png`,

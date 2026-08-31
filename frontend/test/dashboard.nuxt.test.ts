@@ -93,6 +93,7 @@ describe('Phase 11 Dashboard', () => {
       }
       if (path.startsWith('/api/v1/observability/requests')) {
         return { items: [
+          { id: 3, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', endpoint: '/v1/chat/completions', api_key: { id: 'k1', name: 'Primary key', prefix: 'pk_live' }, streaming: false, status_code: 500, result: 'error', duration_ms: 220, prompt_tokens: 8, generated_tokens: 0, total_tokens: 8, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false, error: 'context length exceeded' },
           { id: 2, started_at: Date.now(), finished_at: Date.now(), instance_id: 'broken', endpoint: '/v1/chat/completions', api_key: { id: 'k2', name: 'CI key', prefix: 'pk_ci' }, streaming: false, status_code: 503, result: 'error', duration_ms: 41, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 5, load_duration_ms: 5, autoloaded: true, error: 'worker unavailable' },
           { id: 1, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', endpoint: '/v1/chat/completions', api_key: { id: 'k1', name: 'Primary key', prefix: 'pk_live' }, streaming: true, status_code: 200, result: 'success', duration_ms: 1840, prompt_tokens: 10, generated_tokens: 20, total_tokens: 30, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false }
         ] }
@@ -128,7 +129,10 @@ describe('Phase 11 Dashboard', () => {
     expect(wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()).toContain('1.84 s')
     const attention = wrapper.get('[data-testid="dashboard-attention"]').text()
     expect(attention).toContain('broken failed to start')
-    expect(attention).toContain('worker unavailable')
+    expect(attention).toContain('coder returned 500')
+    expect(attention).toContain('context length exceeded')
+    expect(attention).not.toContain('returned 503')
+    expect(attention).not.toContain('worker unavailable')
     expect(attention).toContain('CUDA0 is at 96% VRAM')
 
     manager.observabilityLive.value = {
