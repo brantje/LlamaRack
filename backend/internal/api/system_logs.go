@@ -50,7 +50,7 @@ func (h *systemLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func systemLogLimit(r *http.Request) (int, bool) {
-	limit := 1000
+	limit := 100
 	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
 	if raw == "" {
 		return limit, true
@@ -112,18 +112,16 @@ func (h *systemLogHandler) stream(w http.ResponseWriter, r *http.Request, limit 
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	writeEntry := func(entry systemlog.Entry) bool {
-		payload, err := json.Marshal(entry)
+	writeEvent := func(name string, value any) bool {
+		payload, err := json.Marshal(value)
 		if err != nil {
 			return false
 		}
-		_, err = fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload)
+		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, payload)
 		return err == nil
 	}
-	for _, entry := range filterSystemLogEntries(snapshot, level, source, query) {
-		if !writeEntry(entry) {
-			return
-		}
+	if !writeEvent("snapshot", filterSystemLogEntries(snapshot, level, source, query)) {
+		return
 	}
 	_, _ = w.Write([]byte(": connected\n\n"))
 	flusher.Flush()
@@ -140,7 +138,7 @@ func (h *systemLogHandler) stream(w http.ResponseWriter, r *http.Request, limit 
 			if !systemLogMatches(entry, level, source, query) {
 				continue
 			}
-			if !writeEntry(entry) {
+			if !writeEvent("log", entry) {
 				return
 			}
 			flusher.Flush()

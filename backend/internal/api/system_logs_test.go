@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,7 +70,36 @@ func TestSystemLogStream(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/logs/stream?scope=system&source=manager&limit=10", nil).WithContext(ctx)
 	NewSystemLogHandler(store).ServeHTTP(w, r)
-	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/event-stream" || !strings.Contains(w.Body.String(), "event: log") || !strings.Contains(w.Body.String(), `"message":"old"`) || !strings.Contains(w.Body.String(), ": connected") {
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/event-stream" || !strings.Contains(w.Body.String(), "event: snapshot") || !strings.Contains(w.Body.String(), `"message":"old"`) || !strings.Contains(w.Body.String(), ": connected") {
 		t.Fatalf("stream=%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSystemLogDefaultLimitKeepsLastHundredPerSource(t *testing.T) {
+	store := systemlog.New(500)
+	for i := 0; i < 150; i++ {
+		store.Add(systemlog.Info, "manager", fmt.Sprintf("m-%d", i))
+		store.Add(systemlog.Info, "gateway", fmt.Sprintf("g-%d", i))
+	}
+	w := httptest.NewRecorder()
+	NewSystemLogHandler(store).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs?scope=system", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Entries []systemlog.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, entry := range body.Entries {
+		counts[entry.Source]++
+	}
+	if len(body.Entries) != 200 || counts["manager"] != 100 || counts["gateway"] != 100 {
+		t.Fatalf("entries=%d counts=%v first=%+v last=%+v", len(body.Entries), counts, body.Entries[0], body.Entries[len(body.Entries)-1])
+	}
+	if body.Entries[0].Message != "m-50" || body.Entries[1].Message != "g-50" || body.Entries[len(body.Entries)-1].Message != "g-149" {
+		t.Fatalf("window first=%s %s last=%s", body.Entries[0].Message, body.Entries[1].Message, body.Entries[len(body.Entries)-1].Message)
 	}
 }

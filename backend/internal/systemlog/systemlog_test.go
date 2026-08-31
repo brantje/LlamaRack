@@ -1,6 +1,7 @@
 package systemlog
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -13,7 +14,7 @@ func TestStoreBoundsTimestampsAndSubscriptions(t *testing.T) {
 	store.Add(Warn, "gateway", "second")
 	initial, events, cancel := store.Subscribe(1)
 	defer cancel()
-	if len(initial) != 1 || initial[0].Message != "second" {
+	if len(initial) != 2 || initial[0].Message != "first" || initial[1].Message != "second" {
 		t.Fatalf("initial=%+v", initial)
 	}
 	store.Add(Debug, "telemetry", "third")
@@ -57,5 +58,30 @@ func TestStoreValidationResetAndDurationFormatting(t *testing.T) {
 	cancel()
 	if _, open := <-ch; open {
 		t.Fatal("nil subscription should be closed")
+	}
+}
+
+func TestStoreSnapshotKeepsLastNPerSource(t *testing.T) {
+	store := New(20)
+	for i := 1; i <= 4; i++ {
+		store.Add(Info, "manager", "m"+strconv.Itoa(i))
+		store.Add(Warn, "gateway", "g"+strconv.Itoa(i))
+	}
+	got := store.Snapshot(2)
+	if len(got) != 4 || got[0].Message != "m3" || got[1].Message != "g3" || got[2].Message != "m4" || got[3].Message != "g4" {
+		t.Fatalf("snapshot=%+v", got)
+	}
+	initial, _, cancel := store.Subscribe(2)
+	defer cancel()
+	if len(initial) != 4 || initial[0].Message != "m3" || initial[3].Message != "g4" {
+		t.Fatalf("subscribe=%+v", initial)
+	}
+	if got := store.Snapshot(0); len(got) != 0 {
+		t.Fatalf("zero limit=%+v", got)
+	}
+	full, _, cancelAll := store.Subscribe(0)
+	cancelAll()
+	if len(full) != 8 || full[0].Message != "m1" || full[7].Message != "g4" {
+		t.Fatalf("unlimited subscribe=%+v", full)
 	}
 }

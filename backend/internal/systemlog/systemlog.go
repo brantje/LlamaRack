@@ -79,13 +79,7 @@ func (s *Store) Snapshot(limit int) []Entry {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	start := 0
-	if len(s.data) > limit {
-		start = len(s.data) - limit
-	}
-	out := make([]Entry, len(s.data)-start)
-	copy(out, s.data[start:])
-	return out
+	return lastPerSource(s.data, limit)
 }
 
 func (s *Store) Subscribe(limit int) ([]Entry, <-chan Entry, func()) {
@@ -95,12 +89,13 @@ func (s *Store) Subscribe(limit int) ([]Entry, <-chan Entry, func()) {
 		return []Entry{}, ch, func() {}
 	}
 	s.mu.Lock()
-	start := 0
-	if limit > 0 && len(s.data) > limit {
-		start = len(s.data) - limit
+	var snapshot []Entry
+	if limit > 0 {
+		snapshot = lastPerSource(s.data, limit)
+	} else {
+		snapshot = make([]Entry, len(s.data))
+		copy(snapshot, s.data)
 	}
-	snapshot := make([]Entry, len(s.data)-start)
-	copy(snapshot, s.data[start:])
 	ch := make(chan Entry, 256)
 	s.subs[ch] = struct{}{}
 	s.mu.Unlock()
@@ -123,6 +118,30 @@ func (s *Store) Reset() {
 	s.mu.Lock()
 	s.data = nil
 	s.mu.Unlock()
+}
+
+func lastPerSource(entries []Entry, limit int) []Entry {
+	if limit <= 0 || len(entries) == 0 {
+		return []Entry{}
+	}
+	counts := make(map[string]int)
+	keep := make([]bool, len(entries))
+	kept := 0
+	for i := len(entries) - 1; i >= 0; i-- {
+		source := entries[i].Source
+		if counts[source] < limit {
+			keep[i] = true
+			counts[source]++
+			kept++
+		}
+	}
+	out := make([]Entry, 0, kept)
+	for i, entry := range entries {
+		if keep[i] {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func validLevel(level Level) bool {

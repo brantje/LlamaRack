@@ -9,13 +9,14 @@ type SystemLogEntry = {
 
 type LogResponse = { entries: SystemLogEntry[] }
 
+const snapshotLimit = 100
 const manager = useManager()
 const route = useRoute()
 const entries = ref<SystemLogEntry[]>([])
 const selectedLevel = ref<'ALL' | 'INFO' | 'WARN' | 'DEBUG'>('ALL')
 const selectedSource = ref('all')
 const grep = ref('')
-const follow = ref(true)
+const autoScroll = ref(true)
 const loading = ref(false)
 const error = ref('')
 const output = ref<HTMLElement | null>(null)
@@ -62,6 +63,21 @@ function validEntry(value: unknown): value is SystemLogEntry {
     && !Number.isNaN(Date.parse(candidate.timestamp))
 }
 
+function lastPerSource(list: SystemLogEntry[], limit: number) {
+  const counts = new Map<string, number>()
+  const keep: SystemLogEntry[] = []
+  for (let index = list.length - 1; index >= 0; index--) {
+    const entry = list[index]!
+    const seen = counts.get(entry.source) || 0
+    if (seen < limit) {
+      keep.push(entry)
+      counts.set(entry.source, seen + 1)
+    }
+  }
+  keep.reverse()
+  return keep
+}
+
 function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -76,7 +92,7 @@ function levelClass(level: LogLevel) {
 }
 
 async function scrollToTail() {
-  if (!follow.value) return
+  if (!autoScroll.value) return
   await nextTick()
   if (!output.value) return
   programmaticScroll = true
@@ -84,15 +100,20 @@ async function scrollToTail() {
   requestAnimationFrame(() => { programmaticScroll = false })
 }
 
+function applySnapshot(list: unknown) {
+  entries.value = lastPerSource(Array.isArray(list) ? list.filter(validEntry) : [], snapshotLimit)
+  void scrollToTail()
+}
+
 function append(entry: SystemLogEntry) {
-  entries.value = [...entries.value, entry].slice(-4000)
+  entries.value = lastPerSource([...entries.value, entry], snapshotLimit)
   void scrollToTail()
 }
 
 function onScroll() {
   if (!output.value || programmaticScroll) return
   const remaining = output.value.scrollHeight - output.value.scrollTop - output.value.clientHeight
-  if (remaining > 24) follow.value = false
+  if (remaining > 24) autoScroll.value = false
 }
 
 function closeStream() {
@@ -105,9 +126,8 @@ async function loadSnapshot() {
   loading.value = true
   error.value = ''
   try {
-    const response = await manager.request<LogResponse>('/api/v1/logs?scope=system&limit=4000')
-    entries.value = Array.isArray(response?.entries) ? response.entries.filter(validEntry) : []
-    await scrollToTail()
+    const response = await manager.request<LogResponse>(`/api/v1/logs?scope=system&limit=${snapshotLimit}`)
+    applySnapshot(response?.entries)
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load manager logs'
   } finally {
@@ -142,13 +162,22 @@ async function connectStream() {
     return
   }
 
-  const url = `${manager.apiBase.value}/api/v1/logs/stream?scope=system&limit=4000&ticket=${encodeURIComponent(ticket)}`
+  const url = `${manager.apiBase.value}/api/v1/logs/stream?scope=system&limit=${snapshotLimit}&ticket=${encodeURIComponent(ticket)}`
   const nextStream = new EventSource(url)
   stream = nextStream
   nextStream.onopen = () => {
     if (stream !== nextStream) return
     loading.value = false
   }
+  nextStream.addEventListener('snapshot', (event) => {
+    if (stream !== nextStream) return
+    loading.value = false
+    try {
+      applySnapshot(JSON.parse((event as MessageEvent).data))
+    } catch {
+      applySnapshot([])
+    }
+  })
   nextStream.addEventListener('log', (event) => {
     if (stream !== nextStream) return
     loading.value = false
@@ -168,7 +197,7 @@ async function connectStream() {
   }
 }
 
-watch(follow, (enabled) => {
+watch(autoScroll, (enabled) => {
   if (enabled) void scrollToTail()
 })
 
@@ -205,8 +234,8 @@ onBeforeUnmount(closeStream)
             {{ level === 'ALL' ? 'All' : level === 'WARN' ? 'WARN+' : level }}
           </UButton>
         </div>
-        <UCheckbox v-model="follow" label="Follow" data-testid="system-log-follow" />
-        <div v-if="!follow && entries.length" class="flex items-center gap-1" data-testid="system-log-follow-paused"><StatusTag variant="neutral">Follow paused</StatusTag><AppButton intent="ghost" size="xs" @click="follow = true">Resume</AppButton></div>
+        <UCheckbox v-model="autoScroll" label="Auto-scroll" data-testid="system-log-auto-scroll" />
+        <div v-if="!autoScroll && entries.length" class="flex items-center gap-1" data-testid="system-log-auto-scroll-paused"><StatusTag variant="neutral">Auto-scroll paused</StatusTag><AppButton intent="ghost" size="xs" @click="autoScroll = true">Resume</AppButton></div>
       </div>
     </template>
 

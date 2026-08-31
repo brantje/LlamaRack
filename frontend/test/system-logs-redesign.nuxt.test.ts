@@ -80,7 +80,7 @@ afterEach(() => {
 })
 
 describe('Administration system logs', () => {
-  it('renders diagnostics, composes level/source/grep filters and disables Follow after manual scroll', async () => {
+  it('renders diagnostics, composes level/source/grep filters and disables Auto-scroll after manual scroll', async () => {
     vi.stubGlobal('EventSource', undefined)
     mocks.request.mockResolvedValue({ entries: [
       log('INFO', 'manager', 'reconcile: 1 Always On Instance satisfied'),
@@ -95,7 +95,7 @@ describe('Administration system logs', () => {
     const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=qwen-coder-ci' })
     await flushPromises()
 
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=4000')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=100')
     expect(wrapper.text()).toContain('DIAGNOSTICS')
     expect(wrapper.text()).toContain('Logs')
     expect(wrapper.get('[data-testid="system-log-header-controls"]').text()).toContain('All')
@@ -163,15 +163,17 @@ describe('Administration system logs', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     expect(FakeEventSource.instances).toHaveLength(1)
     const first = FakeEventSource.instances[0]!
-    expect(first.url).toBe('http://manager.test:8888/api/v1/logs/stream?scope=system&limit=4000&ticket=ticket-1')
+    expect(first.url).toBe('http://manager.test:8888/api/v1/logs/stream?scope=system&limit=100&ticket=ticket-1')
 
     first.onopen?.(new Event('open'))
+    first.emit('snapshot', JSON.stringify([log('INFO', 'manager', 'manager history')]))
     first.emit('log', JSON.stringify(log('INFO', 'manager', 'manager ready')))
     first.emit('log', JSON.stringify(log('INFO', 'llama-70b-long', 'load_tensors: offloading 41/81 layers to GPU')))
     first.emit('log', '{bad json')
     first.emit('log', JSON.stringify(log('TRACE', 'manager', 'ignore invalid level')))
     await flushPromises()
-    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(3)
+    expect(wrapper.text()).toContain('manager history')
     expect(wrapper.text()).toContain('llama-70b-long')
     expect(wrapper.text()).not.toContain('ignore invalid level')
 
@@ -179,8 +181,10 @@ describe('Administration system logs', () => {
     await flushPromises()
     expect(first.closed).toBe(true)
     expect(wrapper.text()).toContain('Live log stream disconnected')
+    first.emit('snapshot', JSON.stringify([log('ERROR', 'stale', 'stale snapshot')]))
     first.emit('log', JSON.stringify(log('ERROR', 'stale', 'stale event')))
     await flushPromises()
+    expect(wrapper.text()).not.toContain('stale snapshot')
     expect(wrapper.text()).not.toContain('stale event')
 
     await button(wrapper, 'Reconnect').trigger('click')

@@ -66,7 +66,7 @@ describe('System diagnostics logs', () => {
     const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=worker-a' })
     await flushPromises()
 
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=4000')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?scope=system&limit=100')
     expect(wrapper.text()).toContain('DIAGNOSTICS')
     expect(wrapper.text()).toContain('Logs')
     const workerChip = button(wrapper, 'worker-a')
@@ -105,17 +105,26 @@ describe('System diagnostics logs', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     expect(FakeEventSource.instances).toHaveLength(1)
     const stream = FakeEventSource.instances[0]!
-    expect(stream.url).toBe('http://manager.test:8888/api/v1/logs/stream?scope=system&limit=4000&ticket=diag-ticket')
+    expect(stream.url).toBe('http://manager.test:8888/api/v1/logs/stream?scope=system&limit=100&ticket=diag-ticket')
     expect(button(wrapper, 'worker-b').attributes('aria-pressed')).toBe('true')
 
     stream.onopen?.(new Event('open'))
+    stream.emit('snapshot', '{bad snapshot')
+    stream.emit('snapshot', JSON.stringify({ entries: [log('INFO', 'worker-b', 'not an array')] }))
+    stream.emit('snapshot', JSON.stringify([
+      log('INFO', 'worker-b', 'history line'),
+      log('TRACE', 'worker-b', 'ignored history'),
+      { timestamp: 'not-a-date', level: 'INFO', source: 'worker-b', message: 'bad history' }
+    ]))
     stream.emit('log', JSON.stringify(log('INFO', 'worker-b', 'worker online')))
     stream.emit('log', '{bad json')
     stream.emit('log', JSON.stringify({ ...log('INFO', 'worker-b', 'bad time'), timestamp: 'not-a-date' }))
     stream.emit('log', JSON.stringify(log('INFO', '', 'bad source')))
     await flushPromises()
+    expect(wrapper.text()).toContain('history line')
     expect(wrapper.text()).toContain('worker online')
-    expect(wrapper.text()).not.toContain('bad time')
+    expect(wrapper.text()).not.toContain('ignored history')
+    expect(wrapper.text()).not.toContain('bad history')
 
     stream.onerror?.(new Event('error'))
     await flushPromises()
@@ -129,7 +138,7 @@ describe('System diagnostics logs', () => {
     expect(FakeEventSource.instances[1]!.closed).toBe(true)
   })
 
-  it('covers stream authentication errors, empty tickets, follow scrolling and snapshot errors', async () => {
+  it('covers stream authentication errors, empty tickets, auto-scroll and snapshot errors', async () => {
     vi.stubGlobal('EventSource', FakeEventSource as any)
     mocks.request.mockRejectedValueOnce({ data: { error: 'ticket denied' } })
     const denied = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
@@ -165,11 +174,11 @@ describe('System diagnostics logs', () => {
     await flushPromises()
     const follow = scrolling.findComponent({ name: 'UCheckbox' })
     expect((follow.props() as any).modelValue).toBe(false)
-    expect(scrolling.text()).toContain('Follow paused')
+    expect(scrolling.text()).toContain('Auto-scroll paused')
     await button(scrolling, 'Resume').trigger('click')
     await flushPromises()
     expect((follow.props() as any).modelValue).toBe(true)
-    expect(scrolling.text()).not.toContain('Follow paused')
+    expect(scrolling.text()).not.toContain('Auto-scroll paused')
     scrolling.unmount()
   })
 
@@ -182,6 +191,31 @@ describe('System diagnostics logs', () => {
 
     expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('No log lines match this filter.')
+    wrapper.unmount()
+  })
+
+  it('keeps the last 100 lines per source when live logs continue after the snapshot', async () => {
+    vi.stubGlobal('EventSource', FakeEventSource as any)
+    mocks.request.mockResolvedValue({ ticket: 'cap-ticket' })
+
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs' })
+    await flushPromises()
+    const stream = FakeEventSource.instances[0]!
+    stream.emit('snapshot', JSON.stringify([
+      log('INFO', 'manager', 'manager seed'),
+      log('INFO', 'gateway', 'gateway seed')
+    ]))
+    for (let index = 0; index < 101; index++) {
+      stream.emit('log', JSON.stringify(log('INFO', 'manager', `manager line ${index}`)))
+    }
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="system-log-row"]').map((row: any) => row.text())
+    expect(rows.some((text: string) => text.includes('gateway seed'))).toBe(true)
+    expect(rows.some((text: string) => text.includes('manager line 100'))).toBe(true)
+    expect(rows.some((text: string) => text.includes('manager line 1'))).toBe(true)
+    expect(rows.some((text: string) => text.includes('manager seed'))).toBe(false)
+    expect(rows.some((text: string) => text.includes('manager line 0'))).toBe(false)
+    expect(rows.filter((text: string) => text.includes('manager line'))).toHaveLength(100)
     wrapper.unmount()
   })
 })
