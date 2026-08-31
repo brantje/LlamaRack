@@ -1,6 +1,7 @@
 package ggufmeta
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -97,26 +98,27 @@ func tensorPrefixPresent(path, prefix string) (bool, error) {
 		return false, err
 	}
 	defer f.Close()
+	r := bufio.NewReaderSize(f, metadataReadBufferSize)
 
 	var magic [4]byte
-	if _, err := io.ReadFull(f, magic[:]); err != nil {
+	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return false, err
 	}
 	if string(magic[:]) != "GGUF" {
 		return false, errors.New("GGUF metadata unavailable: invalid magic")
 	}
-	version, err := readU32(f)
+	version, err := readU32(r)
 	if err != nil {
 		return false, err
 	}
 	if version < 2 || version > 3 {
 		return false, fmt.Errorf("GGUF metadata unavailable: unsupported version %d", version)
 	}
-	tensorCount, err := readU64(f)
+	tensorCount, err := readU64(r)
 	if err != nil {
 		return false, err
 	}
-	metadataCount, err := readU64(f)
+	metadataCount, err := readU64(r)
 	if err != nil {
 		return false, err
 	}
@@ -125,24 +127,24 @@ func tensorPrefixPresent(path, prefix string) (bool, error) {
 	}
 
 	for i := uint64(0); i < metadataCount; i++ {
-		if _, err := readKey(f); err != nil {
+		if _, err := readKey(r); err != nil {
 			return false, err
 		}
-		typeID, err := readU32(f)
+		typeID, err := readU32(r)
 		if err != nil {
 			return false, err
 		}
-		if _, err := readValue(f, typeID); err != nil {
+		if _, err := readValue(r, typeID); err != nil {
 			return false, err
 		}
 	}
 
 	for i := uint64(0); i < tensorCount; i++ {
-		name, _, err := readString(f)
+		name, _, err := readString(r)
 		if err != nil {
 			return false, err
 		}
-		dimensions, err := readU32(f)
+		dimensions, err := readU32(r)
 		if err != nil {
 			return false, err
 		}
@@ -150,14 +152,14 @@ func tensorPrefixPresent(path, prefix string) (bool, error) {
 			return false, errors.New("GGUF tensor has unreasonable dimension count")
 		}
 		for dimension := uint32(0); dimension < dimensions; dimension++ {
-			if _, err := readU64(f); err != nil {
+			if _, err := readU64(r); err != nil {
 				return false, err
 			}
 		}
-		if _, err := readU32(f); err != nil { // ggml tensor type
+		if _, err := readU32(r); err != nil { // ggml tensor type
 			return false, err
 		}
-		if _, err := readU64(f); err != nil { // tensor data offset
+		if _, err := readU64(r); err != nil { // tensor data offset
 			return false, err
 		}
 		if strings.HasPrefix(name, prefix) {

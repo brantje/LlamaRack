@@ -1,6 +1,7 @@
 package ggufmeta
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -30,10 +31,10 @@ func ReadSummary(path string) (Summary, error) {
 		return Summary{}, err
 	}
 	defer f.Close()
-	return readSummary(f)
+	return readSummary(bufio.NewReaderSize(f, metadataReadBufferSize))
 }
 
-func readSummary(r io.ReadSeeker) (Summary, error) {
+func readSummary(r io.Reader) (Summary, error) {
 	var magic [4]byte
 	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return Summary{}, err
@@ -152,10 +153,9 @@ func summaryFeatures(derived Derived, values map[string]string) Features {
 	return features
 }
 
-func skipSummaryValue(r io.ReadSeeker, typeID uint32) error {
+func skipSummaryValue(r io.Reader, typeID uint32) error {
 	if size, ok := fixedSize(typeID); ok {
-		_, err := r.Seek(size, io.SeekCurrent)
-		return err
+		return skipBytes(r, size)
 	}
 	if typeID == 8 {
 		return skipSummaryString(r)
@@ -182,8 +182,7 @@ func skipSummaryValue(r io.ReadSeeker, typeID uint32) error {
 		if count > uint64(^uint64(0)>>1)/uint64(size) {
 			return errors.New("GGUF metadata array is too large to seek")
 		}
-		_, err := r.Seek(int64(count*uint64(size)), io.SeekCurrent)
-		return err
+		return skipBytes(r, int64(count*uint64(size)))
 	}
 	if elemType == 8 {
 		for i := uint64(0); i < count; i++ {
@@ -196,7 +195,7 @@ func skipSummaryValue(r io.ReadSeeker, typeID uint32) error {
 	return fmt.Errorf("unsupported array element type %d", elemType)
 }
 
-func skipSummaryString(r io.ReadSeeker) error {
+func skipSummaryString(r io.Reader) error {
 	n, err := readU64(r)
 	if err != nil {
 		return err
@@ -207,11 +206,10 @@ func skipSummaryString(r io.ReadSeeker) error {
 	if n > uint64(^uint64(0)>>1) {
 		return errors.New("GGUF metadata string is too large to seek")
 	}
-	_, err = r.Seek(int64(n), io.SeekCurrent)
-	return err
+	return skipBytes(r, int64(n))
 }
 
-func tensorPrefixPresentCurrent(r io.ReadSeeker, tensorCount uint64, prefix string) (bool, error) {
+func tensorPrefixPresentCurrent(r io.Reader, tensorCount uint64, prefix string) (bool, error) {
 	for i := uint64(0); i < tensorCount; i++ {
 		name, _, err := readString(r)
 		if err != nil {
