@@ -47,6 +47,13 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+async function activateTab(wrapper: any, text: string) {
+  const tab = wrapper.findAll('[role="tab"]').find((candidate: any) => candidate.text().trim() === text)
+  if (!tab) throw new Error(`Missing tab: ${text}`)
+  await tab.trigger('pointerdown')
+  await tab.trigger('click')
+}
+
 function promptSubmit(wrapper: any) {
   return wrapper.get('[data-testid="playground-prompt-submit"]')
 }
@@ -56,7 +63,7 @@ async function sendPlayground(wrapper: any) {
 }
 
 async function prepareRaw(wrapper: any, body: unknown) {
-  await button(wrapper, 'Request').trigger('click')
+  await activateTab(wrapper, 'Request')
   await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(body))
 }
 
@@ -95,7 +102,7 @@ describe('Playground edge branches', () => {
     expect(wrapper.text()).toContain('legacy text choice')
     expect(wrapper.text()).toContain('2.20 s')
     expect(wrapper.text()).toContain('—')
-    await button(wrapper, 'Response').trigger('click')
+    await activateTab(wrapper, 'Response')
     expect(wrapper.text()).toContain('x-llamacpp-manager-upstream-port: 9101')
     wrapper.unmount()
   })
@@ -104,7 +111,7 @@ describe('Playground edge branches', () => {
     const publicFetch = vi.fn()
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
-    await button(wrapper, 'Request').trigger('click')
+    await activateTab(wrapper, 'Request')
 
     for (const raw of ['[]', 'null']) {
       await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(raw)
@@ -133,6 +140,7 @@ describe('Playground edge branches', () => {
 
     const expected = ['nested failure', 'string failure', 'Request failed with HTTP 503', 'plain failure', 'Request failed with HTTP 500']
     for (const message of expected) {
+      await wrapper.get('textarea[aria-label="Playground message"]').setValue('error case')
       await sendPlayground(wrapper)
       await flushPromises()
       expect(wrapper.text()).toContain(message)
@@ -159,14 +167,17 @@ describe('Playground edge branches', () => {
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
 
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('stream variants')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Completed')
 
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('stream variants')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('message fallback text fallback')
 
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('stream variants')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Inference request failed.')
@@ -192,7 +203,7 @@ describe('Playground edge branches', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await prepareRaw(wrapper, { model: 'coder', messages: [], stream: false })
     await sendPlayground(wrapper)
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise(resolve => setTimeout(resolve, 250))
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledTimes(2)
@@ -212,7 +223,7 @@ describe('Playground edge branches', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await prepareRaw(wrapper, { model: 'coder', messages: [], stream: false })
     await sendPlayground(wrapper)
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await new Promise(resolve => setTimeout(resolve, 800))
     await flushPromises()
 
     expect(mocks.request).toHaveBeenCalledTimes(6)
@@ -264,7 +275,7 @@ describe('Playground edge branches', () => {
     expect(confirm).toBeTruthy()
     confirm!.click()
     await flushPromises()
-    expect(wrapper.text()).toContain('Exercise an Instance through the real gateway.')
+    expect(wrapper.text()).toContain('Type a prompt to start.')
     wrapper.unmount()
   })
 

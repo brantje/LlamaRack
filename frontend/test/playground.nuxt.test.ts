@@ -34,6 +34,13 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+async function activateTab(wrapper: any, text: string) {
+  const tab = wrapper.findAll('[role="tab"]').find((candidate: any) => candidate.text().trim() === text)
+  if (!tab) throw new Error(`Missing tab: ${text}`)
+  await tab.trigger('pointerdown')
+  await tab.trigger('click')
+}
+
 function promptSubmit(wrapper: any) {
   return wrapper.get('[data-testid="playground-prompt-submit"]')
 }
@@ -87,12 +94,10 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('PLAYGROUND')
     expect(wrapper.text()).toContain('This Instance is not loaded — sending will trigger autoload through the gateway.')
     expect(wrapper.find('#playground-api-key').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="playground-mobile-controls"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="playground-thread-chrome"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="playground-mobile-quick-parameters"]').exists()).toBe(false)
-    await wrapper.get('[data-testid="playground-mobile-parameters-toggle"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-testid="playground-mobile-quick-parameters"]').text()).toContain('Quick controls stay beside the composer on mobile.')
-    expect(wrapper.get('[data-testid="playground-mobile-parameters-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('[data-testid="playground-mobile-parameters-toggle"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="playground-empty-state"]').text()).toContain('Type a prompt to start.')
 
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('Explain this code')
     await sendPlayground(wrapper)
@@ -109,10 +114,10 @@ describe('Playground', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/playground/req-1')
 
     expect(wrapper.text()).toContain('Hello world')
-    expect(wrapper.text()).toContain('12 prompt · 24 completion · 32.00 tok/s · ttft 150 ms')
+    expect(wrapper.text()).toContain('12 prompt · 24 completion (incl. reasoning) · 32.00 tok/s · ttft 150 ms')
     expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="playground-model-name"]').text()).toBe('Qwen Coder')
-    await button(wrapper, 'Response').trigger('click')
+    await activateTab(wrapper, 'Response')
     expect(wrapper.text()).toContain('UNLOADED → STARTING → READY')
     expect(wrapper.text()).toContain('yes — autoload')
     expect(wrapper.text()).toContain('victim-a')
@@ -134,7 +139,7 @@ describe('Playground', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
-    await button(wrapper, 'Request').trigger('click')
+    await activateTab(wrapper, 'Request')
     const raw = {
       model: 'coder',
       messages: [{ role: 'system', content: 'Be terse' }, { role: 'user', content: 'from raw JSON' }],
@@ -169,7 +174,7 @@ describe('Playground', () => {
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('long response')
     await sendPlayground(wrapper)
     await flushPromises()
-    expect(promptSubmit(wrapper).exists()).toBe(true)
+    expect(promptSubmit(wrapper).attributes('aria-label')).toBe('Stop generating')
 
     await promptSubmit(wrapper).trigger('click')
     await flushPromises()
@@ -187,12 +192,13 @@ describe('Playground', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
 
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('ping')
     await sendPlayground(wrapper)
     expect(wrapper.text()).toContain('Management session is unavailable. Sign in again.')
     expect(publicFetch).not.toHaveBeenCalled()
 
     sessionStorage.setItem('lcm_management_token', 'management-playground')
-    await button(wrapper, 'Request').trigger('click')
+    await activateTab(wrapper, 'Request')
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue('{bad json')
     await sendPlayground(wrapper)
     await flushPromises()

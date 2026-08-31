@@ -45,6 +45,24 @@ export default defineAppConfig({
     },
     dashboardGroup: {
       base: () => 'fixed inset-0 flex overflow-auto'
+    },
+    chatPrompt: {
+      slots: {
+        root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)]'
+      },
+      variants: {
+        variant: {
+          outline: {
+            root: 'bg-[var(--color-surface)] ring ring-[var(--color-divider)]'
+          },
+          soft: {
+            root: 'bg-[var(--color-surface)]'
+          },
+          subtle: {
+            root: 'bg-[var(--color-surface)] ring ring-[var(--color-divider)]'
+          }
+        }
+      }
     }
   }
 })

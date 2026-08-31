@@ -29,6 +29,23 @@ mocks.manager = {
 
 mockNuxtImport('useManager', () => () => mocks.manager)
 
+function button(wrapper: any, text: string) {
+  const found = wrapper.findAll('button').find((candidate: any) => candidate.text().trim() === text)
+  if (!found) throw new Error(`Missing button: ${text}`)
+  return found
+}
+
+function selectedTab(wrapper: any) {
+  return wrapper.findAll('[role="tab"]').find((tab: any) => tab.attributes('aria-selected') === 'true')
+}
+
+async function activateTab(wrapper: any, text: string) {
+  const tab = wrapper.findAll('[role="tab"]').find((candidate: any) => candidate.text().trim() === text)
+  if (!tab) throw new Error(`Missing tab: ${text}`)
+  await tab.trigger('pointerdown')
+  await tab.trigger('click')
+}
+
 function promptSubmit(wrapper: any) {
   return wrapper.get('[data-testid="playground-prompt-submit"]')
 }
@@ -99,11 +116,16 @@ describe('Playground UX', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="playground-response"]').exists()).toBe(false)
+    expect(selectedTab(wrapper)?.text()).toBe('Parameters')
     expect(wrapper.get('[data-testid="playground-chat-messages"]').text()).toContain(PLAYGROUND_GENERATING_PLACEHOLDER)
-    expect(wrapper.get('[data-testid="playground-phase-label"]').text()).toBe('Generating')
+    expect(wrapper.get('[data-testid="playground-phase-label"]').text()).toBe(PLAYGROUND_GENERATING_PLACEHOLDER)
     expect(wrapper.get('[data-testid="playground-chat-indicator"]').text()).toBe(PLAYGROUND_GENERATING_PLACEHOLDER)
-    expect(wrapper.get('[data-testid="playground-mobile-phase"]').text()).toBe('Generating')
+    expect(wrapper.findAll('[data-testid="playground-phase-label"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="playground-chat-messages"]').text()).not.toContain('Exercise an Instance')
+    const assistantPlaceholder = wrapper.find('[data-testid="playground-assistant-text"]')
+    if (assistantPlaceholder.exists()) {
+      expect(assistantPlaceholder.text()).not.toContain(PLAYGROUND_GENERATING_PLACEHOLDER)
+    }
 
     sse.push('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n')
     await flushPromises()
@@ -117,7 +139,7 @@ describe('Playground UX', () => {
 
     expect(wrapper.get('[data-testid="playground-chat-messages"]').text()).toContain('Hello world')
     expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="playground-response"]').exists()).toBe(false)
+    expect(selectedTab(wrapper)?.text()).toBe('Parameters')
     wrapper.unmount()
   })
 
@@ -152,6 +174,9 @@ describe('Playground UX', () => {
     expect(wrapper.get('[data-testid="playground-empty-content"]').text()).toBe(PLAYGROUND_REASONING_ONLY_FALLBACK)
     expect(wrapper.get('[data-testid="playground-truncation-warning"]').text()).toBe(PLAYGROUND_TRUNCATION_WARNING)
     expect(wrapper.get('[data-testid="playground-reasoning"]').find('[aria-expanded]').exists()).toBe(true)
+    await wrapper.get('[data-testid="playground-copy-message"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="playground-notice"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -189,6 +214,7 @@ describe('Playground UX', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('empty please')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.get('[data-testid="playground-empty-content"]').text()).toContain('no visible text')
@@ -223,7 +249,8 @@ describe('Playground UX', () => {
     await flushPromises()
     confirmationButton('confirm').click()
     await flushPromises()
-    expect(wrapper.text()).toContain('Exercise an Instance through the real gateway.')
+    expect(wrapper.text()).toContain('Type a prompt to start.')
+    expect(wrapper.text()).not.toContain('Exercise an Instance through the real gateway.')
     expect(wrapper.find('[data-testid="playground-chat-messages"]').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -239,18 +266,20 @@ describe('Playground UX', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('first turn')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="playground-response"]').exists()).toBe(false)
+    expect(selectedTab(wrapper)?.text()).toBe('Parameters')
 
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('retry after error')
     await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.get('[data-testid="playground-response"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="playground-error"]').text()).toContain('upstream rejected')
     expect(wrapper.find('[data-testid="playground-empty-content"]').exists()).toBe(false)
-    const selectedTab = wrapper.findAll('[role="tab"]').find((tab: any) => tab.attributes('aria-selected') === 'true')
-    expect(selectedTab?.text()).toBe('Response')
+    expect(selectedTab(wrapper)?.text()).toBe('Response')
+    expect(selectedTab(wrapper)?.attributes('aria-controls')).toBeTruthy()
     wrapper.unmount()
   })
 
@@ -261,6 +290,94 @@ describe('Playground UX', () => {
     expect(parameters.findAll('label').length).toBeGreaterThanOrEqual(8)
     expect(parameters.text()).toContain('temperature')
     expect(parameters.text()).toContain('system prompt')
+    expect(wrapper.get('input[placeholder="token, or one per line"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the composer in the thread column while a tall request panel lives in the independent rail', async () => {
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    const page = wrapper.get('[data-testid="playground-page"]')
+    expect(page.classes()).toContain('overflow-hidden')
+    const thread = wrapper.get('[data-testid="playground-thread"]')
+    expect(thread.classes()).toContain('overflow-hidden')
+    const composer = wrapper.get('[data-testid="playground-composer"]')
+    expect(composer.classes()).toContain('shrink-0')
+    expect(thread.element.contains(composer.element)).toBe(true)
+    const rail = wrapper.get('[data-testid="playground-rail"]')
+    expect(rail.classes().some((value: string) => value.includes('overflow-y-auto'))).toBe(true)
+    await activateTab(wrapper, 'Request')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-request"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="playground-composer"]').exists()).toBe(true)
+    expect(thread.element.contains(wrapper.get('[data-testid="playground-composer"]').element)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('disables send when the composer is empty and enables it for text or attachments', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    expect(promptSubmit(wrapper).attributes('disabled')).toBeDefined()
+    expect(promptSubmit(wrapper).attributes('aria-label')).toBe('Send prompt')
+
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('hello')
+    await flushPromises()
+    expect(promptSubmit(wrapper).attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('   ')
+    await flushPromises()
+    expect(promptSubmit(wrapper).attributes('disabled')).toBeDefined()
+
+    const file = new File(['fake'], 'diagram.png', { type: 'image/png' })
+    const input = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(promptSubmit(wrapper).attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('labels copy failures as a notice instead of a request error', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }
+    })
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    await button(wrapper, 'Copy as curl').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-notice"]').text()).toContain('Unable to copy curl.')
+    expect(wrapper.find('[data-testid="playground-error"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Request error')
+    wrapper.unmount()
+  })
+
+  it('copies an assistant message and regenerates the last turn', async () => {
+    const publicFetch = vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"first reply"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-regen' } }
+    ))
+    vi.stubGlobal('fetch', publicFetch)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) }
+    })
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('again please')
+    await sendPlayground(wrapper)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-assistant-text"]').text()).toContain('first reply')
+
+    await wrapper.get('[data-testid="playground-copy-message"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-notice"]').text()).toBe('Message copied.')
+
+    await wrapper.get('[data-testid="playground-regenerate"]').trigger('click')
+    await flushPromises()
+    expect(publicFetch).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

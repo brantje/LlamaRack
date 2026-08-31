@@ -30,6 +30,13 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+async function activateTab(wrapper: any, text: string) {
+  const tab = wrapper.findAll('[role="tab"]').find((candidate: any) => candidate.text().trim() === text)
+  if (!tab) throw new Error(`Missing tab: ${text}`)
+  await tab.trigger('pointerdown')
+  await tab.trigger('click')
+}
+
 function promptSubmit(wrapper: any) {
   return wrapper.get('[data-testid="playground-prompt-submit"]')
 }
@@ -71,7 +78,7 @@ describe('Playground nullable diagnostics', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
-    await button(wrapper, 'Request').trigger('click')
+    await activateTab(wrapper, 'Request')
     const raw = { model: 'coder', messages: [{ role: 'user', content: 'ping' }], stream: false }
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(raw))
     await sendPlayground(wrapper)

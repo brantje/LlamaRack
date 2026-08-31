@@ -85,7 +85,6 @@ const error = ref('')
 const notice = ref('')
 const inFlight = ref(false)
 const phase = ref<'cold' | 'generating' | 'completed' | 'failed' | ''>('')
-const mobileParametersOpen = ref(false)
 const confirmation = ref<{ request: (options: {
   title: string
   description: string
@@ -117,7 +116,9 @@ const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
 const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
 const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Last request failed', '': '' }[phase.value]))
-const chatIndicatorLabel = computed(() => phase.value === 'cold' ? 'Cold start — autoload in progress' : PLAYGROUND_GENERATING_PLACEHOLDER)
+const hasComposerPayload = computed(() => Boolean(composer.value.trim()) || attachments.value.length > 0)
+const canSend = computed(() => Boolean(selectedInstance.value) && (hasComposerPayload.value || rawDirty.value))
+const submitDisabled = computed(() => !inFlight.value && !canSend.value)
 const chatStatus = computed<ChatStatus>(() => {
   if (inFlight.value) {
     const last = conversation.value.at(-1)
@@ -125,6 +126,20 @@ const chatStatus = computed<ChatStatus>(() => {
     return 'submitted'
   }
   return 'ready'
+})
+const promptSubmitLabel = computed(() => (
+  chatStatus.value === 'submitted' || chatStatus.value === 'streaming' ? 'Stop generating' : 'Send prompt'
+))
+const chatIndicatorLabel = computed(() => {
+  if (!inFlight.value) return ''
+  if (phase.value === 'cold') return 'Cold start — autoload in progress'
+  return PLAYGROUND_GENERATING_PLACEHOLDER
+})
+const showGenerationStatus = computed(() => {
+  if (!inFlight.value) return false
+  const last = conversation.value.at(-1)
+  if (last?.role === 'assistant' && (assistantHasText(last.parts) || assistantHasReasoning(last.parts))) return false
+  return Boolean(chatIndicatorLabel.value)
 })
 const chatMessages = computed(() => conversation.value.map(message => ({
   id: message.id,
@@ -135,10 +150,20 @@ const chatMessages = computed(() => conversation.value.map(message => ({
 })))
 
 const panelItems = [
-  { id: 'parameters' as const, label: 'Parameters' },
-  { id: 'request' as const, label: 'Request' },
-  { id: 'response' as const, label: 'Response' }
+  { label: 'Parameters', value: 'parameters', slot: 'parameters' },
+  { label: 'Request', value: 'request', slot: 'request' },
+  { label: 'Response', value: 'response', slot: 'response' }
 ]
+
+const chatPromptUi = {
+  root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)]'
+}
+const chatMessagesUi = {
+  root: 'min-h-0 w-full flex-1 overflow-y-auto px-2.5 [&>article]:last-of-type:min-h-0'
+}
+const userMessageUi = {
+  content: 'rounded-none bg-[var(--color-accent)] text-[var(--color-on-accent)] ring ring-[var(--color-accent)]'
+}
 
 function runtimeVariant(state: string) {
   if (state === 'READY') return 'ready' as const
@@ -308,7 +333,7 @@ async function copyText(text: string, label: string) {
     await navigator.clipboard.writeText(text)
     notice.value = `${label} copied.`
   } catch {
-    error.value = `Unable to copy ${label.toLowerCase()}.`
+    notice.value = `Unable to copy ${label.toLowerCase()}.`
   }
 }
 
@@ -515,17 +540,21 @@ async function loadDiagnostics(requestID: string) {
   error.value ||= lastError?.data?.error || lastError?.message || 'Request completed, but diagnostics could not be loaded.'
 }
 
-async function send() {
+async function send(options: { allowEmpty?: boolean } = {}) {
   if (inFlight.value) return
+  if (!options.allowEmpty && !hasComposerPayload.value && !rawDirty.value) return
+  inFlight.value = true
   error.value = ''
   notice.value = ''
   if (!selectedInstance.value) {
     error.value = 'Select an Instance first.'
+    inFlight.value = false
     return
   }
   const managementToken = readManagementToken()
   if (!managementToken) {
     error.value = 'Management session is unavailable. Sign in again.'
+    inFlight.value = false
     return
   }
 
@@ -534,12 +563,14 @@ async function send() {
     body = await requestBodyForSendAsync()
   } catch (value: any) {
     error.value = value?.message || 'Unable to build request.'
+    inFlight.value = false
     return
   }
 
   const target = manager.instances.value.find(item => item.id === String(body.model))
   if (!target) {
     error.value = 'The request model must be an existing Instance slug.'
+    inFlight.value = false
     return
   }
   selectedInstanceID.value = target.id
@@ -550,7 +581,6 @@ async function send() {
   rawResponse.value = ''
   responseHeaders.value = []
   diagnostics.value = null
-  inFlight.value = true
   phase.value = manager.instanceState(target) === 'READY' ? 'generating' : 'cold'
   controller = new AbortController()
   let requestID = ''
@@ -607,9 +637,36 @@ function stop() {
 }
 
 function onPromptAction(event: MouseEvent) {
-  if (chatStatus.value === 'submitted' || chatStatus.value === 'streaming') return
+  if (chatStatus.value === 'submitted' || chatStatus.value === 'streaming') {
+    stop()
+    return
+  }
   event.preventDefault()
   void send()
+}
+
+function isLastAssistant(id: string) {
+  const last = conversation.value.at(-1)
+  return last?.role === 'assistant' && last.id === id
+}
+
+async function copyAssistantMessage(id: string) {
+  const message = conversation.value.find(item => item.id === id)
+  if (!message) return
+  const text = message.parts
+    .filter((part): part is Extract<ChatPart, { type: 'text' }> => part.type === 'text')
+    .map(part => part.text)
+    .join('')
+    .trim()
+  if (!text) return
+  await copyText(text, 'Message')
+}
+
+async function regenerate() {
+  if (inFlight.value) return
+  const last = conversation.value.at(-1)
+  if (last?.role === 'assistant') conversation.value = conversation.value.slice(0, -1)
+  await send({ allowEmpty: true })
 }
 
 function messageStats(id: string) {
@@ -630,11 +687,6 @@ function assistantHasText(parts: ChatPart[]) {
 
 function assistantHasReasoning(parts: ChatPart[]) {
   return parts.some(part => part.type === 'reasoning' && part.text)
-}
-
-function generatingPlaceholder(message: { role: string, parts: ChatPart[] }) {
-  if (message.role !== 'assistant' || !inFlight.value || assistantHasText(message.parts) || assistantHasReasoning(message.parts)) return ''
-  return PLAYGROUND_GENERATING_PLACEHOLDER
 }
 
 function emptyContentFallback(message: { role: string, parts: ChatPart[] }) {
@@ -703,48 +755,56 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex min-h-[calc(100dvh-12rem)] flex-col gap-4" data-testid="playground-page">
-    <header class="shrink-0 border-b border-[var(--color-divider)] pb-4">
-      <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <UPageHeader title="PLAYGROUND" headline="OpenAI-compatible gateway" description="Exercise an Instance through the real gateway." />
-
-      
+  <div
+    class="flex h-[calc(100dvh-8.5rem)] min-h-0 flex-col gap-3 overflow-hidden lg:h-[calc(100dvh-5rem)]"
+    data-testid="playground-page"
+  >
+    <header class="shrink-0 border-b border-[var(--color-divider)] pb-3">
+      <div class="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+        <UPageHeader title="PLAYGROUND" headline="OpenAI-compatible gateway" />
         <div class="flex flex-wrap gap-1">
           <AppButton intent="ghost" size="sm" @click="copyText(curlExample, 'curl')">Copy as curl</AppButton>
           <AppButton intent="ghost" size="sm" @click="copyText(sdkExample, 'SDK example')">Copy SDK example</AppButton>
-          <AppButton intent="ghost" size="sm" data-testid="playground-clear-conversation" @click="requestClearConversation">Clear conversation</AppButton>
         </div>
       </div>
     </header>
 
-    <Frame v-if="error" class="flex items-start gap-2 p-3" data-testid="playground-error">
+    <Frame v-if="error" class="flex shrink-0 items-start gap-2 p-3" data-testid="playground-error">
       <StatusTag variant="failed">Request error</StatusTag>
       <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
     </Frame>
-    <p v-if="notice" class="border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]">{{ notice }}</p>
+    <p v-if="notice" class="shrink-0 border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]" data-testid="playground-notice">{{ notice }}</p>
 
-    <div class="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-stretch">
-      <Frame class="flex h-full min-h-0 min-w-0 flex-col p-0" data-testid="playground-thread">
-        <div class="sticky top-0 z-10 shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3 xl:hidden" data-testid="playground-mobile-controls">
+    <div class="grid min-h-0 flex-1 gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-stretch xl:overflow-hidden">
+      <Frame
+        class="flex min-h-[calc(100dvh-12rem)] min-w-0 flex-col overflow-hidden p-0 xl:h-full xl:min-h-0"
+        data-testid="playground-thread"
+      >
+        <div class="shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3" data-testid="playground-thread-chrome">
           <div class="flex min-w-0 items-center gap-2">
-            <USelect :model-value="selectedInstanceID" :items="instanceOptions" value-key="value" class="min-w-0 flex-1 font-mono" aria-label="Playground Instance" data-testid="playground-mobile-instance" @update:model-value="selectInstance" />
-            <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
-            <StatusTag v-if="inFlight && phaseLabel" variant="pending" data-testid="playground-mobile-phase">{{ phaseLabel }}</StatusTag>
-            <AppButton intent="secondary" size="sm" data-testid="playground-mobile-parameters-toggle" :aria-expanded="mobileParametersOpen" @click="mobileParametersOpen = !mobileParametersOpen">Parameters</AppButton>
-          </div>
-          <div v-if="mobileParametersOpen" class="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--color-divider)] pt-3" data-testid="playground-mobile-quick-parameters">
-            <UFormField label="temperature"><UInput v-model.number="parameters.temperature" data-testid="playground-mobile-temperature" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
-            <UFormField label="top_p"><UInput v-model.number="parameters.topP" data-testid="playground-mobile-top-p" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
-            <UFormField label="max_tokens"><UInput v-model.number="parameters.maxTokens" data-testid="playground-mobile-max-tokens" type="number" class="font-mono tabular-nums" /></UFormField>
-            <div class="flex items-end pb-2"><UCheckbox v-model="parameters.stream" label="stream" data-testid="playground-mobile-stream" /></div>
-            <p class="col-span-2 text-xs leading-5 text-[var(--neutral-700)]">Quick controls stay beside the composer on mobile. Advanced parameters and raw Request/Response inspection remain below the thread.</p>
+            <USelect
+              :model-value="selectedInstanceID"
+              :items="instanceOptions"
+              value-key="value"
+              class="min-w-0 flex-1 font-mono xl:hidden"
+              aria-label="Playground Instance"
+              data-testid="playground-mobile-instance"
+              @update:model-value="selectInstance"
+            />
+            <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState === 'READY' ? 'Instance READY' : runtimeState }}</StatusTag>
+            <span
+              data-testid="playground-model-name"
+              class="min-w-0 truncate font-mono text-[length:var(--font-size-h5)] font-semibold"
+            >{{ selectedModel?.name || selectedInstance?.model_id || 'Select an Instance' }}</span>
+            <StatusTag v-if="phase === 'failed'" variant="failed">{{ phaseLabel }}</StatusTag>
+            <StatusTag v-else-if="phase === 'completed'" variant="ready">{{ phaseLabel }}</StatusTag>
           </div>
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
             v-if="parameters.systemPrompt.trim()"
-            class="shrink-0 border-b border-[var(--color-divider)] px-5 py-4"
+            class="shrink-0 border-b border-[var(--color-divider)] px-5 py-3"
           >
             <p class="mb-1 font-mono text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">system</p>
             <p class="whitespace-pre-wrap font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ parameters.systemPrompt }}</p>
@@ -754,22 +814,28 @@ onBeforeUnmount(() => {
             v-if="!conversation.length"
             variant="naked"
             class="flex min-h-0 flex-1 items-center justify-center"
-            title="Exercise an Instance through the real gateway."
-            description="Requests here use the signed-in management session to re-enter the public OpenAI-compatible gateway, preserving the same lifecycle and observability path as external clients."
+            title="Type a prompt to start."
+            description="The composer stays at the bottom of this thread. Attach an image or type a message, then send."
+            data-testid="playground-empty-state"
           />
 
           <UChatMessages
             v-else
             :messages="chatMessages"
             :status="chatStatus"
+            compact
             should-auto-scroll
+            :auto-scroll="{ 'aria-label': 'Scroll to latest messages' }"
             :assistant="{ side: 'left', variant: 'naked' }"
-            :user="{ side: 'right', variant: 'solid', ui: { content: 'bg-[var(--color-accent)] text-[var(--color-on-accent)]' } }"
-            class="min-h-0 flex-1"
+            :user="{ side: 'right', variant: 'solid', ui: userMessageUi }"
+            :ui="chatMessagesUi"
+            class="min-h-0 flex-1 overflow-y-auto"
             data-testid="playground-chat-messages"
           >
             <template #indicator>
-              <p class="text-sm text-[var(--neutral-800)]" data-testid="playground-chat-indicator">{{ chatIndicatorLabel }}</p>
+              <div v-if="showGenerationStatus" data-testid="playground-chat-indicator">
+                <StatusTag variant="pending" data-testid="playground-phase-label">{{ chatIndicatorLabel }}</StatusTag>
+              </div>
             </template>
             <template #files="{ parts }">
               <img
@@ -791,11 +857,11 @@ onBeforeUnmount(() => {
               <p
                 v-for="(part, index) in messageTextParts(message.parts)"
                 :key="`${message.id}-text-${index}`"
-                v-show="part.text || generatingPlaceholder(message)"
+                v-show="part.text"
                 class="whitespace-pre-wrap text-sm leading-6"
                 :data-testid="message.role === 'assistant' ? 'playground-assistant-text' : 'playground-user-text'"
               >
-                {{ part.text || generatingPlaceholder(message) }}
+                {{ part.text }}
               </p>
               <p
                 v-if="emptyContentFallback(message)"
@@ -814,12 +880,23 @@ onBeforeUnmount(() => {
               <p
                 v-if="message.role === 'assistant' && messageStats(message.id)"
                 class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]"
+                data-testid="playground-token-stats"
               >
                 {{ messageStats(message.id)?.prompt }} prompt ·
-                {{ messageStats(message.id)?.completion }} completion ·
+                {{ messageStats(message.id)?.completion }} completion (incl. reasoning) ·
                 {{ formatRate(messageStats(message.id)?.rate) }} ·
                 ttft {{ formatMS(messageStats(message.id)?.ttft) }}
               </p>
+              <div v-if="message.role === 'assistant' && !inFlight" class="mt-2 flex flex-wrap gap-1">
+                <AppButton intent="ghost" size="xs" data-testid="playground-copy-message" @click="copyAssistantMessage(message.id)">Copy</AppButton>
+                <AppButton
+                  v-if="isLastAssistant(message.id)"
+                  intent="ghost"
+                  size="xs"
+                  data-testid="playground-regenerate"
+                  @click="regenerate"
+                >Regenerate</AppButton>
+              </div>
             </template>
           </UChatMessages>
         </div>
@@ -831,7 +908,8 @@ onBeforeUnmount(() => {
             aria-label="Playground message"
             :disabled="!selectedInstance"
             class="w-full"
-            @submit="send"
+            :ui="chatPromptUi"
+            @submit="() => send()"
           >
             <template v-if="attachments.length" #header>
               <div class="flex flex-wrap gap-2">
@@ -851,12 +929,11 @@ onBeforeUnmount(() => {
             </template>
             <template #footer>
               <div class="flex w-full items-center justify-between gap-2">
-                <div>
-                  <UButton
-                    icon="i-lucide-plus"
-                    color="neutral"
-                    variant="ghost"
+                <div class="flex items-center gap-1">
+                  <AppButton
+                    intent="ghost"
                     size="sm"
+                    icon="i-lucide-plus"
                     aria-label="Attach images"
                     data-testid="playground-attach-files"
                     :disabled="!selectedInstance"
@@ -871,10 +948,16 @@ onBeforeUnmount(() => {
                     data-testid="playground-file-input"
                     @change="onAttachmentInput"
                   >
+                  <AppButton intent="ghost" size="sm" data-testid="playground-clear-conversation" @click="requestClearConversation">Clear</AppButton>
                 </div>
                 <UChatPromptSubmit
                   :status="chatStatus"
-                  :disabled="!selectedInstance"
+                  :disabled="submitDisabled"
+                  :aria-label="promptSubmitLabel"
+                  submitted-icon="i-lucide-square"
+                  streaming-icon="i-lucide-square"
+                  square
+                  type="button"
                   data-testid="playground-prompt-submit"
                   @click="onPromptAction"
                   @stop="stop"
@@ -885,9 +968,9 @@ onBeforeUnmount(() => {
         </div>
       </Frame>
 
-      <aside class="min-w-0 space-y-4" data-testid="playground-rail">
+      <aside class="flex min-h-0 min-w-0 flex-col gap-4 xl:overflow-y-auto" data-testid="playground-rail">
         <Frame class="p-0">
-          <div class="hidden border-b border-[var(--color-divider)] p-4 xl:block">
+          <div class="hidden border-b border-[var(--color-divider)] p-4 xl:block" data-testid="playground-instance-list">
             <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Instance — the OpenAI model value</p>
             <div class="mt-3 max-h-56 space-y-1 overflow-auto">
               <button
@@ -905,66 +988,83 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-
-          <div class="grid grid-cols-3 border-b border-[var(--color-divider)]" role="tablist" aria-label="Playground inspector">
-            <button
-              v-for="item in panelItems"
-              :key="item.id"
-              type="button"
-              role="tab"
-              :aria-selected="activePanel === item.id"
-              class="border-r border-[var(--color-divider)] px-2 py-2 text-[length:var(--font-size-table-header)] font-semibold last:border-r-0"
-              :class="activePanel === item.id ? 'bg-[var(--accent-100)] text-[var(--accent-800)]' : 'text-[var(--neutral-700)]'"
-              @click="activePanel = item.id"
-            >
-              {{ item.label }}
-            </button>
-          </div>
-
-          <div v-if="activePanel === 'parameters'" class="space-y-4 p-4" data-testid="playground-parameters">
-            <div class="grid grid-cols-2 gap-3">
-              <UFormField label="temperature"><UInput v-model.number="parameters.temperature" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="top_p"><UInput v-model.number="parameters.topP" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="max_tokens"><UInput v-model.number="parameters.maxTokens" type="number" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="seed"><UInput v-model="parameters.seed" type="number" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="top_k"><UInput v-model.number="parameters.topK" type="number" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="min_p"><UInput v-model.number="parameters.minP" type="number" step="0.01" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="repeat_penalty"><UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
-              <UFormField label="stop"><UInput v-model="parameters.stop" class="font-mono" placeholder="one, two" /></UFormField>
-            </div>
-            <UCheckbox v-model="parameters.stream" label="stream" />
-            <UFormField label="system prompt">
-              <UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" />
-            </UFormField>
-          </div>
-
-          <div v-else-if="activePanel === 'request'" class="space-y-4 p-4" data-testid="playground-request">
-            <label class="block text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW JSON</label>
-            <textarea
-              v-model="rawRequest"
-              class="min-h-80 w-full resize-y border border-[var(--color-divider)] bg-transparent p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 outline-none focus:border-[var(--color-accent)]"
-              aria-label="Raw request JSON"
-              @input="rawDirty = true"
-            />
-            <div>
-              <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CURL</p>
-              <pre class="overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ curlExample }}</pre>
-            </div>
-          </div>
-
-          <div v-else class="space-y-4 p-4" data-testid="playground-response">
-            <template v-if="rawResponse || capturedHeaders.length">
-              <div>
-                <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RESPONSE HEADERS</p>
-                <pre class="max-h-44 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ capturedHeaders.map(([key, value]) => `${key}: ${value}`).join('\n') }}</pre>
-              </div>
-              <div>
-                <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW {{ parameters.stream ? 'SSE STREAM' : 'RESPONSE' }}</p>
-                <pre class="max-h-72 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ rawResponse }}</pre>
+          <UTabs
+            v-model="activePanel"
+            :items="panelItems"
+            :unmount-on-hide="false"
+            variant="link"
+            class="w-full gap-0"
+            :ui="{ list: 'border-b border-[var(--color-divider)] px-2', trigger: 'grow' }"
+            aria-label="Playground inspector"
+          >
+            <template #parameters>
+              <div class="space-y-4 p-4" data-testid="playground-parameters">
+                <div class="grid grid-cols-2 gap-3">
+                  <UFormField label="temperature" description="Sampling randomness. 0 is near-deterministic.">
+                    <UInput v-model.number="parameters.temperature" type="number" step="0.05" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="top_p" description="Nucleus sampling cutoff.">
+                    <UInput v-model.number="parameters.topP" type="number" step="0.05" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="max_tokens" description="Maximum generated tokens, including reasoning.">
+                    <UInput v-model.number="parameters.maxTokens" type="number" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="seed" description="Optional integer for reproducible sampling.">
+                    <UInput v-model="parameters.seed" type="number" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="top_k">
+                    <UInput v-model.number="parameters.topK" type="number" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="min_p">
+                    <UInput v-model.number="parameters.minP" type="number" step="0.01" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="repeat_penalty">
+                    <UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="font-mono tabular-nums" />
+                  </UFormField>
+                  <UFormField label="stop" description="Stop sequences as a comma list, or one per line.">
+                    <UInput v-model="parameters.stop" class="font-mono" placeholder="token, or one per line" />
+                  </UFormField>
+                </div>
+                <UCheckbox v-model="parameters.stream" label="stream" />
+                <UFormField label="system prompt" description="Sent as a system message before the thread.">
+                  <UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" />
+                </UFormField>
               </div>
             </template>
-            <p v-else class="py-8 text-center text-xs text-[var(--neutral-700)]">Send a request to capture the raw response.</p>
-          </div>
+            <template #request>
+              <div class="space-y-4 p-4" data-testid="playground-request">
+                <UFormField label="RAW JSON">
+                  <UTextarea
+                    v-model="rawRequest"
+                    :rows="12"
+                    autoresize
+                    class="w-full font-mono text-[length:var(--font-size-table-header)] leading-5"
+                    aria-label="Raw request JSON"
+                    @update:model-value="rawDirty = true"
+                  />
+                </UFormField>
+                <div>
+                  <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CURL</p>
+                  <pre class="max-h-56 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ curlExample }}</pre>
+                </div>
+              </div>
+            </template>
+            <template #response>
+              <div class="space-y-4 p-4" data-testid="playground-response">
+                <template v-if="rawResponse || capturedHeaders.length">
+                  <div>
+                    <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RESPONSE HEADERS</p>
+                    <pre class="max-h-44 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ capturedHeaders.map(([key, value]) => `${key}: ${value}`).join('\n') }}</pre>
+                  </div>
+                  <div>
+                    <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW {{ parameters.stream ? 'SSE STREAM' : 'RESPONSE' }}</p>
+                    <pre class="max-h-72 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ rawResponse }}</pre>
+                  </div>
+                </template>
+                <p v-else class="py-8 text-center text-xs text-[var(--neutral-700)]">Send a request to capture the raw response.</p>
+              </div>
+            </template>
+          </UTabs>
         </Frame>
 
         <Frame class="p-4" data-testid="playground-diagnostics">
@@ -977,7 +1077,7 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">TTFT</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnostics.request.ttft_ms) }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generation time</dt><dd class="font-mono tabular-nums">{{ formatMS(Math.max(0, diagnostics.request.duration_ms - (diagnostics.request.ttft_ms || 0))) }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.prompt_tokens }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.generated_tokens }}</dd></div>
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens (incl. reasoning)</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.generated_tokens }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tokens / second</dt><dd class="font-mono tabular-nums">{{ formatRate(diagnostics.request.tokens_per_second) }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Context usage</dt><dd class="font-mono tabular-nums">{{ contextUsage }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">GPU allocation</dt><dd class="font-mono tabular-nums">{{ gpuAllocation }}</dd></div>
@@ -988,7 +1088,20 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
-    <p class="shrink-0 border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
+    <UCollapsible class="shrink-0" data-testid="playground-about">
+      <AppButton intent="ghost" size="xs">About Playground requests</AppButton>
+      <template #content>
+        <p class="border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
+      </template>
+    </UCollapsible>
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>
+
+<style scoped>
+/* Nuxt UI ChatPrompt still merges a decorative blur utility. Naming that utility in
+   class would fail the design-rule scanner, so force an opaque composer surface here. */
+:deep([data-testid='playground-composer'] form) {
+  backdrop-filter: none;
+}
+</style>
