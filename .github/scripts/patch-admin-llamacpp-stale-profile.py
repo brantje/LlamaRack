@@ -68,6 +68,10 @@ marker = """    const url = new URL(request.url())
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
 """
 route_patch = """    const url = new URL(request.url())
+    if (llamaCppMissingProfilePages.has(page) && url.pathname === '/api/v1/llamacpp/profile' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ available: false, profile: null }) })
+      return
+    }
     if (llamaCppMissingProfilePages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ effective: { global: {}, values: {}, sources: {} } }) })
       return
