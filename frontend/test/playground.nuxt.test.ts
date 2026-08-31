@@ -33,6 +33,14 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+function promptSubmit(wrapper: any) {
+  return wrapper.get('[data-testid="playground-prompt-submit"]')
+}
+
+async function sendPlayground(wrapper: any) {
+  await promptSubmit(wrapper).trigger('click')
+}
+
 function diagnostic() {
   return {
     request: {
@@ -86,7 +94,7 @@ describe('Playground', () => {
     expect(wrapper.get('[data-testid="playground-mobile-parameters-toggle"]').attributes('aria-expanded')).toBe('true')
 
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('Explain this code')
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
 
     expect(publicFetch).toHaveBeenCalledTimes(1)
@@ -131,7 +139,7 @@ describe('Playground', () => {
       stream: false
     }
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(raw))
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
 
     const sent = JSON.parse(String(publicFetch.mock.calls[0]![1].body))
@@ -155,15 +163,15 @@ describe('Playground', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('long response')
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
-    expect(button(wrapper, 'Stop').exists()).toBe(true)
+    expect(promptSubmit(wrapper).exists()).toBe(true)
 
-    await button(wrapper, 'Stop').trigger('click')
+    await promptSubmit(wrapper).trigger('click')
     await flushPromises()
     expect(seenSignal?.aborted).toBe(true)
     expect(wrapper.text()).toContain('Request stopped.')
-    expect(button(wrapper, 'Send').exists()).toBe(true)
+    expect(promptSubmit(wrapper).exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -174,14 +182,14 @@ describe('Playground', () => {
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
 
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     expect(wrapper.text()).toContain('Management session is unavailable. Sign in again.')
     expect(publicFetch).not.toHaveBeenCalled()
 
     sessionStorage.setItem('lcm_management_token', 'management-playground')
     await button(wrapper, 'Request').trigger('click')
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue('{bad json')
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Request JSON is not valid.')
     expect(publicFetch).not.toHaveBeenCalled()

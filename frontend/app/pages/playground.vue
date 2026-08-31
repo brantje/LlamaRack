@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import type { Instance, Model, RuntimeTelemetry } from '~/composables/useManager'
 import { readManagementToken } from '~/composables/useManagerApi'
+import { isPartStreaming } from '@nuxt/ui/utils/ai'
 
 type Role = 'system' | 'user' | 'assistant'
+type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 type MessageStats = { prompt: number; completion: number; rate?: number; ttft?: number }
-type ThreadMessage = { role: Role; content: string; stats?: MessageStats }
+type PlainMessage = { role: Role, content: string }
+type ChatPart = { type: 'text' | 'reasoning', text: string, state?: 'streaming' }
+type ThreadMessage = { id: string, role: Role, parts: ChatPart[], stats?: MessageStats }
 type RequestRecord = {
   request_id?: string
   instance_id: string | null
@@ -77,6 +81,21 @@ const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
 const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
 const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Last request failed', '': '' }[phase.value]))
+const chatStatus = computed<ChatStatus>(() => {
+  if (inFlight.value) {
+    const last = conversation.value.at(-1)
+    if (last?.role === 'assistant' && last.parts.some(part => part.text)) return 'streaming'
+    return 'submitted'
+  }
+  return 'ready'
+})
+const chatMessages = computed(() => conversation.value.map(message => ({
+  id: message.id,
+  role: message.role,
+  parts: message.parts.length
+    ? message.parts
+    : [{ type: 'text' as const, text: '', state: inFlight.value && message.role === 'assistant' ? 'streaming' as const : undefined }]
+})))
 
 const panelItems = [
   { id: 'parameters' as const, label: 'Parameters' },
@@ -103,12 +122,27 @@ function stopValues(value = parameters.stop) {
   return value.split(/\r?\n|,/).map(item => item.trim()).filter(Boolean)
 }
 
+function messageText(message: Pick<ThreadMessage, 'parts'>) {
+  return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
+}
+
+let messageCounter = 0
+
+function nextMessageId(prefix: string) {
+  messageCounter += 1
+  return `${prefix}-${messageCounter}`
+}
+
+function toThreadMessage(role: Role, content: string, id = nextMessageId(role)): ThreadMessage {
+  return { id, role, parts: content ? [{ type: 'text', text: content }] : [] }
+}
+
 function parameterBody(messages: ThreadMessage[] = conversation.value) {
   const body: Record<string, unknown> = {
     model: selectedInstanceID.value,
     messages: [
       ...(parameters.systemPrompt.trim() ? [{ role: 'system', content: parameters.systemPrompt.trim() }] : []),
-      ...messages.map(({ role, content }) => ({ role, content }))
+      ...messages.map(({ role, parts }) => ({ role, content: messageText({ parts }) }))
     ],
     temperature: parameters.temperature,
     top_p: parameters.topP,
@@ -131,7 +165,7 @@ function syncRawRequest() {
   rawRequest.value = JSON.stringify(parameterBody(), null, 2)
 }
 
-function validMessages(value: unknown): ThreadMessage[] {
+function validMessages(value: unknown): PlainMessage[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item: any) => {
     const role = String(item?.role || '') as Role
@@ -156,7 +190,9 @@ function adoptBody(body: Record<string, any>) {
   const messages = validMessages(body.messages)
   const system = messages.find(item => item.role === 'system')
   parameters.systemPrompt = system?.content || ''
-  conversation.value = messages.filter(item => item.role !== 'system')
+  conversation.value = messages
+    .filter(item => item.role !== 'system')
+    .map((item, index) => toThreadMessage(item.role, item.content, `${item.role}-${index}`))
 }
 
 function requestBodyForSend() {
@@ -221,13 +257,34 @@ function clearConversation() {
   syncRawRequest()
 }
 
-function appendAssistant(content: string) {
+function appendAssistantPart(type: ChatPart['type'], content: string) {
   const index = conversation.value.length - 1
   const current = conversation.value[index]
-  if (current?.role === 'assistant' && !current.stats) {
-    current.content += content
-    conversation.value = [...conversation.value]
+  if (current?.role !== 'assistant' || current.stats) return
+  const lastPart = current.parts.at(-1)
+  if (lastPart?.type === type && lastPart.state === 'streaming') {
+    lastPart.text += content
+  } else {
+    current.parts.push({ type, text: content, state: 'streaming' })
   }
+  conversation.value = [...conversation.value]
+}
+
+function finalizeStreamingParts() {
+  const current = conversation.value.at(-1)
+  if (current?.role !== 'assistant') return
+  for (const part of current.parts) {
+    if (part.state === 'streaming') delete part.state
+  }
+  conversation.value = [...conversation.value]
+}
+
+function consumeChoicePayload(choice: any) {
+  const delta = choice?.delta ?? choice?.message
+  const content = delta?.content ?? choice?.message?.content ?? choice?.text
+  const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? choice?.message?.reasoning_content ?? choice?.message?.reasoning
+  if (typeof reasoning === 'string' && reasoning) appendAssistantPart('reasoning', reasoning)
+  if (typeof content === 'string' && content) appendAssistantPart('text', content)
 }
 
 function consumeSSELine(line: string) {
@@ -237,9 +294,7 @@ function consumeSSELine(line: string) {
   if (!payload || payload === '[DONE]') return
   try {
     const event = JSON.parse(payload)
-    const choice = event?.choices?.[0]
-    const content = choice?.delta?.content ?? choice?.message?.content ?? choice?.text
-    if (typeof content === 'string') appendAssistant(content)
+    consumeChoicePayload(event?.choices?.[0])
   } catch {
     // Raw response remains available for malformed/non-OpenAI-compatible frames.
   }
@@ -331,8 +386,10 @@ async function send() {
   selectedInstanceID.value = target.id
 
   const sentMessages = validMessages(body.messages)
-  conversation.value = sentMessages.filter(item => item.role !== 'system')
-  conversation.value.push({ role: 'assistant', content: '' })
+  conversation.value = sentMessages
+    .filter(item => item.role !== 'system')
+    .map((item, index) => toThreadMessage(item.role, item.content, `${item.role}-${index}`))
+  conversation.value.push(toThreadMessage('assistant', '', nextMessageId('assistant')))
   composer.value = ''
   rawResponse.value = ''
   responseHeaders.value = []
@@ -367,8 +424,7 @@ async function send() {
       rawResponse.value = text
       try {
         const parsed = JSON.parse(text)
-        const content = parsed?.choices?.[0]?.message?.content ?? parsed?.choices?.[0]?.text
-        if (typeof content === 'string') appendAssistant(content)
+        consumeChoicePayload(parsed?.choices?.[0])
       } catch {
         // Keep the raw response visible even when it is not JSON.
       }
@@ -383,6 +439,7 @@ async function send() {
       phase.value = 'failed'
     }
   } finally {
+    finalizeStreamingParts()
     inFlight.value = false
     controller = null
     if (requestID) await loadDiagnostics(requestID)
@@ -393,10 +450,14 @@ function stop() {
   controller?.abort()
 }
 
-function onComposerKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.shiftKey) return
+function onPromptAction(event: MouseEvent) {
+  if (chatStatus.value === 'submitted' || chatStatus.value === 'streaming') return
   event.preventDefault()
   void send()
+}
+
+function messageStats(id: string) {
+  return conversation.value.find(item => item.id === id)?.stats
 }
 
 function formatMS(value?: number) {
@@ -453,8 +514,8 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <div class="space-y-4" data-testid="playground-page">
-    <header class="border-b border-[var(--color-divider)] pb-4">
+  <div class="flex min-h-[calc(100dvh-12rem)] flex-col gap-4" data-testid="playground-page">
+    <header class="shrink-0 border-b border-[var(--color-divider)] pb-4">
       <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex flex-wrap items-center gap-2">
@@ -476,9 +537,9 @@ onBeforeUnmount(() => controller?.abort())
     </Frame>
     <p v-if="notice" class="border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]">{{ notice }}</p>
 
-    <div class="grid min-h-[calc(100vh-11rem)] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <Frame class="flex min-h-[38rem] min-w-0 flex-col p-0" data-testid="playground-thread">
-        <div class="sticky top-0 z-10 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3 xl:hidden" data-testid="playground-mobile-controls">
+    <div class="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-stretch">
+      <Frame class="flex h-full min-h-0 min-w-0 flex-col p-0" data-testid="playground-thread">
+        <div class="sticky top-0 z-10 shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3 xl:hidden" data-testid="playground-mobile-controls">
           <div class="flex min-w-0 items-center gap-2">
             <USelect :model-value="selectedInstanceID" :items="instanceOptions" value-key="value" class="min-w-0 flex-1 font-mono" aria-label="Playground Instance" data-testid="playground-mobile-instance" @update:model-value="selectInstance" />
             <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
@@ -493,53 +554,84 @@ onBeforeUnmount(() => controller?.abort())
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 space-y-5 overflow-auto p-5">
-          <div v-if="parameters.systemPrompt.trim()" class="max-w-3xl font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">
-            <p class="mb-1 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em]">system</p>
-            <p class="whitespace-pre-wrap">{{ parameters.systemPrompt }}</p>
-          </div>
-
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
-            v-for="(message, index) in conversation"
-            :key="`${index}-${message.role}`"
-            class="flex"
-            :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
+            v-if="parameters.systemPrompt.trim()"
+            class="shrink-0 border-b border-[var(--color-divider)] px-5 py-4"
           >
-            <article
-              class="max-w-[82%] px-4 py-3"
-              :class="message.role === 'user'
-                ? 'bg-[var(--neutral-200)]'
-                : 'border-l-2 border-[var(--accent-300)] bg-transparent'"
-            >
-              <p class="mb-1 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">{{ message.role }}</p>
-              <p class="whitespace-pre-wrap text-sm leading-6">{{ message.content || (message.role === 'assistant' && inFlight ? '…' : '') }}</p>
-              <p v-if="message.role === 'assistant' && message.stats" class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">
-                {{ message.stats.prompt }} prompt · {{ message.stats.completion }} completion · {{ formatRate(message.stats.rate) }} · ttft {{ formatMS(message.stats.ttft) }}
-              </p>
-            </article>
+            <p class="mb-1 font-mono text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">system</p>
+            <p class="whitespace-pre-wrap font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ parameters.systemPrompt }}</p>
           </div>
 
-          <div v-if="!parameters.systemPrompt.trim() && !conversation.length" class="grid min-h-56 place-items-center text-center">
-            <div>
-              <p class="text-sm font-semibold">Exercise an Instance through the real gateway.</p>
-              <p class="mt-1 max-w-lg text-xs leading-5 text-[var(--neutral-700)]">Requests here use the signed-in management session to re-enter the public OpenAI-compatible gateway, preserving the same lifecycle and observability path as external clients.</p>
-            </div>
-          </div>
+          <UEmpty
+            v-if="!conversation.length"
+            variant="naked"
+            class="flex min-h-0 flex-1 items-center justify-center"
+            title="Exercise an Instance through the real gateway."
+            description="Requests here use the signed-in management session to re-enter the public OpenAI-compatible gateway, preserving the same lifecycle and observability path as external clients."
+          />
+
+          <UChatMessages
+            v-else
+            :messages="chatMessages"
+            :status="chatStatus"
+            should-auto-scroll
+            :assistant="{ side: 'left', variant: 'naked' }"
+            :user="{ side: 'right', variant: 'soft' }"
+            class="min-h-0 flex-1"
+            data-testid="playground-chat-messages"
+          >
+            <template #content="{ message }">
+              <template
+                v-for="(part, index) in message.parts"
+                :key="`${message.id}-${part.type}-${index}`"
+              >
+                <UChatReasoning
+                  v-if="part.type === 'reasoning'"
+                  :text="part.text"
+                  :streaming="isPartStreaming(part)"
+                />
+                <p
+                  v-else-if="part.type === 'text'"
+                  class="whitespace-pre-wrap text-sm leading-6"
+                >
+                  {{ part.text || (message.role === 'assistant' && inFlight ? '…' : '') }}
+                </p>
+              </template>
+              <p
+                v-if="message.role === 'assistant' && messageStats(message.id)"
+                class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]"
+              >
+                {{ messageStats(message.id)?.prompt }} prompt ·
+                {{ messageStats(message.id)?.completion }} completion ·
+                {{ formatRate(messageStats(message.id)?.rate) }} ·
+                ttft {{ formatMS(messageStats(message.id)?.ttft) }}
+              </p>
+            </template>
+          </UChatMessages>
         </div>
 
-        <div class="border-t border-[var(--color-divider)] p-4">
+        <div class="mt-auto shrink-0 border-t border-[var(--color-divider)] p-4" data-testid="playground-composer">
           <p v-if="selectedInstance && !isLoaded" class="mb-2 text-xs text-[var(--neutral-700)]">This Instance is not loaded — sending will trigger autoload through the gateway.</p>
-          <div class="flex items-end gap-2">
-            <textarea
-              v-model="composer"
-              class="min-h-24 flex-1 resize-y border border-[var(--color-divider)] bg-transparent px-3 py-2 font-mono text-[length:var(--font-size-h6)] outline-none focus:border-[var(--color-accent)]"
-              placeholder="Message"
-              aria-label="Playground message"
-              @keydown="onComposerKeydown"
-            />
-            <AppButton v-if="!inFlight" intent="primary" :disabled="!selectedInstance" @click="send">Send</AppButton>
-            <AppButton v-else intent="secondary" @click="stop">Stop</AppButton>
-          </div>
+          <UChatPrompt
+            v-model="composer"
+            aria-label="Playground message"
+            :disabled="!selectedInstance"
+            class="w-full"
+            @submit="send"
+          >
+            <template #footer>
+              <div class="flex w-full justify-end">
+                <UChatPromptSubmit
+                  :status="chatStatus"
+                  :disabled="!selectedInstance"
+                  data-testid="playground-prompt-submit"
+                  @click="onPromptAction"
+                  @stop="stop"
+                />
+              </div>
+            </template>
+          </UChatPrompt>
         </div>
       </Frame>
 
@@ -644,6 +736,6 @@ onBeforeUnmount(() => controller?.abort())
       </aside>
     </div>
 
-    <p class="border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
+    <p class="shrink-0 border-t border-[var(--color-divider)] pt-3 text-xs leading-5 text-[var(--neutral-700)]">Playground requests use the signed-in management session through an internal `/api/v1` bridge that re-enters the public inference gateway, so instance resolution, autoload, eviction and logging behave exactly as they do for external clients. These figures are live diagnostics, not a benchmark.</p>
   </div>
 </template>

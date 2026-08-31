@@ -56,7 +56,7 @@ function toggleOpen() {
       data-testid="frame-collapse-toggle"
     />
     </div>
-    <div v-if="!collapsible || isOpen">
+    <div v-if="!collapsible || isOpen" class="contents">
       <slot />
     </div>
   </div>

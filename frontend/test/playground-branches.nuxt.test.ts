@@ -47,6 +47,14 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+function promptSubmit(wrapper: any) {
+  return wrapper.get('[data-testid="playground-prompt-submit"]')
+}
+
+async function sendPlayground(wrapper: any) {
+  await promptSubmit(wrapper).trigger('click')
+}
+
 async function prepareRaw(wrapper: any, body: unknown) {
   await button(wrapper, 'Request').trigger('click')
   await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(body))
@@ -79,7 +87,7 @@ describe('Playground edge branches', () => {
       stop: ['END', 'STOP'], stream: false
     }
     await prepareRaw(wrapper, raw)
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
 
     expect(JSON.parse(String(publicFetch.mock.calls[0]![1].body))).toEqual(raw)
@@ -99,13 +107,13 @@ describe('Playground edge branches', () => {
 
     for (const raw of ['[]', 'null']) {
       await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(raw)
-      await button(wrapper, 'Send').trigger('click')
+      await sendPlayground(wrapper)
       await flushPromises()
       expect(wrapper.text()).toContain('Request JSON must be an object.')
     }
 
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify({ model: 'missing', messages: [] }))
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Unknown Instance “missing”.')
     expect(publicFetch).not.toHaveBeenCalled()
@@ -124,7 +132,7 @@ describe('Playground edge branches', () => {
 
     const expected = ['nested failure', 'string failure', 'Request failed with HTTP 503', 'plain failure', 'Request failed with HTTP 500']
     for (const message of expected) {
-      await button(wrapper, 'Send').trigger('click')
+      await sendPlayground(wrapper)
       await flushPromises()
       expect(wrapper.text()).toContain(message)
       expect(wrapper.text()).toContain('Last request failed')
@@ -150,15 +158,15 @@ describe('Playground edge branches', () => {
     vi.stubGlobal('fetch', publicFetch)
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
 
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Completed')
 
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('message fallback text fallback')
 
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
     expect(wrapper.text()).toContain('Inference request failed.')
     expect(wrapper.text()).toContain('Last request failed')
@@ -182,7 +190,7 @@ describe('Playground edge branches', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await prepareRaw(wrapper, { model: 'coder', messages: [], stream: false })
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await new Promise(resolve => setTimeout(resolve, 100))
     await flushPromises()
 
@@ -202,7 +210,7 @@ describe('Playground edge branches', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await prepareRaw(wrapper, { model: 'coder', messages: [], stream: false })
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await new Promise(resolve => setTimeout(resolve, 500))
     await flushPromises()
 
@@ -261,7 +269,7 @@ describe('Playground edge branches', () => {
     let wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
     expect(wrapper.text()).toContain('Select an Instance')
-    expect(button(wrapper, 'Send').attributes('disabled')).toBeDefined()
+    expect(promptSubmit(wrapper).attributes('disabled')).toBeDefined()
     wrapper.unmount()
 
     for (const state of ['FAILED', 'STARTING', 'LOADING', 'STOPPING', 'UNLOADED']) {

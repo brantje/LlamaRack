@@ -30,6 +30,14 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+function promptSubmit(wrapper: any) {
+  return wrapper.get('[data-testid="playground-prompt-submit"]')
+}
+
+async function sendPlayground(wrapper: any) {
+  await promptSubmit(wrapper).trigger('click')
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   sessionStorage.clear()
@@ -66,7 +74,7 @@ describe('Playground nullable diagnostics', () => {
     await button(wrapper, 'Request').trigger('click')
     const raw = { model: 'coder', messages: [{ role: 'user', content: 'ping' }], stream: false }
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(raw))
-    await button(wrapper, 'Send').trigger('click')
+    await sendPlayground(wrapper)
     await flushPromises()
 
     const diagnostics = wrapper.get('[data-testid="playground-diagnostics"]').text()

@@ -5,6 +5,21 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(resolve(process.cwd(), 'app/pages/playground.vue'), 'utf8')
 
 describe('Playground redesign cleanup', () => {
+  it('pins the chat composer to the bottom of the thread panel', () => {
+    expect(source).toContain('data-testid="playground-composer"')
+    expect(source).toContain('mt-auto shrink-0 border-t border-[var(--color-divider)]')
+    expect(source).toContain('flex min-h-[calc(100dvh-12rem)] flex-col gap-4')
+    expect(source).toContain('grid min-h-0 flex-1 gap-4')
+  })
+
+  it('uses native Nuxt UI chat components for the thread and composer', () => {
+    expect(source).toContain('<UChatMessages')
+    expect(source).toContain('<UChatReasoning')
+    expect(source).toContain('<UChatPrompt')
+    expect(source).toContain('<UChatPromptSubmit')
+    expect(source).toContain('data-testid="playground-composer"')
+  })
+
   it('uses the shared semantic request error note', () => {
     expect(source).toContain('data-testid="playground-error"')
     expect(source).toContain('<StatusTag variant="failed">Request error</StatusTag>')
@@ -13,7 +28,8 @@ describe('Playground redesign cleanup', () => {
 
   it('uses mono tabular typography for numeric parameters and diagnostics', () => {
     expect(source.match(/class="mt-1 font-mono tabular-nums"/g)).toHaveLength(7)
-    expect(source).toContain('message.stats" class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums')
+    expect(source).toContain('messageStats(message.id)')
+    expect(source).toContain('class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums')
     expect(source).toContain('Prompt tokens</dt><dd class="font-mono tabular-nums"')
     expect(source).toContain('Tokens / second</dt><dd class="font-mono tabular-nums"')
   })
