@@ -1,0 +1,51 @@
+name: Integrate Discover recovery feedback
+
+on:
+  push:
+    branches:
+      - feature/redesign
+    paths:
+      - .github/workflows/integrate-discover-recovery-responsive.yml
+      - .github/scripts/integrate-discover-recovery-responsive.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/redesign
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply validated Discover recovery fixes
+        run: |
+          python .github/scripts/integrate-discover-recovery-responsive.py
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Discover recovery fixes
+        run: |
+          rm .github/workflows/integrate-discover-recovery-responsive.yml .github/scripts/integrate-discover-recovery-responsive.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): make Discover recovery explicit" -m "Keep Discover header actions below the intro on narrow screens and give direct repository failures clear Back and Retry recovery with deterministic visual coverage."
+          git push origin HEAD:feature/redesign
