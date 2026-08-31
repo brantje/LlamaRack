@@ -55,7 +55,7 @@ describe('Add model redesign', () => {
       '#model-artifact', '#model-companions', '#model-identity', '#model-defaults', '#model-first-instance'
     ])
     expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
-    expect(wrapper.get('[data-testid="model-add-header"]').classes()).toContain('flex-wrap')
+    expect(wrapper.get('[data-testid="model-add-header"]').classes()).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-4', 'sm:flex-row']))
     const rescans = wrapper.findAllComponents(AppButton).filter(button => button.text() === 'Rescan')
     expect(rescans.map(button => button.props('intent'))).toEqual(['secondary', 'ghost'])
   })

@@ -391,14 +391,14 @@ async function createModel() {
 
 <template>
   <div class="space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-4" data-testid="model-add-header">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between" data-testid="model-add-header">
       <UPageHeader
-        class="min-w-0 flex-1"
+        class="w-full min-w-0 sm:flex-1"
         headline="MODEL REGISTRY"
         :title="remoteMode ? 'Launch Hugging Face model' : 'Add model'"
         :description="remoteMode ? 'Configure the Model and its first Instance now. The Instance stays in Downloading state until the selected GGUF is ready.' : 'Register a GGUF model and optionally bootstrap its first addressable Instance.'"
       />
-      <AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</AppButton>
+      <div class="w-full sm:w-auto sm:shrink-0"><AppButton :to="remoteMode ? '/models/discover' : '/models'" intent="secondary">{{ remoteMode ? 'Back to Discover' : 'Back to models' }}</AppButton></div>
     </div>
 
     <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="model-add-error">
