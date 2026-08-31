@@ -155,6 +155,32 @@ describe('Playground UX', () => {
     wrapper.unmount()
   })
 
+  it('renders reasoning above assistant text even when text streams first', async () => {
+    const sse = createSSEStream()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sse.stream, {
+      status: 200,
+      headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-order' }
+    })))
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('order check')
+    await sendPlayground(wrapper)
+    await flushPromises()
+
+    sse.push('data: {"choices":[{"delta":{"content":"Final answer."}}]}\n\n')
+    await flushPromises()
+    sse.push('data: {"choices":[{"delta":{"reasoning_content":"Late thought."}}]}\n\n')
+    await flushPromises()
+
+    const reasoning = wrapper.get('[data-testid="playground-reasoning"]')
+    const text = wrapper.get('[data-testid="playground-assistant-text"]')
+    expect(reasoning.text()).toContain('Late thought.')
+    expect(text.text()).toContain('Final answer.')
+    expect(reasoning.element.compareDocumentPosition(text.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    wrapper.unmount()
+  })
+
   it('shows an empty-content fallback when a completed stream has no text or reasoning', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',

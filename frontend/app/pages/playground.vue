@@ -616,8 +616,12 @@ function messageStats(id: string) {
   return conversation.value.find(item => item.id === id)?.stats
 }
 
-function messageContentParts(parts: ChatPart[]) {
-  return parts.filter(part => part.type === 'text' || part.type === 'reasoning')
+function messageReasoningParts(parts: ChatPart[]) {
+  return parts.filter(part => part.type === 'reasoning')
+}
+
+function messageTextParts(parts: ChatPart[]) {
+  return parts.filter(part => part.type === 'text')
 }
 
 function assistantHasText(parts: ChatPart[]) {
@@ -778,24 +782,22 @@ onBeforeUnmount(() => {
               >
             </template>
             <template #content="{ message }">
-              <template
-                v-for="(part, index) in messageContentParts(message.parts)"
-                :key="`${message.id}-${part.type}-${index}`"
+              <UChatReasoning
+                v-for="(part, index) in messageReasoningParts(message.parts)"
+                :key="`${message.id}-reasoning-${index}`"
+                :text="part.text"
+                :streaming="isPartStreaming(part)"
+                data-testid="playground-reasoning"
+              />
+              <p
+                v-for="(part, index) in messageTextParts(message.parts)"
+                :key="`${message.id}-text-${index}`"
+                v-show="part.text || generatingPlaceholder(message)"
+                class="whitespace-pre-wrap text-sm leading-6"
+                :data-testid="message.role === 'assistant' ? 'playground-assistant-text' : 'playground-user-text'"
               >
-                <UChatReasoning
-                  v-if="part.type === 'reasoning'"
-                  :text="part.text"
-                  :streaming="isPartStreaming(part)"
-                  data-testid="playground-reasoning"
-                />
-                <p
-                  v-else-if="part.type === 'text' && (part.text || generatingPlaceholder(message))"
-                  class="whitespace-pre-wrap text-sm leading-6"
-                  :data-testid="message.role === 'assistant' ? 'playground-assistant-text' : 'playground-user-text'"
-                >
-                  {{ part.text || generatingPlaceholder(message) }}
-                </p>
-              </template>
+                {{ part.text || generatingPlaceholder(message) }}
+              </p>
               <p
                 v-if="emptyContentFallback(message)"
                 class="whitespace-pre-wrap text-sm leading-6 text-[var(--neutral-800)]"
