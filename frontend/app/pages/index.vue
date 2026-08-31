@@ -501,7 +501,7 @@ watch(selectedWindow, (next, previous) => {
       </Frame>
 
       <Frame class="p-4">
-        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Automatic cold starts triggered when a request targets an unloaded Instance.">Autoloads · {{ selectedRangeLabel }}</p>
+        <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Requests that started an unloaded Instance in the selected range. Load, unload, then load again counts as two cold starts.">Autoloads · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
           <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ summary?.lifecycle?.autoloads || 0 }}</strong>
           <span class="text-sm text-muted">cold starts</span>

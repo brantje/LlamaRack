@@ -148,8 +148,9 @@ func (s *Service) HardwareTimeseries(ctx context.Context, metric string, sinceMS
 	return out, rows.Err()
 }
 
-func (s *Service) LifecycleSummary(ctx context.Context) (LifecycleSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0) FROM observability_counters WHERE metric IN ('autoload_total','load_total','failed_start_total','eviction_total','idle_unload_total','load_duration_ms_total') GROUP BY metric`)
+func (s *Service) LifecycleSummary(ctx context.Context, sinceMS int64) (LifecycleSummary, error) {
+	if sinceMS < 0 { sinceMS = 0 }
+	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0) FROM observability_counters WHERE metric IN ('load_total','eviction_total','idle_unload_total') GROUP BY metric`)
 	if err != nil { return LifecycleSummary{}, err }
 	defer rows.Close()
 	var summary LifecycleSummary
@@ -158,15 +159,23 @@ func (s *Service) LifecycleSummary(ctx context.Context) (LifecycleSummary, error
 		var value float64
 		if err := rows.Scan(&metric, &value); err != nil { return LifecycleSummary{}, err }
 		switch strings.TrimSpace(metric) {
-		case "autoload_total": summary.Autoloads = int64(value)
 		case "load_total": summary.Loads = int64(value)
-		case "failed_start_total": summary.FailedStarts = int64(value)
 		case "eviction_total": summary.Evictions = int64(value)
 		case "idle_unload_total": summary.IdleUnloads = int64(value)
-		case "load_duration_ms_total": summary.LoadMS = value
 		}
 	}
-	return summary, rows.Err()
+	if err := rows.Err(); err != nil { return LifecycleSummary{}, err }
+	// Cold-start KPIs are request-attributed so the dashboard window applies:
+	// load → idle-unload → load again is two autoloads, and the same start is
+	// not counted once from lifecycle events and again from the request row.
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN finished_at>0 AND result<>'success' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN finished_at>0 THEN load_duration_ms ELSE 0 END),0)
+		FROM inference_requests WHERE autoloaded=1 AND started_at>=?`, sinceMS).
+		Scan(&summary.Autoloads, &summary.FailedStarts, &summary.LoadMS); err != nil {
+		return LifecycleSummary{}, err
+	}
+	return summary, nil
 }
 
 func (s *Service) PruneHardware(ctx context.Context, retentionDays int) error {

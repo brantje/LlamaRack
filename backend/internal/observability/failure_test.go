@@ -19,6 +19,7 @@ func TestDatabaseFailuresAreReportedWithoutPanics(t *testing.T) {
 	}
 	if _, err := s.Counters(ctx); err == nil { t.Fatal("counters should fail when database is closed") }
 	if _, err := s.Summary(ctx, now-1000); err == nil { t.Fatal("summary should fail when database is closed") }
+	if _, err := s.LifecycleSummary(ctx, 0); err == nil { t.Fatal("lifecycle summary should fail when database is closed") }
 	if _, err := s.ListRequests(ctx, RequestFilters{}); err == nil { t.Fatal("list should fail when database is closed") }
 	if _, err := s.Timeseries(ctx, "requests", now-1000, 60); err == nil { t.Fatal("timeseries should fail when database is closed") }
 	if err := s.Prune(ctx, 30); err == nil { t.Fatal("prune should fail when database is closed") }

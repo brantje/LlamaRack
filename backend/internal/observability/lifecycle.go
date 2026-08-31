@@ -18,7 +18,9 @@ func (s *Service) RecordLifecycle(ctx context.Context, event, instanceID string,
 	metric := ""
 	switch event {
 	case LifecycleAutoload:
-		metric = "autoload_total"
+		// Autoload totals are derived from autoloaded inference_requests so a
+		// single cold start is not counted here and again when the request lands.
+		return s.recordPlaygroundLifecycleEvent(ctx, event, instanceID)
 	case LifecycleLoad:
 		metric = "load_total"
 	case LifecycleFailedStart:

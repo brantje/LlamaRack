@@ -50,7 +50,7 @@ func TestHardwarePersistenceTimeseriesLifecycleAndMetrics(t *testing.T) {
 
 	if err := s.RecordRequest(ctx, RequestRecord{StartedAt:now.UnixMilli(), FinishedAt:now.UnixMilli(), InstanceID:"coder", Endpoint:"/v1/chat/completions", StatusCode:200, Autoloaded:true, LoadDurationMS:125}); err != nil { t.Fatal(err) }
 	if err := s.RecordRequest(ctx, RequestRecord{StartedAt:now.UnixMilli(), FinishedAt:now.UnixMilli(), InstanceID:"coder", Endpoint:"/v1/chat/completions", StatusCode:503, Autoloaded:true, LoadDurationMS:75}); err != nil { t.Fatal(err) }
-	lifecycle, err := s.LifecycleSummary(ctx)
+	lifecycle, err := s.LifecycleSummary(ctx, 0)
 	if err != nil || lifecycle.Autoloads != 2 || lifecycle.FailedStarts != 1 || lifecycle.LoadMS != 200 { t.Fatalf("lifecycle=%+v err=%v", lifecycle, err) }
 
 	h := NewManagementHandler(s)

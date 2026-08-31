@@ -39,7 +39,7 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		lifecycle, err := h.service.LifecycleSummary(r.Context())
+		lifecycle, err := h.service.LifecycleSummary(r.Context(), since)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
