@@ -1,0 +1,51 @@
+name: Validate admin llama.cpp state screenshots
+
+on:
+  push:
+    branches:
+      - test/admin-llamacpp-state-screenshots
+    paths:
+      - .github/workflows/validate-admin-llamacpp-state-screenshots.yml
+      - .github/scripts/patch-admin-llamacpp-state-screenshots.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/admin-llamacpp-state-screenshots
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply llama.cpp admin visual coverage
+        run: |
+          python .github/scripts/patch-admin-llamacpp-state-screenshots.py
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated llama.cpp admin coverage
+        run: |
+          rm .github/workflows/validate-admin-llamacpp-state-screenshots.yml .github/scripts/patch-admin-llamacpp-state-screenshots.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "test(ui): cover llama.cpp admin states" -m "Capture populated global defaults, validation failure, and unavailable binary states across the six visual QA viewports."
+          git push origin HEAD:test/admin-llamacpp-state-screenshots
