@@ -107,6 +107,7 @@ describe('Playground', () => {
     const [url, init] = publicFetch.mock.calls[0]!
     expect(url).toBe('http://manager.test:8888/api/v1/playground/chat/completions')
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer management-playground')
+    expect((init.headers as Record<string, string>)['X-LiteLLM-Session-ID']).toMatch(/^[0-9a-f-]{36}$/i)
     const body = JSON.parse(String(init.body))
     expect(body.model).toBe('coder')
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'Explain this code' })
@@ -285,6 +286,59 @@ describe('Playground', () => {
     await limitInput.trigger('change')
     await flushPromises()
     expect(wrapper.text()).toContain(`Playground supports up to ${PLAYGROUND_MAX_ATTACHMENTS} images per message.`)
+    wrapper.unmount()
+  })
+
+  it('reuses one LiteLLM session for follow-up sends and omits it when reuse is turned off', async () => {
+    mocks.runtime.state = 'READY'
+    mocks.request.mockResolvedValue({ ...diagnostic(), state_trace: ['READY'], evictions_triggered: [] })
+    const publicFetch = vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-session' } }
+    ))
+    vi.stubGlobal('fetch', publicFetch)
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    const sessionID = wrapper.get('[data-testid="playground-session-id"]').text().trim()
+    expect(sessionID.length).toBeGreaterThan(8)
+    expect(wrapper.text()).toContain('Reuse session')
+
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('first turn')
+    await sendPlayground(wrapper)
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('follow up')
+    await sendPlayground(wrapper)
+    await flushPromises()
+
+    expect(publicFetch).toHaveBeenCalledTimes(2)
+    const firstHeaders = publicFetch.mock.calls[0]![1]!.headers as Record<string, string>
+    const secondHeaders = publicFetch.mock.calls[1]![1]!.headers as Record<string, string>
+    expect(firstHeaders['X-LiteLLM-Session-ID']).toBe(sessionID)
+    expect(secondHeaders['X-LiteLLM-Session-ID']).toBe(sessionID)
+    expect(JSON.parse(String(publicFetch.mock.calls[0]![1]!.body)).session_id).toBeUndefined()
+    expect(wrapper.get('[data-testid="playground-diagnostics-session"]').text()).toBe(sessionID)
+
+    const reuseSwitch = wrapper.get('[data-testid="playground-reuse-session"]')
+    const switchControl = reuseSwitch.find('[role="switch"]').exists()
+      ? reuseSwitch.get('[role="switch"]')
+      : reuseSwitch
+    await switchControl.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="playground-session-id"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="playground-diagnostics-session"]').text()).toBe('—')
+
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('ungrouped')
+    await sendPlayground(wrapper)
+    await flushPromises()
+    const thirdHeaders = publicFetch.mock.calls[2]![1]!.headers as Record<string, string>
+    expect(thirdHeaders['X-LiteLLM-Session-ID']).toBeUndefined()
+
+    await switchControl.trigger('click')
+    await flushPromises()
+    const resumedSession = wrapper.get('[data-testid="playground-session-id"]').text().trim()
+    expect(resumedSession.length).toBeGreaterThan(8)
+    expect(resumedSession).not.toBe(sessionID)
     wrapper.unmount()
   })
 

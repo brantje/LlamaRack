@@ -21,6 +21,7 @@ import {
   playgroundEmptyContentFallback
 } from '~/utils/playgroundChatStream'
 import { isPartStreaming } from '@nuxt/ui/utils/ai'
+import { newPlaygroundSessionID } from '~/utils/playgroundSession'
 
 type Role = 'system' | 'user' | 'assistant'
 type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
@@ -85,6 +86,8 @@ const error = ref('')
 const notice = ref('')
 const inFlight = ref(false)
 const phase = ref<'cold' | 'generating' | 'completed' | 'failed' | ''>('')
+const reuseSession = ref(true)
+const chatSessionID = ref(newPlaygroundSessionID())
 const confirmation = ref<{ request: (options: {
   title: string
   description: string
@@ -152,11 +155,12 @@ const chatMessages = computed(() => conversation.value.map(message => ({
 const panelItems = [
   { label: 'Parameters', value: 'parameters', slot: 'parameters' },
   { label: 'Request', value: 'request', slot: 'request' },
-  { label: 'Response', value: 'response', slot: 'response' }
+  { label: 'Response', value: 'response', slot: 'response' },
+  { label: 'Session', value: 'session', slot: 'session' },
 ]
 
 const chatPromptUi = {
-  root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)]'
+  root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)] has-[textarea:focus-visible]:ring-[var(--color-divider)] has-[textarea:focus-visible]:outline-none'
 }
 const chatMessagesUi = {
   root: 'min-h-0 w-full flex-1 overflow-y-auto px-2.5 [&>article]:last-of-type:min-h-0'
@@ -164,6 +168,14 @@ const chatMessagesUi = {
 const userMessageUi = {
   content: 'rounded-none bg-[var(--color-accent)] text-[var(--color-on-accent)] ring ring-[var(--color-accent)]'
 }
+
+function resetChatSession() {
+  chatSessionID.value = reuseSession.value ? newPlaygroundSessionID() : ''
+}
+
+watch(reuseSession, () => {
+  resetChatSession()
+})
 
 function runtimeVariant(state: string) {
   if (state === 'READY') return 'ready' as const
@@ -316,15 +328,26 @@ async function requestBodyForSendAsync() {
   return body
 }
 
+function sessionRequestHeaders() {
+  if (!reuseSession.value || !chatSessionID.value) return {}
+  return { 'X-LiteLLM-Session-ID': chatSessionID.value }
+}
+
 const curlExample = computed(() => {
   const body = rawRequest.value || JSON.stringify(parameterBody(), null, 2)
   const escaped = body.replace(/'/g, `'"'"'`)
-  return `curl ${manager.apiBase.value}/v1/chat/completions \\\n  -H 'Authorization: Bearer $LLAMA_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${escaped}'`
+  const sessionHeader = reuseSession.value && chatSessionID.value
+    ? ` \\\n  -H 'X-LiteLLM-Session-ID: ${chatSessionID.value}'`
+    : ''
+  return `curl ${manager.apiBase.value}/v1/chat/completions \\\n  -H 'Authorization: Bearer $LLAMA_API_KEY' \\\n  -H 'Content-Type: application/json'${sessionHeader} \\\n  -d '${escaped}'`
 })
 
 const sdkExample = computed(() => {
   const body = rawRequest.value || JSON.stringify(parameterBody(), null, 2)
-  return `import json\nimport os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${manager.apiBase.value}/v1",\n    api_key=os.environ["LLAMA_API_KEY"],\n)\n\nbody = json.loads(${JSON.stringify(body)})\nresponse = client.chat.completions.create(**body)`
+  const extraHeaders = reuseSession.value && chatSessionID.value
+    ? `,\n    extra_headers={"X-LiteLLM-Session-ID": ${JSON.stringify(chatSessionID.value)}}`
+    : ''
+  return `import json\nimport os\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${manager.apiBase.value}/v1",\n    api_key=os.environ["LLAMA_API_KEY"],\n)\n\nbody = json.loads(${JSON.stringify(body)})\nresponse = client.chat.completions.create(**body${extraHeaders})`
 })
 
 async function copyText(text: string, label: string) {
@@ -402,14 +425,15 @@ function clearConversation() {
   phase.value = ''
   error.value = ''
   notice.value = ''
+  resetChatSession()
   syncRawRequest()
 }
 
 async function requestClearConversation() {
   const confirmed = await confirmation.value?.request({
-    title: 'Clear conversation',
+    title: 'Clear chat',
     description: 'This removes all messages, diagnostics, and the captured raw request/response from this Playground session. This cannot be undone.',
-    confirmLabel: 'Clear conversation',
+    confirmLabel: 'Clear chat',
     confirmTone: 'destructive'
   })
   if (!confirmed) return
@@ -590,7 +614,8 @@ async function send(options: { allowEmpty?: boolean } = {}) {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${managementToken}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...sessionRequestHeaders()
       },
       body: JSON.stringify(body),
       signal: controller.signal
@@ -765,6 +790,7 @@ onBeforeUnmount(() => {
         <div class="flex flex-wrap gap-1">
           <AppButton intent="ghost" size="sm" @click="copyText(curlExample, 'curl')">Copy as curl</AppButton>
           <AppButton intent="ghost" size="sm" @click="copyText(sdkExample, 'SDK example')">Copy SDK example</AppButton>
+          <AppButton intent="ghost" size="sm" data-testid="playground-clear-conversation" @click="requestClearConversation">Clear chat</AppButton>
         </div>
       </div>
     </header>
@@ -775,9 +801,9 @@ onBeforeUnmount(() => {
     </Frame>
     <p v-if="notice" class="shrink-0 border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]" data-testid="playground-notice">{{ notice }}</p>
 
-    <div class="grid min-h-0 flex-1 gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-stretch xl:overflow-hidden">
+    <div class="grid min-h-0 flex-1 gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch xl:overflow-hidden">
       <Frame
-        class="flex min-h-[calc(100dvh-12rem)] min-w-0 flex-col overflow-hidden p-0 xl:h-full xl:min-h-0"
+        class="flex min-h-[calc(100dvh-15rem)] min-w-0 flex-col overflow-hidden p-0 xl:h-full xl:min-h-0"
         data-testid="playground-thread"
       >
         <div class="shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3" data-testid="playground-thread-chrome">
@@ -948,7 +974,6 @@ onBeforeUnmount(() => {
                     data-testid="playground-file-input"
                     @change="onAttachmentInput"
                   >
-                  <AppButton intent="ghost" size="sm" data-testid="playground-clear-conversation" @click="requestClearConversation">Clear</AppButton>
                 </div>
                 <UChatPromptSubmit
                   :status="chatStatus"
@@ -1026,6 +1051,7 @@ onBeforeUnmount(() => {
                   </UFormField>
                 </div>
                 <UCheckbox v-model="parameters.stream" label="stream" />
+               
                 <UFormField label="system prompt" description="Sent as a system message before the thread.">
                   <UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" />
                 </UFormField>
@@ -1064,12 +1090,28 @@ onBeforeUnmount(() => {
                 <p v-else class="py-8 text-center text-xs text-[var(--neutral-700)]">Send a request to capture the raw response.</p>
               </div>
             </template>
+            <template #session>
+              <div class="space-y-4 p-4" data-testid="playground-session">
+                <UFormField
+                  label="Reuse session"
+                  description="Follow-up sends share one session ID while this page stays open. Turn off for a new session on every request."
+                >
+                  <USwitch v-model="reuseSession" data-testid="playground-reuse-session" aria-label="Reuse session" />
+                </UFormField>
+                <p
+                  v-if="reuseSession && chatSessionID"
+                  data-testid="playground-session-id"
+                  class="min-w-0 break-all font-mono text-[length:var(--font-size-table-header)]"
+                >{{ chatSessionID }}</p>
+              </div>
+            </template>
           </UTabs>
         </Frame>
 
         <Frame class="p-4" data-testid="playground-diagnostics">
           <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">REQUEST DIAGNOSTICS</p>
           <dl v-if="diagnostics" class="mt-3 divide-y divide-[var(--color-divider)] text-[length:var(--font-size-table-header)]">
+            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Session ID</dt><dd data-testid="playground-diagnostics-session" class="min-w-0 break-all font-mono text-[length:var(--font-size-table-header)]">{{ chatSessionID || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.instance_id || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance state</dt><dd class="font-mono tabular-nums">{{ diagnostics.state_trace?.join(' → ') || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Cold start</dt><dd>{{ diagnostics.request.autoloaded ? 'yes — autoload' : 'no' }}</dd></div>
@@ -1103,5 +1145,10 @@ onBeforeUnmount(() => {
    class would fail the design-rule scanner, so force an opaque composer surface here. */
 :deep([data-testid='playground-composer'] form) {
   backdrop-filter: none;
+}
+
+:deep([data-testid='playground-composer'] form:has(textarea:focus-visible)) {
+  outline: none;
+  --tw-ring-color: var(--color-divider);
 }
 </style>

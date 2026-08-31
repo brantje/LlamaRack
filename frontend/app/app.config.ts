@@ -20,10 +20,23 @@ export default defineAppConfig({
         base: 'cursor-pointer font-semibold rounded-none max-lg:min-h-11 max-lg:min-w-11'
       }
     },
+    input: {
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
+    },
+    textarea: {
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
+    },
     select: {
       slots: {
         base: 'rounded-none max-lg:min-h-11'
-      }
+      },
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
     },
     badge: {
       slots: {
@@ -48,7 +61,7 @@ export default defineAppConfig({
     },
     chatPrompt: {
       slots: {
-        root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)]'
+        root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)] has-[textarea:focus-visible]:ring-[var(--color-divider)] has-[textarea:focus-visible]:outline-none'
       },
       variants: {
         variant: {

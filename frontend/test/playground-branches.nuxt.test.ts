@@ -248,6 +248,7 @@ describe('Playground edge branches', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('curl copied.')
     expect(String(writeText.mock.calls[0]![0])).toContain('$LLAMA_API_KEY')
+    expect(String(writeText.mock.calls[0]![0])).toContain('X-LiteLLM-Session-ID')
 
     await button(wrapper, 'Copy SDK example').trigger('click')
     await flushPromises()
@@ -255,7 +256,8 @@ describe('Playground edge branches', () => {
     const sdk = String(writeText.mock.calls[1]![0])
     expect(sdk).toContain('import json')
     expect(sdk).toContain('json.loads(')
-    expect(sdk).toContain('client.chat.completions.create(**body)')
+    expect(sdk).toContain('client.chat.completions.create(**body')
+    expect(sdk).toContain('X-LiteLLM-Session-ID')
 
     await button(wrapper, 'Copy SDK example').trigger('click')
     await flushPromises()

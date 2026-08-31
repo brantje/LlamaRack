@@ -230,6 +230,8 @@ describe('Playground UX', () => {
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
+    const firstSession = wrapper.get('[data-testid="playground-session-id"]').text().trim()
+    expect(firstSession.length).toBeGreaterThan(8)
     await wrapper.get('textarea[aria-label="Playground message"]').setValue('remember this')
     await sendPlayground(wrapper)
     await flushPromises()
@@ -238,7 +240,7 @@ describe('Playground UX', () => {
     await wrapper.get('[data-testid="playground-clear-conversation"]').trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('This removes all messages, diagnostics, and the captured raw request/response')
-    expect(confirmationButton('confirm').textContent).toContain('Clear conversation')
+    expect(confirmationButton('confirm').textContent).toContain('Clear chat')
 
     confirmationButton('cancel').click()
     await flushPromises()
@@ -252,6 +254,8 @@ describe('Playground UX', () => {
     expect(wrapper.text()).toContain('Type a prompt to start.')
     expect(wrapper.text()).not.toContain('Exercise an Instance through the real gateway.')
     expect(wrapper.find('[data-testid="playground-chat-messages"]').exists()).toBe(false)
+    const nextSession = wrapper.get('[data-testid="playground-session-id"]').text().trim()
+    expect(nextSession).not.toBe(firstSession)
     wrapper.unmount()
   })
 

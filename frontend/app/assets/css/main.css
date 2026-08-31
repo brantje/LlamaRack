@@ -146,9 +146,27 @@ button,
   cursor: pointer;
 }
 
+:focus {
+  outline: none;
+}
+
 :focus-visible {
   outline: 2px solid var(--color-accent) !important;
   outline-offset: 2px;
+}
+
+/* Nuxt UI turns focused fields and ChatPrompt into a thick primary (blue) ring/outline.
+   Keep the existing divider ring and reserve the accent outline for keyboard chrome. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role='combobox']:focus-visible,
+[contenteditable]:focus-visible,
+form:has(textarea:focus-visible),
+form:has([contenteditable]:focus-visible) {
+  outline: none !important;
+  outline-offset: 0;
+  --tw-ring-color: var(--color-divider) !important;
 }
 
 ::selection {
