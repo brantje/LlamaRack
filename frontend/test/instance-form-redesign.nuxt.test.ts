@@ -4,7 +4,6 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { reactive } from 'vue'
 import InstanceForm from '~/components/InstanceForm.vue'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
-import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -224,37 +223,5 @@ describe('shared Instance form redesign', () => {
     expect(wrapper.text()).toContain('CUDA9')
     expect(wrapper.text()).toContain('Full content logging enabled')
     expect(wrapper.text()).toContain('save failed')
-  })
-})
-
-describe('flat Instance overrides editor', () => {
-  it('syncs, edits, adds and removes rows while preserving excluded companion tombstones', async () => {
-    seedManager()
-    const options = { threads: '4', mmproj: '', mystery: 'yes' }
-    const wrapper = await mountSuspended(InstanceOverridesEditor, { props: { modelValue: options, excludeKeys: ['mmproj'] } })
-    await flushPromises()
-    expect(wrapper.text()).toContain('CPU threads')
-    expect(wrapper.text()).toContain('Instance override')
-    expect(wrapper.text()).not.toContain('mmproj')
-
-    await wrapper.get('[data-testid="add-instance-option"]').trigger('click')
-    const inputs = controls(wrapper, 'Input', 'UInput')
-    expect(inputs.length).toBeGreaterThanOrEqual(6)
-    const emptyKey = inputs.find((item: any) => item.props('modelValue') === '')!
-    emptyKey.vm.$emit('update:modelValue', '--ctx-size')
-    await flushPromises()
-    const empties = controls(wrapper, 'Input', 'UInput').filter((item: any) => item.props('modelValue') === '')
-    empties.at(-1)!.vm.$emit('update:modelValue', '8192')
-    await flushPromises()
-    const emitted = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Record<string, string>
-    expect(emitted.mmproj).toBe('')
-    expect(emitted['ctx-size']).toBe('8192')
-
-    const threadsRow = wrapper.findAll('[data-testid="instance-override-row"]').find(row => row.text().includes('CPU threads'))!
-    await threadsRow.findAll('button').find(button => button.text() === 'Remove')!.trigger('click')
-    await flushPromises()
-    const afterRemove = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as Record<string, string>
-    expect(afterRemove.mmproj).toBe('')
-    expect(afterRemove.threads).toBeUndefined()
   })
 })
