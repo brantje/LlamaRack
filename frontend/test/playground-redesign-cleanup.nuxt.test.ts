@@ -18,6 +18,9 @@ describe('Playground redesign cleanup', () => {
     expect(source).toContain('<UChatPrompt')
     expect(source).toContain('<UChatPromptSubmit')
     expect(source).toContain('data-testid="playground-composer"')
+    expect(source).toContain('data-testid="playground-attach-files"')
+    expect(source).toContain('data-testid="playground-file-input"')
+    expect(source).toContain('buildApiMessageContent')
   })
 
   it('uses the shared semantic request error note', () => {

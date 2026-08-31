@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
+import { PLAYGROUND_MAX_ATTACHMENT_BYTES, PLAYGROUND_MAX_ATTACHMENTS } from '~/utils/playgroundMessageContent'
 import PlaygroundPage from '~/pages/playground.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -193,6 +194,114 @@ describe('Playground', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Request JSON is not valid.')
     expect(publicFetch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('sends image attachments as OpenAI-compatible multimodal message content', async () => {
+    mocks.request.mockResolvedValue(diagnostic())
+    const publicFetch = vi.fn(async (_url: string, init: RequestInit) => new Response(
+      'data: {"choices":[{"delta":{"content":"I see an image"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-image' } }
+    ))
+    vi.stubGlobal('fetch', publicFetch)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:diagram-preview')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    vi.stubGlobal('FileReader', class {
+      result: string | ArrayBuffer | null = null
+      onload: ((this: FileReader, ev: ProgressEvent<FileReader>) => any) | null = null
+      onerror: ((this: FileReader, ev: ProgressEvent<FileReader>) => any) | null = null
+      readAsDataURL() {
+        this.result = 'data:image/png;base64,ZmFrZQ=='
+        this.onload?.call(this, {} as ProgressEvent<FileReader>)
+      }
+    })
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+
+    const file = new File(['fake'], 'diagram.png', { type: 'image/png' })
+    const input = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('diagram.png')
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('describe this image')
+    await sendPlayground(wrapper)
+    await flushPromises()
+
+    expect(publicFetch).toHaveBeenCalledTimes(1)
+    const body = JSON.parse(String(publicFetch.mock.calls[0]![1].body))
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this image' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,ZmFrZQ==' } }
+        ]
+      }
+    ])
+    expect(wrapper.text()).toContain('I see an image')
+    wrapper.unmount()
+  })
+
+  it('rejects unsupported attachment types and oversized images', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+
+    const input = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['bad'], 'notes.pdf', { type: 'application/pdf' })] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Only image files can be attached in Playground.')
+
+    const oversizedInput = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(oversizedInput.element, 'files', { configurable: true, value: [new File([new Uint8Array(PLAYGROUND_MAX_ATTACHMENT_BYTES + 1)], 'huge.png', { type: 'image/png' })] })
+    await oversizedInput.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('exceeds the 8 MiB attachment limit.')
+
+    for (let index = 0; index < PLAYGROUND_MAX_ATTACHMENTS; index++) {
+      const attachInput = wrapper.get('[data-testid="playground-file-input"]')
+      Object.defineProperty(attachInput.element, 'files', { configurable: true, value: [new File([`img-${index}`], `img-${index}.png`, { type: 'image/png' })] })
+      await attachInput.trigger('change')
+      await flushPromises()
+    }
+    const limitInput = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(limitInput.element, 'files', { configurable: true, value: [new File(['overflow'], 'overflow.png', { type: 'image/png' })] })
+    await limitInput.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain(`Playground supports up to ${PLAYGROUND_MAX_ATTACHMENTS} images per message.`)
+    wrapper.unmount()
+  })
+
+  it('surfaces attachment read failures without calling the gateway', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    vi.stubGlobal('FileReader', class {
+      onload: ((this: FileReader, ev: ProgressEvent<FileReader>) => any) | null = null
+      onerror: ((this: FileReader, ev: ProgressEvent<FileReader>) => any) | null = null
+      readAsDataURL() {
+        this.onerror?.call(this, {} as ProgressEvent<FileReader>)
+      }
+    })
+    const publicFetch = vi.fn()
+    vi.stubGlobal('fetch', publicFetch)
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    const input = wrapper.get('[data-testid="playground-file-input"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['x'], 'broken.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    await flushPromises()
+    await sendPlayground(wrapper)
+    await flushPromises()
+
+    expect(publicFetch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Unable to read one or more attachments.')
     wrapper.unmount()
   })
 })

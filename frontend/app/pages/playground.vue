@@ -1,14 +1,31 @@
 <script setup lang="ts">
 import type { Instance, Model, RuntimeTelemetry } from '~/composables/useManager'
 import { readManagementToken } from '~/composables/useManagerApi'
+import {
+  PLAYGROUND_ATTACHMENT_ACCEPT,
+  PLAYGROUND_MAX_ATTACHMENT_BYTES,
+  PLAYGROUND_MAX_ATTACHMENTS,
+  buildApiMessageContent,
+  isPlaygroundImageType,
+  parseApiMessageContent,
+  readFileAsDataUrl,
+  threadPartsToApiContent
+} from '~/utils/playgroundMessageContent'
 import { isPartStreaming } from '@nuxt/ui/utils/ai'
 
 type Role = 'system' | 'user' | 'assistant'
 type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 type MessageStats = { prompt: number; completion: number; rate?: number; ttft?: number }
-type PlainMessage = { role: Role, content: string }
-type ChatPart = { type: 'text' | 'reasoning', text: string, state?: 'streaming' }
+type FileChatPart = { type: 'file', url: string, mediaType: string, filename: string }
+type ChatPart = { type: 'text' | 'reasoning', text: string, state?: 'streaming' } | FileChatPart
 type ThreadMessage = { id: string, role: Role, parts: ChatPart[], stats?: MessageStats }
+type PendingAttachment = {
+  id: string
+  file: File
+  previewUrl: string
+  mediaType: string
+  filename: string
+}
 type RequestRecord = {
   request_id?: string
   instance_id: string | null
@@ -47,6 +64,8 @@ const route = useRoute()
 const selectedInstanceID = ref('')
 const activePanel = ref<'parameters' | 'request' | 'response'>('parameters')
 const composer = ref('')
+const attachments = ref<PendingAttachment[]>([])
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const conversation = ref<ThreadMessage[]>([])
 const rawRequest = ref('')
 const rawDirty = ref(false)
@@ -84,7 +103,7 @@ const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress'
 const chatStatus = computed<ChatStatus>(() => {
   if (inFlight.value) {
     const last = conversation.value.at(-1)
-    if (last?.role === 'assistant' && last.parts.some(part => part.text)) return 'streaming'
+    if (last?.role === 'assistant' && last.parts.some(part => (part.type === 'text' || part.type === 'reasoning') && part.text)) return 'streaming'
     return 'submitted'
   }
   return 'ready'
@@ -123,7 +142,10 @@ function stopValues(value = parameters.stop) {
 }
 
 function messageText(message: Pick<ThreadMessage, 'parts'>) {
-  return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
+  return message.parts
+    .filter((part): part is Extract<ChatPart, { type: 'text' | 'reasoning' }> => part.type === 'text' || part.type === 'reasoning')
+    .map(part => part.text)
+    .join('')
 }
 
 let messageCounter = 0
@@ -133,8 +155,25 @@ function nextMessageId(prefix: string) {
   return `${prefix}-${messageCounter}`
 }
 
-function toThreadMessage(role: Role, content: string, id = nextMessageId(role)): ThreadMessage {
-  return { id, role, parts: content ? [{ type: 'text', text: content }] : [] }
+function toThreadMessage(role: Role, parts: ChatPart[], id = nextMessageId(role)): ThreadMessage {
+  return { id, role, parts }
+}
+
+function parseBodyMessages(value: unknown): Array<{ role: Role, parts: ChatPart[] }> {
+  if (!Array.isArray(value)) return []
+  const messages: Array<{ role: Role, parts: ChatPart[] }> = []
+  for (const item of value) {
+    const role = String(item?.role || '') as Role
+    if (!['system', 'user', 'assistant'].includes(role)) continue
+    if (role === 'system') {
+      const content = typeof item.content === 'string' ? item.content.trim() : ''
+      if (content) messages.push({ role, parts: [{ type: 'text', text: content }] })
+      continue
+    }
+    const parts = parseApiMessageContent(item.content) as ChatPart[]
+    if (parts.length) messages.push({ role, parts })
+  }
+  return messages
 }
 
 function parameterBody(messages: ThreadMessage[] = conversation.value) {
@@ -142,7 +181,7 @@ function parameterBody(messages: ThreadMessage[] = conversation.value) {
     model: selectedInstanceID.value,
     messages: [
       ...(parameters.systemPrompt.trim() ? [{ role: 'system', content: parameters.systemPrompt.trim() }] : []),
-      ...messages.map(({ role, parts }) => ({ role, content: messageText({ parts }) }))
+      ...messages.map(message => ({ role: message.role, content: threadPartsToApiContent(message.parts) }))
     ],
     temperature: parameters.temperature,
     top_p: parameters.topP,
@@ -165,13 +204,8 @@ function syncRawRequest() {
   rawRequest.value = JSON.stringify(parameterBody(), null, 2)
 }
 
-function validMessages(value: unknown): PlainMessage[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((item: any) => {
-    const role = String(item?.role || '') as Role
-    const content = typeof item?.content === 'string' ? item.content : ''
-    return ['system', 'user', 'assistant'].includes(role) && content ? [{ role, content }] : []
-  })
+function validMessages(value: unknown) {
+  return parseBodyMessages(value).filter(item => item.role !== 'system')
 }
 
 function adoptBody(body: Record<string, any>) {
@@ -187,12 +221,12 @@ function adoptBody(body: Record<string, any>) {
   parameters.stream = body.stream !== false
   parameters.stop = Array.isArray(body.stop) ? body.stop.join('\n') : typeof body.stop === 'string' ? body.stop : ''
 
-  const messages = validMessages(body.messages)
+  const messages = parseBodyMessages(body.messages)
   const system = messages.find(item => item.role === 'system')
-  parameters.systemPrompt = system?.content || ''
+  parameters.systemPrompt = system ? messageText({ parts: system.parts }) : ''
   conversation.value = messages
     .filter(item => item.role !== 'system')
-    .map((item, index) => toThreadMessage(item.role, item.content, `${item.role}-${index}`))
+    .map((item, index) => toThreadMessage(item.role, item.parts, `${item.role}-${index}`))
 }
 
 function requestBodyForSend() {
@@ -208,9 +242,29 @@ function requestBodyForSend() {
     body = parameterBody() as Record<string, any>
   }
 
-  if (composer.value.trim()) {
+  return body
+}
+
+async function requestBodyForSendAsync() {
+  const body = requestBodyForSend()
+  let encodedAttachments: Array<{ dataUrl: string, mediaType: string }>
+  try {
+    encodedAttachments = await Promise.all(
+      attachments.value.map(async attachment => ({
+        dataUrl: await readFileAsDataUrl(attachment.file),
+        mediaType: attachment.mediaType
+      }))
+    )
+  } catch {
+    throw new Error('Unable to read one or more attachments.')
+  }
+
+  if (composer.value.trim() || encodedAttachments.length) {
     const messages = Array.isArray(body.messages) ? [...body.messages] : []
-    messages.push({ role: 'user', content: composer.value.trim() })
+    messages.push({
+      role: 'user',
+      content: buildApiMessageContent(composer.value, encodedAttachments)
+    })
     body.messages = messages
   }
 
@@ -244,9 +298,64 @@ async function copyText(text: string, label: string) {
   }
 }
 
+function revokeAttachmentPreview(attachment: PendingAttachment) {
+  if (!attachment.previewUrl) return
+  URL.revokeObjectURL(attachment.previewUrl)
+}
+
+function clearAttachments() {
+  for (const attachment of attachments.value) revokeAttachmentPreview(attachment)
+  attachments.value = []
+  if (fileInputRef.value) fileInputRef.value.value = ''
+}
+
+function removeAttachment(id: string) {
+  const index = attachments.value.findIndex(attachment => attachment.id === id)
+  if (index < 0) return
+  const [removed] = attachments.value.splice(index, 1)
+  if (removed) revokeAttachmentPreview(removed)
+}
+
+async function onAttachmentInput(event: Event) {
+  error.value = ''
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''
+  for (const file of files) {
+    if (!isPlaygroundImageType(file.type)) {
+      error.value = 'Only image files can be attached in Playground.'
+      continue
+    }
+    if (file.size > PLAYGROUND_MAX_ATTACHMENT_BYTES) {
+      error.value = `“${file.name}” exceeds the 8 MiB attachment limit.`
+      continue
+    }
+    if (attachments.value.length >= PLAYGROUND_MAX_ATTACHMENTS) {
+      error.value = `Playground supports up to ${PLAYGROUND_MAX_ATTACHMENTS} images per message.`
+      break
+    }
+    attachments.value.push({
+      id: nextMessageId('attachment'),
+      file,
+      previewUrl: safePreviewUrl(file),
+      mediaType: file.type,
+      filename: file.name
+    })
+  }
+}
+
+function safePreviewUrl(file: File) {
+  try {
+    return URL.createObjectURL(file)
+  } catch {
+    return ''
+  }
+}
+
 function clearConversation() {
   conversation.value = []
   composer.value = ''
+  clearAttachments()
   rawDirty.value = false
   diagnostics.value = null
   rawResponse.value = ''
@@ -257,12 +366,12 @@ function clearConversation() {
   syncRawRequest()
 }
 
-function appendAssistantPart(type: ChatPart['type'], content: string) {
+function appendAssistantPart(type: 'text' | 'reasoning', content: string) {
   const index = conversation.value.length - 1
   const current = conversation.value[index]
   if (current?.role !== 'assistant' || current.stats) return
   const lastPart = current.parts.at(-1)
-  if (lastPart?.type === type && lastPart.state === 'streaming') {
+  if (lastPart && (lastPart.type === 'text' || lastPart.type === 'reasoning') && lastPart.type === type && lastPart.state === 'streaming') {
     lastPart.text += content
   } else {
     current.parts.push({ type, text: content, state: 'streaming' })
@@ -274,7 +383,7 @@ function finalizeStreamingParts() {
   const current = conversation.value.at(-1)
   if (current?.role !== 'assistant') return
   for (const part of current.parts) {
-    if (part.state === 'streaming') delete part.state
+    if ((part.type === 'text' || part.type === 'reasoning') && part.state === 'streaming') delete part.state
   }
   conversation.value = [...conversation.value]
 }
@@ -372,7 +481,7 @@ async function send() {
 
   let body: Record<string, any>
   try {
-    body = requestBodyForSend()
+    body = await requestBodyForSendAsync()
   } catch (value: any) {
     error.value = value?.message || 'Unable to build request.'
     return
@@ -385,12 +494,9 @@ async function send() {
   }
   selectedInstanceID.value = target.id
 
-  const sentMessages = validMessages(body.messages)
-  conversation.value = sentMessages
-    .filter(item => item.role !== 'system')
-    .map((item, index) => toThreadMessage(item.role, item.content, `${item.role}-${index}`))
-  conversation.value.push(toThreadMessage('assistant', '', nextMessageId('assistant')))
+  conversation.value.push(toThreadMessage('assistant', [], nextMessageId('assistant')))
   composer.value = ''
+  clearAttachments()
   rawResponse.value = ''
   responseHeaders.value = []
   diagnostics.value = null
@@ -460,6 +566,10 @@ function messageStats(id: string) {
   return conversation.value.find(item => item.id === id)?.stats
 }
 
+function messageContentParts(parts: ChatPart[]) {
+  return parts.filter(part => part.type === 'text' || part.type === 'reasoning')
+}
+
 function formatMS(value?: number) {
   if (!Number.isFinite(value)) return '—'
   const number = Number(value)
@@ -510,7 +620,10 @@ watch(runtimeState, state => {
 
 watch([selectedInstanceID, () => parameters.temperature, () => parameters.topP, () => parameters.maxTokens, () => parameters.seed, () => parameters.topK, () => parameters.minP, () => parameters.repeatPenalty, () => parameters.stop, () => parameters.stream, () => parameters.systemPrompt, conversation], syncRawRequest, { deep: true, immediate: true })
 
-onBeforeUnmount(() => controller?.abort())
+onBeforeUnmount(() => {
+  controller?.abort()
+  clearAttachments()
+})
 </script>
 
 <template>
@@ -581,9 +694,18 @@ onBeforeUnmount(() => controller?.abort())
             class="min-h-0 flex-1"
             data-testid="playground-chat-messages"
           >
+            <template #files="{ parts }">
+              <img
+                v-for="(part, index) in parts"
+                :key="`${part.url}-${index}`"
+                :src="part.url"
+                :alt="part.filename || 'attachment'"
+                class="max-h-48 max-w-full border border-[var(--color-divider)] object-contain"
+              >
+            </template>
             <template #content="{ message }">
               <template
-                v-for="(part, index) in message.parts"
+                v-for="(part, index) in messageContentParts(message.parts)"
                 :key="`${message.id}-${part.type}-${index}`"
               >
                 <UChatReasoning
@@ -620,8 +742,45 @@ onBeforeUnmount(() => controller?.abort())
             class="w-full"
             @submit="send"
           >
+            <template v-if="attachments.length" #header>
+              <div class="flex flex-wrap gap-2">
+                <UButton
+                  v-for="attachment in attachments"
+                  :key="attachment.id"
+                  :label="attachment.filename"
+                  :avatar="attachment.previewUrl ? { src: attachment.previewUrl } : undefined"
+                  :icon="attachment.previewUrl ? undefined : 'i-lucide-image'"
+                  color="neutral"
+                  variant="soft"
+                  size="xs"
+                  trailing-icon="i-lucide-x"
+                  @click="removeAttachment(attachment.id)"
+                />
+              </div>
+            </template>
             <template #footer>
-              <div class="flex w-full justify-end">
+              <div class="flex w-full items-center justify-between gap-2">
+                <div>
+                  <UButton
+                    icon="i-lucide-plus"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Attach images"
+                    data-testid="playground-attach-files"
+                    :disabled="!selectedInstance"
+                    @click="fileInputRef?.click()"
+                  />
+                  <input
+                    ref="fileInputRef"
+                    type="file"
+                    :accept="PLAYGROUND_ATTACHMENT_ACCEPT"
+                    multiple
+                    class="hidden"
+                    data-testid="playground-file-input"
+                    @change="onAttachmentInput"
+                  >
+                </div>
                 <UChatPromptSubmit
                   :status="chatStatus"
                   :disabled="!selectedInstance"

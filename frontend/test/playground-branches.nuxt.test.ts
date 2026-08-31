@@ -263,6 +263,36 @@ describe('Playground edge branches', () => {
     wrapper.unmount()
   })
 
+  it('adopts multimodal image content from raw JSON requests', async () => {
+    mocks.request.mockResolvedValue({
+      request: { instance_id: 'coder', status_code: 200, result: 'success', duration_ms: 200, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, load_duration_ms: 0, autoloaded: false },
+      state_trace: ['READY'], evictions_triggered: []
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'vision reply' } }] }), {
+      status: 200,
+      headers: { 'X-LlamaCPP-Manager-Request-ID': 'raw-image' }
+    })))
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await prepareRaw(wrapper, {
+      model: 'coder',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }
+        ]
+      }],
+      stream: false
+    })
+    await sendPlayground(wrapper)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('describe this')
+    expect(wrapper.text()).toContain('vision reply')
+    wrapper.unmount()
+  })
+
   it('renders empty-instance and runtime-state variants without inventing a target', async () => {
     mocks.manager.instances.value = []
     mocks.manager.models.value = []
