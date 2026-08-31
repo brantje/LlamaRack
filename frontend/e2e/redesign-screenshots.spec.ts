@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const modelEditSaveFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -185,7 +186,8 @@ const llamaProfile = {
   options: [
     { key: 'ctx-size', value_hint: 'N', description: 'Size of the prompt context', kind: 'number' },
     { key: 'parallel', value_hint: 'N', description: 'Number of parallel sequences', kind: 'number' },
-    { key: 'flash-attn', description: 'Enable Flash Attention', kind: 'boolean' }
+    { key: 'flash-attn', description: 'Enable Flash Attention', kind: 'boolean' },
+    { key: 'threads', value_hint: 'N', description: 'CPU worker threads', kind: 'number' }
   ]
 }
 const corsHeaders = {
@@ -204,6 +206,8 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/models' && method === 'GET') return models
   if (pathname === '/api/v1/models/available') return []
   if (pathname === '/api/v1/models/inspect') return { dependencies: [], suggested_options: {} }
+  if (pathname === '/api/v1/models/qwen3-8b-q4km') return models[0]
+  if (pathname === '/api/v1/models/qwen3-8b-q4km/options') return { 'ctx-size': '24576', 'flash-attn': 'true', parallel: '2' }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details/value') return { key: 'tokenizer.ggml.tokens', type: 'array[string]', items: ['<|endoftext|>', '<|im_start|>', '<|im_end|>', 'hello'], offset: 0, limit: 100, total: 4, has_more: false }
   if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)
@@ -211,7 +215,7 @@ function responseFor(pathname: string, method: string): unknown {
   if (/^\/api\/v1\/instances\/[^/]+\/runtime$/.test(pathname)) return runtimes[decodeURIComponent(pathname.split('/')[4] || '')] || { state: 'UNLOADED' }
   if (pathname === '/api/v1/auth/ws-ticket') return { error: 'disabled in screenshot fixture' }
   if (pathname === '/api/v1/llamacpp/profile') return { available: true, profile: llamaProfile }
-  if (pathname === '/api/v1/llamacpp/config') return { profile: llamaProfile, effective: { global: {}, values: {}, sources: {} } }
+  if (pathname === '/api/v1/llamacpp/config') return { profile: llamaProfile, effective: { global: { threads: '64' }, values: { threads: '64' }, sources: { threads: 'global' } } }
   if (pathname === '/api/v1/settings/general') return generalSettings
   if (pathname === '/api/v1/settings/discover') return { hybrid_recommendations_enabled: setting(true) }
   if (pathname === '/api/v1/admin/auth/settings') return authSettings
@@ -297,6 +301,10 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (modelEditSaveFailurePages.has(page) && url.pathname === '/api/v1/models/qwen3-8b-q4km' && request.method() === 'PUT') {
+      await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative Model option validation failure for visual QA.' }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -407,6 +415,11 @@ for (const [name, path] of pages) {
     if (name === 'admin-logs') await page.addInitScript(() => { Object.defineProperty(window, 'EventSource', { value: undefined, configurable: true }) })
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     await waitForManagerPanel(page)
+    if (name === 'model-edit') {
+      await expect(page.locator('[data-testid="llamacpp-option-row"][data-option-state="override"]')).toHaveCount(3)
+      await expect(page.locator('[data-testid="llamacpp-inherited-options"]')).toBeVisible()
+      await expect(page.locator('[data-testid="model-edit-submit-hint"]')).toContainText('No changes to save.')
+    }
     if (name === 'profile') {
       await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
       await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
@@ -433,6 +446,22 @@ test('model details expanded metadata screenshot', async ({ page }, testInfo) =>
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
 })
 
+
+
+test('model edit dirty and save failure screenshots', async ({ page }, testInfo) => {
+  modelEditSaveFailurePages.add(page)
+  await page.goto('/models/qwen3-8b-q4km/edit', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="llamacpp-option-row"][data-option-state="override"]')).toHaveCount(3)
+  const nameInput = page.getByRole('textbox', { name: 'Model name' })
+  await nameInput.fill('Qwen3 8B tuned')
+  await expect(page.locator('[data-testid="model-edit-submit-hint"]')).toContainText('Unsaved changes.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-edit-dirty.png`, fullPage: true, animations: 'disabled' })
+
+  await page.getByRole('button', { name: 'Save Model' }).click()
+  await expect(page.locator('[data-testid="model-edit-error"]')).toContainText('Representative Model option validation failure for visual QA.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-edit-save-failure.png`, fullPage: true, animations: 'disabled' })
+})
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await page.goto('/downloads', { waitUntil: 'domcontentloaded' })

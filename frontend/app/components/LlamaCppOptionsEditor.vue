@@ -56,7 +56,7 @@ const editorTitle = computed(() => `${scopeLabel.value} llama.cpp configuration`
 const editorSummary = computed(() => {
   const count = overrideCount.value
   if (props.scope === 'global') return count === 1 ? '1 default configured' : `${count} defaults configured`
-  if (count === 0) return 'No overrides configured · inheriting all values'
+  if (count === 0) return 'No overrides configured · inheriting all values · inherited options available below'
   return count === 1 ? '1 override configured · remaining values inherited' : `${count} overrides configured · remaining values inherited`
 })
 const inherited = computed(() => {
@@ -98,6 +98,8 @@ const visibleOptions = computed(() => {
     return option.key.toLowerCase().includes(term) || (option.description || '').toLowerCase().includes(term)
   })
 })
+const visibleOverrides = computed(() => visibleOptions.value.filter(option => isOverridden(option.key)))
+const visibleInheritedOptions = computed(() => visibleOptions.value.filter(option => !isOverridden(option.key)))
 
 function endpoint() {
   const params = new URLSearchParams()
@@ -196,8 +198,8 @@ function sourceVariant(source: string): StatusVariant {
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-xs text-muted">Only overrides are stored at this layer; remove an override to inherit again.</p>
           <div class="flex items-center gap-2">
-            <UButton type="button" :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" @click="mode = 'basic'">Basic</UButton>
-            <UButton type="button" :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" @click="mode = 'advanced'">Advanced</UButton>
+            <UButton type="button" :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" :aria-pressed="mode === 'basic'" @click="mode = 'basic'">Basic</UButton>
+            <UButton type="button" :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" :aria-pressed="mode === 'advanced'" @click="mode = 'advanced'">Advanced</UButton>
           </div>
         </div>
 
@@ -207,50 +209,79 @@ function sourceVariant(source: string): StatusVariant {
         <UInput v-if="mode === 'advanced'" v-model="search" class="w-full" icon="i-lucide-search" placeholder="Search all detected llama-server options" />
         <div v-if="loading" class="space-y-2"><USkeleton v-for="n in 4" :key="n" class="h-20 w-full" /></div>
 
-        <div v-else class="space-y-2">
-          <div v-for="option in visibleOptions" :key="option.key" class="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
-                  <StatusTag :variant="sourceVariant(effectiveSource(option))">{{ effectiveSource(option) }}</StatusTag>
-                  <StatusTag v-if="isProtected(option)" variant="neutral">Manager controlled</StatusTag>
-                  <StatusTag v-if="option.unsupported" variant="failed">Unsupported · retained</StatusTag>
-                </div>
-                <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
-                <p v-if="!isOverridden(option.key) && effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>
-                <p v-else-if="!isOverridden(option.key)" class="mt-1 text-xs text-dimmed">Using llama.cpp upstream default.</p>
-              </div>
+        <div v-else class="space-y-4">
+          <section v-if="visibleOverrides.length" data-testid="llamacpp-configured-overrides">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <h3 class="text-xs font-semibold uppercase tracking-[.08em] text-[var(--neutral-800)]">Configured overrides</h3>
+              <span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ visibleOverrides.length }}</span>
+            </div>
+            <div class="border border-[var(--color-divider)]">
+              <div v-for="option in visibleOverrides" :key="option.key" class="border-t border-[var(--color-divider)] p-3 first:border-t-0" data-testid="llamacpp-option-row" data-option-state="override">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
+                      <StatusTag :variant="sourceVariant(effectiveSource(option))">{{ effectiveSource(option) }}</StatusTag>
+                      <StatusTag v-if="isProtected(option)" variant="neutral">Manager controlled</StatusTag>
+                      <StatusTag v-if="option.unsupported" variant="failed">Unsupported · retained</StatusTag>
+                    </div>
+                    <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
+                  </div>
 
-              <div class="w-full space-y-2 lg:w-80">
-                <template v-if="isOverridden(option.key)">
-                  <UCheckbox
-                    v-if="kind(option) === 'boolean' && !option.unsupported"
-                    :model-value="overrides[option.key] === 'true'"
-                    :label="overrides[option.key] === 'true' ? 'Enabled' : 'Disabled'"
-                    @update:model-value="updateValue(option.key, $event ? 'true' : 'false')"
-                  />
-                  <USelectMenu
-                    v-else-if="kind(option) === 'enum' && !option.unsupported"
-                    :model-value="overrides[option.key]"
-                    class="w-full"
-                    :items="choices(option)"
-                    @update:model-value="updateValue(option.key, String($event || ''))"
-                  />
-                  <UInput
-                    v-else
-                    :model-value="overrides[option.key]"
-                    class="w-full font-mono"
-                    :disabled="option.unsupported"
-                    :placeholder="option.value_hint || 'value'"
-                    @update:model-value="updateValue(option.key, String($event || ''))"
-                  />
-                  <UButton type="button" size="xs" color="neutral" variant="ghost" @click="removeOverride(option.key)">Remove override</UButton>
-                </template>
-                <UButton v-else-if="!isProtected(option)" type="button" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
+                  <div class="w-full space-y-2 lg:w-72">
+                    <UCheckbox
+                      v-if="kind(option) === 'boolean' && !option.unsupported"
+                      :model-value="overrides[option.key] === 'true'"
+                      :label="overrides[option.key] === 'true' ? 'Enabled' : 'Disabled'"
+                      @update:model-value="updateValue(option.key, $event ? 'true' : 'false')"
+                    />
+                    <USelectMenu
+                      v-else-if="kind(option) === 'enum' && !option.unsupported"
+                      :model-value="overrides[option.key]"
+                      class="w-full"
+                      :items="choices(option)"
+                      @update:model-value="updateValue(option.key, String($event || ''))"
+                    />
+                    <UInput
+                      v-else
+                      :model-value="overrides[option.key]"
+                      class="w-full font-mono"
+                      :disabled="option.unsupported"
+                      :placeholder="option.value_hint || 'value'"
+                      @update:model-value="updateValue(option.key, String($event || ''))"
+                    />
+                    <AppButton type="button" size="xs" intent="ghost" @click="removeOverride(option.key)">Remove override</AppButton>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
+
+          <section v-if="visibleInheritedOptions.length" data-testid="llamacpp-inherited-options">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-xs font-semibold uppercase tracking-[.08em] text-[var(--neutral-800)]">Available inherited options</h3>
+                <p class="mt-1 text-xs text-dimmed">These values are not stored here until you choose Override.</p>
+              </div>
+              <span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ visibleInheritedOptions.length }}</span>
+            </div>
+            <div class="border border-[var(--color-divider)]">
+              <div v-for="option in visibleInheritedOptions" :key="option.key" class="flex flex-col gap-2 border-t border-[var(--color-divider)] p-3 first:border-t-0 sm:flex-row sm:items-center sm:justify-between" data-testid="llamacpp-option-row" data-option-state="inherited">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
+                    <StatusTag :variant="sourceVariant(effectiveSource(option))">{{ effectiveSource(option) }}</StatusTag>
+                    <StatusTag v-if="isProtected(option)" variant="neutral">Manager controlled</StatusTag>
+                  </div>
+                  <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
+                  <p v-if="effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>
+                  <p v-else class="mt-1 text-xs text-dimmed">Using llama.cpp upstream default.</p>
+                </div>
+                <AppButton v-if="!isProtected(option) && !option.unsupported" type="button" size="xs" intent="secondary" class="shrink-0 self-start sm:self-center" @click="enableOverride(option)">Override here</AppButton>
+              </div>
+            </div>
+          </section>
+
           <Frame v-if="!visibleOptions.length" class="p-3">
             <div class="flex items-start gap-2"><StatusTag variant="neutral">No options</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">No options match this view. Switch to Advanced to see every detected option.</p></div>
           </Frame>
