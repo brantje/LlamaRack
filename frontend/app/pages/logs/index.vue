@@ -400,7 +400,7 @@ watch(liveRequestFingerprint, (next, previous) => {
 
     <div v-if="traceID" data-testid="trace-filter" class="flex flex-wrap items-center justify-between gap-3 border-y border-[var(--color-divider)] bg-[var(--neutral-100)] px-4 py-3">
       <div class="min-w-0">
-        <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">TRACE FILTER ACTIVE</p>
+        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">TRACE FILTER ACTIVE</p>
         <p class="mt-1 break-all font-mono text-xs text-[var(--color-text)]">{{ traceID }}</p>
         <p class="mt-1 text-xs text-[var(--neutral-800)]">Showing requests in chronological order for this trace.</p>
       </div>
@@ -417,7 +417,7 @@ watch(liveRequestFingerprint, (next, previous) => {
     <Frame class="p-4" data-testid="request-log-filters">
       <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">FILTERS</p>
+          <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">FILTERS</p>
           <p class="mt-1 text-xs text-[var(--neutral-800)]">Filters are applied server-side to retained request history. Sessions are grouped only in the request inspector.</p>
         </div>
         <StatusTag variant="neutral" data-testid="request-log-active-filter-count">{{ activeFilterCount }} active</StatusTag>
@@ -448,7 +448,7 @@ watch(liveRequestFingerprint, (next, previous) => {
     <Frame data-testid="request-log-table">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-3">
         <div>
-          <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST HISTORY</p>
+          <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST HISTORY</p>
           <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ traceID ? 'Oldest first for this trace.' : 'Newest first.' }} Full payloads load only for the selected request.</p>
         </div>
         <StatusTag variant="neutral"><span class="font-mono tabular-nums">{{ requests.length }} rows</span></StatusTag>
@@ -489,10 +489,10 @@ watch(liveRequestFingerprint, (next, previous) => {
           <aside v-if="(detail || sessionRequests.length) && sessionSidebarOpen" data-testid="request-sidebar" class="w-72 shrink-0 border-r border-[var(--color-divider)] pr-4">
             <div class="mb-4 flex items-start justify-between gap-2">
               <div class="min-w-0">
-                <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SESSION / REQUEST</p>
+                <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SESSION / REQUEST</p>
                 <p class="mt-1 text-sm font-semibold text-[var(--color-text)]">{{ sidebarTotalCount }} {{ sidebarTotalCount === 1 ? 'request' : 'requests' }}</p>
                 <p class="mt-1 font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatDuration(sidebarDuration) }}</p>
-                <p v-if="activeSessionID" class="mt-2 break-all font-mono text-[10px] text-[var(--neutral-700)]" :title="activeSessionID">{{ activeSessionID }}</p>
+                <p v-if="activeSessionID" class="mt-2 break-all font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]" :title="activeSessionID">{{ activeSessionID }}</p>
               </div>
               <AppButton intent="ghost" size="xs" icon="i-lucide-chevron-right" aria-label="Collapse session sidebar" @click="sessionSidebarOpen = false" />
             </div>
@@ -514,9 +514,9 @@ watch(liveRequestFingerprint, (next, previous) => {
                     <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ item.call_type || 'request' }}</span>
                     <StatusTag :variant="isPending(item) ? 'neutral' : item.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(item) }}</StatusTag>
                   </div>
-                  <p class="mt-1 truncate font-mono text-[10px] text-[var(--neutral-700)]">{{ shortID(item.request_id, 26) }}</p>
-                  <p class="mt-1 truncate text-[10px] text-[var(--neutral-800)]">{{ requestModelName(item) }}</p>
-                  <p class="mt-1 font-mono text-[10px] tabular-nums text-[var(--neutral-700)]">{{ formatDuration(item.duration_ms) }} · {{ item.total_tokens || 0 }} tok · {{ formatTime(item.started_at) }}</p>
+                  <p class="mt-1 truncate font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ shortID(item.request_id, 26) }}</p>
+                  <p class="mt-1 truncate text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">{{ requestModelName(item) }}</p>
+                  <p class="mt-1 font-mono text-[length:var(--font-size-kicker)] tabular-nums text-[var(--neutral-700)]">{{ formatDuration(item.duration_ms) }} · {{ item.total_tokens || 0 }} tok · {{ formatTime(item.started_at) }}</p>
                 </button>
               </div>
             </UScrollArea>
@@ -535,7 +535,7 @@ watch(liveRequestFingerprint, (next, previous) => {
 
                 <section data-testid="request-detail-overview" class="border-b border-[var(--color-divider)] py-5">
                   <div class="mb-4 flex items-center justify-between gap-3">
-                    <div><p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request Details</h3></div>
+                    <div><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request Details</h3></div>
                     <StatusTag :variant="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(detail) }}</StatusTag>
                   </div>
                   <p v-if="isPending(detail)" class="mb-3 text-xs text-[var(--neutral-800)]">The request is still in progress.</p>
@@ -558,7 +558,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                 </section>
 
                 <section data-testid="request-detail-metrics" class="border-b border-[var(--color-divider)] py-5">
-                  <div class="mb-4"><p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PERFORMANCE</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Metrics</h3></div>
+                  <div class="mb-4"><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PERFORMANCE</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Metrics</h3></div>
                   <div data-testid="request-detail-metrics-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
                     <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
                       <dt class="text-[var(--neutral-700)]">Tokens</dt><dd><span class="font-mono tabular-nums">{{ detail.total_tokens }}</span> <span class="text-[var(--neutral-800)]">({{ detail.prompt_tokens }} prompt + {{ detail.generated_tokens }} completion)</span></dd>
@@ -579,7 +579,7 @@ watch(liveRequestFingerprint, (next, previous) => {
 
                 <section data-testid="request-detail-content" class="border-b border-[var(--color-divider)] py-5">
                   <div class="mb-4 flex items-center justify-between gap-3">
-                    <div><p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PAYLOAD</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request &amp; Response</h3></div>
+                    <div><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PAYLOAD</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request &amp; Response</h3></div>
                     <div v-if="detail.request_body || detail.response_body" class="flex gap-1">
                       <AppButton size="xs" :intent="detailMode === 'pretty' ? 'primary' : 'secondary'" @click="detailMode = 'pretty'">Pretty</AppButton>
                       <AppButton size="xs" :intent="detailMode === 'json' ? 'primary' : 'secondary'" @click="detailMode = 'json'">JSON</AppButton>
@@ -593,7 +593,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                     <div v-if="requestMessages.length" class="space-y-3">
                       <div class="flex items-center gap-2"><UIcon name="i-lucide-message-square" class="text-[var(--neutral-700)]" /><p class="text-sm font-semibold">Input</p><span class="font-mono text-xs tabular-nums text-[var(--neutral-800)]">Tokens: {{ detail.prompt_tokens }}</span></div>
                       <div v-for="(message, index) in requestMessages" :key="index" class="border-t border-[var(--color-divider)] pt-3 first:border-t-0 first:pt-0">
-                        <p class="text-[10px] font-semibold uppercase tracking-wide text-[var(--neutral-700)]">{{ message.role || 'message' }}</p>
+                        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-wide text-[var(--neutral-700)]">{{ message.role || 'message' }}</p>
                         <pre class="mt-1 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2) }}</pre>
                       </div>
                     </div>
@@ -609,7 +609,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                 </section>
 
                 <section data-testid="request-detail-client-metadata" class="py-5">
-                  <div class="mb-4"><p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CLIENT</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Client Metadata</h3></div>
+                  <div class="mb-4"><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CLIENT</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Client Metadata</h3></div>
                   <div class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
                     <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
                       <dt class="text-[var(--neutral-700)]">Client IP</dt><dd class="font-mono text-xs">{{ detail.client_ip || '—' }}</dd>

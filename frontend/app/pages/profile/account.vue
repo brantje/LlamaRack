@@ -74,9 +74,9 @@ async function changePassword() {
               <StatusTag :variant="profile.enabled ? 'ready' : 'neutral'">{{ profile.enabled ? 'Enabled' : 'Disabled' }}</StatusTag>
             </div>
             <dl class="mt-4 divide-y divide-[var(--color-divider)] text-sm">
-              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Username</dt><dd class="font-mono text-[13px]">{{ profile.username }}</dd></div>
-              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Created</dt><dd class="font-mono text-[12px] tabular-nums">{{ profileDateTime(profile.created_at) }}</dd></div>
-              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Last login</dt><dd class="font-mono text-[12px] tabular-nums">{{ profileDateTime(profile.last_login_at) }}</dd></div>
+              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Username</dt><dd class="font-mono text-[length:var(--font-size-h6)]">{{ profile.username }}</dd></div>
+              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Created</dt><dd class="font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ profileDateTime(profile.created_at) }}</dd></div>
+              <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Last login</dt><dd class="font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ profileDateTime(profile.last_login_at) }}</dd></div>
             </dl>
           </div>
         </div>

@@ -108,7 +108,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
     <template #actions>
       <div class="flex flex-col items-end gap-1">
         <AppButton class="min-w-[104px]" intent="secondary" :disabled="loading" :aria-busy="loading" @click="load">{{ loading ? 'Refreshing…' : 'Refresh' }}</AppButton>
-        <p class="text-[10.5px] leading-4 text-[var(--neutral-800)]" aria-live="polite" data-testid="system-freshness">{{ loading ? 'Refreshing diagnostics…' : freshness }}</p>
+        <p class="text-[length:var(--font-size-table-header)] leading-4 text-[var(--neutral-800)]" aria-live="polite" data-testid="system-freshness">{{ loading ? 'Refreshing diagnostics…' : freshness }}</p>
       </div>
     </template>
 
@@ -118,18 +118,18 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
       <Frame class="p-5" data-testid="admin-system-manager">
         <h2 class="text-base font-semibold">Manager</h2>
         <dl class="mt-4 text-sm">
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd class="min-w-0 flex flex-wrap items-baseline gap-x-2"><code class="font-mono text-[12.5px] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}</code><code class="font-mono text-[12.5px] tabular-nums text-[var(--neutral-700)]">{{ info.manager.uptime_seconds.toLocaleString() }} s</code></dd></div>
-          <div v-for="(value, key) in info.manager.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ labelFor(String(key), runtimeLabels) }}</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[12.5px] [overflow-wrap:anywhere]">{{ value }}</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd class="min-w-0 flex flex-wrap items-baseline gap-x-2"><code class="font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}</code><code class="font-mono text-[length:var(--font-size-h6)] tabular-nums text-[var(--neutral-700)]">{{ info.manager.uptime_seconds.toLocaleString() }} s</code></dd></div>
+          <div v-for="(value, key) in info.manager.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ labelFor(String(key), runtimeLabels) }}</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]">{{ value }}</code></dd></div>
         </dl>
       </Frame>
 
       <Frame class="p-5" data-testid="admin-system-network">
         <h2 class="text-base font-semibold">Network security</h2>
         <dl class="mt-4 text-sm">
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Effective scheme</dt><dd class="min-w-0"><code class="font-mono text-[12.5px]">{{ info.network.effective_scheme }}</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Effective scheme</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.network.effective_scheme }}</code></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Secure session cookie</dt><dd class="min-w-0"><StatusTag :variant="info.network.secure_cookie ? 'ready' : 'neutral'">{{ info.network.secure_cookie ? 'Enabled' : 'Disabled' }}</StatusTag></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Allowed origins</dt><dd class="min-w-0"><ul v-if="allowedOrigins.length" class="space-y-1"><li v-for="(origin, index) in allowedOrigins" :key="`${origin}-${index}`"><code class="whitespace-normal font-mono text-[12.5px] [overflow-wrap:anywhere]" data-testid="allowed-origin-value">{{ origin }}</code></li></ul><code v-else class="font-mono text-[12.5px] text-[var(--neutral-800)]">None configured</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Trusted proxies</dt><dd class="min-w-0"><ul v-if="trustedProxies.length" class="space-y-1"><li v-for="(proxy, index) in trustedProxies" :key="`${proxy}-${index}`"><code class="whitespace-normal font-mono text-[12.5px] [overflow-wrap:anywhere]" data-testid="trusted-proxy-value">{{ proxy }}</code></li></ul><code v-else class="font-mono text-[12.5px] text-[var(--neutral-800)]">None configured</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Allowed origins</dt><dd class="min-w-0"><ul v-if="allowedOrigins.length" class="space-y-1"><li v-for="(origin, index) in allowedOrigins" :key="`${origin}-${index}`"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]" data-testid="allowed-origin-value">{{ origin }}</code></li></ul><code v-else class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">None configured</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Trusted proxies</dt><dd class="min-w-0"><ul v-if="trustedProxies.length" class="space-y-1"><li v-for="(proxy, index) in trustedProxies" :key="`${proxy}-${index}`"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]" data-testid="trusted-proxy-value">{{ proxy }}</code></li></ul><code v-else class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">None configured</code></dd></div>
         </dl>
       </Frame>
 
@@ -139,9 +139,9 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
           <StatusTag variant="pending">Unavailable</StatusTag><p class="text-sm font-semibold">llama-server is unavailable.</p>
         </div>
         <dl v-else class="mt-4 text-sm">
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Path</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[12.5px] [overflow-wrap:anywhere]">{{ info.llamacpp.path || 'unknown' }}</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd class="min-w-0"><code class="font-mono text-[12.5px]">{{ info.llamacpp.version || 'unknown' }}</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd class="min-w-0"><code class="font-mono text-[12.5px] tabular-nums">{{ info.llamacpp.options || 0 }}</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Path</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]">{{ info.llamacpp.path || 'unknown' }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.llamacpp.version || 'unknown' }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ info.llamacpp.options || 0 }}</code></dd></div>
         </dl>
       </Frame>
     </div>

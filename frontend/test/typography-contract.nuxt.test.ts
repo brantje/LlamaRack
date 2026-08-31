@@ -10,25 +10,25 @@ describe('redesign typography contract', () => {
   it('defines the complete shared type scale from the foundations spec', () => {
     const shared = source('app/themes/shared.css')
     const expected = [
-      '--font-size-body: 15px',
+      '--font-size-body: 16.5px',
       '--line-height-body: 1.55',
-      '--font-size-h1: 42px',
+      '--font-size-h1: 46.2px',
       '--line-height-h1: 1.05',
-      '--font-size-screen-title: 30px',
-      '--font-size-h2: 32px',
+      '--font-size-screen-title: 33px',
+      '--font-size-h2: 35.2px',
       '--line-height-h2: 1.1',
-      '--font-size-h3: 25px',
+      '--font-size-h3: 27.5px',
       '--line-height-h3: 1.15',
-      '--font-size-h4: 20px',
+      '--font-size-h4: 22px',
       '--line-height-h4: 1.2',
-      '--font-size-h5: 16px',
+      '--font-size-h5: 17.6px',
       '--line-height-h5: 1.25',
-      '--font-size-h6: 13px',
+      '--font-size-h6: 14.3px',
       '--line-height-h6: 1.3',
-      '--font-size-nav: 13.5px',
-      '--font-size-table-body: 13.5px',
-      '--font-size-table-header: 11px',
-      '--font-size-kicker: 10px'
+      '--font-size-nav: 14.85px',
+      '--font-size-table-body: 14.85px',
+      '--font-size-table-header: 12.1px',
+      '--font-size-kicker: 11px'
     ]
     for (const token of expected) expect(shared).toContain(token)
   })

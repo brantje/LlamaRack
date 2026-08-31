@@ -151,7 +151,7 @@ onBeforeUnmount(closeStream)
   >
     <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-divider)] pb-4">
       <div>
-        <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">INSTANCE OUTPUT</p>
+        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">INSTANCE OUTPUT</p>
         <h3 class="mt-1 text-sm font-semibold text-[var(--color-text)]">Current-session logs</h3>
         <p class="mt-1 max-w-3xl text-xs leading-5 text-[var(--neutral-700)]">Live llama-server stdout/stderr plus manager lifecycle events. Raw log lines stay in memory and are not persisted across manager restarts.</p>
       </div>

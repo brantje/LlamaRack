@@ -87,7 +87,7 @@ function formatUpdated(value?: string) {
     <div class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0">
-          <p class="mb-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REPOSITORY SUMMARY</p>
+          <p class="mb-1 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REPOSITORY SUMMARY</p>
           <h2 class="break-words font-mono text-xl font-semibold text-[var(--color-text)]">{{ model.id }}</h2>
           <p v-if="model.author" class="mt-1 text-sm text-[var(--neutral-800)]">Published by {{ model.author }}</p>
         </div>
@@ -99,15 +99,15 @@ function formatUpdated(value?: string) {
       </div>
 
       <dl class="grid gap-x-8 gap-y-3 border-y border-[var(--color-divider)] py-4 text-sm sm:grid-cols-2 lg:grid-cols-4" data-testid="repository-metadata">
-        <div v-if="model.parameter_count"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Model size</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatParameters(model.parameter_count) }}</dd></div>
-        <div v-if="architecture"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 font-mono font-semibold">{{ architecture }}</dd></div>
-        <div v-if="contextCapability"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(contextCapability) }}</dd></div>
-        <div v-if="model.revision"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Revision</dt><dd class="mt-1 font-mono font-semibold">{{ model.revision }}</dd></div>
-        <div v-if="model.card_metadata?.pipeline_tag"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Task</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.pipeline_tag }}</dd></div>
-        <div v-if="model.card_metadata?.license"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">License</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.license }}</dd></div>
-        <div v-if="model.card_metadata?.library_name"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Library</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.library_name }}</dd></div>
-        <div v-if="formatUpdated(model.last_modified)"><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Updated</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatUpdated(model.last_modified) }}</dd></div>
-        <div><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hugging Face</dt><dd class="mt-1 font-mono font-semibold tabular-nums">↓ {{ model.downloads.toLocaleString() }} · ♡ {{ model.likes.toLocaleString() }}</dd></div>
+        <div v-if="model.parameter_count"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Model size</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatParameters(model.parameter_count) }}</dd></div>
+        <div v-if="architecture"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 font-mono font-semibold">{{ architecture }}</dd></div>
+        <div v-if="contextCapability"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(contextCapability) }}</dd></div>
+        <div v-if="model.revision"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Revision</dt><dd class="mt-1 font-mono font-semibold">{{ model.revision }}</dd></div>
+        <div v-if="model.card_metadata?.pipeline_tag"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Task</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.pipeline_tag }}</dd></div>
+        <div v-if="model.card_metadata?.license"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">License</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.license }}</dd></div>
+        <div v-if="model.card_metadata?.library_name"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Library</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.library_name }}</dd></div>
+        <div v-if="formatUpdated(model.last_modified)"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Updated</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatUpdated(model.last_modified) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hugging Face</dt><dd class="mt-1 font-mono font-semibold tabular-nums">↓ {{ model.downloads.toLocaleString() }} · ♡ {{ model.likes.toLocaleString() }}</dd></div>
       </dl>
 
       <div v-if="model.card_metadata?.base_models?.length || model.card_metadata?.languages?.length || usefulTags.length" class="flex flex-wrap items-center gap-2 text-sm" data-testid="repository-tags">

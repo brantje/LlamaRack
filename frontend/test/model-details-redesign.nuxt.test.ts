@@ -73,8 +73,8 @@ describe('Model details redesign', () => {
       expect(summary.text()).toContain(label)
     }
     expect(summary.text().match(/Unknown/g)?.length).toBeGreaterThanOrEqual(7)
-    expect(summary.findAll('dt').every(item => item.classes().includes('text-[9.5px]'))).toBe(true)
-    expect(summary.findAll('dd').every(item => item.classes().includes('font-mono') && item.classes().includes('text-[13px]'))).toBe(true)
+    expect(summary.findAll('dt').every(item => item.classes().includes('text-[length:var(--font-size-kicker)]'))).toBe(true)
+    expect(summary.findAll('dd').every(item => item.classes().includes('font-mono') && item.classes().includes('text-[length:var(--font-size-h6)]'))).toBe(true)
 
     const warning = wrapper.get('[data-testid="model-details-warning"]')
     expect(warning.text()).toContain('metadata scan was partial')

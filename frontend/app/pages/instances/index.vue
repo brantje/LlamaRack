@@ -380,7 +380,7 @@ onBeforeUnmount(() => {
           @click="stateFilter = filter.value"
         >{{ filter.label }}</UButton>
       </div>
-      <span class="font-mono text-[10.5px] text-[var(--neutral-700)]" data-testid="instances-telemetry-snapshot">{{ snapshotLabel(telemetrySnapshot) }}</span>
+      <span class="font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instances-telemetry-snapshot">{{ snapshotLabel(telemetrySnapshot) }}</span>
     </div>
 
     <Frame v-if="error" class="p-3" data-testid="instances-error">
@@ -398,7 +398,7 @@ onBeforeUnmount(() => {
     <Frame v-else-if="viewMode === 'table'" class="overflow-x-auto" data-testid="instances-table-view" role="region" tabindex="0" aria-label="Instances table. Scroll horizontally for telemetry, lifecycle and actions.">
       <p class="border-b border-[var(--color-divider)] px-3 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for telemetry, lifecycle and actions.</p>
       <table class="min-w-[1180px] w-full border-collapse text-left text-xs">
-        <thead class="bg-[var(--neutral-200)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
+        <thead class="bg-[var(--neutral-200)] text-[length:var(--font-size-table-header)] uppercase tracking-[.08em] text-[var(--neutral-700)]">
           <tr>
             <th class="px-3 py-3 font-semibold">Instance</th><th class="px-3 py-3 font-semibold">Model</th><th class="px-3 py-3 font-semibold">State</th><th class="px-3 py-3 font-semibold">Placement</th><th class="px-3 py-3 font-semibold">GPU</th><th class="px-3 py-3 font-semibold">VRAM</th><th class="px-3 py-3 font-semibold">CPU</th><th class="px-3 py-3 font-semibold">RAM</th><th class="px-3 py-3 font-semibold">PID</th><th class="px-3 py-3 font-semibold">Port</th><th class="px-3 py-3 font-semibold">Lifecycle</th><th class="px-3 py-3 font-semibold">Actions</th>
           </tr>
@@ -406,40 +406,40 @@ onBeforeUnmount(() => {
         <tbody>
           <tr v-for="instance in filteredInstances" :key="instance.id" class="border-t border-[var(--color-divider)] align-top" :data-instance-state="instanceState(instance)">
             <td class="px-3 py-3">
-              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block text-[13.5px] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
+              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
               <div class="mt-1 flex items-center gap-1">
-                <code class="break-all font-mono text-[10.5px] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
                 <AppCopyButton :text="instance.id" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance ID. Select the ID and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
               </div>
             </td>
             <td class="px-3 py-3 text-[var(--neutral-800)]">{{ modelName(instance.model_id) }}</td>
             <td class="px-3 py-3">
               <StatusTag :variant="statusVariant(instanceState(instance))">{{ instanceState(instance) }}</StatusTag>
-              <p v-if="importFor(instance)?.state === 'DOWNLOADING'" class="mt-1 max-w-[180px] text-[10px] leading-snug text-[var(--neutral-700)]">Model is downloading. {{ importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when ready.' : 'Open Downloads to monitor progress.' }}</p>
-              <p v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" class="mt-1 max-w-[180px] font-mono text-[10px] leading-snug text-[var(--accent-800)]">{{ importFor(instance)?.error || 'Open Downloads to retry or inspect this import.' }}</p>
-              <div v-else-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 max-w-[220px] border border-[var(--accent-600)] bg-[var(--accent-100)] px-2 py-1 text-[10px] leading-snug text-[var(--accent-800)]"><span class="font-semibold">Import warning</span> · {{ importFor(instance)?.error }}</div>
-              <p v-else-if="instanceState(instance) === 'FAILED'" class="mt-1 max-w-[180px] font-mono text-[10px] leading-snug text-[var(--accent-800)]">{{ runtimeFor(instance).last_error || 'llama-server exited unexpectedly.' }}</p>
+              <p v-if="importFor(instance)?.state === 'DOWNLOADING'" class="mt-1 max-w-[180px] text-[length:var(--font-size-kicker)] leading-snug text-[var(--neutral-700)]">Model is downloading. {{ importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when ready.' : 'Open Downloads to monitor progress.' }}</p>
+              <p v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ importFor(instance)?.error || 'Open Downloads to retry or inspect this import.' }}</p>
+              <div v-else-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 max-w-[220px] border border-[var(--accent-600)] bg-[var(--accent-100)] px-2 py-1 text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]"><span class="font-semibold">Import warning</span> · {{ importFor(instance)?.error }}</div>
+              <p v-else-if="instanceState(instance) === 'FAILED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ runtimeFor(instance).last_error || 'llama-server exited unexpectedly.' }}</p>
             </td>
-            <td class="px-3 py-3 font-mono text-[11px] text-[var(--neutral-800)]">{{ placement(instance) }}</td>
+            <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ placement(instance) }}</td>
             <td class="px-3 py-3">
               <template v-if="isRunning(instance)">
-                <div class="font-mono text-[11px] text-[var(--color-text)]">{{ formatPercent(gpuPercent(telemetryFor(instance))) }}</div>
+                <div class="font-mono text-[length:var(--font-size-table-header)] text-[var(--color-text)]">{{ formatPercent(gpuPercent(telemetryFor(instance))) }}</div>
                 <div class="mt-1 h-[3px] w-[62px] bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${clampPercent(gpuPercent(telemetryFor(instance)))}%` }" /></div>
-                <div v-if="globalGPUFallback(telemetryFor(instance))" class="mt-1 text-[9.5px] text-[var(--accent-700)]">global</div>
-              </template><span v-else class="font-mono text-[11px] text-[var(--neutral-700)]">—</span>
+                <div v-if="globalGPUFallback(telemetryFor(instance))" class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--accent-700)]">global</div>
+              </template><span v-else class="font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">—</span>
             </td>
             <td class="px-3 py-3">
               <template v-if="isRunning(instance)">
-                <div class="font-mono text-[11px] text-[var(--color-text)]">{{ formatBytes(vramBytes(telemetryFor(instance))) }}</div>
+                <div class="font-mono text-[length:var(--font-size-table-header)] text-[var(--color-text)]">{{ formatBytes(vramBytes(telemetryFor(instance))) }}</div>
                 <div class="mt-1 h-[3px] w-[62px] bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${fractionPercent(vramBytes(telemetryFor(instance)), gpuCapacity(telemetryFor(instance)))}%` }" /></div>
-                <div v-if="globalVRAMFallback(telemetryFor(instance))" class="mt-1 text-[9.5px] text-[var(--accent-700)]">global</div>
-              </template><span v-else class="font-mono text-[11px] text-[var(--neutral-700)]">—</span>
+                <div v-if="globalVRAMFallback(telemetryFor(instance))" class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--accent-700)]">global</div>
+              </template><span v-else class="font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">—</span>
             </td>
-            <td class="px-3 py-3 font-mono text-[11px] text-[var(--color-text)]">{{ isRunning(instance) ? formatPercent(telemetryFor(instance)?.cpu_percent) : '—' }}</td>
-            <td class="px-3 py-3 font-mono text-[11px] text-[var(--color-text)]">{{ isRunning(instance) ? formatBytes(telemetryFor(instance)?.memory_used_bytes) : '—' }}</td>
-            <td class="px-3 py-3 font-mono text-[11px] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).pid ?? '—') : '—' }}</td>
-            <td class="px-3 py-3 font-mono text-[11px] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).port ?? '—') : '—' }}</td>
-            <td class="px-3 py-3 text-[11px] text-[var(--neutral-800)]">{{ lifecycle(instance) }}</td>
+            <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--color-text)]">{{ isRunning(instance) ? formatPercent(telemetryFor(instance)?.cpu_percent) : '—' }}</td>
+            <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--color-text)]">{{ isRunning(instance) ? formatBytes(telemetryFor(instance)?.memory_used_bytes) : '—' }}</td>
+            <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).pid ?? '—') : '—' }}</td>
+            <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ isRunning(instance) ? (runtimeFor(instance).port ?? '—') : '—' }}</td>
+            <td class="px-3 py-3 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ lifecycle(instance) }}</td>
             <td class="px-3 py-3"><div class="flex flex-wrap gap-1">
               <AppButton v-if="importBlocked(instance)" to="/downloads" intent="ghost" size="xs">View download</AppButton>
               <template v-else>
@@ -458,33 +458,33 @@ onBeforeUnmount(() => {
         <div class="flex h-full flex-col gap-4">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
-              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block truncate text-[15px] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
+              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block truncate text-[length:var(--font-size-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
               <div class="mt-1 flex items-center gap-1">
-                <code class="break-all font-mono text-[10.5px] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
                 <AppCopyButton :text="instance.id" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance ID. Select the ID and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
               </div>
-              <p class="mt-1 text-[11px] text-[var(--neutral-700)]">{{ modelName(instance.model_id) }}</p>
+              <p class="mt-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ modelName(instance.model_id) }}</p>
             </div>
             <StatusTag :variant="statusVariant(instanceState(instance))">{{ instanceState(instance) }}</StatusTag>
           </div>
 
-          <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="border border-[var(--accent-600)] bg-[var(--accent-100)] px-3 py-2 text-[11px] text-[var(--accent-800)]"><div class="font-semibold">Import warning</div><div class="mt-1">{{ importFor(instance)?.error }}</div></div>
+          <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="border border-[var(--accent-600)] bg-[var(--accent-100)] px-3 py-2 text-[length:var(--font-size-table-header)] text-[var(--accent-800)]"><div class="font-semibold">Import warning</div><div class="mt-1">{{ importFor(instance)?.error }}</div></div>
 
-          <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] text-[var(--neutral-700)]">
+          <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">
             <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>
           </div>
 
           <div v-if="isRunning(instance)" class="grid grid-cols-2 gap-x-5 gap-y-4 border-t border-[var(--color-divider)] pt-4" data-testid="instance-telemetry">
-            <div><div class="text-[10px] text-[var(--neutral-700)]">{{ globalGPUFallback(telemetryFor(instance)) ? 'Global GPU usage' : 'Instance GPU usage' }}</div><div class="mt-1 font-mono text-[14px] text-[var(--color-text)]" data-testid="instance-gpu-usage">{{ formatPercent(gpuPercent(telemetryFor(instance))) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${clampPercent(gpuPercent(telemetryFor(instance)))}%` }" /></div></div>
-            <div><div class="text-[10px] text-[var(--neutral-700)]">VRAM</div><div class="mt-1 font-mono text-[14px] text-[var(--color-text)]" data-testid="instance-vram">{{ formatBytes(vramBytes(telemetryFor(instance))) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${fractionPercent(vramBytes(telemetryFor(instance)), gpuCapacity(telemetryFor(instance)))}%` }" /></div></div>
-            <div><div class="text-[10px] text-[var(--neutral-700)]">CPU</div><div class="mt-1 font-mono text-[14px] text-[var(--color-text)]" data-testid="instance-cpu">{{ formatPercent(telemetryFor(instance)?.cpu_percent) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${clampPercent(telemetryFor(instance)?.cpu_percent)}%` }" /></div></div>
-            <div><div class="text-[10px] text-[var(--neutral-700)]">RAM</div><div class="mt-1 font-mono text-[14px] text-[var(--color-text)]" data-testid="instance-memory">{{ formatBytes(telemetryFor(instance)?.memory_used_bytes) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${fractionPercent(telemetryFor(instance)?.memory_used_bytes, hostRAMTotal())}%` }" /></div></div>
-            <div class="col-span-2 text-[10px] text-[var(--neutral-700)]" data-testid="instance-gpu-placement">{{ placement(instance) }}</div>
+            <div><div class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ globalGPUFallback(telemetryFor(instance)) ? 'Global GPU usage' : 'Instance GPU usage' }}</div><div class="mt-1 font-mono text-[length:var(--font-size-h5)] text-[var(--color-text)]" data-testid="instance-gpu-usage">{{ formatPercent(gpuPercent(telemetryFor(instance))) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${clampPercent(gpuPercent(telemetryFor(instance)))}%` }" /></div></div>
+            <div><div class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">VRAM</div><div class="mt-1 font-mono text-[length:var(--font-size-h5)] text-[var(--color-text)]" data-testid="instance-vram">{{ formatBytes(vramBytes(telemetryFor(instance))) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${fractionPercent(vramBytes(telemetryFor(instance)), gpuCapacity(telemetryFor(instance)))}%` }" /></div></div>
+            <div><div class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">CPU</div><div class="mt-1 font-mono text-[length:var(--font-size-h5)] text-[var(--color-text)]" data-testid="instance-cpu">{{ formatPercent(telemetryFor(instance)?.cpu_percent) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${clampPercent(telemetryFor(instance)?.cpu_percent)}%` }" /></div></div>
+            <div><div class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">RAM</div><div class="mt-1 font-mono text-[length:var(--font-size-h5)] text-[var(--color-text)]" data-testid="instance-memory">{{ formatBytes(telemetryFor(instance)?.memory_used_bytes) }}</div><div class="mt-1 h-[3px] w-full bg-[var(--neutral-300)]"><div class="h-full bg-[var(--color-accent)]" :style="{ width: `${fractionPercent(telemetryFor(instance)?.memory_used_bytes, hostRAMTotal())}%` }" /></div></div>
+            <div class="col-span-2 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]" data-testid="instance-gpu-placement">{{ placement(instance) }}</div>
           </div>
 
           <div v-else class="border-t border-[var(--color-divider)] pt-4">
-            <div v-if="instanceState(instance) === 'FAILED' || instanceState(instance) === 'CANCELLED'" class="bg-[var(--neutral-200)] px-3 py-2 font-mono text-[11px] leading-relaxed text-[var(--neutral-800)]">{{ nonRunningMessage(instance) }}</div>
-            <p v-else class="text-[11px] leading-relaxed text-[var(--neutral-700)]">{{ nonRunningMessage(instance) }}</p>
+            <div v-if="instanceState(instance) === 'FAILED' || instanceState(instance) === 'CANCELLED'" class="bg-[var(--neutral-200)] px-3 py-2 font-mono text-[length:var(--font-size-table-header)] leading-relaxed text-[var(--neutral-800)]">{{ nonRunningMessage(instance) }}</div>
+            <p v-else class="text-[length:var(--font-size-table-header)] leading-relaxed text-[var(--neutral-700)]">{{ nonRunningMessage(instance) }}</p>
             <AppButton v-if="importBlocked(instance)" to="/downloads" intent="ghost" size="xs" class="mt-2">View download</AppButton>
           </div>
 
@@ -504,7 +504,7 @@ onBeforeUnmount(() => {
       </Frame>
     </div>
 
-    <p v-if="instances.length" class="border-t border-[var(--color-divider)] pt-4 text-[10.5px] leading-relaxed text-[var(--neutral-700)]">GPU telemetry degrades per metric: when process-level utilization cannot be attributed, the assigned device's utilization is shown and labelled Global GPU usage. CPU and RAM stay process-scoped.</p>
+    <p v-if="instances.length" class="border-t border-[var(--color-divider)] pt-4 text-[length:var(--font-size-table-header)] leading-relaxed text-[var(--neutral-700)]">GPU telemetry degrades per metric: when process-level utilization cannot be attributed, the assigned device's utilization is shown and labelled Global GPU usage. CPU and RAM stay process-scoped.</p>
 
     <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }"><template #body><InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" embedded /></template></UModal>
     <AppConfirmationModal ref="confirmation" />

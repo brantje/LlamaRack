@@ -63,9 +63,9 @@ async function submit() {
   <div class="space-y-6">
     <div class="flex flex-wrap items-start justify-between gap-5">
       <div class="min-w-0 flex-1">
-        <div class="mb-1 text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL REGISTRY</div>
-        <h1 class="font-heading text-[30px] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Edit model</h1>
-        <p class="mt-2 max-w-3xl text-[15px] leading-[1.55] text-[var(--neutral-800)]">
+        <div class="mb-1 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL REGISTRY</div>
+        <h1 class="font-heading text-[length:var(--font-size-screen-title)] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Edit model</h1>
+        <p class="mt-2 max-w-3xl text-[length:var(--font-size-body)] leading-[1.55] text-[var(--neutral-800)]">
           Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately.
         </p>
       </div>
@@ -87,8 +87,8 @@ async function submit() {
     <UForm v-else-if="loaded" :state="form" class="space-y-5" @submit="submit">
       <Frame class="p-5" data-testid="model-edit-metadata">
         <div class="mb-5">
-          <div class="text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL METADATA</div>
-          <h2 class="mt-1 font-heading text-[25px] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model metadata</h2>
+          <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL METADATA</div>
+          <h2 class="mt-1 font-heading text-[length:var(--font-size-h3)] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model metadata</h2>
         </div>
         <div class="grid gap-4 md:grid-cols-2">
           <UFormField label="Model name" name="name" required>
@@ -106,8 +106,8 @@ async function submit() {
 
       <Frame class="p-5" data-testid="model-edit-defaults">
         <div class="mb-5">
-          <div class="text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">LLAMA.CPP DEFAULTS</div>
-          <h2 class="mt-1 font-heading text-[25px] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model llama.cpp defaults</h2>
+          <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">LLAMA.CPP DEFAULTS</div>
+          <h2 class="mt-1 font-heading text-[length:var(--font-size-h3)] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model llama.cpp defaults</h2>
           <p class="mt-1 text-sm text-[var(--neutral-800)]">
             Reusable defaults inherited by every Instance of this Model unless that Instance overrides the flag.
           </p>

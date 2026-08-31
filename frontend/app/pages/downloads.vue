@@ -200,9 +200,9 @@ onBeforeUnmount(() => {
   <div class="space-y-6">
     <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between" data-testid="downloads-header">
       <div class="w-full min-w-0 sm:flex-1">
-        <div class="mb-1 text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL STORAGE</div>
-        <h1 class="font-heading text-[30px] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Downloads</h1>
-        <p class="mt-2 max-w-3xl text-[15px] leading-[1.55] text-[var(--neutral-800)]">
+        <div class="mb-1 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL STORAGE</div>
+        <h1 class="font-heading text-[length:var(--font-size-screen-title)] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Downloads</h1>
+        <p class="mt-2 max-w-3xl text-[length:var(--font-size-body)] leading-[1.55] text-[var(--neutral-800)]">
           Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts.
         </p>
       </div>
@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
               <StatusTag :variant="stateVariant(job.state)">{{ job.state }}</StatusTag>
               <StatusTag v-if="job.quantization" variant="neutral">{{ job.quantization }}</StatusTag>
             </div>
-            <p class="mt-1 truncate font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">{{ job.repo_id }}</p>
+            <p class="mt-1 truncate font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">{{ job.repo_id }}</p>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
             <AppButton v-if="activeStates.has(job.state)" intent="secondary" tone="destructive" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</AppButton>
@@ -269,7 +269,7 @@ onBeforeUnmount(() => {
               :style="{ width: `${progress(job)}%` }"
             />
           </div>
-          <div class="flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">
+          <div class="flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">
             <span>{{ formatBytes(job.downloaded_bytes) }} / {{ formatBytes(job.total_bytes) }} · {{ progress(job) }}%</span>
             <span v-if="job.speed_bps">{{ formatBytes(job.speed_bps) }}/s<span v-if="eta(job)"> · {{ eta(job) }}</span></span>
           </div>
@@ -288,8 +288,8 @@ onBeforeUnmount(() => {
           <template #files>
             <div class="divide-y divide-[var(--color-divider)] text-sm" data-testid="download-files">
               <div v-for="file in job.files" :key="file.path" class="grid items-center gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_150px_auto]">
-                <code class="break-all font-mono text-[11px] tabular-nums text-[var(--color-text)]">{{ file.local_path || file.path }}</code>
-                <span class="font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">{{ formatBytes(file.downloaded_bytes) }} / {{ formatBytes(file.size) }}</span>
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--color-text)]">{{ file.local_path || file.path }}</code>
+                <span class="font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">{{ formatBytes(file.downloaded_bytes) }} / {{ formatBytes(file.size) }}</span>
                 <div class="sm:text-right"><StatusTag :variant="stateVariant(file.state)">{{ file.state }}</StatusTag></div>
               </div>
             </div>

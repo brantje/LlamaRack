@@ -88,7 +88,7 @@ function formatTime(timestamp?: number) {
 
 <template>
   <div class="space-y-3">
-    <div v-if="series.length > 1" class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--neutral-800)]">
+    <div v-if="series.length > 1" class="flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">
       <span v-for="item in series" :key="item.label" class="inline-flex items-center gap-1.5">
         <span class="h-px w-4" :class="strokeClass(item.token).replace('stroke-', 'bg-')" />{{ item.label }}
       </span>
@@ -96,7 +96,7 @@ function formatTime(timestamp?: number) {
     <svg v-if="presentValues.length" :viewBox="`0 0 ${width} ${height}`" class="h-40 w-full overflow-visible" role="img" aria-label="History line chart">
       <g v-for="value in gridValues" :key="value">
         <line :x1="left" :x2="width - right" :y1="yFor(value)" :y2="yFor(value)" class="stroke-[var(--color-divider)]" stroke-width="1" vector-effect="non-scaling-stroke" />
-        <text :x="left - 5" :y="yFor(value) + 3" text-anchor="end" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatValue(value) }}</text>
+        <text :x="left - 5" :y="yFor(value) + 3" text-anchor="end" class="fill-[var(--neutral-700)] text-[length:var(--font-size-kicker)] font-mono">{{ formatValue(value) }}</text>
       </g>
       <line :x1="left" :x2="left" :y1="top" :y2="top + plotHeight" class="stroke-[var(--color-divider)]" stroke-width="1" />
       <line :x1="left" :x2="width - right" :y1="top + plotHeight" :y2="top + plotHeight" class="stroke-[var(--color-divider)]" stroke-width="1" />
@@ -115,11 +115,11 @@ function formatTime(timestamp?: number) {
         </circle>
       </template>
 
-      <text v-if="timestamps.length" :x="left" :y="height - 5" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatTime(timestamps[0]) }}</text>
-      <text v-if="timestamps.length > 1" :x="width - right" :y="height - 5" text-anchor="end" class="fill-[var(--neutral-700)] text-[8px] font-mono">{{ formatTime(timestamps[timestamps.length - 1]) }}</text>
+      <text v-if="timestamps.length" :x="left" :y="height - 5" class="fill-[var(--neutral-700)] text-[length:var(--font-size-kicker)] font-mono">{{ formatTime(timestamps[0]) }}</text>
+      <text v-if="timestamps.length > 1" :x="width - right" :y="height - 5" text-anchor="end" class="fill-[var(--neutral-700)] text-[length:var(--font-size-kicker)] font-mono">{{ formatTime(timestamps[timestamps.length - 1]) }}</text>
     </svg>
     <div v-else class="grid min-h-24 place-items-center border border-dashed border-[var(--color-divider)] px-3 py-4">
-      <p class="text-center text-[11px] text-[var(--neutral-800)]">No retained samples in this range.</p>
+      <p class="text-center text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">No retained samples in this range.</p>
     </div>
   </div>
 </template>

@@ -54,8 +54,8 @@ watch(manager.user, user => {
         <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
           <p class="text-sm font-semibold">Users</p>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Local management accounts</p>
-          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.users.enabled }} enabled</p>
-          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ summary.users.total }} total</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold leading-none">{{ summary.users.enabled }} enabled</p>
+          <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ summary.users.total }} total</p>
         </Frame>
       </NuxtLink>
 
@@ -63,8 +63,8 @@ watch(manager.user, user => {
         <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
           <p class="text-sm font-semibold">Hugging Face</p>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Provider credential</p>
-          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.huggingface.configured ? 'Configured' : 'Not configured' }}</p>
-          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ summary.huggingface.configured && summary.huggingface.prefix ? `${summary.huggingface.prefix}…` : 'No token' }}</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold leading-none">{{ summary.huggingface.configured ? 'Configured' : 'Not configured' }}</p>
+          <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ summary.huggingface.configured && summary.huggingface.prefix ? `${summary.huggingface.prefix}…` : 'No token' }}</p>
         </Frame>
       </NuxtLink>
 
@@ -72,8 +72,8 @@ watch(manager.user, user => {
         <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
           <p class="text-sm font-semibold">llama.cpp</p>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Binary capabilities and defaults</p>
-          <p class="mt-6 font-[var(--font-heading)] text-[26px] font-semibold leading-none">{{ summary.llamacpp.available ? (summary.llamacpp.version || 'Available') : 'Unavailable' }}</p>
-          <p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ manager.profile.value?.options.length || 0 }} discovered options</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold leading-none">{{ summary.llamacpp.available ? (summary.llamacpp.version || 'Available') : 'Unavailable' }}</p>
+          <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ manager.profile.value?.options.length || 0 }} discovered options</p>
         </Frame>
       </NuxtLink>
     </div>

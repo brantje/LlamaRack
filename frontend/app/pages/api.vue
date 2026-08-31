@@ -122,10 +122,10 @@ async function rotate(key: ManagedAPIKey) {
     <UPageHeader headline="OPENAI COMPATIBILITY" title="API" description="Connect OpenAI-compatible SDKs and LiteLLM to the unified manager endpoint." />
 
     <Frame class="p-5" data-testid="api-base-url">
-      <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BASE URL</p>
+      <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BASE URL</p>
       <h2 class="mt-1 text-base font-semibold">Unified endpoint</h2>
       <div class="my-4 flex items-center gap-2 border-y border-[var(--color-divider)] py-3">
-        <code class="min-w-0 flex-1 break-all font-mono text-[13.5px] text-[var(--accent-700)]">{{ apiBase }}/v1</code>
+        <code class="min-w-0 flex-1 break-all font-mono text-[length:var(--font-size-table-body)] text-[var(--accent-700)]">{{ apiBase }}/v1</code>
         <AppCopyButton :text="`${apiBase}/v1`" icon-only color="neutral" variant="ghost" size="sm" error-message="Unable to copy Base URL. Select it and copy it manually." data-testid="copy-api-base-url" />
       </div>
       <p class="text-sm leading-6 text-[var(--neutral-700)]">Supported routes: models, chat completions, completions, Responses and embeddings.</p>
@@ -134,7 +134,7 @@ async function rotate(key: ManagedAPIKey) {
     <Frame class="p-5" data-testid="api-keys-card">
       <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CREDENTIALS</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CREDENTIALS</p>
           <h2 class="mt-1 text-base font-semibold">Inference API keys</h2>
         </div>
         <UFieldGroup class="w-full rounded-none md:w-auto">
@@ -152,7 +152,7 @@ async function rotate(key: ManagedAPIKey) {
       <section v-if="secret" class="mt-4 border-y border-[var(--color-divider)] py-4" data-testid="fresh-api-key">
         <div class="space-y-3">
           <strong class="text-sm font-semibold">Copy this key now. It will not be shown again.</strong>
-          <code class="block break-all font-mono text-[13.5px] text-[var(--accent-700)]">{{ secret }}</code>
+          <code class="block break-all font-mono text-[length:var(--font-size-table-body)] text-[var(--accent-700)]">{{ secret }}</code>
           <AppCopyButton
             :text="secret"
             color="neutral"
@@ -169,8 +169,8 @@ async function rotate(key: ManagedAPIKey) {
       <p v-if="keys.length" class="mt-4 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for key status, timestamps and actions.</p>
       <div v-if="keys.length" class="mt-2 overflow-x-auto border border-[var(--color-divider)]" data-testid="api-keys-table" role="region" tabindex="0" aria-label="API keys. Scroll horizontally for status, timestamps and actions.">
         <UTable class="min-w-[760px]" :data="keys" :columns="columns">
-          <template #name-cell="{ row }"><span class="text-[13.5px] font-semibold">{{ row.original.name }}</span></template>
-          <template #prefix-cell="{ row }"><span class="font-mono text-[11.5px] text-[var(--neutral-700)]">{{ row.original.prefix }}…</span></template>
+          <template #name-cell="{ row }"><span class="text-[length:var(--font-size-table-body)] font-semibold">{{ row.original.name }}</span></template>
+          <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ row.original.prefix }}…</span></template>
           <template #status-cell="{ row }"><StatusTag :variant="statusVariant(row.original)">{{ statusLabel(row.original) }}</StatusTag></template>
           <template #created_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.created_at) }}</span></template>
           <template #last_used_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.last_used_at) }}</span></template>

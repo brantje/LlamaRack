@@ -58,7 +58,7 @@ describe('Models registry redesign', () => {
 
     const nameLink = table.findAll('a').find(link => link.text().includes('Coder 7B'))!
     expect(nameLink.attributes('href')).toBe('/models/coder/details')
-    expect(nameLink.classes()).toContain('text-[13.5px]')
+    expect(nameLink.classes()).toContain('text-[length:var(--font-size-table-body)]')
 
     const pathCell = table.findAll('td')[1]!
     expect(pathCell.classes()).toContain('min-w-[260px]')
@@ -66,7 +66,7 @@ describe('Models registry redesign', () => {
     expect(pathCell.classes()).toContain('break-words')
     expect(pathCell.classes()).not.toContain('break-all')
     expect(pathCell.classes()).toContain('font-mono')
-    expect(pathCell.classes()).toContain('text-[11.5px]')
+    expect(pathCell.classes()).toContain('text-[length:var(--font-size-h6)]')
 
     const copyPath = wrapper.getComponent(AppCopyButton)
     expect(copyPath.props('text')).toBe('nested/models/coder/coder-q4.gguf')

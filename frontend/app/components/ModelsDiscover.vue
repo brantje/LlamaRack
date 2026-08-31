@@ -419,12 +419,12 @@ onBeforeUnmount(() => {
         >
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="truncate font-mono text-[14px] font-semibold text-[var(--color-text)]">{{ item.id }}</span>
+              <span class="truncate font-mono text-[length:var(--font-size-h5)] font-semibold text-[var(--color-text)]">{{ item.id }}</span>
               <StatusTag v-if="item.private" variant="pending">Private</StatusTag>
               <StatusTag v-if="item.gated" variant="pending">Gated</StatusTag>
               <StatusTag variant="neutral">GGUF</StatusTag>
             </div>
-            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[var(--neutral-800)]">
+            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">
               <span v-if="item.author">Author <span class="font-mono text-[var(--neutral-900)]">{{ item.author }}</span></span>
               <span v-if="item.parameter_count" class="font-mono tabular-nums">{{ formatParameters(item.parameter_count) }}</span>
               <span class="font-mono tabular-nums">↓ {{ item.downloads.toLocaleString() }}</span>
@@ -450,7 +450,7 @@ onBeforeUnmount(() => {
       <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
           <StatusTag variant="failed">Repository unavailable</StatusTag>
-          <p class="mt-3 break-all font-mono text-[13px] font-semibold text-[var(--color-text)]">{{ repoID }}</p>
+          <p class="mt-3 break-all font-mono text-[length:var(--font-size-h6)] font-semibold text-[var(--color-text)]">{{ repoID }}</p>
           <p class="mt-2 text-sm leading-6 text-[var(--neutral-800)]">{{ error }}</p>
         </div>
         <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
@@ -484,7 +484,7 @@ onBeforeUnmount(() => {
       <Frame class="p-5" data-testid="discover-context-section">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CONTEXT + RECOMMENDATION</p>
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CONTEXT + RECOMMENDATION</p>
             <div class="mt-1 flex flex-wrap items-center gap-2">
               <h2 class="font-heading text-xl font-semibold text-[var(--color-text)]">Hardware guidance</h2>
               <StatusTag v-if="recommendations" :variant="recommendations.hardware_available ? 'ready' : 'neutral'">{{ recommendations.hardware_available ? 'Hardware aware' : 'Telemetry limited' }}</StatusTag>
@@ -492,7 +492,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="recommendations" class="text-right">
-            <p class="text-[10px] uppercase tracking-[.08em] text-[var(--neutral-700)]">Selected context</p>
+            <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.08em] text-[var(--neutral-700)]">Selected context</p>
             <p class="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]">{{ formatContext(selectedContext) }}</p>
           </div>
         </div>
@@ -530,7 +530,7 @@ onBeforeUnmount(() => {
       <div class="space-y-3" data-testid="discover-artifacts">
         <div class="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">GGUF ARTIFACTS</p>
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">GGUF ARTIFACTS</p>
             <h2 class="mt-1 font-heading text-xl font-semibold text-[var(--color-text)]">Choose a quantization</h2>
             <p class="mt-1 max-w-4xl text-sm text-[var(--neutral-800)]">Quality, memory use, estimated generation speed and runtime placement stay separate from the raw quantization label.</p>
           </div>
@@ -562,17 +562,17 @@ onBeforeUnmount(() => {
               <p class="mt-2 truncate font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ artifact.name }} · {{ formatBytes(artifact.total_bytes) }}</p>
 
               <dl v-if="artifactAdvice(artifact)" class="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
-                <div><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
-                <div><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
                 <div>
-                  <dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Estimated Generation</dt>
+                  <dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Estimated Generation</dt>
                   <dd class="mt-1 font-semibold"><UTooltip :text="speedReason(artifactAdvice(artifact))"><span data-testid="artifact-generation-speed">{{ speedLabel(artifactAdvice(artifact)) }}</span></UTooltip></dd>
                 </div>
                 <div>
-                  <dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hardware</dt>
+                  <dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hardware</dt>
                   <dd class="mt-1"><UTooltip :text="fitReason(artifactAdvice(artifact))"><StatusTag :variant="artifactAdvice(artifact)!.fit === 'gpu' || artifactAdvice(artifact)!.fit === 'multi_gpu' ? 'ready' : artifactAdvice(artifact)!.fit === 'no_fit' ? 'failed' : artifactAdvice(artifact)!.fit === 'hybrid' ? 'pending' : 'neutral'" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</StatusTag></UTooltip></dd>
                 </div>
-                <div><dt class="text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
               </dl>
               <div v-else class="mt-4"><StatusTag variant="neutral" data-testid="artifact-hardware-fit">Fit unknown</StatusTag></div>
 
@@ -582,7 +582,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-4 border-l border-[var(--color-divider)] pl-4">
-                <p class="mb-2 text-[10px] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Companion files</p>
+                <p class="mb-2 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Companion files</p>
                 <div v-for="dependency in artifact.dependencies" :key="`${dependency.kind}-${dependency.name}`" class="grid gap-1 border-t border-[var(--color-divider)] py-2 text-xs first:border-t-0 sm:grid-cols-[160px_minmax(0,1fr)_auto_auto] sm:items-center">
                   <StatusTag variant="neutral">{{ dependencyLabel(dependency.kind) }}</StatusTag>
                   <span class="min-w-0 truncate font-mono text-[var(--neutral-900)]">{{ dependency.name }}</span>

@@ -48,7 +48,7 @@ describe('API redesign', () => {
     expect(base.text()).toContain('Unified endpoint')
     expect(base.text()).toContain('http://manager.test:8888/v1')
     expect(base.text()).toContain('Supported routes: models, chat completions, completions, Responses and embeddings.')
-    expect(base.get('code').classes()).toContain('text-[13.5px]')
+    expect(base.get('code').classes()).toContain('text-[length:var(--font-size-table-body)]')
     expect(base.get('code').classes()).toContain('font-mono')
 
     const table = wrapper.get('[data-testid="api-keys-table"]')

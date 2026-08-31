@@ -455,10 +455,10 @@ onBeforeUnmount(() => controller?.abort())
 <template>
   <div class="space-y-4" data-testid="playground-page">
     <header class="border-b border-[var(--color-divider)] pb-4">
-      <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
+      <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="min-w-0 truncate font-mono text-[16px] font-semibold text-[var(--neutral-900)] sm:text-[18px]" :title="selectedInstance?.id || undefined">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
+          <h1 class="min-w-0 truncate font-mono text-[length:var(--font-size-h5)] font-semibold text-[var(--neutral-900)] sm:text-[length:var(--font-size-h4)]" :title="selectedInstance?.id || undefined">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
           <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState === 'READY' ? 'Instance READY' : runtimeState }}</StatusTag>
           <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : phase === 'failed' ? 'failed' : 'pending'">{{ phaseLabel }}</StatusTag>
         </div>
@@ -494,8 +494,8 @@ onBeforeUnmount(() => controller?.abort())
         </div>
 
         <div class="min-h-0 flex-1 space-y-5 overflow-auto p-5">
-          <div v-if="parameters.systemPrompt.trim()" class="max-w-3xl font-mono text-[12.5px] text-[var(--neutral-700)]">
-            <p class="mb-1 text-[9.5px] font-extrabold tracking-[0.18em]">system</p>
+          <div v-if="parameters.systemPrompt.trim()" class="max-w-3xl font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">
+            <p class="mb-1 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em]">system</p>
             <p class="whitespace-pre-wrap">{{ parameters.systemPrompt }}</p>
           </div>
 
@@ -511,9 +511,9 @@ onBeforeUnmount(() => controller?.abort())
                 ? 'bg-[var(--neutral-200)]'
                 : 'border-l-2 border-[var(--accent-300)] bg-transparent'"
             >
-              <p class="mb-1 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">{{ message.role }}</p>
+              <p class="mb-1 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">{{ message.role }}</p>
               <p class="whitespace-pre-wrap text-sm leading-6">{{ message.content || (message.role === 'assistant' && inFlight ? '…' : '') }}</p>
-              <p v-if="message.role === 'assistant' && message.stats" class="mt-2 font-mono text-[11px] tabular-nums text-[var(--neutral-700)]">
+              <p v-if="message.role === 'assistant' && message.stats" class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">
                 {{ message.stats.prompt }} prompt · {{ message.stats.completion }} completion · {{ formatRate(message.stats.rate) }} · ttft {{ formatMS(message.stats.ttft) }}
               </p>
             </article>
@@ -532,7 +532,7 @@ onBeforeUnmount(() => controller?.abort())
           <div class="flex items-end gap-2">
             <textarea
               v-model="composer"
-              class="min-h-24 flex-1 resize-y border border-[var(--color-divider)] bg-transparent px-3 py-2 font-mono text-[13px] outline-none focus:border-[var(--color-accent)]"
+              class="min-h-24 flex-1 resize-y border border-[var(--color-divider)] bg-transparent px-3 py-2 font-mono text-[length:var(--font-size-h6)] outline-none focus:border-[var(--color-accent)]"
               placeholder="Message"
               aria-label="Playground message"
               @keydown="onComposerKeydown"
@@ -546,7 +546,7 @@ onBeforeUnmount(() => controller?.abort())
       <aside class="min-w-0 space-y-4" data-testid="playground-rail">
         <Frame class="p-0">
           <div class="hidden border-b border-[var(--color-divider)] p-4 xl:block">
-            <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Instance — the OpenAI model value</p>
+            <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Instance — the OpenAI model value</p>
             <div class="mt-3 max-h-56 space-y-1 overflow-auto">
               <button
                 v-for="instance in manager.instances.value"
@@ -558,8 +558,8 @@ onBeforeUnmount(() => controller?.abort())
                   : 'border-[var(--color-divider)] bg-transparent'"
                 @click="selectInstance(instance.id)"
               >
-                <span class="block font-mono text-[12px] font-semibold">{{ instance.id }}</span>
-                <span class="mt-0.5 block text-[10px] opacity-75">{{ manager.instanceState(instance) }} · {{ manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id }}</span>
+                <span class="block font-mono text-[length:var(--font-size-h6)] font-semibold">{{ instance.id }}</span>
+                <span class="mt-0.5 block text-[length:var(--font-size-kicker)] opacity-75">{{ manager.instanceState(instance) }} · {{ manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id }}</span>
               </button>
             </div>
           </div>
@@ -569,7 +569,7 @@ onBeforeUnmount(() => controller?.abort())
               v-for="item in panelItems"
               :key="item.id"
               type="button"
-              class="border-r border-[var(--color-divider)] px-2 py-2 text-[11px] font-semibold last:border-r-0"
+              class="border-r border-[var(--color-divider)] px-2 py-2 text-[length:var(--font-size-table-header)] font-semibold last:border-r-0"
               :class="activePanel === item.id ? 'bg-[var(--accent-100)] text-[var(--accent-800)]' : 'text-[var(--neutral-700)]'"
               @click="activePanel = item.id"
             >
@@ -579,44 +579,44 @@ onBeforeUnmount(() => controller?.abort())
 
           <div v-if="activePanel === 'parameters'" class="space-y-4 p-4" data-testid="playground-parameters">
             <div class="grid grid-cols-2 gap-3">
-              <label class="text-[10px] text-[var(--neutral-700)]">temperature<UInput v-model.number="parameters.temperature" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">top_p<UInput v-model.number="parameters.topP" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">max_tokens<UInput v-model.number="parameters.maxTokens" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">seed<UInput v-model="parameters.seed" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">top_k<UInput v-model.number="parameters.topK" type="number" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">min_p<UInput v-model.number="parameters.minP" type="number" step="0.01" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">repeat_penalty<UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
-              <label class="text-[10px] text-[var(--neutral-700)]">stop<UInput v-model="parameters.stop" class="mt-1 font-mono" placeholder="one, two" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">temperature<UInput v-model.number="parameters.temperature" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">top_p<UInput v-model.number="parameters.topP" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">max_tokens<UInput v-model.number="parameters.maxTokens" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">seed<UInput v-model="parameters.seed" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">top_k<UInput v-model.number="parameters.topK" type="number" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">min_p<UInput v-model.number="parameters.minP" type="number" step="0.01" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">repeat_penalty<UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="mt-1 font-mono tabular-nums" /></label>
+              <label class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">stop<UInput v-model="parameters.stop" class="mt-1 font-mono" placeholder="one, two" /></label>
             </div>
             <UCheckbox v-model="parameters.stream" label="stream" />
-            <label class="block text-[10px] text-[var(--neutral-700)]">system prompt
-              <textarea v-model="parameters.systemPrompt" class="mt-1 min-h-28 w-full resize-y border border-[var(--color-divider)] bg-transparent p-2 font-mono text-[12px] outline-none focus:border-[var(--color-accent)]" />
+            <label class="block text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">system prompt
+              <textarea v-model="parameters.systemPrompt" class="mt-1 min-h-28 w-full resize-y border border-[var(--color-divider)] bg-transparent p-2 font-mono text-[length:var(--font-size-h6)] outline-none focus:border-[var(--color-accent)]" />
             </label>
           </div>
 
           <div v-else-if="activePanel === 'request'" class="space-y-4 p-4" data-testid="playground-request">
-            <label class="block text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW JSON</label>
+            <label class="block text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW JSON</label>
             <textarea
               v-model="rawRequest"
-              class="min-h-80 w-full resize-y border border-[var(--color-divider)] bg-transparent p-3 font-mono text-[11px] leading-5 outline-none focus:border-[var(--color-accent)]"
+              class="min-h-80 w-full resize-y border border-[var(--color-divider)] bg-transparent p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 outline-none focus:border-[var(--color-accent)]"
               aria-label="Raw request JSON"
               @input="rawDirty = true"
             />
             <div>
-              <p class="mb-2 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CURL</p>
-              <pre class="overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[10.5px] leading-5 whitespace-pre-wrap">{{ curlExample }}</pre>
+              <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CURL</p>
+              <pre class="overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ curlExample }}</pre>
             </div>
           </div>
 
           <div v-else class="space-y-4 p-4" data-testid="playground-response">
             <template v-if="rawResponse || capturedHeaders.length">
               <div>
-                <p class="mb-2 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RESPONSE HEADERS</p>
-                <pre class="max-h-44 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[10.5px] leading-5 whitespace-pre-wrap">{{ capturedHeaders.map(([key, value]) => `${key}: ${value}`).join('\n') }}</pre>
+                <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RESPONSE HEADERS</p>
+                <pre class="max-h-44 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ capturedHeaders.map(([key, value]) => `${key}: ${value}`).join('\n') }}</pre>
               </div>
               <div>
-                <p class="mb-2 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW {{ parameters.stream ? 'SSE STREAM' : 'RESPONSE' }}</p>
-                <pre class="max-h-72 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[10.5px] leading-5 whitespace-pre-wrap">{{ rawResponse }}</pre>
+                <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW {{ parameters.stream ? 'SSE STREAM' : 'RESPONSE' }}</p>
+                <pre class="max-h-72 overflow-auto bg-[var(--neutral-200)] p-3 font-mono text-[length:var(--font-size-table-header)] leading-5 whitespace-pre-wrap">{{ rawResponse }}</pre>
               </div>
             </template>
             <p v-else class="py-8 text-center text-xs text-[var(--neutral-700)]">Send a request to capture the raw response.</p>
@@ -624,8 +624,8 @@ onBeforeUnmount(() => controller?.abort())
         </Frame>
 
         <Frame class="p-4" data-testid="playground-diagnostics">
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">REQUEST DIAGNOSTICS</p>
-          <dl v-if="diagnostics" class="mt-3 divide-y divide-[var(--color-divider)] text-[11px]">
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">REQUEST DIAGNOSTICS</p>
+          <dl v-if="diagnostics" class="mt-3 divide-y divide-[var(--color-divider)] text-[length:var(--font-size-table-header)]">
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.instance_id || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance state</dt><dd class="font-mono tabular-nums">{{ diagnostics.state_trace?.join(' → ') || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Cold start</dt><dd>{{ diagnostics.request.autoloaded ? 'yes — autoload' : 'no' }}</dd></div>

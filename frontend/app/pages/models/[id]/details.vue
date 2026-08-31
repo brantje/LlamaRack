@@ -195,25 +195,25 @@ onMounted(() => void load())
 
     <Frame v-if="details" class="p-5" data-testid="model-details-summary">
       <div class="mb-5">
-        <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">GGUF SUMMARY</p>
+        <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">GGUF SUMMARY</p>
         <h2 class="mt-1 text-lg font-semibold">Artifact</h2>
       </div>
       <dl class="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Path</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ details.model.gguf_path || 'Unknown' }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Size</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ formatBytes(details.model.total_bytes) }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">GGUF version</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ formatPositiveNumber(details.gguf_version) }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Metadata keys</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ formatPositiveNumber(details.metadata_count) }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ details.architecture || 'Unknown' }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Quantization</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ details.model.quantization || 'Unknown' }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ formatContext(details.model.context_length || details.detected_context_length) }}</dd></div>
-        <div><dt class="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Tensor count</dt><dd class="mt-1 break-all font-mono text-[13px]">{{ formatPositiveNumber(details.tensor_count) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Path</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ details.model.gguf_path || 'Unknown' }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Size</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatBytes(details.model.total_bytes) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">GGUF version</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatPositiveNumber(details.gguf_version) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Metadata keys</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatPositiveNumber(details.metadata_count) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ details.architecture || 'Unknown' }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Quantization</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ details.model.quantization || 'Unknown' }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatContext(details.model.context_length || details.detected_context_length) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Tensor count</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatPositiveNumber(details.tensor_count) }}</dd></div>
       </dl>
     </Frame>
 
     <Frame class="overflow-hidden" data-testid="gguf-metadata-card">
       <div class="flex flex-col gap-4 border-b border-[var(--color-divider)] p-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW GGUF METADATA</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">RAW GGUF METADATA</p>
           <h2 class="mt-1 text-lg font-semibold">Key / Type / Value</h2>
           <p class="mt-1 text-sm text-[var(--neutral-700)]">Unknown and future GGUF keys are shown without requiring manager-specific support.</p>
         </div>
@@ -231,7 +231,7 @@ onMounted(() => void load())
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full table-fixed text-left" data-testid="metadata-table">
-          <thead class="border-b border-[var(--color-divider)] text-[10px] uppercase tracking-[0.12em] text-[var(--neutral-700)]">
+          <thead class="border-b border-[var(--color-divider)] text-[length:var(--font-size-kicker)] uppercase tracking-[0.12em] text-[var(--neutral-700)]">
             <tr>
               <th class="w-[38%] px-5 py-3 font-semibold">Key</th>
               <th class="w-[18%] px-5 py-3 font-semibold">Type</th>
@@ -240,11 +240,11 @@ onMounted(() => void load())
           </thead>
           <tbody class="divide-y divide-[var(--color-divider)]">
             <tr v-for="entry in details?.metadata || []" :key="entry.key">
-              <td class="break-all px-5 py-3 align-top font-mono text-[12px]">{{ entry.key }}</td>
-              <td class="break-all px-5 py-3 align-top font-mono text-[11.5px] text-[var(--neutral-700)]">{{ entry.type }}</td>
+              <td class="break-all px-5 py-3 align-top font-mono text-[length:var(--font-size-h6)]">{{ entry.key }}</td>
+              <td class="break-all px-5 py-3 align-top font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ entry.type }}</td>
               <td class="px-5 py-3 align-top">
                 <div class="flex min-w-0 items-start justify-between gap-3">
-                  <span class="min-w-0 break-all font-mono text-[12px]">{{ entry.value }}</span>
+                  <span class="min-w-0 break-all font-mono text-[length:var(--font-size-h6)]">{{ entry.value }}</span>
                   <AppButton v-if="entry.truncated" type="button" data-testid="metadata-expand" intent="ghost" size="xs" class="shrink-0" @click="openValue(entry)">Expand</AppButton>
                 </div>
               </td>

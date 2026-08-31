@@ -391,7 +391,7 @@ defineExpose({ setSelectedWindow })
   <div class="space-y-8">
     <div class="flex flex-wrap items-start justify-between gap-5">
       <div class="min-w-0 flex-1">
-        <p class="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--accent-700)]">INSTANCE DETAIL</p>
+        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.18em] text-[var(--accent-700)]">INSTANCE DETAIL</p>
         <div class="mt-2 flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance?.name || instanceID }}</h1>
           <StatusTag v-if="instance && !error.includes('was not found')" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
@@ -419,30 +419,30 @@ defineExpose({ setSelectedWindow })
     <template v-else-if="instance">
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="instance-detail-summary">
         <Frame class="p-4">
-          <p class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Status</p>
+          <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Status</p>
           <p class="mt-3 font-mono text-xl font-semibold tabular-nums">{{ runtime?.state || 'UNLOADED' }}</p>
-          <div class="mt-3 space-y-1 text-[11px] text-[var(--neutral-800)]"><p>Uptime <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatUptime(runtimeUptime) }}</span></p><p>Started <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ runtime?.started_at ? formatLocal(runtime.started_at) : '—' }}</span></p></div>
+          <div class="mt-3 space-y-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]"><p>Uptime <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatUptime(runtimeUptime) }}</span></p><p>Started <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ runtime?.started_at ? formatLocal(runtime.started_at) : '—' }}</span></p></div>
         </Frame>
         <Frame class="p-4">
-          <p class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Requests · {{ selectedRangeLabel }}</p>
+          <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Requests · {{ selectedRangeLabel }}</p>
           <p class="mt-3 font-mono text-xl font-semibold tabular-nums">{{ formatNumber(completedRequests) }}</p>
-          <div class="mt-3 space-y-1 text-[11px] text-[var(--neutral-800)]"><p>Tokens <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatNumber(tokenTotal) }}</span></p><p>Average latency <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatDuration(averageLatency) }}</span></p></div>
+          <div class="mt-3 space-y-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]"><p>Tokens <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatNumber(tokenTotal) }}</span></p><p>Average latency <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatDuration(averageLatency) }}</span></p></div>
         </Frame>
         <Frame class="p-4">
-          <p class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Context</p>
+          <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Context</p>
           <p class="mt-3 font-mono text-xl font-semibold tabular-nums">{{ contextHighWatermark() }}</p>
-          <div class="mt-3 space-y-1 text-[11px] text-[var(--neutral-800)]"><p>Utilization <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatPercent(contextPercent) }}</span></p><p>Maximum context <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ model?.context_length ? formatNumber(model.context_length) : '—' }}</span></p></div>
+          <div class="mt-3 space-y-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]"><p>Utilization <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatPercent(contextPercent) }}</span></p><p>Maximum context <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ model?.context_length ? formatNumber(model.context_length) : '—' }}</span></p></div>
         </Frame>
         <Frame class="p-4">
-          <p class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">VRAM</p>
+          <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">VRAM</p>
           <p class="mt-3 font-mono text-xl font-semibold tabular-nums">{{ formatBytes(currentVRAM) }} / {{ relevantVRAMTotal ? formatBytes(relevantVRAMTotal) : '—' }}</p>
-          <div class="mt-3 space-y-1 text-[11px] text-[var(--neutral-800)]"><p>Utilization <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatPercent(currentVRAMPercent) }}</span></p><p>Placement <span class="float-right font-mono text-[var(--color-text)]">{{ placementIDs.length ? placementIDs.join(', ') : '—' }}</span></p></div>
+          <div class="mt-3 space-y-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]"><p>Utilization <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatPercent(currentVRAMPercent) }}</span></p><p>Placement <span class="float-right font-mono text-[var(--color-text)]">{{ placementIDs.length ? placementIDs.join(', ') : '—' }}</span></p></div>
         </Frame>
       </section>
 
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h2 class="text-base font-semibold">Performance history</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Server-bucketed history for this Instance only.</p></div>
-        <div class="flex items-center gap-2"><span v-if="historyLoading" class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Refreshing</span><USelect v-model="selectedWindow" data-testid="instance-detail-history-range" aria-label="Instance history range" :items="selectableRanges" value-key="value" label-key="label" size="sm" class="min-w-28" /></div>
+        <div class="flex items-center gap-2"><span v-if="historyLoading" class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Refreshing</span><USelect v-model="selectedWindow" data-testid="instance-detail-history-range" aria-label="Instance history range" :items="selectableRanges" value-key="value" label-key="label" size="sm" class="min-w-28" /></div>
       </div>
 
       <Frame v-if="historyError" class="p-3" data-testid="instance-detail-history-error">
@@ -455,19 +455,19 @@ defineExpose({ setSelectedWindow })
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Frame class="p-4" data-testid="instance-detail-chart-requests">
-          <div class="mb-3"><h3 class="text-sm font-semibold">Requests per minute</h3><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Completed gateway requests, including errors.</p></div>
+          <div class="mb-3"><h3 class="text-sm font-semibold">Requests per minute</h3><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Completed gateway requests, including errors.</p></div>
           <InstanceHistoryChart :series="[{ label: 'Requests', points: requestChart, token: 'accent' }]" value-format="number" />
         </Frame>
         <Frame class="p-4" data-testid="instance-detail-chart-tokens">
-          <div class="mb-3"><h3 class="text-sm font-semibold">Tokens per minute</h3><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Prompt/input and generated/output traffic.</p></div>
+          <div class="mb-3"><h3 class="text-sm font-semibold">Tokens per minute</h3><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Prompt/input and generated/output traffic.</p></div>
           <InstanceHistoryChart :series="[{ label: 'Prompt / input', points: promptChart, token: 'accent' }, { label: 'Generated / output', points: generatedChart, token: 'accent-strong' }]" value-format="tokens" />
         </Frame>
         <Frame class="p-4" data-testid="instance-detail-chart-latency">
-          <div class="mb-3"><h3 class="text-sm font-semibold">Request latency</h3><p class="mt-1 text-[10px] text-[var(--neutral-700)]">End-to-end p50 / p95 for completed requests.</p></div>
+          <div class="mb-3"><h3 class="text-sm font-semibold">Request latency</h3><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">End-to-end p50 / p95 for completed requests.</p></div>
           <InstanceHistoryChart :series="[{ label: 'p50', points: latencyP50Chart, token: 'accent' }, { label: 'p95', points: latencyP95Chart, token: 'accent-strong' }]" value-format="duration" />
         </Frame>
         <Frame class="p-4" data-testid="instance-detail-chart-context">
-          <div class="mb-3"><h3 class="text-sm font-semibold">Context utilization</h3><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Historical llama.cpp context high-watermark.</p></div>
+          <div class="mb-3"><h3 class="text-sm font-semibold">Context utilization</h3><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Historical llama.cpp context high-watermark.</p></div>
           <InstanceHistoryChart :series="[{ label: 'Context', points: contextChart, token: 'accent' }]" value-format="percent" :min="0" :max="100" />
         </Frame>
       </section>
@@ -476,12 +476,12 @@ defineExpose({ setSelectedWindow })
         <div><h2 class="text-base font-semibold">VRAM allocation</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Current device allocation, including attributed and unattributed process memory.</p></div>
         <div v-if="allocationGPUs.length" class="grid gap-4 lg:grid-cols-2">
           <Frame v-for="gpu in allocationGPUs" :key="gpu.id" class="p-4">
-            <div class="flex flex-wrap items-baseline justify-between gap-2"><h3 class="text-sm font-semibold">{{ gpu.id }} · {{ gpu.name }}</h3><span class="font-mono text-[11px] tabular-nums text-[var(--neutral-800)]">{{ formatBytes(gpu.used_bytes) }} / {{ formatBytes(gpu.total_bytes) }} · {{ formatPercent(gpu.utilization_pct) }} util</span></div>
+            <div class="flex flex-wrap items-baseline justify-between gap-2"><h3 class="text-sm font-semibold">{{ gpu.id }} · {{ gpu.name }}</h3><span class="font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-800)]">{{ formatBytes(gpu.used_bytes) }} / {{ formatBytes(gpu.total_bytes) }} · {{ formatPercent(gpu.utilization_pct) }} util</span></div>
             <div class="mt-4 flex h-3 w-full overflow-hidden bg-[var(--neutral-300)]">
               <span v-for="segment in vramSegments(gpu)" :key="segment.label" class="h-full" :style="{ width: `${segment.percent}%`, backgroundColor: segment.token }" />
             </div>
             <div class="mt-4 divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
-              <div v-for="segment in vramSegments(gpu)" :key="segment.label" class="flex items-center justify-between gap-3 py-2 text-[11px]"><span class="flex min-w-0 items-center gap-2"><i class="block h-2 w-2 shrink-0" :style="{ backgroundColor: segment.token }" /><span class="truncate">{{ segment.label }}</span></span><span class="shrink-0 font-mono tabular-nums">{{ formatBytes(segment.bytes) }}</span></div>
+              <div v-for="segment in vramSegments(gpu)" :key="segment.label" class="flex items-center justify-between gap-3 py-2 text-[length:var(--font-size-table-header)]"><span class="flex min-w-0 items-center gap-2"><i class="block h-2 w-2 shrink-0" :style="{ backgroundColor: segment.token }" /><span class="truncate">{{ segment.label }}</span></span><span class="shrink-0 font-mono tabular-nums">{{ formatBytes(segment.bytes) }}</span></div>
             </div>
           </Frame>
         </div>
@@ -489,20 +489,20 @@ defineExpose({ setSelectedWindow })
       </section>
 
       <Frame class="p-4" data-testid="instance-detail-runtime">
-        <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-sm font-semibold">Runtime snapshot</h2><p class="mt-1 font-mono text-[11px] text-[var(--neutral-700)]">{{ instance.id }}</p></div><StatusTag :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag></div>
+        <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-sm font-semibold">Runtime snapshot</h2><p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ instance.id }}</p></div><StatusTag :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag></div>
         <dl class="mt-4 grid gap-0 border-t border-l border-[var(--color-divider)] sm:grid-cols-2 lg:grid-cols-4">
           <div v-for="item in [
             ['PID', runtime?.pid || '—'], ['Port', runtime?.port || '—'], ['Placed on', placementIDs.length ? placementIDs.join(', ') : '—'],
             [gpuUsageLabel, formatPercent(currentGPUUsage)], ['VRAM', formatBytes(currentVRAM)], ['CPU', formatPercent(telemetry?.cpu_percent)],
             ['RAM', formatBytes(telemetry?.memory_used_bytes)], ['Snapshot time', telemetry?.collected_at ? formatLocal(telemetry.collected_at) : '—']
-          ]" :key="String(item[0])" class="border-r border-b border-[var(--color-divider)] p-3"><dt class="text-[9.5px] uppercase tracking-[.12em] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[15px] tabular-nums">{{ item[1] }}</dd></div>
+          ]" :key="String(item[0])" class="border-r border-b border-[var(--color-divider)] p-3"><dt class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[length:var(--font-size-body)] tabular-nums">{{ item[1] }}</dd></div>
         </dl>
       </Frame>
 
       <Frame v-if="companions.length" class="p-4" data-testid="instance-detail-companions">
         <h2 class="text-sm font-semibold">Companion files</h2>
         <div class="mt-3 divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
-          <div v-for="helper in companions" :key="`${helper.kind}-${helper.path}`" class="flex flex-wrap items-center justify-between gap-3 py-3"><div class="min-w-0"><p class="text-xs font-semibold">{{ helper.kind }}</p><p class="mt-1 break-all font-mono text-[11px]">{{ helper.path }}</p><p class="mt-1 text-[10px] text-[var(--neutral-700)]">{{ helper.flag }} · {{ formatBytes(helper.size) }}</p></div><StatusTag variant="ready">Enabled</StatusTag></div>
+          <div v-for="helper in companions" :key="`${helper.kind}-${helper.path}`" class="flex flex-wrap items-center justify-between gap-3 py-3"><div class="min-w-0"><p class="text-xs font-semibold">{{ helper.kind }}</p><p class="mt-1 break-all font-mono text-[length:var(--font-size-table-header)]">{{ helper.path }}</p><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ helper.flag }} · {{ formatBytes(helper.size) }}</p></div><StatusTag variant="ready">Enabled</StatusTag></div>
         </div>
       </Frame>
 
@@ -513,23 +513,23 @@ defineExpose({ setSelectedWindow })
 
       <template v-else>
         <Frame class="p-4" data-testid="instance-detail-throughput">
-          <div><h2 class="text-sm font-semibold">Throughput & load</h2><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Live llama.cpp gauges from the managed worker.</p></div>
+          <div><h2 class="text-sm font-semibold">Throughput & load</h2><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Live llama.cpp gauges from the managed worker.</p></div>
           <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div v-for="item in [['Generation throughput', formatRate(llama.predicted_tokens_per_second)], ['Prompt throughput', formatRate(llama.prompt_tokens_per_second)], ['Active requests', formatNumber(llama.requests_processing)], ['Queued requests', formatNumber(llama.requests_deferred)], ['Context high-watermark', contextHighWatermark()], ['Busy slots / decode', formatNumber(llama.busy_slots_per_decode, 2)]]" :key="String(item[0])"><dt class="text-[10px] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[19px] font-semibold tabular-nums">{{ item[1] }}</dd></div>
+            <div v-for="item in [['Generation throughput', formatRate(llama.predicted_tokens_per_second)], ['Prompt throughput', formatRate(llama.prompt_tokens_per_second)], ['Active requests', formatNumber(llama.requests_processing)], ['Queued requests', formatNumber(llama.requests_deferred)], ['Context high-watermark', contextHighWatermark()], ['Busy slots / decode', formatNumber(llama.busy_slots_per_decode, 2)]]" :key="String(item[0])"><dt class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[length:var(--font-size-h4)] font-semibold tabular-nums">{{ item[1] }}</dd></div>
           </dl>
         </Frame>
         <Frame class="p-4" data-testid="instance-detail-counters">
-          <div><h2 class="text-sm font-semibold">Cumulative counters</h2><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Counters reset when the llama-server process restarts.</p></div>
+          <div><h2 class="text-sm font-semibold">Cumulative counters</h2><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Counters reset when the llama-server process restarts.</p></div>
           <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <div v-for="item in [['Prompt tokens', formatNumber(llama.prompt_tokens_total)], ['Prompt processing time', formatSeconds(llama.prompt_seconds_total)], ['Generated tokens', formatNumber(llama.predicted_tokens_total)], ['Generation time', formatSeconds(llama.predicted_seconds_total)], ['llama_decode() calls', formatNumber(llama.decode_total)]]" :key="String(item[0])"><dt class="text-[10px] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[15px] tabular-nums">{{ item[1] }}</dd></div>
+            <div v-for="item in [['Prompt tokens', formatNumber(llama.prompt_tokens_total)], ['Prompt processing time', formatSeconds(llama.prompt_seconds_total)], ['Generated tokens', formatNumber(llama.predicted_tokens_total)], ['Generation time', formatSeconds(llama.predicted_seconds_total)], ['llama_decode() calls', formatNumber(llama.decode_total)]]" :key="String(item[0])"><dt class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[length:var(--font-size-body)] tabular-nums">{{ item[1] }}</dd></div>
           </dl>
         </Frame>
         <Frame class="p-4" data-testid="instance-detail-speculative">
-          <div><h2 class="text-sm font-semibold">Speculative decoding</h2><p class="mt-1 text-[10px] text-[var(--neutral-700)]">Counters are zero when speculative decoding is disabled.</p></div>
+          <div><h2 class="text-sm font-semibold">Speculative decoding</h2><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">Counters are zero when speculative decoding is disabled.</p></div>
           <dl class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div v-for="item in [['Draft tokens', formatNumber(llama.spec_draft_tokens_total)], ['Accepted draft tokens', formatNumber(llama.spec_accepted_tokens_total)], ['Verification steps', formatNumber(llama.spec_drafts_total)], ['Acceptance rate', formatPercent(llama.spec_acceptance_rate_pct)]]" :key="String(item[0])"><dt class="text-[10px] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[15px] tabular-nums">{{ item[1] }}</dd></div>
+            <div v-for="item in [['Draft tokens', formatNumber(llama.spec_draft_tokens_total)], ['Accepted draft tokens', formatNumber(llama.spec_accepted_tokens_total)], ['Verification steps', formatNumber(llama.spec_drafts_total)], ['Acceptance rate', formatPercent(llama.spec_acceptance_rate_pct)]]" :key="String(item[0])"><dt class="text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ item[0] }}</dt><dd class="mt-1 font-mono text-[length:var(--font-size-body)] tabular-nums">{{ item[1] }}</dd></div>
           </dl>
-          <div v-if="specPositions.length" class="mt-4 border-t border-[var(--color-divider)] pt-3"><p class="text-[10px] font-semibold text-[var(--neutral-700)]">Accepted tokens per draft position</p><div class="mt-2 flex flex-wrap gap-2" data-testid="instance-detail-spec-positions"><span v-for="[position, value] in specPositions" :key="position" class="bg-[var(--neutral-300)] px-2 py-1 font-mono text-[10px]">Position {{ position }}: {{ formatNumber(value) }}</span></div></div>
+          <div v-if="specPositions.length" class="mt-4 border-t border-[var(--color-divider)] pt-3"><p class="text-[length:var(--font-size-kicker)] font-semibold text-[var(--neutral-700)]">Accepted tokens per draft position</p><div class="mt-2 flex flex-wrap gap-2" data-testid="instance-detail-spec-positions"><span v-for="[position, value] in specPositions" :key="position" class="bg-[var(--neutral-300)] px-2 py-1 font-mono text-[length:var(--font-size-kicker)]">Position {{ position }}: {{ formatNumber(value) }}</span></div></div>
         </Frame>
       </template>
 

@@ -447,7 +447,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame data-testid="dashboard-running" class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Ready</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ readyCount }}</strong>{{ ' ' }}<span class="text-sm text-muted">/ {{ instances.length }} Instances</span>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ readyCount }}</strong>{{ ' ' }}<span class="text-sm text-muted">/ {{ instances.length }} Instances</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ startingCount }} loading · {{ failedCount }} failed</p>
       </Frame>
@@ -455,7 +455,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame data-testid="dashboard-vram" class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="VRAM committed to manager-attributed llama.cpp Instances; other device processes are excluded.">VRAM committed</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ formatBytes(committedVRAM) }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ formatBytes(committedVRAM) }}</strong>
           <span class="text-sm text-muted">/ {{ formatBytes(totalVRAM) }}</span>
         </div>
         <p class="mt-1 text-xs text-muted">
@@ -466,7 +466,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame data-testid="dashboard-gateway" class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Gateway · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ gatewaySummary?.requests || 0 }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ gatewaySummary?.requests || 0 }}</strong>
           <span class="text-sm text-muted">req</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ gatewaySummary?.active_api_keys || 0 }} key{{ gatewaySummary?.active_api_keys === 1 ? '' : 's' }} active</p>
@@ -475,7 +475,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame data-testid="dashboard-idle" class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="How long an idle Instance may remain loaded before automatic unload.">Idle unload</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ formatIdle(idleSeconds) }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ formatIdle(idleSeconds) }}</strong>
           <span class="text-sm text-muted">global</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ idleOverrides }} Instance override{{ idleOverrides === 1 ? '' : 's' }}</p>
@@ -486,7 +486,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Tokens · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ tokenTotalK }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ tokenTotalK }}</strong>
           <span class="text-sm text-muted">k total</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ gatewaySummary?.prompt_tokens || 0 }} prompt · {{ gatewaySummary?.generated_tokens || 0 }} generated</p>
@@ -495,7 +495,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Requests currently running or waiting at the inference gateway.">In flight</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ currentActivity?.active || 0 }}</strong>{{ ' ' }}<span class="text-sm text-muted">active</span>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ currentActivity?.active || 0 }}</strong>{{ ' ' }}<span class="text-sm text-muted">active</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ currentActivity?.queued || 0 }} queued · {{ streamingCount }} streaming</p>
       </Frame>
@@ -503,7 +503,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame class="p-4">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted" title="Automatic cold starts triggered when a request targets an unloaded Instance.">Autoloads · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ summary?.lifecycle?.autoloads || 0 }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ summary?.lifecycle?.autoloads || 0 }}</strong>
           <span class="text-sm text-muted">cold starts</span>
         </div>
         <p class="mt-1 text-xs text-muted">{{ summary?.lifecycle?.failed_starts || 0 }} failed start · {{ formatDuration(meanAutoloadDuration) }} mean load</p>
@@ -512,7 +512,7 @@ watch(selectedWindow, (next, previous) => {
       <Frame class="p-4" data-testid="dashboard-success-rate">
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">Success rate · {{ selectedRangeLabel }}</p>
         <div class="mt-2 flex items-baseline gap-1.5">
-          <strong class="font-[var(--font-heading)] text-[27px] font-semibold">{{ successRate === null ? '—' : successRate }}</strong>
+          <strong class="font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold">{{ successRate === null ? '—' : successRate }}</strong>
           <span v-if="successRate !== null" class="text-sm text-muted">%</span>
         </div>
         <p v-if="(gatewaySummary?.requests || 0) > 0" class="mt-1 text-xs text-muted">{{ gatewaySummary?.successes || 0 }} ok · {{ gatewaySummary?.errors || 0 }} errors</p>
@@ -523,7 +523,7 @@ watch(selectedWindow, (next, previous) => {
     <section class="space-y-3" data-testid="dashboard-vram-allocation">
       <div>
         <p class="text-[length:var(--font-size-table-header)] font-medium uppercase tracking-[.1em] text-muted">VRAM ALLOCATION</p>
-        <h2 class="mt-1 text-[30px]">VRAM allocation</h2>
+        <h2 class="mt-1 text-[length:var(--font-size-screen-title)]">VRAM allocation</h2>
         <p class="mt-1 text-xs text-muted">Manager-attributed Instance VRAM; Free is device capacity not attributed to managed Instances.</p>
       </div>
 
@@ -638,7 +638,7 @@ watch(selectedWindow, (next, previous) => {
           <div v-for="item in attention" :key="item.key" class="border-l-2 border-[var(--color-accent)] pl-3">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <p class="text-[13px] font-medium text-highlighted">{{ item.title }}</p>
+                <p class="text-[length:var(--font-size-h6)] font-medium text-highlighted">{{ item.title }}</p>
                 <p class="mt-1 text-xs text-muted">{{ item.detail }}</p>
               </div>
               <AppButton v-if="item.to" :to="item.to" intent="ghost" size="xs">Review</AppButton>

@@ -242,7 +242,7 @@ onBeforeUnmount(closeStream)
         <div
           ref="output"
           data-testid="system-log-output"
-          class="h-full min-h-[28rem] max-h-[calc(100vh-18rem)] overflow-auto font-mono text-[12px] leading-[1.6]"
+          class="h-full min-h-[28rem] max-h-[calc(100vh-18rem)] overflow-auto font-mono text-[length:var(--font-size-h6)] leading-[1.6]"
           @scroll="onScroll"
         >
           <div

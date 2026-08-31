@@ -113,8 +113,8 @@ async function submitReset() {
         <UTable class="min-w-[720px]" :data="users" :columns="columns">
         <template #username-cell="{ row }">
           <div>
-            <span class="text-[13.5px] font-semibold">{{ row.original.username }}</span>
-            <span v-if="row.original.bootstrap_admin" class="mt-0.5 block text-[10.5px] text-[var(--neutral-700)]">bootstrap admin</span>
+            <span class="text-[length:var(--font-size-table-body)] font-semibold">{{ row.original.username }}</span>
+            <span v-if="row.original.bootstrap_admin" class="mt-0.5 block text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">bootstrap admin</span>
           </div>
         </template>
         <template #enabled-cell="{ row }"><StatusTag :variant="row.original.enabled ? 'ready' : 'neutral'">{{ row.original.enabled ? 'Enabled' : 'Disabled' }}</StatusTag></template>

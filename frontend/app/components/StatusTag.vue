@@ -12,7 +12,7 @@ const classes = computed(() => ({
 </script>
 
 <template>
-  <span class="inline-flex items-center px-[10px] py-[3px] text-[11px] font-medium leading-none tracking-[.02em]" :class="classes">
+  <span class="inline-flex items-center px-[10px] py-[3px] text-[length:var(--font-size-table-header)] font-medium leading-none tracking-[.02em]" :class="classes">
     <slot />
   </span>
 </template>

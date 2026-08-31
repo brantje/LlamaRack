@@ -19,8 +19,8 @@ const currentItem = computed(() => navigation.find(item => active(item.to)) ?? n
     <details class="lg:hidden" data-testid="profile-mobile-navigation">
       <summary class="flex min-h-11 cursor-pointer items-center justify-between border border-[var(--color-divider)] px-3 py-2 text-[var(--neutral-900)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
         <span class="min-w-0">
-          <span class="block text-[13.5px] font-semibold leading-5">Account · {{ currentItem.label }}</span>
-          <span class="block text-[11px] leading-4 text-[var(--neutral-800)]">Choose account section</span>
+          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">Account · {{ currentItem.label }}</span>
+          <span class="block text-[length:var(--font-size-table-header)] leading-4 text-[var(--neutral-800)]">Choose account section</span>
         </span>
         <UIcon name="i-lucide-chevron-down" class="size-4 shrink-0 text-[var(--neutral-700)]" aria-hidden="true" />
       </summary>
@@ -36,14 +36,14 @@ const currentItem = computed(() => navigation.find(item => active(item.to)) ?? n
           :aria-current="active(item.to) ? 'page' : undefined"
           :data-testid="`profile-mobile-nav-${item.label.toLowerCase().replaceAll(' ', '-')}`"
         >
-          <span class="block text-[13.5px] font-semibold leading-5">{{ item.label }}</span>
-          <span class="block text-[11px] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
+          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">{{ item.label }}</span>
+          <span class="block text-[length:var(--font-size-table-header)] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
         </NuxtLink>
       </nav>
     </details>
 
     <div class="hidden lg:block" data-testid="profile-desktop-navigation">
-      <p class="mb-3 px-3 text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Account</p>
+      <p class="mb-3 px-3 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Account</p>
       <nav class="space-y-1" aria-label="Account">
         <NuxtLink
           v-for="item in navigation"
@@ -56,8 +56,8 @@ const currentItem = computed(() => navigation.find(item => active(item.to)) ?? n
           :aria-current="active(item.to) ? 'page' : undefined"
           :data-testid="`profile-nav-${item.label.toLowerCase().replaceAll(' ', '-')}`"
         >
-          <span class="block text-[13.5px] font-semibold leading-5">{{ item.label }}</span>
-          <span class="block text-[10.5px] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
+          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">{{ item.label }}</span>
+          <span class="block text-[length:var(--font-size-table-header)] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
         </NuxtLink>
       </nav>
     </div>

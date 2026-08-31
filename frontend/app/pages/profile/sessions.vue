@@ -85,10 +85,10 @@ async function revokeAll() {
           <div v-for="session in sessions" :key="session.id" class="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="text-[13.5px] font-semibold">{{ profileClientLabel(session.user_agent) }}</span>
+                <span class="text-[length:var(--font-size-table-body)] font-semibold">{{ profileClientLabel(session.user_agent) }}</span>
                 <StatusTag v-if="session.current" variant="ready">Current</StatusTag>
               </div>
-              <p class="mt-1 break-words font-mono text-[10.5px] leading-5 tabular-nums text-[var(--neutral-700)]">
+              <p class="mt-1 break-words font-mono text-[length:var(--font-size-table-header)] leading-5 tabular-nums text-[var(--neutral-700)]">
                 {{ session.remote_address || 'Unknown address' }} · Created {{ profileDateTime(session.created_at) }} · Expires {{ profileDateTime(session.expires_at) }}
               </p>
             </div>

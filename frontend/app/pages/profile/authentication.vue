@@ -66,7 +66,7 @@ async function unlinkIdentity(identity: ExternalIdentity) {
 
       <Frame class="p-5" data-testid="profile-authentication-sources">
         <div>
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">SIGN-IN</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">SIGN-IN</p>
           <h2 class="mt-1 text-base font-semibold">Authentication sources</h2>
           <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">External sign-in providers linked to this account. Provider configuration is managed in <NuxtLink to="/admin/authentication" class="font-semibold text-[var(--accent-700)] hover:underline">Administration → Authentication</NuxtLink>.</p>
         </div>
@@ -74,11 +74,11 @@ async function unlinkIdentity(identity: ExternalIdentity) {
           <div v-for="identity in identities" :key="identity.id" class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="text-[13.5px] font-semibold">{{ profileProviderName(identity, authProviders) }}</span>
+                <span class="text-[length:var(--font-size-table-body)] font-semibold">{{ profileProviderName(identity, authProviders) }}</span>
                 <StatusTag variant="neutral">OIDC</StatusTag>
               </div>
-              <p class="mt-1 truncate font-mono text-[10.5px] text-[var(--neutral-700)]">{{ identity.issuer }}</p>
-              <p class="mt-1 font-mono text-[10.5px] tabular-nums text-[var(--neutral-700)]">Linked {{ profileDateTime(identity.created_at) }}</p>
+              <p class="mt-1 truncate font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ identity.issuer }}</p>
+              <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">Linked {{ profileDateTime(identity.created_at) }}</p>
             </div>
             <AppButton intent="ghost" size="sm" @click="unlinkIdentity(identity)">Unlink</AppButton>
           </div>

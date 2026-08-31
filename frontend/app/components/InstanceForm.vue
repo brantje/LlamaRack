@@ -264,7 +264,7 @@ onMounted(() => {
                 :class="form.model_id === model.id ? 'bg-[var(--accent-100)]' : 'bg-transparent hover:bg-[var(--neutral-200)]'"
               >
                 <input type="radio" name="registered-model" :value="model.id" :checked="form.model_id === model.id" class="mt-0.5" @change="selectModel(model)">
-                <span class="min-w-0"><span class="block text-sm font-semibold">{{ model.name }}</span><span class="mt-1 block font-mono text-[10.5px] text-[var(--neutral-700)]">{{ modelMeta(model) }}</span></span>
+                <span class="min-w-0"><span class="block text-sm font-semibold">{{ model.name }}</span><span class="mt-1 block font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ modelMeta(model) }}</span></span>
               </label>
             </div>
           </fieldset>
@@ -276,7 +276,7 @@ onMounted(() => {
       </Frame>
 
       <Frame id="instance-companions" class="p-5 scroll-mt-4" data-testid="instance-form-companions">
-        <div class="mb-4"><div class="flex flex-wrap items-center gap-2"><h2 class="text-base font-semibold">Companion files</h2><span v-if="companionLoading" class="text-[10px] uppercase tracking-[.12em] text-[var(--neutral-700)]">Resolving</span></div><p class="mt-1 text-xs text-[var(--neutral-700)]">Detected next to the Model's GGUF and inherited from its llama.cpp defaults. Disable to run this Instance without them.</p></div>
+        <div class="mb-4"><div class="flex flex-wrap items-center gap-2"><h2 class="text-base font-semibold">Companion files</h2><span v-if="companionLoading" class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Resolving</span></div><p class="mt-1 text-xs text-[var(--neutral-700)]">Detected next to the Model's GGUF and inherited from its llama.cpp defaults. Disable to run this Instance without them.</p></div>
         <div class="grid gap-3 lg:grid-cols-2">
           <div
             v-for="definition in companionDefinitions"
@@ -286,7 +286,7 @@ onMounted(() => {
             :data-testid="`companion-${definition.key}`"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
-              <div><p class="text-sm font-semibold">{{ definition.label }}</p><p class="mt-1 font-mono text-[10.5px] text-[var(--neutral-700)]">{{ definition.flag }}</p></div>
+              <div><p class="text-sm font-semibold">{{ definition.label }}</p><p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.flag }}</p></div>
               <div class="flex items-center gap-2">
                 <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">Auto-detected</StatusTag>
                 <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">Ignored</StatusTag>
@@ -297,8 +297,8 @@ onMounted(() => {
             </div>
             <template v-if="companionState(definition) !== 'none'">
               <UFormField :label="definition.flag" class="mt-4"><UInput :model-value="companionValue(definition)" class="w-full font-mono" placeholder="not set" @update:model-value="setCompanionValue(definition, $event)" /></UFormField>
-              <p v-if="companionState(definition) === 'detected'" class="mt-2 font-mono text-[10px] text-[var(--neutral-700)]">{{ formatBytes(companions[definition.key]?.size) }} · inherited from the Model defaults</p>
-              <p v-else class="mt-2 text-[10px] text-[var(--neutral-700)]">value cleared — the flag is not passed</p>
+              <p v-if="companionState(definition) === 'detected'" class="mt-2 font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ formatBytes(companions[definition.key]?.size) }} · inherited from the Model defaults</p>
+              <p v-else class="mt-2 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">value cleared — the flag is not passed</p>
             </template>
             <p v-else class="mt-4 text-xs text-[var(--neutral-700)]">No matching file was detected alongside this Model's GGUF.</p>
           </div>
@@ -346,7 +346,7 @@ onMounted(() => {
           <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <label v-for="gpu in hardwareGPUs" :key="gpu.id" class="flex cursor-pointer items-center gap-3 border p-3" :class="gpuSelected(gpu.id) ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'">
               <input type="checkbox" :checked="gpuSelected(gpu.id)" @change="toggleGPU(gpu.id)">
-              <span><span class="block font-mono text-xs font-semibold">{{ gpu.id }}</span><span class="mt-1 block text-[10px] text-[var(--neutral-700)]">{{ formatBytes(gpu.free_bytes) }} free</span></span>
+              <span><span class="block font-mono text-xs font-semibold">{{ gpu.id }}</span><span class="mt-1 block text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ formatBytes(gpu.free_bytes) }} free</span></span>
             </label>
             <p v-if="!hardwareGPUs.length" class="text-xs text-[var(--neutral-700)]">No GPU devices were detected.</p>
           </div>

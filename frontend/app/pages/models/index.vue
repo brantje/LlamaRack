@@ -93,7 +93,7 @@ async function remove(id: string) {
       <div class="overflow-x-auto" role="region" aria-label="Registered models table. Scroll horizontally to view all columns on small screens." tabindex="0" data-testid="models-table-scroll">
         <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for path, context and actions.</p>
         <table class="min-w-[920px] w-full border-collapse text-left" data-testid="models-table">
-          <thead class="border-b border-[var(--color-divider)] bg-[var(--neutral-100)] text-[10.5px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
+          <thead class="border-b border-[var(--color-divider)] bg-[var(--neutral-100)] text-[length:var(--font-size-table-header)] uppercase tracking-[.08em] text-[var(--neutral-700)]">
             <tr>
               <th class="px-4 py-3 font-semibold">Name</th>
               <th class="px-4 py-3 font-semibold">Path</th>
@@ -106,11 +106,11 @@ async function remove(id: string) {
           <tbody class="divide-y divide-[var(--color-divider)]">
             <tr v-for="model in models" :key="model.id" data-testid="model-row">
               <td class="px-4 py-3">
-                <NuxtLink :to="`/models/${model.id}/details`" class="text-[13.5px] font-semibold text-[var(--color-text)] hover:underline">
+                <NuxtLink :to="`/models/${model.id}/details`" class="text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:underline">
                   {{ model.name }}
                 </NuxtLink>
               </td>
-              <td class="min-w-[260px] max-w-[420px] break-words px-4 py-3 font-mono text-[11.5px] text-[var(--neutral-700)]">
+              <td class="min-w-[260px] max-w-[420px] break-words px-4 py-3 font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">
                 <div class="flex min-w-0 items-start gap-1">
                   <span class="min-w-0 flex-1">{{ model.gguf_path }}</span>
                   <AppCopyButton

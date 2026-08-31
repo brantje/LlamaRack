@@ -244,7 +244,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
       <template v-else>
         <Frame class="p-5" data-testid="authentication-sign-in-policy">
           <div class="mb-5">
-            <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SIGN-IN POLICY</p>
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SIGN-IN POLICY</p>
             <h2 class="mt-1 text-xl font-semibold">Management login</h2>
             <p class="mt-1 text-sm text-[var(--neutral-800)]">Configure browser destinations and which local or external sign-in paths are available.</p>
           </div>
@@ -252,22 +252,22 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           <div class="grid gap-5 lg:grid-cols-2">
             <UFormField description="Public backend URL used to generate stable OIDC callback URIs.">
               <template #label>
-                <div class="flex w-full items-center justify-between gap-3"><span>External URL</span><span :class="sourceClass(settings?.external_url.source)" class="text-[10px] font-mono uppercase">{{ settings?.external_url.source }}</span></div>
+                <div class="flex w-full items-center justify-between gap-3"><span>External URL</span><span :class="sourceClass(settings?.external_url.source)" class="text-[length:var(--font-size-kicker)] font-mono uppercase">{{ settings?.external_url.source }}</span></div>
               </template>
               <UInput v-model="settingsForm.external_url" class="w-full" :disabled="settings?.external_url.editable === false" placeholder="https://manager.example.com" />
             </UFormField>
             <UFormField description="Optional browser destination after OIDC sign-in. Leave empty to use External URL.">
               <template #label>
-                <div class="flex w-full items-center justify-between gap-3"><span>Frontend URL</span><span :class="sourceClass(settings?.frontend_url?.source)" class="text-[10px] font-mono uppercase">{{ settings?.frontend_url?.source || 'default' }}</span></div>
+                <div class="flex w-full items-center justify-between gap-3"><span>Frontend URL</span><span :class="sourceClass(settings?.frontend_url?.source)" class="text-[length:var(--font-size-kicker)] font-mono uppercase">{{ settings?.frontend_url?.source || 'default' }}</span></div>
               </template>
               <UInput v-model="settingsForm.frontend_url" class="w-full" :disabled="settings?.frontend_url?.editable === false" placeholder="https://manager.example.com" />
             </UFormField>
           </div>
 
           <div class="mt-5 border-t border-[var(--color-divider)] pt-5 space-y-4">
-            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.local_login_enabled.source }}</span></div>
-            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>
-            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="pl-9 text-[10px] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_auto_link_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.local_login_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_auto_link_enabled.source }}</span></div>
           </div>
 
           <div class="mt-5 flex flex-col items-start gap-2 border border-[var(--color-divider)] px-4 py-3 sm:flex-row" data-testid="authentication-auto-link-note">
@@ -279,7 +279,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
         <section data-testid="authentication-providers">
           <div class="mb-3 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">OIDC PROVIDERS</p>
+              <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">OIDC PROVIDERS</p>
               <h2 class="mt-1 text-xl font-semibold">External login providers</h2>
               <p class="mt-1 text-sm text-[var(--neutral-800)]">Multiple providers can be enabled at the same time.</p>
             </div>
@@ -295,7 +295,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           <Frame v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="OIDC providers. Scroll horizontally for issuer, callback and actions.">
             <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] sm:hidden">Scroll horizontally for issuer, callback and actions.</p>
             <div class="min-w-[760px]">
-              <div class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] gap-4 border-b border-[var(--color-divider)] px-4 py-2 text-[11px] uppercase tracking-[.08em] text-[var(--neutral-700)]">
+              <div class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] gap-4 border-b border-[var(--color-divider)] px-4 py-2 text-[length:var(--font-size-table-header)] uppercase tracking-[.08em] text-[var(--neutral-700)]">
                 <span>Provider</span><span>Issuer</span><span>Callback</span><span class="text-right">Actions</span>
               </div>
               <div v-for="provider in providers" :key="provider.id" class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] items-center gap-4 border-b border-[var(--color-divider)] px-4 py-3 last:border-b-0">
@@ -303,7 +303,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
                   <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ provider.name }}</span><StatusTag :variant="provider.enabled ? 'ready' : 'neutral'">{{ provider.enabled ? 'Enabled' : 'Disabled' }}</StatusTag><StatusTag :variant="provider.last_test_succeeded ? 'ready' : 'pending'">{{ provider.last_test_succeeded ? 'Tested' : 'Needs test' }}</StatusTag></div>
                 </div>
                 <p class="break-all text-sm text-[var(--neutral-800)]">{{ provider.issuer }}</p>
-                <p class="break-all font-mono text-[11px] text-[var(--neutral-700)]">{{ callbackURL(provider) }}</p>
+                <p class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ callbackURL(provider) }}</p>
                 <div class="flex justify-end gap-1">
                   <AppButton intent="ghost" :loading="providerBusy === provider.id" @click="testProvider(provider)">Test</AppButton>
                   <AppButton intent="ghost" @click="setProviderForm(provider)">Edit</AppButton>
@@ -334,7 +334,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           <UFormField label="Scopes"><UInput v-model="providerForm.scopes" class="w-full" /></UFormField>
           <UFormField label="Username claim"><UInput v-model="providerForm.username_claim" class="w-full" /></UFormField>
           <div class="border-t border-[var(--color-divider)] pt-4">
-            <p class="mb-3 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">MANUAL ENDPOINTS · OPTIONAL</p>
+            <p class="mb-3 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">MANUAL ENDPOINTS · OPTIONAL</p>
             <div class="space-y-4">
               <UFormField label="Authorization endpoint"><UInput v-model="providerForm.authorization_endpoint" class="w-full" /></UFormField>
               <UFormField label="Token endpoint"><UInput v-model="providerForm.token_endpoint" class="w-full" /></UFormField>

@@ -13,7 +13,7 @@ describe('Playground redesign cleanup', () => {
 
   it('uses mono tabular typography for numeric parameters and diagnostics', () => {
     expect(source.match(/class="mt-1 font-mono tabular-nums"/g)).toHaveLength(7)
-    expect(source).toContain('message.stats" class="mt-2 font-mono text-[11px] tabular-nums')
+    expect(source).toContain('message.stats" class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums')
     expect(source).toContain('Prompt tokens</dt><dd class="font-mono tabular-nums"')
     expect(source).toContain('Tokens / second</dt><dd class="font-mono tabular-nums"')
   })
@@ -25,7 +25,7 @@ describe('Playground redesign cleanup', () => {
     expect(source).toContain('data-testid="playground-mobile-quick-parameters"')
     expect(source).toContain('Quick controls stay beside the composer on mobile.')
     expect(source).toContain('hidden border-b border-[var(--color-divider)] p-4 xl:block')
-    expect(source).toContain('text-[16px] font-semibold')
+    expect(source).toContain('text-[length:var(--font-size-h5)] font-semibold')
     expect(source).toContain("runtimeState === 'READY' ? 'Instance READY'")
     expect(source).toContain("failed: 'Last request failed'")
     expect(source).toContain('min-w-0 truncate font-mono')

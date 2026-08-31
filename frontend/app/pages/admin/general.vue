@@ -187,7 +187,7 @@ function editable(key: keyof typeof form) {
           <AdminSettingField label="External/public URL" :source="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></AdminSettingField>
         </div>
         <div class="mt-5 grid gap-4 border-t border-[var(--color-divider)] pt-4 text-sm sm:grid-cols-2">
-          <div><p class="text-xs text-[var(--neutral-700)]">Effective external scheme</p><code class="mt-1 block font-mono text-[12.5px]">{{ network?.effective_scheme || 'unknown' }}</code></div>
+          <div><p class="text-xs text-[var(--neutral-700)]">Effective external scheme</p><code class="mt-1 block font-mono text-[length:var(--font-size-h6)]">{{ network?.effective_scheme || 'unknown' }}</code></div>
           <div><p class="text-xs text-[var(--neutral-700)]">Secure session cookies</p><StatusTag class="mt-1" :variant="network?.secure_cookie ? 'ready' : 'neutral'">{{ network?.secure_cookie ? 'Enabled' : 'Disabled' }}</StatusTag></div>
         </div>
       </Frame>
@@ -220,9 +220,9 @@ function editable(key: keyof typeof form) {
       <Frame class="p-5" data-testid="admin-general-runtime">
         <h2 class="text-base font-semibold">Manager runtime</h2>
         <dl class="mt-4 text-sm">
-          <div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 first:border-t-0 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono text-[12.5px]">{{ value }}</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Management API URL</dt><dd><code class="break-all font-mono text-[12.5px]">{{ manager.apiBase.value }}/api/v1</code></dd></div>
-          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">OpenAI API URL</dt><dd><code class="break-all font-mono text-[12.5px]">{{ manager.apiBase.value }}/v1</code></dd></div>
+          <div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 first:border-t-0 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ value }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Management API URL</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ manager.apiBase.value }}/api/v1</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">OpenAI API URL</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ manager.apiBase.value }}/v1</code></dd></div>
         </dl>
       </Frame>
 

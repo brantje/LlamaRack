@@ -7,15 +7,15 @@ const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf
 describe('Administration machine typography', () => {
   it('keeps llama.cpp numeric capabilities mono and tabular', () => {
     const content = source('app/pages/admin/llamacpp.vue')
-    expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ profile.options.length }}')
+    expect(content).toContain('font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ profile.options.length }}')
   })
 
   it('keeps System machine values mono and numeric values tabular', () => {
     const content = source('app/pages/admin/system.vue')
-    expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}')
+    expect(content).toContain('font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}')
     expect(content).toContain('{{ info.manager.uptime_seconds.toLocaleString() }} s')
-    expect(content).toContain('font-mono text-[12.5px]">{{ info.llamacpp.version || \'unknown\' }}')
-    expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ info.llamacpp.options || 0 }}')
+    expect(content).toContain('font-mono text-[length:var(--font-size-h6)]">{{ info.llamacpp.version || \'unknown\' }}')
+    expect(content).toContain('font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ info.llamacpp.options || 0 }}')
   })
 
   it('keeps setting provenance readable while preserving machine typography', () => {

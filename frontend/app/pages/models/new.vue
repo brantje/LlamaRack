@@ -419,7 +419,7 @@ async function createModel() {
       <Frame id="model-artifact" class="p-5 scroll-mt-4" data-testid="model-form-gguf">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">ARTIFACT</p>
+            <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">ARTIFACT</p>
             <h2 class="mt-1 text-base font-semibold">GGUF file</h2>
           </div>
           <AppButton v-if="!remoteMode" type="button" intent="secondary" size="xs" :loading="scanning" @click="scanGGUFs">Rescan</AppButton>
@@ -433,8 +433,8 @@ async function createModel() {
                 <span class="font-semibold">{{ remoteRepo }}</span>
                 <StatusTag v-if="remoteArtifact.quantization" variant="neutral">{{ remoteArtifact.quantization }}</StatusTag>
               </div>
-              <p class="break-all font-mono text-[12.5px]">{{ remoteArtifact.name }}</p>
-              <p class="text-[10.5px] text-[var(--neutral-700)]">{{ formatBytes(remoteArtifact.total_bytes) }} total<span v-if="remoteArtifact.dependencies?.length"> · including detected helpers</span></p>
+              <p class="break-all font-mono text-[length:var(--font-size-h6)]">{{ remoteArtifact.name }}</p>
+              <p class="text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ formatBytes(remoteArtifact.total_bytes) }} total<span v-if="remoteArtifact.dependencies?.length"> · including detected helpers</span></p>
             </div>
           </div>
         </template>
@@ -456,11 +456,11 @@ async function createModel() {
           >
             <input v-model="form.gguf_path" type="radio" name="gguf_path" :value="file.path" class="mt-1">
             <span class="min-w-0 flex-1">
-              <span class="block break-all font-mono text-[12.5px]">{{ file.path }}</span>
-              <span class="mt-1 block text-[10.5px] text-[var(--neutral-700)]">{{ formatBytes(file.total_bytes) }} · modified {{ formatModified(file.modified_at) }}</span>
+              <span class="block break-all font-mono text-[length:var(--font-size-h6)]">{{ file.path }}</span>
+              <span class="mt-1 block text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ formatBytes(file.total_bytes) }} · modified {{ formatModified(file.modified_at) }}</span>
             </span>
             <span v-if="ggufCapabilities(file).length" class="flex shrink-0 flex-wrap justify-end gap-1">
-              <span v-for="capability in ggufCapabilities(file)" :key="capability" class="border px-2 py-1 text-[9.5px] font-semibold" :class="{
+              <span v-for="capability in ggufCapabilities(file)" :key="capability" class="border px-2 py-1 text-[length:var(--font-size-kicker)] font-semibold" :class="{
                 'border-[var(--color-success)] bg-[var(--success-100)] text-[var(--success-700)]': capability === 'MTP',
                 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]': capability === 'Vision',
                 'border-[var(--color-divider)]': capability !== 'MTP' && capability !== 'Vision'
@@ -473,7 +473,7 @@ async function createModel() {
 
       <Frame id="model-companions" class="p-5 scroll-mt-4" data-testid="detected-gguf-helpers">
         <div class="mb-4">
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">COMPANIONS</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">COMPANIONS</p>
           <h2 class="mt-1 text-base font-semibold">Companion files</h2>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Scanned alongside the selected GGUF · options filled automatically.</p>
         </div>
@@ -488,7 +488,7 @@ async function createModel() {
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="font-semibold">{{ definition.title }}</p>
-                <p class="mt-1 font-mono text-[11px] text-[var(--neutral-700)]">{{ definition.flag }}</p>
+                <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.flag }}</p>
               </div>
               <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">Auto-detected</StatusTag>
               <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">Ignored</StatusTag>
@@ -506,7 +506,7 @@ async function createModel() {
                 />
                 <AppButton type="button" intent="ghost" size="xs" @click="disableCompanion(definition)">Disable</AppButton>
               </div>
-              <p class="mt-2 text-[10.5px] text-[var(--neutral-700)]">{{ definition.title }}: {{ companionDisplayName(definition) }}<span v-if="companionSize(definition)"> · {{ formatBytes(companionSize(definition)) }}</span></p>
+              <p class="mt-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.title }}: {{ companionDisplayName(definition) }}<span v-if="companionSize(definition)"> · {{ formatBytes(companionSize(definition)) }}</span></p>
             </template>
 
             <template v-else-if="companionState(definition) === 'disabled'">
@@ -514,13 +514,13 @@ async function createModel() {
                 <UInput model-value="" class="min-w-0 flex-1 font-mono" placeholder="value cleared" readonly />
                 <AppButton type="button" intent="ghost" size="xs" @click="enableCompanion(definition)">Enable</AppButton>
               </div>
-              <p class="mt-2 text-[10.5px] text-[var(--neutral-800)]" :data-testid="`companion-disabled-${definition.kind}`">value cleared — the flag is not passed</p>
+              <p class="mt-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]" :data-testid="`companion-disabled-${definition.kind}`">value cleared — the flag is not passed</p>
             </template>
 
             <p v-else class="mt-4 text-xs text-[var(--neutral-800)]" :data-testid="`companion-empty-${definition.kind}`">No compatible {{ definition.title.toLowerCase() }} was detected in this artifact scope.</p>
 
             <div v-if="candidateList(definition).length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-3">
-              <p class="mb-2 text-[9.5px] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
+              <p class="mb-2 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
               <div class="flex flex-wrap gap-2">
                 <UButton
                   v-for="candidate in candidateList(definition)"
@@ -542,7 +542,7 @@ async function createModel() {
 
       <Frame id="model-identity" class="p-5 scroll-mt-4" data-testid="model-form-identity">
         <div class="mb-4">
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">IDENTITY</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">IDENTITY</p>
           <h2 class="mt-1 text-base font-semibold">Model identity</h2>
         </div>
         <div class="grid gap-5 md:grid-cols-2">
@@ -563,7 +563,7 @@ async function createModel() {
 
       <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults" collapsible title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
         <div class="mb-4">
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
           <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Reusable across every Instance of this Model. Only overrides are stored here; everything else inherits from global defaults.</p>
         </div>
@@ -572,7 +572,7 @@ async function createModel() {
 
       <Frame id="model-first-instance" class="p-5 scroll-mt-4" data-testid="model-form-first-instance">
         <div class="mb-4">
-          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BOOTSTRAP</p>
+          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">BOOTSTRAP</p>
           <h2 class="mt-1 text-base font-semibold">First Instance</h2>
         </div>
         <div v-if="remoteMode" class="mb-4 border border-[var(--color-divider)] p-3 text-sm text-[var(--neutral-800)]">
