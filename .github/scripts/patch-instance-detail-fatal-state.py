@@ -130,3 +130,52 @@ new = """  it('keeps fatal load failures separate from recoverable Instance acti
 if text.count(old) != 1:
     raise SystemExit(f'Instance detail test marker: expected one match, found {text.count(old)}')
 unit.write_text(text.replace(old, new, 1))
+
+e2e = Path('frontend/e2e/redesign-screenshots.spec.ts')
+text = e2e.read_text()
+old = """const modelDetailsPageTwoPages = new WeakSet<Page>()
+"""
+new = """const modelDetailsPageTwoPages = new WeakSet<Page>()
+const instanceDetailMissingPages = new WeakSet<Page>()
+"""
+if text.count(old) != 1:
+    raise SystemExit(f'Instance detail visual state marker: expected one match, found {text.count(old)}')
+text = text.replace(old, new, 1)
+
+marker = """    if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+"""
+fixture = """    if (instanceDetailMissingPages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances.filter(item => item.id !== 'qwen3-primary').slice(0, 1)) })
+      return
+    }
+"""
+if text.count(marker) != 1:
+    raise SystemExit(f'Instance detail visual route marker: expected one match, found {text.count(marker)}')
+text = text.replace(marker, fixture + marker, 1)
+
+anchor = """test('model details filtered no-match screenshot', async ({ page }, testInfo) => {
+"""
+visual = """test('instance detail fatal load and retry screenshot', async ({ page }, testInfo) => {
+  instanceDetailMissingPages.add(page)
+  await page.goto('/instances/qwen3-primary/detail', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const failure = page.locator('[data-testid="instance-detail-error"]')
+  await expect(failure).toContainText('Instance detail unavailable')
+  await expect(failure).toContainText('qwen3-primary')
+  await expect(page.getByText('READY', { exact: true })).toHaveCount(0)
+  await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/instance-detail-fatal.png`, fullPage: true, animations: 'disabled' })
+
+  instanceDetailMissingPages.delete(page)
+  await failure.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByRole('heading', { name: 'Qwen3 primary' })).toBeVisible()
+  await expect(page.getByText('READY', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-testid="instance-detail-error"]')).toBeHidden()
+})
+
+"""
+if text.count(anchor) != 1:
+    raise SystemExit(f'Instance detail visual test anchor: expected one match, found {text.count(anchor)}')
+if 'instance detail fatal load and retry screenshot' in text:
+    raise SystemExit('Instance detail fatal visual test already exists')
+e2e.write_text(text.replace(anchor, visual + anchor, 1))
