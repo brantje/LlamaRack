@@ -6,6 +6,7 @@ import ProfilePage from '~/pages/profile.vue'
 import AdminLlamaCppPage from '~/pages/admin/llamacpp.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
 import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
+import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
 import { useManager, type Profile } from '~/composables/useManager'
 import { clearManagementToken, storeManagementToken } from '~/composables/useManagerApi'
 
@@ -296,8 +297,7 @@ describe('Phase 10 llama and general branch variants', () => {
     })
     const llama = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
-    await llama.get('[data-testid="add-global-option"]').trigger('click')
-    await llama.get('input[aria-label="llama.cpp flag"]').setValue('threads')
+    llama.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { threads: '8' })
     await flushPromises()
     for (const [failure, message] of [[{ data: { error: 'save denied' } }, 'save denied'], [new Error('save exploded'), 'save exploded'], [{}, 'Unable to save llama.cpp defaults']] as const) {
       saveFailure = failure; await button(llama, 'Save defaults').trigger('click'); await flushPromises(); expect(llama.text()).toContain(message)

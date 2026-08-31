@@ -61,7 +61,6 @@ const autoSuggestedOptions = ref<Record<string, string>>({})
 const localInspection = ref<ModelInspection | null>(null)
 const remoteDetail = ref<HFDetail | null>(null)
 const remoteArtifact = ref<HFArtifact | null>(null)
-const overridesEditor = ref<{ addOption: () => void } | null>(null)
 const remoteRepo = computed(() => typeof route.query.repo === 'string' ? route.query.repo.trim() : '')
 const remoteArtifactID = computed(() => typeof route.query.artifact === 'string' ? route.query.artifact.trim() : '')
 const remoteMode = computed(() => Boolean(remoteRepo.value && remoteArtifactID.value))
@@ -557,15 +556,12 @@ async function createModel() {
       </Frame>
 
       <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults">
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
-            <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>
-            <p class="mt-1 text-xs text-[var(--neutral-700)]">Reusable across every Instance of this Model.</p>
-          </div>
-          <AppButton type="button" intent="secondary" size="xs" @click="overridesEditor?.addOption()">Add option</AppButton>
+        <div class="mb-4">
+          <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
+          <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Reusable across every Instance of this Model. Only overrides are stored here; everything else inherits from global defaults.</p>
         </div>
-        <ModelOverridesEditor ref="overridesEditor" v-model="form.options" :exclude-keys="companionOptionKeys" :show-add-button="false" />
+        <LlamaCppOptionsEditor v-model="form.options" scope="model" :exclude-keys="companionOptionKeys" />
       </Frame>
 
       <Frame id="model-first-instance" class="p-5 scroll-mt-4" data-testid="model-form-first-instance">

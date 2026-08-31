@@ -130,6 +130,7 @@ async function submit() {
     :submit-disabled="!hasChanges"
     submit-disabled-reason="No changes to save."
     :dirty="hasChanges"
+    :instance-id="originalID"
     @submit="submit"
   />
   <AppConfirmationModal ref="confirmation" />

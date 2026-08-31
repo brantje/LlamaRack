@@ -37,6 +37,7 @@ const props = withDefaults(defineProps<{
   submitDisabled?: boolean
   submitDisabledReason?: string
   dirty?: boolean
+  instanceId?: string
 }>(), {
   busy: false,
   error: '',
@@ -45,7 +46,8 @@ const props = withDefaults(defineProps<{
   launchAfterCreate: false,
   submitDisabled: false,
   submitDisabledReason: '',
-  dirty: false
+  dirty: false,
+  instanceId: ''
 })
 const emit = defineEmits<{
   submit: []
@@ -57,7 +59,6 @@ const globalIdleSeconds = ref(300)
 const hardwareGPUs = ref<HardwareGPU[]>([])
 const companions = ref<Partial<Record<CompanionDefinition['key'], DetectedCompanion>>>({})
 const companionLoading = ref(false)
-const overridesEditor = ref<{ addOption: () => void } | null>(null)
 let slugEdited = false
 let companionSequence = 0
 
@@ -364,8 +365,17 @@ onMounted(() => {
       </Frame>
 
       <Frame id="instance-overrides" class="p-5 scroll-mt-4" data-testid="instance-form-overrides">
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-base font-semibold">Instance llama.cpp overrides</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Applied over the Model defaults, which are applied over the global defaults.</p></div><AppButton type="button" intent="secondary" size="xs" @click="overridesEditor?.addOption()">Add option</AppButton></div>
-        <InstanceOverridesEditor ref="overridesEditor" v-model="form.options" :exclude-keys="detectedCompanionKeys" :show-add-button="false" />
+        <div class="mb-4">
+          <h2 class="text-base font-semibold">Instance llama.cpp overrides</h2>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Applied over the Model defaults, which are applied over the global defaults. Only overrides are stored at this layer.</p>
+        </div>
+        <LlamaCppOptionsEditor
+          v-model="form.options"
+          scope="instance"
+          :model-id="form.model_id"
+          :instance-id="instanceId"
+          :exclude-keys="detectedCompanionKeys"
+        />
       </Frame>
 
       <Frame id="instance-observability" class="p-5 scroll-mt-4" data-testid="instance-form-observability">

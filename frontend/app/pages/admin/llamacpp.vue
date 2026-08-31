@@ -78,7 +78,7 @@ async function save() {
         <h2 class="text-base font-semibold">Global defaults</h2>
         <p class="mt-1 text-xs text-[var(--neutral-700)]">Inherited by Models and Instances unless a lower layer overrides a value.</p>
         <div v-if="loading" class="mt-4 space-y-2"><USkeleton v-for="n in 3" :key="n" class="h-14 w-full" /></div>
-        <AdminGlobalDefaultsEditor v-else v-model="globalOptions" class="mt-4" :profile="profile" />
+        <LlamaCppOptionsEditor v-else v-model="globalOptions" class="mt-4" scope="global" />
       </Frame>
     </div>
   </AdminShell>

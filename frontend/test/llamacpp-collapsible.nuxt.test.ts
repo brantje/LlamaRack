@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
-import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import NewInstancePage from '~/pages/instances/new.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -60,13 +59,36 @@ describe('llama.cpp override editors', () => {
     expect(wrapper.text()).toContain('No overrides configured · inheriting all values')
   })
 
-  it('uses the flat redesign editor on the shared New Instance form', async () => {
+  it('uses the structured llama.cpp editor on the shared New Instance form', async () => {
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await flushPromises()
-    const editor = wrapper.findComponent(InstanceOverridesEditor)
+    const editor = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(editor.exists()).toBe(true)
+    expect(editor.props('scope')).toBe('instance')
     expect(wrapper.text()).toContain('Instance llama.cpp overrides')
     expect(wrapper.text()).toContain('Applied over the Model defaults, which are applied over the global defaults.')
-    expect(wrapper.findAll('button').some(button => button.text() === 'Add option')).toBe(true)
+    expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').text()).toBe('Basic')
+    expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').text()).toBe('Advanced')
+  })
+
+  it('hides excluded companion keys from both views while keeping them in the stored map', async () => {
+    const wrapper = await mountSuspended(LlamaCppOptionsEditor, {
+      route: false,
+      props: {
+        modelValue: { 'ctx-size': '8192', mmproj: '/models/mmproj.gguf' },
+        scope: 'model',
+        excludeKeys: ['mmproj']
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('--ctx-size')
+    expect(wrapper.text()).not.toContain('--mmproj')
+    expect(wrapper.text()).toContain('1 override configured · remaining values inherited')
+
+    await wrapper.get('[data-testid="llamacpp-mode-advanced"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('--ctx-size')
+    expect(wrapper.text()).not.toContain('--mmproj')
   })
 })

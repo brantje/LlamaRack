@@ -5,7 +5,6 @@ import NewInstancePage from '~/pages/instances/new.vue'
 import EditInstancePage from '~/pages/instances/[id]/edit.vue'
 import EditModelPage from '~/pages/models/[id]/edit.vue'
 import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
-import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import HardwarePlacementEditor from '~/components/HardwarePlacementEditor.vue'
 import { useManager, type Instance, type Model } from '~/composables/useManager'
 
@@ -130,7 +129,7 @@ describe('Instance configuration pages', () => {
     placement.vm.$emit('update:gpuMode', 'manual')
     placement.vm.$emit('update:gpuDevices', ['CUDA0', 'CUDA1'])
     placement.vm.$emit('update:tensorSplit', '1,1')
-    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192', threads: '4' })
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192', threads: '4' })
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 90)
     checkbox(wrapper, 'Always On').vm.$emit('update:modelValue', true)
     checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
@@ -171,7 +170,7 @@ describe('Instance configuration pages', () => {
     await selectRegisteredModel(wrapper, 'm1')
     await wrapper.get('[data-testid="instance-name"]').setValue('Cancelled Launch')
     checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
-    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -206,14 +205,15 @@ describe('Instance configuration pages', () => {
     const wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     expect(wrapper.text()).toContain('Edit Instance')
-    expect(wrapper.findComponent(InstanceOverridesEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('instanceId')).toBe('primary-coder')
     expect(wrapper.text()).toContain('No changes to save.')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/primary-coder', expect.objectContaining({ method: 'PUT' }))
 
     inputWithValue(wrapper, 'Primary Coder').vm.$emit('update:modelValue', 'Renamed Coder')
-    wrapper.findComponent(InstanceOverridesEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384', threads: '6' })
     await flushPromises()
     expect(wrapper.text()).toContain('Unsaved changes')
     expect(wrapper.text()).not.toContain('No changes to save.')
@@ -246,7 +246,7 @@ describe('Instance configuration pages', () => {
     wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
     expect(wrapper.get('[data-testid="instance-edit-load-error"]').text()).toContain('Unable to load Instance')
-    expect(wrapper.findComponent(InstanceOverridesEditor).exists()).toBe(false)
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).exists()).toBe(false)
     wrapper.unmount()
 
     const manager = resetManager()

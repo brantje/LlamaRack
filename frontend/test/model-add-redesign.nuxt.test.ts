@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewModelPage from '~/pages/models/new.vue'
-import ModelOverridesEditor from '~/components/ModelOverridesEditor.vue'
+import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
 import AppButton from '~/components/AppButton.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -23,7 +23,7 @@ function seedManager() {
 }
 
 function modelOptions(wrapper: any) {
-  return wrapper.findComponent(ModelOverridesEditor).props('modelValue') as Record<string, string>
+  return wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue') as Record<string, string>
 }
 
 async function chooseGGUF(wrapper: any, path: string) {
@@ -56,6 +56,9 @@ describe('Add model redesign', () => {
     ])
     expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
     expect(wrapper.get('[data-testid="model-add-header"]').classes()).toContain('flex-wrap')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).exists()).toBe(true)
+    expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').exists()).toBe(true)
     const rescans = wrapper.findAllComponents(AppButton).filter(button => button.text() === 'Rescan')
     expect(rescans.map(button => button.props('intent'))).toEqual(['secondary', 'ghost'])
   })

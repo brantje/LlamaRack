@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import NewModelPage from '~/pages/models/new.vue'
+import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -82,7 +83,7 @@ describe('local GGUF inspection helpers', () => {
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: vision-F16.gguf')
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('MTP draft model: draft-Q4_0.gguf')
 
-    const options = wrapper.findComponent({ name: 'ModelOverridesEditor' })
+    const options = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(options.exists()).toBe(true)
     expect(options.props('modelValue')).toMatchObject({
       mmproj: '/models/local/vision-F16.gguf',

@@ -28,7 +28,8 @@ const props = withDefaults(defineProps<{
   modelId?: string
   instanceId?: string
   defaultOpen?: boolean
-}>(), { modelId: '', instanceId: '', defaultOpen: true })
+  excludeKeys?: string[]
+}>(), { modelId: '', instanceId: '', defaultOpen: true, excludeKeys: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, string>] }>()
 
 const manager = useManager()
@@ -50,8 +51,9 @@ const basicKeys = new Set([
 ])
 
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
+const excluded = computed(() => new Set(props.excludeKeys || []))
 const overrides = computed(() => props.modelValue || {})
-const overrideCount = computed(() => Object.keys(overrides.value).length)
+const overrideCount = computed(() => Object.keys(overrides.value).filter(key => !excluded.value.has(key)).length)
 const editorTitle = computed(() => `${scopeLabel.value} llama.cpp configuration`)
 const editorSummary = computed(() => {
   const count = overrideCount.value
@@ -93,6 +95,7 @@ const allOptions = computed<OptionDefinition[]>(() => {
 const visibleOptions = computed(() => {
   const term = search.value.trim().toLowerCase()
   return allOptions.value.filter((option) => {
+    if (excluded.value.has(option.key)) return false
     if (mode.value === 'basic' && (!basicKeys.has(option.key) || isProtected(option))) return false
     if (!term) return true
     return option.key.toLowerCase().includes(term) || (option.description || '').toLowerCase().includes(term)
@@ -175,7 +178,7 @@ function sourceVariant(source: string): StatusVariant {
 </script>
 
 <template>
-  <UCollapsible :default-open="defaultOpen" class="space-y-4">
+  <UCollapsible :default-open="defaultOpen" class="space-y-4" data-testid="llamacpp-options-editor">
     <template #default="{ open }">
       <UButton type="button" color="neutral" variant="soft" class="w-full">
         <span class="flex w-full items-center justify-between gap-3 text-left">
@@ -195,9 +198,9 @@ function sourceVariant(source: string): StatusVariant {
       <div class="space-y-4 pt-1">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-xs text-muted">Only overrides are stored at this layer; remove an override to inherit again.</p>
-          <div class="flex items-center gap-2">
-            <UButton type="button" :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" @click="mode = 'basic'">Basic</UButton>
-            <UButton type="button" :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" @click="mode = 'advanced'">Advanced</UButton>
+          <div class="inline-flex border border-[var(--color-divider)]" data-testid="llamacpp-mode">
+            <UButton type="button" size="sm" :color="mode === 'basic' ? 'primary' : 'neutral'" :variant="mode === 'basic' ? 'solid' : 'ghost'" class="border-r border-[var(--color-divider)]" :aria-pressed="mode === 'basic'" data-testid="llamacpp-mode-basic" @click="mode = 'basic'">Basic</UButton>
+            <UButton type="button" size="sm" :color="mode === 'advanced' ? 'primary' : 'neutral'" :variant="mode === 'advanced' ? 'solid' : 'ghost'" :aria-pressed="mode === 'advanced'" data-testid="llamacpp-mode-advanced" @click="mode = 'advanced'">Advanced</UButton>
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { reactive } from 'vue'
 import InstanceForm from '~/components/InstanceForm.vue'
+import LlamaCppOptionsEditor from '~/components/LlamaCppOptionsEditor.vue'
 import InstanceOverridesEditor from '~/components/InstanceOverridesEditor.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -72,6 +73,9 @@ describe('shared Instance form redesign', () => {
     ])
     expect(wrapper.get('[data-testid="priority-normal"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-testid="placement-mode-auto"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('scope')).toBe('instance')
+    expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').text()).toBe('Basic')
+    expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').text()).toBe('Advanced')
     expect(wrapper.text()).toContain('Q4_K_M · 0 B · ctx 8,192')
     expect(wrapper.text()).toContain('— · 5.0 GiB · ctx 4,096')
 
@@ -123,6 +127,7 @@ describe('shared Instance form redesign', () => {
     expect(projector.text()).toContain('value cleared — the flag is not passed')
     expect(draft.text()).toContain('Auto-detected')
     expect(draft.text()).toContain('1.5 KiB · inherited from the Model defaults')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('excludeKeys')).toEqual(['mmproj', 'spec-draft-model'])
 
     await projector.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
