@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import AdminUsersPage from '~/pages/admin/users.vue'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileAccountPage from '~/pages/profile/account.vue'
+import ProfileSessionsPage from '~/pages/profile/sessions.vue'
 import AdminLlamaCppPage from '~/pages/admin/llamacpp.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
 import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
@@ -199,21 +200,20 @@ describe('Phase 10 deep profile branches', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
     await flushPromises()
     expect(wrapper.text()).toContain('No active sessions')
-    expect(wrapper.text()).toContain('Never')
     wrapper.unmount()
 
     sessions = [{ id: 'current', user_id: 1, created_at: 1, expires_at: 2, remote_address: '', user_agent: '', current: true }]
     resetManager(); storeManagementToken('profile-token', false)
-    const current = await mountSuspended(ProfilePage, { route: false })
+    const current = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
     await flushPromises(); await button(current, 'Sign out').trigger('click'); await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/logout', { method: 'POST' })
     current.unmount()
 
     resetManager(); sessions = [{ id: 'other', user_id: 1, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Safari/1 Mac OS X' }]
-    const actions = await mountSuspended(ProfilePage, { route: false })
+    const actions = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
     await flushPromises()
     await button(actions, 'Revoke others').trigger('click'); await confirmation('cancel')
     await button(actions, 'Log out everywhere').trigger('click'); await confirmation('cancel')
@@ -237,18 +237,17 @@ describe('Phase 10 deep profile branches', () => {
   it('covers profile and password fallback errors', async () => {
     for (const [failure, message] of [[{ data: { error: 'profile denied' } }, 'profile denied'], [{}, 'Unable to load profile']] as const) {
       resetManager(); mocks.request.mockReset(); mocks.request.mockRejectedValue(failure)
-      const wrapper = await mountSuspended(ProfilePage, { route: false })
+      const wrapper = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
       await flushPromises(); expect(wrapper.text()).toContain(message); wrapper.unmount()
     }
     for (const [failure, message] of [[new Error('password exploded'), 'password exploded'], [{}, 'Unable to change password']] as const) {
       resetManager(); mocks.request.mockReset()
       mocks.request.mockImplementation(async (path: string, options?: any) => {
         if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 1 }
-        if (path === '/api/v1/me/sessions') return []
         if (path === '/api/v1/me/password' && options?.method === 'POST') throw failure
         return []
       })
-      const wrapper = await mountSuspended(ProfilePage, { route: false })
+      const wrapper = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
       await flushPromises()
       const passwordInputs = inputs(wrapper).filter(component => component.props('type') === 'password')
       for (const [index, value] of ['current-password', 'replacement-password', 'replacement-password'].entries()) passwordInputs[index].vm.$emit('update:modelValue', value)

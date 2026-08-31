@@ -4,7 +4,8 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import AdminIndexPage from '~/pages/admin/index.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
 import AdminUsersPage from '~/pages/admin/users.vue'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileAccountPage from '~/pages/profile/account.vue'
+import ProfileSessionsPage from '~/pages/profile/sessions.vue'
 import AdminSidebar from '~/components/navigation/AdminSidebar.vue'
 import { useManager } from '~/composables/useManager'
 
@@ -216,26 +217,15 @@ describe('Phase 10 general settings', () => {
 })
 
 describe('Phase 10 profile', () => {
-  it('changes passwords and revokes sessions through the profile workflow', async () => {
-    const sessions = [
-      { id: 'current', user_id: 1, created_at: 100, expires_at: 9000, remote_address: '192.0.2.1', user_agent: 'Chrome/100 Windows', current: true },
-      { id: 'other/session', user_id: 1, created_at: 200, expires_at: 9000, remote_address: '', user_agent: 'Firefox/100 Linux' }
-    ]
+  it('changes passwords through the account page', async () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 10 }
-      if (path === '/api/v1/me/sessions') return sessions
       if (path === '/api/v1/me/password' && options?.method === 'POST') return {}
-      if (path === '/api/v1/sessions/other%2Fsession' && options?.method === 'DELETE') return {}
-      if (path === '/api/v1/me/sessions/revoke-others' && options?.method === 'POST') return { revoked: 1 }
-      if (path === '/api/v1/me/sessions/revoke-all' && options?.method === 'POST') return {}
-      if (path === '/api/v1/models' || path === '/api/v1/instances') return []
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: '/profile' })
+    const wrapper = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
     await flushPromises()
-    expect(wrapper.text()).toContain('Chrome on Windows')
-    expect(wrapper.text()).toContain('Firefox on Linux')
     const passwordInputs = inputs(wrapper).filter(component => component.props('type') === 'password')
     passwordInputs[0].vm.$emit('update:modelValue', 'current-password')
     passwordInputs[1].vm.$emit('update:modelValue', 'new-password-123')
@@ -244,6 +234,27 @@ describe('Phase 10 profile', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Password changed')
+    wrapper.unmount()
+  })
+
+  it('revokes sessions through the sessions page', async () => {
+    const sessions = [
+      { id: 'current', user_id: 1, created_at: 100, expires_at: 9000, remote_address: '192.0.2.1', user_agent: 'Chrome/100 Windows', current: true },
+      { id: 'other/session', user_id: 1, created_at: 200, expires_at: 9000, remote_address: '', user_agent: 'Firefox/100 Linux' }
+    ]
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/me/sessions') return sessions
+      if (path === '/api/v1/sessions/other%2Fsession' && options?.method === 'DELETE') return {}
+      if (path === '/api/v1/me/sessions/revoke-others' && options?.method === 'POST') return { revoked: 1 }
+      if (path === '/api/v1/me/sessions/revoke-all' && options?.method === 'POST') return {}
+      if (path === '/api/v1/models' || path === '/api/v1/instances') return []
+      return []
+    })
+
+    const wrapper = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Chrome on Windows')
+    expect(wrapper.text()).toContain('Firefox on Linux')
     await button(wrapper, 'Revoke').trigger('click')
     await clickConfirmation('confirm')
     await button(wrapper, 'Revoke others').trigger('click')
@@ -254,19 +265,24 @@ describe('Phase 10 profile', () => {
   })
 
   it('surfaces profile load and password errors', async () => {
-    mocks.request.mockRejectedValueOnce(new Error('profile exploded')).mockRejectedValueOnce(new Error('sessions exploded'))
-    const failed = await mountSuspended(ProfilePage, { route: false })
+    mocks.request.mockRejectedValueOnce(new Error('profile exploded'))
+    const failed = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
     await flushPromises()
     expect(failed.text()).toContain('profile exploded')
     failed.unmount()
 
+    mocks.request.mockRejectedValueOnce(new Error('sessions exploded'))
+    const sessionsFailed = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
+    await flushPromises()
+    expect(sessionsFailed.text()).toContain('sessions exploded')
+    sessionsFailed.unmount()
+
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 10, last_login_at: 20 }
-      if (path === '/api/v1/me/sessions') return []
       if (path === '/api/v1/me/password' && options?.method === 'POST') throw { data: { error: 'password denied' } }
       return []
     })
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
     await flushPromises()
     const passwordInputs = inputs(wrapper).filter(component => component.props('type') === 'password')
     for (const [index, value] of ['current-password', 'new-password-123', 'new-password-123'].entries()) passwordInputs[index].vm.$emit('update:modelValue', value)

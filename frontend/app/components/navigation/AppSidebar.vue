@@ -35,7 +35,7 @@ const administrationNavigation: NavigationMenuItem[] = [
         <UNavigationMenu :items="administrationNavigation" orientation="vertical" class="mt-auto w-full" data-testid="administration-main-nav" />
         <ThemeSelector />
         <div class="flex w-full items-center justify-between gap-3">
-          <UButton to="/profile" color="neutral" variant="ghost" class="min-w-0 justify-start px-1">
+          <UButton to="/profile/account" color="neutral" variant="ghost" class="min-w-0 justify-start px-1">
             <UUser :name="user?.username || ''" size="sm" />
           </UButton>
           <UButton data-testid="sign-out" color="neutral" variant="link" size="xs" @click="manager.logout">Sign out</UButton>

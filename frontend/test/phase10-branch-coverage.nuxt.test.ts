@@ -5,7 +5,7 @@ import AdminIndexPage from '~/pages/admin/index.vue'
 import AdminHuggingFacePage from '~/pages/admin/huggingface.vue'
 import AdminSystemPage from '~/pages/admin/system.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileSessionsPage from '~/pages/profile/sessions.vue'
 import AdminUsersPage from '~/pages/admin/users.vue'
 import { useManager } from '~/composables/useManager'
 import { storeManagementToken } from '~/composables/useManagerApi'
@@ -273,13 +273,12 @@ describe('Phase 10 branch coverage', () => {
       if (path === '/api/v1/auth/logout' && options?.method === 'POST') return {}
       return {}
     })
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
     await flushPromises()
     expect(wrapper.text()).toContain('Chrome on Windows')
     expect(wrapper.text()).toContain('Edge on macOS')
     expect(wrapper.text()).toContain('Safari on Linux')
     expect(wrapper.text()).toContain('Unknown client')
-    expect(wrapper.text()).toContain('Never')
 
     const revokeButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Revoke')
     await revokeButtons[0]!.trigger('click')

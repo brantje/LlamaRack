@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileAuthenticationPage from '~/pages/profile/authentication.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -41,7 +41,7 @@ beforeEach(() => {
 })
 
 describe('profile authentication sources', () => {
-  it('shows linked provider names next to change password and unlinks them', async () => {
+  it('shows linked provider names and unlinks them', async () => {
     let identities = [{
       id: 'identity/one',
       provider_id: 'authentik',
@@ -52,8 +52,6 @@ describe('profile authentication sources', () => {
     }]
 
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 10 }
-      if (path === '/api/v1/me/sessions') return []
       if (path === '/api/v1/me/identities') return identities
       if (path === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [{ id: 'authentik', name: 'Authentik' }] }
       if (path === '/api/v1/admin/auth/identities/identity%2Fone' && options?.method === 'DELETE') {
@@ -63,10 +61,9 @@ describe('profile authentication sources', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: '/profile' })
+    const wrapper = await mountSuspended(ProfileAuthenticationPage, { route: '/profile/authentication' })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Change password')
     expect(wrapper.text()).toContain('Authentication sources')
     expect(wrapper.text()).toContain('Authentik')
     expect(wrapper.text()).toContain('https://auth.example.test/application/o/manager/')
@@ -93,8 +90,6 @@ describe('profile authentication sources', () => {
     let failUnlink = false
 
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/me') return { id: 1, username: 'admin', enabled: true, created_at: 10 }
-      if (path === '/api/v1/me/sessions') return []
       if (path === '/api/v1/me/identities') return [identity]
       if (path === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [] }
       if (path === '/api/v1/admin/auth/identities/identity-two' && options?.method === 'DELETE') {
@@ -104,7 +99,7 @@ describe('profile authentication sources', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileAuthenticationPage, { route: '/profile/authentication' })
     await flushPromises()
     expect(wrapper.text()).toContain('https://disabled.example.test/')
 

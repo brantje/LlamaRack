@@ -458,7 +458,9 @@ const pages = [
   ['request-log-detail', '/logs?request_id=req_a1b2c3&session_id=session_fixture'],
   ['request-logs-trace', '/logs?trace_id=trace_fixture'],
   ['api-keys', '/api'],
-  ['profile', '/profile'],
+  ['profile-account', '/profile/account'],
+  ['profile-authentication', '/profile/authentication'],
+  ['profile-sessions', '/profile/sessions'],
   ['admin-overview', '/admin'],
   ['admin-authentication', '/admin/authentication'],
   ['admin-general', '/admin/general'],
@@ -486,9 +488,15 @@ for (const [name, path] of pages) {
       await expect(page.locator('[data-testid="model-name"]')).toHaveValue('Qwen3 Vision 8B')
       await expect(page.locator('[data-testid^="companion-candidate-"]')).toHaveCount(4)
     }
-    if (name === 'profile') {
-      await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
+    if (name === 'profile-account') {
+      await expect(page.locator('[data-testid="profile-account"]')).toBeVisible()
+      await expect(page.locator('[data-testid="profile-password"]')).toBeVisible()
+    }
+    if (name === 'profile-authentication') {
       await expect(page.locator('[data-testid="profile-authentication-sources"]')).toContainText('Authentik')
+    }
+    if (name === 'profile-sessions') {
+      await expect(page.locator('[data-testid="profile-sessions"]')).toContainText('Current')
     }
     if (name === 'admin-logs') await expect(page.locator('[data-testid="system-log-row"]')).toHaveCount(4)
     const documentOverflow = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)

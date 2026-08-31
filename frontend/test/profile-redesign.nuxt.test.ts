@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileAccountPage from '~/pages/profile/account.vue'
+import ProfileAuthenticationPage from '~/pages/profile/authentication.vue'
+import ProfileSessionsPage from '~/pages/profile/sessions.vue'
 import { useManager } from '~/composables/useManager'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
@@ -27,23 +29,17 @@ beforeEach(() => {
 })
 
 describe('Profile redesign', () => {
-  it('renders the flat account, password, authentication-source and session sections', async () => {
+  it('renders the account and password sections on the account page', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/me') return { id: 1, username: 'john.doe', enabled: false, created_at: 10 }
-      if (path === '/api/v1/me/sessions') return [
-        { id: 'current', user_id: 1, created_at: 100, expires_at: 9000, remote_address: '192.0.2.1', user_agent: 'Chrome/100 Mac OS X', current: true },
-        { id: 'other', user_id: 1, created_at: 200, expires_at: 9000, remote_address: '', user_agent: 'Firefox/100 Linux' }
-      ]
-      if (path === '/api/v1/me/identities') return [{ id: 'oidc-1', provider_id: 'authentik', issuer: 'https://auth.example.test/', subject: 'sub', user_id: 1, created_at: 300 }]
-      if (path === '/api/v1/auth/providers') return { providers: [{ id: 'authentik', name: 'Authentik' }] }
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
     await flushPromises()
 
     expect(wrapper.text()).toContain('ACCOUNT')
-    expect(wrapper.text()).toContain('Manage your local account password and active management sessions.')
+    expect(wrapper.text()).toContain('View your local account details and change your password.')
     expect(wrapper.get('[data-testid="profile-avatar"]').text()).toBe('JD')
     expect(wrapper.get('[data-testid="profile-avatar"]').element.tagName).toBe('SPAN')
     expect(wrapper.get('[data-testid="profile-account"]').text()).toContain('Disabled')
@@ -74,9 +70,40 @@ describe('Profile redesign', () => {
     await flushPromises()
     expect(passwordSection.text()).not.toContain('New password confirmation does not match.')
     expect(changePassword.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('API keys')
+
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/me')
+    wrapper.unmount()
+  })
+
+  it('renders authentication sources on the authentication page', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/me/identities') return [{ id: 'oidc-1', provider_id: 'authentik', issuer: 'https://auth.example.test/', subject: 'sub', user_id: 1, created_at: 300 }]
+      if (path === '/api/v1/auth/providers') return { providers: [{ id: 'authentik', name: 'Authentik' }] }
+      return []
+    })
+
+    const wrapper = await mountSuspended(ProfileAuthenticationPage, { route: '/profile/authentication' })
+    await flushPromises()
+
     expect(wrapper.get('[data-testid="profile-authentication-sources"]').text()).toContain('Authentik')
     expect(wrapper.get('[data-testid="profile-authentication-sources"]').text()).toContain('OIDC')
     expect(wrapper.get('[data-testid="profile-authentication-sources"]').text()).toContain('Administration → Authentication')
+    wrapper.unmount()
+  })
+
+  it('renders session details on the sessions page', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/me/sessions') return [
+        { id: 'current', user_id: 1, created_at: 100, expires_at: 9000, remote_address: '192.0.2.1', user_agent: 'Chrome/100 Mac OS X', current: true },
+        { id: 'other', user_id: 1, created_at: 200, expires_at: 9000, remote_address: '', user_agent: 'Firefox/100 Linux' }
+      ]
+      return []
+    })
+
+    const wrapper = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
+    await flushPromises()
+
     expect(wrapper.get('[data-testid="profile-sessions"]').text()).toContain('Chrome on macOS')
     expect(wrapper.get('[data-testid="profile-sessions"]').text()).toContain('Firefox on Linux')
     expect(wrapper.get('[data-testid="profile-sessions"]').text()).toContain('Current')
@@ -84,12 +111,6 @@ describe('Profile redesign', () => {
     const sessionButtons = wrapper.get('[data-testid="profile-sessions"]').findAll('button')
     expect(sessionButtons.find(button => button.text().trim() === 'Revoke others')!.attributes('disabled')).toBeUndefined()
     expect(sessionButtons.find(button => button.text().trim() === 'Log out everywhere')!.attributes('disabled')).toBeUndefined()
-    expect(wrapper.text()).not.toContain('API keys')
-
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/me')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/me/sessions')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/me/identities')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/providers')
     wrapper.unmount()
   })
 
@@ -103,20 +124,27 @@ describe('Profile redesign', () => {
       return []
     })
 
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const account = await mountSuspended(ProfileAccountPage, { route: '/profile/account' })
     await flushPromises()
+    expect(account.get('[data-testid="profile-avatar"]').text()).toBe('?')
+    expect(account.get('[data-testid="profile-account"]').text()).toContain('Enabled')
+    expect(account.text()).not.toContain('Email')
+    expect(account.text()).not.toContain('Display name')
+    expect(account.text()).not.toContain('Timezone')
+    expect(account.text()).not.toContain('Role')
+    account.unmount()
 
-    expect(wrapper.get('[data-testid="profile-avatar"]').text()).toBe('?')
-    expect(wrapper.get('[data-testid="profile-account"]').text()).toContain('Enabled')
-    expect(wrapper.text()).toContain('No linked authentication sources')
-    expect(wrapper.text()).toContain('No active sessions')
-    const sessionButtons = wrapper.get('[data-testid="profile-sessions"]').findAll('button')
+    const authentication = await mountSuspended(ProfileAuthenticationPage, { route: '/profile/authentication' })
+    await flushPromises()
+    expect(authentication.text()).toContain('No linked authentication sources')
+    authentication.unmount()
+
+    const sessions = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
+    await flushPromises()
+    expect(sessions.text()).toContain('No active sessions')
+    const sessionButtons = sessions.get('[data-testid="profile-sessions"]').findAll('button')
     expect(sessionButtons.find(button => button.text().trim() === 'Revoke others')!.attributes('disabled')).toBeDefined()
     expect(sessionButtons.find(button => button.text().trim() === 'Log out everywhere')!.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).not.toContain('Email')
-    expect(wrapper.text()).not.toContain('Display name')
-    expect(wrapper.text()).not.toContain('Timezone')
-    expect(wrapper.text()).not.toContain('Role')
-    wrapper.unmount()
+    sessions.unmount()
   })
 })
