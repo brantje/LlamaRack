@@ -20,3 +20,4 @@ backend/*.db-wal
 .idea/
 .vscode/
 .DS_Store
+frontend/artifacts/
