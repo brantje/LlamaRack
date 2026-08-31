@@ -12,13 +12,17 @@ count = source.count(old)
 if count != 1:
     raise SystemExit(f'Downloads header marker: expected one match, found {count}')
 source = source.replace(old, new, 1)
-old = """      <div class="flex flex-wrap items-center justify-end gap-2">
-"""
-new = """      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
-"""
+old = """        </p>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <StatusTag :variant="liveUpdates ? 'ready' : 'pending'">"""
+new = """        </p>
+      </div>
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+        <StatusTag :variant="liveUpdates ? 'ready' : 'pending'">"""
 count = source.count(old)
 if count != 1:
-    raise SystemExit(f'Downloads action group marker: expected one match, found {count}')
+    raise SystemExit(f'Downloads header action marker: expected one match, found {count}')
 page.write_text(source.replace(old, new, 1))
 
 unit = Path('frontend/test/downloads-redesign-cleanup.nuxt.test.ts')
