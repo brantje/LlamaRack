@@ -1,0 +1,51 @@
+name: Validate Edit model mobile header feedback
+
+on:
+  push:
+    branches:
+      - fix/model-edit-mobile-header
+    paths:
+      - .github/workflows/validate-model-edit-mobile-header.yml
+      - .github/scripts/patch-model-edit-mobile-header.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/model-edit-mobile-header
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Apply Edit model mobile header fix
+        run: |
+          python .github/scripts/patch-model-edit-mobile-header.py
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run required frontend coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run redesign screenshot suite
+        working-directory: frontend
+        run: npm run test:e2e:screenshots
+      - name: Commit validated Edit model mobile header fix
+        run: |
+          rm .github/workflows/validate-model-edit-mobile-header.yml .github/scripts/patch-model-edit-mobile-header.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): stack Edit model header action" -m "Keep Back to Models below the Edit model intro on narrow layouts so shared 412px header behavior remains readable."
+          git push origin HEAD:fix/model-edit-mobile-header
