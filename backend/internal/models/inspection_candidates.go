@@ -44,8 +44,11 @@ func (s *Service) InspectGGUFArtifactCandidates(ctx context.Context, path string
 	}
 	mainGroup := groups[mainKey]
 	if mainGroup == nil {
-		groups = buildLocalArtifactGroups(root, []string{mainRel})
-		mainGroup = groups[mainKey]
+		mainGroups := buildLocalArtifactGroups(root, []string{mainRel})
+		mainGroup = mainGroups[mainKey]
+		if mainGroup != nil {
+			groups[mainKey] = mainGroup
+		}
 	}
 	if mainGroup == nil {
 		return nil, os.ErrNotExist
