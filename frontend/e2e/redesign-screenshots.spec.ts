@@ -10,6 +10,9 @@ const discoverDetailFailurePages = new WeakSet<Page>()
 const modelInspectFailurePages = new WeakSet<Page>()
 const modelDetailsFailurePages = new WeakSet<Page>()
 const modelDetailsPageTwoPages = new WeakSet<Page>()
+const adminLlamaPopulatedPages = new WeakSet<Page>()
+const adminLlamaUnavailablePages = new WeakSet<Page>()
+const adminLlamaSaveFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -329,6 +332,33 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (adminLlamaUnavailablePages.has(page) && url.pathname === '/api/v1/llamacpp/profile') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ available: false, profile: null }) })
+      return
+    }
+    if (adminLlamaUnavailablePages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'GET') {
+      await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ profile: null, effective: { global: {}, values: {}, sources: {} } }) })
+      return
+    }
+    if (adminLlamaPopulatedPages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          profile: llamaProfile,
+          effective: {
+            global: { 'ctx-size': '32768', 'flash-attn': 'on', parallel: '4' },
+            values: {},
+            sources: {}
+          }
+        })
+      })
+      return
+    }
+    if (adminLlamaSaveFailurePages.has(page) && url.pathname === '/api/v1/llamacpp/config' && request.method() === 'PUT') {
+      await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative invalid llama.cpp default for visual QA.' }) })
+      return
+    }
     if (modelInspectFailurePages.has(page) && url.pathname === '/api/v1/models/inspect' && request.method() === 'POST') {
       await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative GGUF metadata inspection failure for visual QA.' }) })
       return
@@ -580,6 +610,35 @@ test('discover repository failure and retry screenshot', async ({ page }, testIn
   await page.locator('[data-testid="discover-detail-retry"]').click()
   await expect(page.locator('[data-testid="discover-repository-header"]').getByRole('heading', { name: 'Qwen/Qwen3-8B-GGUF' })).toBeVisible()
   await expect(page.locator('[data-testid="discover-detail-error"]')).toBeHidden()
+})
+
+
+test('administration llama.cpp populated defaults and save failure screenshots', async ({ page }, testInfo) => {
+  adminLlamaPopulatedPages.add(page)
+  await page.goto('/admin/llamacpp', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const rows = page.locator('[data-testid="admin-global-default-row"]')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.nth(0)).toContainText('Size of the prompt context')
+  await expect(rows.nth(1)).toContainText('Enable Flash Attention')
+  await expect(rows.nth(2)).toContainText('Number of parallel sequences')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-populated.png`, fullPage: true, animations: 'disabled' })
+
+  adminLlamaSaveFailurePages.add(page)
+  await page.getByRole('button', { name: 'Save defaults', exact: true }).click()
+  await expect(page.getByText('Representative invalid llama.cpp default for visual QA.', { exact: true })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-save-error.png`, fullPage: true, animations: 'disabled' })
+})
+
+
+test('administration llama.cpp unavailable screenshot', async ({ page }, testInfo) => {
+  adminLlamaUnavailablePages.add(page)
+  await page.goto('/admin/llamacpp', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const warning = page.locator('[data-testid="llamacpp-unavailable-warning"]')
+  await expect(warning).toContainText('Unavailable')
+  await expect(warning).toContainText('llama-server could not be discovered.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-llamacpp-unavailable.png`, fullPage: true, animations: 'disabled' })
 })
 
 
