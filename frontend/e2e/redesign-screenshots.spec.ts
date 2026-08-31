@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const adminSummaryFailurePages = new WeakSet<Page>()
 const discoverDetailFailurePages = new WeakSet<Page>()
 const modelInspectFailurePages = new WeakSet<Page>()
 const modelDetailsFailurePages = new WeakSet<Page>()
@@ -361,6 +362,10 @@ async function installApiFixture(page: Page) {
         return
       }
     }
+    if (adminSummaryFailurePages.has(page) && url.pathname === '/api/v1/admin/summary') {
+      await route.fulfill({ status: 503, headers: corsHeaders, body: JSON.stringify({ error: 'Administration summary temporarily unavailable for visual QA.' }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/imports') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify([{ id: 'import-qwen3-downloading', job_id: 'dl-qwen3-downloading', model_id: 'qwen3-8b-q4km', instance_id: 'qwen3-downloading', state: 'DOWNLOADING', start_when_ready: true }]) })
       return
@@ -580,6 +585,22 @@ test('discover repository failure and retry screenshot', async ({ page }, testIn
   await page.locator('[data-testid="discover-detail-retry"]').click()
   await expect(page.locator('[data-testid="discover-repository-header"]').getByRole('heading', { name: 'Qwen/Qwen3-8B-GGUF' })).toBeVisible()
   await expect(page.locator('[data-testid="discover-detail-error"]')).toBeHidden()
+})
+
+
+test('administration dashboard degraded summary screenshot', async ({ page }, testInfo) => {
+  adminSummaryFailurePages.add(page)
+  await page.goto('/admin', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const failure = page.locator('[data-testid="admin-summary-error"]')
+  await expect(failure).toContainText('Summary unavailable')
+  await expect(failure).toContainText('Administration summary temporarily unavailable for visual QA.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-dashboard-summary-error.png`, fullPage: true, animations: 'disabled' })
+
+  adminSummaryFailurePages.delete(page)
+  await failure.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(page.locator('[data-testid="admin-summary-cards"]')).toBeVisible()
+  await expect(failure).toBeHidden()
 })
 
 
