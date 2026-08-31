@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
+	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
 	"github.com/brantje/llamacpp-manager/backend/internal/models"
 	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
@@ -62,7 +63,7 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	}
 }
 
-func (s *Service) Instances() *instances.Service { return s.instances }
+func (s *Service) Instances() *instances.Service                            { return s.instances }
 func (s *Service) SetProfileGetter(getter func() (llamacpp.Profile, error)) { s.profile = getter }
 func (s *Service) HardwareSnapshot(ctx context.Context) (hardware.Snapshot, error) {
 	return s.hardware.Snapshot(ctx)
@@ -690,21 +691,16 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	if placementErr != nil {
 		return "", placementErr
 	}
+	var workerEnv []string
 	if len(placement.Devices) > 0 {
-		args = append(args, "--device", strings.Join(placement.Devices, ","))
-		if !hasTensorSplitOverride && placement.TensorSplit != "" && len(placement.Devices) > 1 {
-			args = append(args, "--tensor-split", placement.TensorSplit)
-		}
+		args, workerEnv = appendPlacementLaunchArgs(args, placement.Devices, placement.TensorSplit, hasTensorSplitOverride)
 	} else if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
 		// Preserve explicitly configured non-NVIDIA/ROCm backends when this Phase 7
 		// detector cannot observe them.
-		args = append(args, "--device", strings.Join(i.GPUDevices, ","))
-		if !hasTensorSplitOverride && i.TensorSplit != "" {
-			args = append(args, "--tensor-split", i.TensorSplit)
-		}
+		args, workerEnv = appendPlacementLaunchArgs(args, i.GPUDevices, i.TensorSplit, hasTensorSplitOverride)
 	}
 
-	_, err = s.sup.Start(ctx, i.ID, m.ID, path, args)
+	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv)
 	if err != nil {
 		return "", err
 	}
@@ -803,6 +799,65 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 	s.AddManagerLog(id, "evicted for resource pressure")
 	slog.Info("evicted instance for resource pressure", "instance_id", id, "always_on", i.AlwaysOn)
 	return nil
+}
+
+func appendPlacementLaunchArgs(args []string, devices []string, tensorSplit string, hasTensorSplitOverride bool) ([]string, []string) {
+	if len(devices) == 0 {
+		return args, nil
+	}
+	launchDevices := append([]string(nil), devices...)
+	var env []string
+	if len(devices) == 1 {
+		if isolated, extraEnv, ok := isolateSingleVisibleGPU(devices[0]); ok {
+			launchDevices[0] = isolated
+			env = extraEnv
+		}
+		args = append(args, "--device", launchDevices[0], "--split-mode", "none")
+		return args, env
+	}
+	args = append(args, "--device", strings.Join(launchDevices, ","))
+	if !hasTensorSplitOverride && tensorSplit != "" {
+		args = append(args, "--tensor-split", tensorSplit)
+	}
+	return args, nil
+}
+
+// isolateSingleVisibleGPU hides every other GPU from a single-device worker so
+// llama.cpp cannot create a CUDA/HIP context on cards that are not in the placement.
+func isolateSingleVisibleGPU(deviceID string) (llamaDevice string, env []string, ok bool) {
+	index, backend, ok := parseIndexedGPU(deviceID)
+	if !ok {
+		return "", nil, false
+	}
+	visible := strconv.Itoa(index)
+	switch backend {
+	case "cuda":
+		return "CUDA0", []string{"CUDA_VISIBLE_DEVICES=" + visible}, true
+	case "rocm":
+		return "ROCm0", []string{"HIP_VISIBLE_DEVICES=" + visible, "ROCR_VISIBLE_DEVICES=" + visible}, true
+	default:
+		return "", nil, false
+	}
+}
+
+func parseIndexedGPU(deviceID string) (int, string, bool) {
+	deviceID = strings.TrimSpace(deviceID)
+	switch {
+	case strings.HasPrefix(deviceID, "CUDA"):
+		index, err := strconv.Atoi(strings.TrimPrefix(deviceID, "CUDA"))
+		if err != nil || index < 0 {
+			return 0, "", false
+		}
+		return index, "cuda", true
+	case strings.HasPrefix(deviceID, "ROCm"):
+		index, err := strconv.Atoi(strings.TrimPrefix(deviceID, "ROCm"))
+		if err != nil || index < 0 {
+			return 0, "", false
+		}
+		return index, "rocm", true
+	default:
+		return 0, "", false
+	}
 }
 
 func optionArgs(options map[string]string) []string {

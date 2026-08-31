@@ -21,3 +21,22 @@ func sanitizeLlamaArgEnvironment() {
 		}
 	}
 }
+
+func workerEnviron(extra []string) []string {
+	override := make(map[string]bool, len(extra))
+	for _, entry := range extra {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "" {
+			override[key] = true
+		}
+	}
+	out := make([]string, 0, len(os.Environ())+len(extra))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if override[key] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, extra...)
+}

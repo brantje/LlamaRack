@@ -65,6 +65,10 @@ func New(binary, host string, portStart int, startupTimeout time.Duration) *Supe
 }
 
 func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, args []string) (Runtime, error) {
+	return s.StartWithEnv(ctx, instanceID, modelID, modelPath, args, nil)
+}
+
+func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, modelPath string, args, env []string) (Runtime, error) {
 	s.mu.Lock()
 	if w := s.workers[instanceID]; w != nil && w.runtime.State != Unloaded && w.runtime.State != Failed {
 		rt := w.runtime
@@ -85,6 +89,9 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	// The manager owns worker CORS/auth configuration and applies it exactly once.
 	workerArgs = append(workerArgs, "--cors-origins", "localhost")
 	cmd := exec.Command(s.binary, workerArgs...)
+	if len(env) > 0 {
+		cmd.Env = workerEnviron(env)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.mu.Unlock()
@@ -106,7 +113,7 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: logRing, done: make(chan struct{})}
 	s.workers[instanceID] = w
 	s.emitRuntimeLocked(w.runtime)
-	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs)
+	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs, "env", env)
 	if err := cmd.Start(); err != nil {
 		w.runtime.State = Failed
 		w.runtime.LastError = err.Error()
