@@ -8,8 +8,11 @@ html[data-theme='dark'] {
   --color-divider: #303030;
   --color-danger: #d85b66;
   --color-on-danger: #181818;
+  --color-success: #5cb882;
   --danger-100: #3a2226;
   --danger-700: #e9858e;
+  --success-100: #1d2e24;
+  --success-700: #8fd4a8;
 
   --neutral-100: #181818;
   --neutral-200: #212121;

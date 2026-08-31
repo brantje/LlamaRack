@@ -268,7 +268,20 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		applyMTPDefaults(options)
 	}
 
-	for _, localPath := range sidecarsByMain[mainPath] {
+	// Match InspectGGUFArtifact scope: prefer completed download-job paths when
+	// present; otherwise scan sibling GGUFs in the same directory so manually
+	// placed helpers (e.g. gemma4-assistant MTP + clip projector) still surface
+	// as MTP/Vision tags on the available-files list.
+	candidates := sidecarsByMain[mainPath]
+	if len(candidates) == 0 {
+		var err error
+		candidates, err = directorySiblingGGUFs(root, mainPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, localPath := range candidates {
 		absolute, ok := sidecarAbsolutePath(root, localPath)
 		if !ok {
 			continue
@@ -304,6 +317,22 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		return nil, nil
 	}
 	return options, nil
+}
+
+func directorySiblingGGUFs(root, mainRel string) ([]string, error) {
+	dir := filepath.Dir(filepath.FromSlash(mainRel))
+	entries, err := os.ReadDir(filepath.Join(root, dir))
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+			continue
+		}
+		paths = append(paths, filepath.ToSlash(filepath.Join(dir, entry.Name())))
+	}
+	return paths, nil
 }
 
 func applyMTPDefaults(options map[string]string) {

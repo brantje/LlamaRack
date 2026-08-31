@@ -87,6 +87,13 @@ describe('Add model redesign', () => {
     expect(rows[1]!.text()).toContain('1.5 KiB · modified 2h ago')
     expect(rows[1]!.text()).toContain('Vision')
     expect(rows[1]!.text()).toContain('MTP')
+    const capabilityBadges = rows[1]!.findAll('span.border')
+    expect(capabilityBadges.find(badge => badge.text() === 'MTP')!.classes()).toEqual(expect.arrayContaining([
+      'border-[var(--color-success)]', 'bg-[var(--success-100)]', 'text-[var(--success-700)]'
+    ]))
+    expect(capabilityBadges.find(badge => badge.text() === 'Vision')!.classes()).toEqual(expect.arrayContaining([
+      'border-[var(--color-accent)]', 'bg-[var(--accent-100)]', 'text-[var(--accent-800)]'
+    ]))
 
     await chooseGGUF(wrapper, available[1]!.path)
     expect(rows[1]!.classes()).toContain('bg-[var(--accent-100)]')

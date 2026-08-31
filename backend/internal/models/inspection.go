@@ -217,19 +217,7 @@ func (s *Service) localArtifactScopePaths(ctx context.Context, root, mainRel str
 		return append([]string(nil), paths...), nil
 	}
 
-	dir := filepath.Dir(mainRel)
-	entries, err := os.ReadDir(filepath.Join(root, dir))
-	if err != nil {
-		return nil, err
-	}
-	paths := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
-			continue
-		}
-		paths = append(paths, filepath.Join(dir, entry.Name()))
-	}
-	return paths, nil
+	return directorySiblingGGUFs(root, mainRel)
 }
 
 func buildLocalArtifactGroups(root string, paths []string) map[string]*localArtifactGroup {

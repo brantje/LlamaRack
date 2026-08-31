@@ -69,6 +69,47 @@ func TestAvailableGGUFsSuggestsDownloadedSidecarOptionsFromMetadata(t *testing.T
 	}
 }
 
+func TestAvailableGGUFsSuggestsDirectorySidecarOptionsWithoutDownloadJob(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	modelDir := filepath.Join(dir, "gemma-4-12b-it-UD-Q5_K_XL")
+	if err := os.MkdirAll(modelDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeClassifiedGGUF(t, modelDir, "gemma-4-12b-it-UD-Q5_K_XL.gguf", "gemma4", 0, true)
+	projectorPath := writeClassifiedGGUF(t, modelDir, "mmproj-F16.gguf", "clip", 0, false)
+	mtpPath := writeClassifiedGGUF(t, modelDir, "mtp-gemma-4-12b-it.gguf", "gemma4-assistant", 4, true)
+	// Unrelated selectable model in another directory must not pick up these helpers.
+	otherDir := filepath.Join(dir, "other")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeClassifiedGGUF(t, otherDir, "plain-Q4_K_M.gguf", "qwen2", 0, true)
+
+	files, err := s.AvailableGGUFs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("available files = %+v", files)
+	}
+	byPath := map[string]GGUFFile{}
+	for _, file := range files {
+		byPath[file.Path] = file
+	}
+	main := byPath[filepath.ToSlash(filepath.Join("gemma-4-12b-it-UD-Q5_K_XL", "gemma-4-12b-it-UD-Q5_K_XL.gguf"))]
+	if main.SuggestedOptions["mmproj"] != projectorPath {
+		t.Fatalf("mmproj = %q want %q (options=%+v)", main.SuggestedOptions["mmproj"], projectorPath, main.SuggestedOptions)
+	}
+	if main.SuggestedOptions["spec-draft-model"] != mtpPath || main.SuggestedOptions["spec-type"] != "draft-mtp" {
+		t.Fatalf("MTP options = %+v", main.SuggestedOptions)
+	}
+	plain := byPath[filepath.ToSlash(filepath.Join("other", "plain-Q4_K_M.gguf"))]
+	if len(plain.SuggestedOptions) != 0 {
+		t.Fatalf("unrelated model must not inherit directory helpers: %+v", plain.SuggestedOptions)
+	}
+}
+
 func TestDownloadSidecarsByMainUsesNewestCompletedJobAndFileOrder(t *testing.T) {
 	ctx := context.Background()
 	s, _ := testModelService(t)

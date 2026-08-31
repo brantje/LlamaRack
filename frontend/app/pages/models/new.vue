@@ -458,7 +458,11 @@ async function createModel() {
               <span class="mt-1 block text-[10.5px] text-[var(--neutral-700)]">{{ formatBytes(file.total_bytes) }} · modified {{ formatModified(file.modified_at) }}</span>
             </span>
             <span v-if="ggufCapabilities(file).length" class="flex shrink-0 flex-wrap justify-end gap-1">
-              <span v-for="capability in ggufCapabilities(file)" :key="capability" class="border border-[var(--color-divider)] px-2 py-1 text-[9.5px] font-semibold">{{ capability }}</span>
+              <span v-for="capability in ggufCapabilities(file)" :key="capability" class="border px-2 py-1 text-[9.5px] font-semibold" :class="{
+                'border-[var(--color-success)] bg-[var(--success-100)] text-[var(--success-700)]': capability === 'MTP',
+                'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]': capability === 'Vision',
+                'border-[var(--color-divider)]': capability !== 'MTP' && capability !== 'Vision'
+              }">{{ capability }}</span>
             </span>
           </label>
         </div>
