@@ -21,4 +21,6 @@ backend/*.db-wal
 .vscode/
 .DS_Store
 frontend/artifacts/*
+frontend/coverage/*
 data/*
+screenshots/*
