@@ -292,6 +292,9 @@ async function showRequest(requestID: string, routeSessionID: string): Promise<R
   if (selectionGeneration !== detailSelectionGeneration) return { current: false, sessionID: '' }
   return { current: true, sessionID: resolvedSessionID }
 }
+function onRequestRowSelect(_event: Event, row: { original: RequestRecord }) {
+  return openRequest(row.original)
+}
 async function openRequest(item: RequestRecord) {
   if (!item.request_id) return
   const selection = await showRequest(item.request_id, item.session_id || '')
@@ -459,7 +462,7 @@ watch(liveRequestFingerprint, (next, previous) => {
         <p class="mt-2 text-sm text-[var(--neutral-800)]">Adjust the filters or send inference traffic through the gateway.</p>
       </div>
       <div v-else class="overflow-x-auto" role="region" aria-label="Request history table. Scroll horizontally to view all columns on small screens." tabindex="0">
-        <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]">
+        <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]" :ui="{ tbody: '[&>tr]:cursor-pointer' }" @select="onRequestRowSelect">
           <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatTime(row.original.started_at) }}</span></template>
           <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>
           <template #model_name-cell="{ row }"><span class="text-xs font-semibold">{{ requestModelName(row.original) }}</span></template>
@@ -472,7 +475,7 @@ watch(liveRequestFingerprint, (next, previous) => {
           <template #generation_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatRate(row.original.generation_tokens_per_second) }}</span></template>
           <template #call_type-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ callTypeLabel(row.original.call_type) }}</span></template>
           <template #request_id-cell="{ row }"><AppButton v-if="row.original.request_id" data-testid="request-detail-trigger" intent="ghost" size="xs" class="font-mono" @click="openRequest(row.original)">{{ shortID(row.original.request_id, 20) }}</AppButton><span v-else>—</span></template>
-          <template #session_id-cell="{ row }"><AppButton v-if="sessionCount(row.original) > 1" intent="secondary" size="xs" @click="openRequest(row.original)">{{ sessionCount(row.original) }} requests</AppButton><span v-else-if="row.original.session_id" class="font-mono text-xs text-[var(--neutral-800)]">{{ shortID(row.original.session_id) }}</span><span v-else>—</span></template>
+          <template #session_id-cell="{ row }"><span v-if="row.original.session_id" class="font-mono text-xs text-[var(--neutral-800)]">{{ shortID(row.original.session_id) }}</span><span v-else>—</span></template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.endpoint }}</span></template>
         </UTable>
       </div>
