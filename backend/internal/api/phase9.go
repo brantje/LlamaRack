@@ -156,7 +156,7 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		warnings = append(warnings, "Context capability could not be detected automatically from GGUF metadata.")
 	}
 	page, total := ggufmeta.Filter(inspection.Metadata, query, offset, limit)
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"model":                   model,
 		"gguf_version":            inspection.Version,
 		"tensor_count":            inspection.TensorCount,
@@ -168,7 +168,11 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		"offset":                  offset,
 		"limit":                   limit,
 		"warnings":                warnings,
-	})
+	}
+	if summary, summaryErr := h.models.GGUFSummary(r.Context(), model.GGUFPath); summaryErr == nil {
+		payload["features"] = summary.Features
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func modelIDFromRequest(r *http.Request) string {

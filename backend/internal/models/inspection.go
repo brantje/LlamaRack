@@ -48,6 +48,7 @@ type GGUFInspection struct {
 	GGUFVersion      uint32            `json:"gguf_version,omitempty"`
 	MetadataCount    uint64            `json:"metadata_count,omitempty"`
 	Warning          string            `json:"warning,omitempty"`
+	Features         ggufmeta.Features `json:"features,omitempty"`
 	SuggestedOptions map[string]string `json:"suggested_options,omitempty"`
 }
 
@@ -122,6 +123,7 @@ func (s *Service) InspectGGUFArtifact(ctx context.Context, path string) (GGUFIns
 	inspection.ContextLength = summary.Derived.ContextLength
 	inspection.GGUFVersion = summary.Version
 	inspection.MetadataCount = summary.MetadataCount
+	inspection.Features = summary.Features
 	if metadataRel := mainGroup.firstRel(); metadataRel != "" {
 		namePage, nameErr := ggufmeta.ReadValuePage(filepath.Join(root, filepath.FromSlash(metadataRel)), "general.name", 0, 0)
 		if nameErr == nil && namePage.Type == "string" {

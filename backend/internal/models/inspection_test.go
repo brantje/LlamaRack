@@ -2,8 +2,10 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -137,11 +139,22 @@ func TestInspectGGUFArtifactNativeMTPUsesDefaultsWithoutDraftDependency(t *testi
 	if len(inspection.Dependencies) != 0 {
 		t.Fatalf("native MTP dependencies = %+v", inspection.Dependencies)
 	}
+	if !inspection.Features.HasMTP || inspection.Features.MTPOnly || inspection.Features.NextNPredictLayers != 1 {
+		t.Fatalf("native MTP features = %+v", inspection.Features)
+	}
 	if inspection.SuggestedOptions["spec-type"] != "draft-mtp" || inspection.SuggestedOptions["spec-draft-n-max"] != "16" || inspection.SuggestedOptions["spec-draft-p-min"] != "0.8" {
 		t.Fatalf("native MTP defaults = %+v", inspection.SuggestedOptions)
 	}
 	if _, exists := inspection.SuggestedOptions["spec-draft-model"]; exists {
 		t.Fatalf("native MTP must not invent draft file: %+v", inspection.SuggestedOptions)
+	}
+	encoded, err := json.Marshal(inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encoded)
+	if !strings.Contains(body, `"has_mtp":true`) || !strings.Contains(body, `"mtp_only":false`) || !strings.Contains(body, `"nextn_predict_layers":1`) {
+		t.Fatalf("inspect JSON missing native MTP features: %s", body)
 	}
 }
 

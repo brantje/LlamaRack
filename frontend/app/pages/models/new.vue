@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { companionOptionKeys, type ModelInspection } from '~/utils/modelCompanions'
+
 type AvailableGGUF = {
   path: string
   name: string
@@ -7,6 +9,7 @@ type AvailableGGUF = {
   quantization?: string
   suggested_options?: Record<string, string>
 }
+
 type CreateResponse = { model: { id: string }; instance?: { id: string }; start_error?: string }
 type HFFile = { path: string; size: number; oid?: string }
 type HFDependency = {
@@ -29,18 +32,7 @@ type HFArtifact = {
   files: HFFile[]
   dependencies?: HFDependency[]
 }
-type ModelInspection = HFArtifact & {
-  model_name?: string
-  architecture?: string
-  context_length?: number
-  gguf_version?: number
-  metadata_count?: number
-  warning?: string
-  suggested_options?: Record<string, string>
-  dependency_candidates?: HFDependency[]
-}
 type HFDetail = { id: string; revision: string; artifacts: HFArtifact[] }
-type CompanionDefinition = { key: 'mmproj' | 'spec-draft-model'; kind: 'mmproj' | 'mtp'; title: string; flag: string }
 
 const manager = useManager()
 const router = useRouter()
@@ -65,11 +57,6 @@ const remoteRepo = computed(() => typeof route.query.repo === 'string' ? route.q
 const remoteArtifactID = computed(() => typeof route.query.artifact === 'string' ? route.query.artifact.trim() : '')
 const remoteMode = computed(() => Boolean(remoteRepo.value && remoteArtifactID.value))
 
-const companionDefinitions: CompanionDefinition[] = [
-  { key: 'mmproj', kind: 'mmproj', title: 'Vision projector', flag: '--mmproj' },
-  { key: 'spec-draft-model', kind: 'mtp', title: 'MTP draft model', flag: '--spec-draft-model' }
-]
-const companionOptionKeys = ['mmproj', 'spec-draft-model', 'spec-type']
 const overrideCount = computed(() =>
   Object.keys(form.options).filter(key => !companionOptionKeys.includes(key)).length
 )
@@ -106,9 +93,6 @@ const submitDisabled = computed(() => {
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
-}
-function filename(value: string) {
-  return value.split(/[\\/]/).pop() || value
 }
 function capitalizeFirst(value: string) {
   const characters = Array.from(value.trim())
@@ -164,97 +148,6 @@ function applyAutoSuggestedOptions(suggested: Record<string, string>) {
   }
   form.options = next
   autoSuggestedOptions.value = applied
-}
-
-function dependencyFor(definition: CompanionDefinition) {
-  const dependencies = remoteMode.value ? (remoteArtifact.value?.dependencies || []) : (localInspection.value?.dependencies || [])
-  return dependencies.find(dependency => dependency.kind === definition.kind) || null
-}
-
-function candidateList(definition: CompanionDefinition) {
-  if (remoteMode.value) return []
-  const candidates = (localInspection.value?.dependency_candidates || []).filter(candidate => candidate.kind === definition.kind)
-  if (candidates.length) return candidates
-  const selected = dependencyFor(definition)
-  const optionPath = localInspection.value?.suggested_options?.[definition.key] || selectedGGUF.value?.suggested_options?.[definition.key]
-  if (!selected || !optionPath) return []
-  return [{ ...selected, option_path: optionPath }]
-}
-
-function detectedCompanionPath(definition: CompanionDefinition) {
-  if (remoteMode.value) return ''
-  return localInspection.value?.suggested_options?.[definition.key]
-    || selectedGGUF.value?.suggested_options?.[definition.key]
-    || dependencyFor(definition)?.option_path
-    || ''
-}
-
-function companionAvailable(definition: CompanionDefinition) {
-  if (remoteMode.value) return Boolean(dependencyFor(definition))
-  return Boolean(detectedCompanionPath(definition) || candidateList(definition).length)
-}
-
-function companionState(definition: CompanionDefinition): 'detected' | 'disabled' | 'none' {
-  if (!companionAvailable(definition)) return 'none'
-  if (Object.prototype.hasOwnProperty.call(form.options, definition.key) && form.options[definition.key] === '') return 'disabled'
-  return 'detected'
-}
-
-function companionValue(definition: CompanionDefinition) {
-  if (Object.prototype.hasOwnProperty.call(form.options, definition.key)) return form.options[definition.key] || ''
-  if (remoteMode.value) return dependencyFor(definition)?.files?.[0]?.path || dependencyFor(definition)?.name || ''
-  return detectedCompanionPath(definition)
-}
-
-function activeCandidate(definition: CompanionDefinition) {
-  const value = companionValue(definition)
-  return candidateList(definition).find(candidate => candidate.option_path === value) || null
-}
-
-function companionDisplayName(definition: CompanionDefinition) {
-  return activeCandidate(definition)?.name
-    || dependencyFor(definition)?.name
-    || filename(companionValue(definition))
-}
-
-function companionSize(definition: CompanionDefinition) {
-  return activeCandidate(definition)?.total_bytes || dependencyFor(definition)?.total_bytes || 0
-}
-
-function disableCompanion(definition: CompanionDefinition) {
-  const next = { ...form.options, [definition.key]: '' }
-  if (definition.kind === 'mtp') next['spec-type'] = ''
-  form.options = next
-}
-
-function enableCompanion(definition: CompanionDefinition) {
-  const next = { ...form.options }
-  if (remoteMode.value) {
-    delete next[definition.key]
-    if (definition.kind === 'mtp') delete next['spec-type']
-  } else {
-    const selected = dependencyFor(definition)
-    const candidate = candidateList(definition).find(item => item.name === selected?.name) || candidateList(definition)[0]
-    const path = candidate?.option_path || detectedCompanionPath(definition)
-    if (path) next[definition.key] = path
-    else delete next[definition.key]
-    if (definition.kind === 'mtp') next['spec-type'] = 'draft-mtp'
-  }
-  form.options = next
-}
-
-function chooseCompanionCandidate(definition: CompanionDefinition, candidate: HFDependency) {
-  if (!candidate.option_path) return
-  const next = { ...form.options, [definition.key]: candidate.option_path }
-  if (definition.kind === 'mtp') next['spec-type'] = 'draft-mtp'
-  form.options = next
-}
-
-function setCompanionValue(definition: CompanionDefinition, value: unknown) {
-  if (remoteMode.value) return
-  const next = { ...form.options, [definition.key]: String(value || '') }
-  if (definition.kind === 'mtp' && next[definition.key]) next['spec-type'] = 'draft-mtp'
-  form.options = next
 }
 
 watch(() => form.name, (name) => {
@@ -471,74 +364,14 @@ async function createModel() {
         <p v-if="!remoteMode" class="mt-2 text-xs text-[var(--neutral-700)]">Already-registered GGUF files and detected helper GGUFs are hidden.</p>
       </Frame>
 
-      <Frame id="model-companions" class="p-5 scroll-mt-4" data-testid="detected-gguf-helpers">
-        <div class="mb-4">
-          <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">COMPANIONS</p>
-          <h2 class="mt-1 text-base font-semibold">Companion files</h2>
-          <p class="mt-1 text-xs text-[var(--neutral-700)]">Scanned alongside the selected GGUF · options filled automatically.</p>
-        </div>
-        <div class="grid gap-4 lg:grid-cols-2">
-          <div
-            v-for="definition in companionDefinitions"
-            :key="definition.key"
-            class="border p-4"
-            :class="companionState(definition) === 'detected' ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'"
-            :data-testid="`companion-${definition.kind}`"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p class="font-semibold">{{ definition.title }}</p>
-                <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.flag }}</p>
-              </div>
-              <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">Auto-detected</StatusTag>
-              <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">Ignored</StatusTag>
-              <StatusTag v-else variant="neutral">None found</StatusTag>
-            </div>
-
-            <template v-if="companionState(definition) === 'detected'">
-              <div class="mt-4 flex items-center gap-2">
-                <UInput
-                  :model-value="companionValue(definition)"
-                  class="min-w-0 flex-1 font-mono"
-                  :readonly="remoteMode"
-                  :aria-label="`${definition.title} path`"
-                  @update:model-value="setCompanionValue(definition, $event)"
-                />
-                <AppButton type="button" intent="ghost" size="xs" @click="disableCompanion(definition)">Disable</AppButton>
-              </div>
-              <p class="mt-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.title }}: {{ companionDisplayName(definition) }}<span v-if="companionSize(definition)"> · {{ formatBytes(companionSize(definition)) }}</span></p>
-            </template>
-
-            <template v-else-if="companionState(definition) === 'disabled'">
-              <div class="mt-4 flex items-center gap-2">
-                <UInput model-value="" class="min-w-0 flex-1 font-mono" placeholder="value cleared" readonly />
-                <AppButton type="button" intent="ghost" size="xs" @click="enableCompanion(definition)">Enable</AppButton>
-              </div>
-              <p class="mt-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]" :data-testid="`companion-disabled-${definition.kind}`">value cleared — the flag is not passed</p>
-            </template>
-
-            <p v-else class="mt-4 text-xs text-[var(--neutral-800)]" :data-testid="`companion-empty-${definition.kind}`">No compatible {{ definition.title.toLowerCase() }} was detected in this artifact scope.</p>
-
-            <div v-if="candidateList(definition).length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-3">
-              <p class="mb-2 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Alternate candidates</p>
-              <div class="flex flex-wrap gap-2">
-                <UButton
-                  v-for="candidate in candidateList(definition)"
-                  :key="candidate.option_path || candidate.name"
-                  type="button"
-                  size="xs"
-                  :color="activeCandidate(definition)?.option_path === candidate.option_path ? 'primary' : 'neutral'"
-                  :variant="activeCandidate(definition)?.option_path === candidate.option_path ? 'soft' : 'ghost'"
-                  class="font-mono"
-                  :aria-pressed="activeCandidate(definition)?.option_path === candidate.option_path"
-                  :data-testid="`companion-candidate-${definition.kind}`"
-                  @click="chooseCompanionCandidate(definition, candidate)"
-                >{{ candidate.quantization || candidate.name }}</UButton>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Frame>
+      <ModelCompanionFiles
+        v-model="form.options"
+        :inspection="localInspection"
+        :fallback-suggested-options="selectedGGUF?.suggested_options || {}"
+        :remote="remoteMode"
+        :remote-artifact="remoteArtifact"
+        :inspecting="inspectingMetadata"
+      />
 
       <Frame id="model-identity" class="p-5 scroll-mt-4" data-testid="model-form-identity">
         <div class="mb-4">

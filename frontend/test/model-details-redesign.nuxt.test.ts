@@ -69,7 +69,7 @@ describe('Model details redesign', () => {
     expect(headerActions.classes()).toContain('sm:justify-end')
 
     const summary = wrapper.get('[data-testid="model-details-summary"]')
-    for (const label of ['Path', 'Size', 'GGUF version', 'Metadata keys', 'Architecture', 'Quantization', 'Context capability', 'Tensor count']) {
+    for (const label of ['Path', 'Size', 'GGUF version', 'Metadata keys', 'Architecture', 'Quantization', 'Context capability', 'Tensor count', 'Detected features']) {
       expect(summary.text()).toContain(label)
     }
     expect(summary.text().match(/Unknown/g)?.length).toBeGreaterThanOrEqual(7)

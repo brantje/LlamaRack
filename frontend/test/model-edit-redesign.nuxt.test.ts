@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 describe('model edit redesign', () => {
-  it('uses two peer framed sections and the shared action hierarchy', () => {
+  it('uses three peer framed sections and the shared action hierarchy', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/pages/models/[id]/edit.vue'), 'utf8')
 
     expect(source).toContain('data-testid="model-edit-metadata"')
+    expect(source).toContain('testid="model-edit-companions"')
     expect(source).toContain('data-testid="model-edit-defaults"')
     expect(source).toContain('Reusable defaults inherited by every Instance of this Model unless that Instance overrides the flag.')
     expect(source).toContain('<AppButton to="/models" intent="secondary">Cancel</AppButton>')

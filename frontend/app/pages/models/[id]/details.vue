@@ -14,6 +14,13 @@ type MetadataEntry = {
   truncated?: boolean
   array_length?: number
 }
+type InspectionFeatures = {
+  architecture?: string
+  nextn_predict_layers?: number
+  has_mtp?: boolean
+  mtp_only?: boolean
+  projector?: boolean
+}
 type ModelDetails = {
   model: ModelSummary
   gguf_version?: number
@@ -23,6 +30,7 @@ type ModelDetails = {
   metadata: MetadataEntry[]
   architecture?: string
   detected_context_length?: number
+  features?: InspectionFeatures
   offset: number
   limit: number
   warnings?: string[]
@@ -207,6 +215,16 @@ onMounted(() => void load())
         <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Quantization</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ details.model.quantization || 'Unknown' }}</dd></div>
         <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatContext(details.model.context_length || details.detected_context_length) }}</dd></div>
         <div><dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Tensor count</dt><dd class="mt-1 break-all font-mono text-[length:var(--font-size-h6)]">{{ formatPositiveNumber(details.tensor_count) }}</dd></div>
+        <div data-testid="model-details-features">
+          <dt class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[0.12em] text-[var(--neutral-700)]">Detected features</dt>
+          <dd class="mt-1 flex flex-wrap items-center gap-2 font-mono text-[length:var(--font-size-h6)]">
+            <StatusTag v-if="details.features?.projector" variant="ready">Vision projector</StatusTag>
+            <StatusTag v-if="details.features?.has_mtp && details.features?.mtp_only" variant="neutral">MTP helper</StatusTag>
+            <StatusTag v-else-if="details.features?.has_mtp" variant="ready">Built-in MTP</StatusTag>
+            <span v-if="details.features?.nextn_predict_layers" class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">nextn_predict_layers {{ details.features.nextn_predict_layers }}</span>
+            <span v-if="!details.features?.projector && !details.features?.has_mtp" class="font-mono text-[length:var(--font-size-h6)]">None</span>
+          </dd>
+        </div>
       </dl>
     </Frame>
 

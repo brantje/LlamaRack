@@ -105,6 +105,7 @@ describe('Model GGUF metadata', () => {
     const wrapper = await mountSuspended(ModelDetailsPage, { route: '/models/m1/details' })
     await flushPromises()
     expect(wrapper.get('[data-testid="model-details-summary"]').text()).toContain('qwen2')
+    expect(wrapper.get('[data-testid="model-details-features"]').text()).toContain('None')
     expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('general.architecture')
     expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('vendor.future.key')
     expect(wrapper.text()).toContain('Key / Type / Value')
@@ -115,6 +116,35 @@ describe('Model GGUF metadata', () => {
     expect(mocks.request).toHaveBeenCalledWith(expect.stringContaining('q=vendor'))
     expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('still visible')
     expect(wrapper.get('[data-testid="metadata-table"]').text()).not.toContain('general.architecture')
+  })
+
+  it('renders inspect-equivalent GGUF features on the details summary', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (!path.startsWith('/api/v1/models/m1/details?')) return {}
+      return {
+        model,
+        gguf_version: 3,
+        tensor_count: 12,
+        metadata_count: 2,
+        metadata_total: 2,
+        offset: 0,
+        limit: 100,
+        architecture: 'qwen35',
+        detected_context_length: 262144,
+        features: { architecture: 'qwen35', has_mtp: true, mtp_only: false, projector: true, nextn_predict_layers: 1 },
+        warnings: [],
+        metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen35' }]
+      }
+    })
+
+    const wrapper = await mountSuspended(ModelDetailsPage, { route: '/models/m1/details' })
+    await flushPromises()
+    const features = wrapper.get('[data-testid="model-details-features"]')
+    expect(features.text()).toContain('Built-in MTP')
+    expect(features.text()).toContain('Vision projector')
+    expect(features.text()).toContain('nextn_predict_layers 1')
+    expect(features.text()).not.toContain('MTP helper')
+    expect(features.text()).not.toContain('None')
   })
 
   it('covers metadata warnings, fallback values, pagination, empty searches, clearing, and API errors', async () => {

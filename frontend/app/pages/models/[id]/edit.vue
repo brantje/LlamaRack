@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { companionOptionKeys, type ModelInspection } from '~/utils/modelCompanions'
+
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
@@ -6,8 +8,10 @@ const id = computed(() => String(route.params.id || ''))
 const busy = ref(false)
 const loading = ref(true)
 const loaded = ref(false)
+const inspecting = ref(false)
 const error = ref('')
 const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
+const inspection = ref<ModelInspection | null>(null)
 const baselineFingerprint = ref('')
 
 function formFingerprint() {
@@ -25,15 +29,29 @@ const canSubmit = computed(() => valid.value && dirty.value)
 onMounted(async () => {
   try {
     const [model, options] = await Promise.all([
-      manager.request<any>(`/api/v1/models/${encodeURIComponent(id.value)}`),
+      manager.request<{ name?: string; context_length?: number; gguf_path?: string }>(`/api/v1/models/${encodeURIComponent(id.value)}`),
       manager.request<Record<string, string>>(`/api/v1/models/${encodeURIComponent(id.value)}/options`)
     ])
     if (!model?.name) throw { data: { error: 'Unable to load Model' } }
     form.name = model.name
     form.context_length = model.context_length || 0
     form.options = { ...(options || {}) }
-    baselineFingerprint.value = formFingerprint()
     loaded.value = true
+    baselineFingerprint.value = formFingerprint()
+    loading.value = false
+    if (model.gguf_path) {
+      inspecting.value = true
+      try {
+        inspection.value = await manager.request<ModelInspection>('/api/v1/models/inspect', {
+          method: 'POST',
+          body: { gguf_path: model.gguf_path }
+        })
+      } catch {
+        inspection.value = null
+      } finally {
+        inspecting.value = false
+      }
+    }
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Model'
   } finally {
@@ -104,6 +122,14 @@ async function submit() {
         </div>
       </Frame>
 
+      <ModelCompanionFiles
+        v-model="form.options"
+        :inspection="inspection"
+        :inspecting="inspecting"
+        testid="model-edit-companions"
+        description="Detected from this Model's GGUF. Disable to clear the extra flags; Enable restores inspect defaults."
+      />
+
       <Frame class="p-5" data-testid="model-edit-defaults">
         <div class="mb-5">
           <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">LLAMA.CPP DEFAULTS</div>
@@ -112,7 +138,7 @@ async function submit() {
             Reusable defaults inherited by every Instance of this Model unless that Instance overrides the flag.
           </p>
         </div>
-        <LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" />
+        <LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" :exclude-keys="companionOptionKeys" />
       </Frame>
 
       <div class="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">

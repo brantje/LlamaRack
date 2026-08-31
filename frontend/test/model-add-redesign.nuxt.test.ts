@@ -173,12 +173,118 @@ describe('Add model redesign', () => {
     await projectorSlot.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
     expect((await modelOptions(wrapper)).mmproj).toBe(selectedProjector)
+    const projectorInput = projectorSlot.findAllComponents({ name: 'UInput' })[0] || projectorSlot.findAllComponents({ name: 'Input' })[0]
+    projectorInput!.vm.$emit('update:modelValue', '/custom/projector.gguf')
+    await flushPromises()
+    expect((await modelOptions(wrapper)).mmproj).toBe('/custom/projector.gguf')
 
     const mtpSlot = wrapper.get('[data-testid="companion-mtp"]')
     await mtpSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
     await flushPromises()
     expect((await modelOptions(wrapper))['spec-draft-model']).toBe('')
     expect((await modelOptions(wrapper))['spec-type']).toBe('')
+  })
+
+  it('surfaces built-in MTP from inspect features and lets extra MTP params be cleared', async () => {
+    const ggufPath = 'huggingface/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF/Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf'
+    const projector = '/models/huggingface/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF/mmproj-model-bf16.gguf'
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/models/available') return [{
+        path: ggufPath, name: 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf', total_bytes: 10 * 1024 ** 3,
+        suggested_options: {
+          mmproj: projector,
+          'spec-type': 'draft-mtp',
+          'spec-draft-n-max': '16',
+          'spec-draft-p-min': '0.8'
+        }
+      }]
+      if (path === '/api/v1/models/inspect') return {
+        id: ggufPath, name: 'Huihui-Qwen3.8-27B-abliterated-Q4_K.gguf', model_bytes: 10 * 1024 ** 3, total_bytes: 10 * 1024 ** 3 + 888 * 1024 ** 2,
+        shard_count: 1, expected_shards: 1, complete: true, files: [{ path: ggufPath, size: 10 * 1024 ** 3 }],
+        architecture: 'qwen35',
+        features: { architecture: 'qwen35', has_mtp: true, mtp_only: false, projector: false, nextn_predict_layers: 1 },
+        dependencies: [
+          { kind: 'mmproj', name: 'mmproj-model-bf16.gguf', quantization: 'BF16', total_bytes: 888 * 1024 ** 2, files: [{ path: 'huggingface/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF/mmproj-model-bf16.gguf', size: 888 * 1024 ** 2 }] }
+        ],
+        suggested_options: {
+          mmproj: projector,
+          'spec-type': 'draft-mtp',
+          'spec-draft-n-max': '16',
+          'spec-draft-p-min': '0.8'
+        }
+      }
+      return {}
+    })
+
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="gguf-option"]').text()).toContain('MTP')
+    expect(wrapper.get('[data-testid="gguf-option"]').text()).toContain('Vision')
+    await chooseGGUF(wrapper, ggufPath)
+
+    const mtpSlot = wrapper.get('[data-testid="companion-mtp"]')
+    expect(mtpSlot.text()).toContain('Built-in MTP')
+    expect(mtpSlot.text()).toContain('Built-in')
+    expect(mtpSlot.text()).not.toContain('None found')
+    expect(mtpSlot.text()).not.toContain('MTP draft model')
+    expect(wrapper.get('[data-testid="companion-native-mtp"]').text()).toContain('Packed into this GGUF')
+    expect(wrapper.get('[data-testid="companion-native-mtp"]').text()).toContain('nextn_predict_layers 1')
+    expect(wrapper.get('[data-testid="companion-native-mtp-params"]').text()).toContain('spec-type=draft-mtp')
+    expect(wrapper.get('[data-testid="companion-native-mtp-params"]').text()).toContain('spec-draft-n-max=16')
+    expect(wrapper.get('[data-testid="companion-native-mtp-params"]').text()).toContain('spec-draft-p-min=0.8')
+    expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('Auto-detected')
+    expect(await modelOptions(wrapper)).toMatchObject({
+      mmproj: projector,
+      'spec-type': 'draft-mtp',
+      'spec-draft-n-max': '16',
+      'spec-draft-p-min': '0.8'
+    })
+    expect(Object.prototype.hasOwnProperty.call(await modelOptions(wrapper), 'spec-draft-model')).toBe(false)
+
+    await mtpSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
+    await flushPromises()
+    expect(mtpSlot.text()).toContain('Ignored')
+    expect(mtpSlot.get('[data-testid="companion-disabled-mtp"]').text()).toContain('MTP defaults cleared')
+    expect(await modelOptions(wrapper)).toMatchObject({
+      mmproj: projector,
+      'spec-type': '',
+      'spec-draft-n-max': '',
+      'spec-draft-p-min': ''
+    })
+
+    await mtpSlot.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
+    await flushPromises()
+    expect(mtpSlot.text()).toContain('Built-in')
+    expect(await modelOptions(wrapper)).toMatchObject({
+      'spec-type': 'draft-mtp',
+      'spec-draft-n-max': '16',
+      'spec-draft-p-min': '0.8'
+    })
+  })
+
+  it('treats inspect spec-type without a draft file as built-in MTP before features arrive', async () => {
+    const ggufPath = 'local/native-mtp.gguf'
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/models/available') return [{
+        path: ggufPath, name: 'native-mtp.gguf', total_bytes: 2048,
+        suggested_options: { 'spec-type': 'draft-mtp', 'spec-draft-n-max': '16', 'spec-draft-p-min': '0.8' }
+      }]
+      if (path === '/api/v1/models/inspect') return {
+        id: ggufPath, name: 'native-mtp.gguf', model_bytes: 2048, total_bytes: 2048,
+        shard_count: 1, expected_shards: 1, complete: true, files: [{ path: ggufPath, size: 2048 }],
+        suggested_options: { 'spec-type': 'draft-mtp', 'spec-draft-n-max': '16', 'spec-draft-p-min': '0.8' }
+      }
+      return {}
+    })
+
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+    await chooseGGUF(wrapper, ggufPath)
+    const mtpSlot = wrapper.get('[data-testid="companion-mtp"]')
+    expect(mtpSlot.text()).toContain('Built-in MTP')
+    expect(mtpSlot.get('[data-testid="companion-native-mtp"]').text()).toContain('Packed into this GGUF')
+    expect(mtpSlot.text()).not.toContain('nextn_predict_layers')
+    expect(await modelOptions(wrapper)).toMatchObject({ 'spec-type': 'draft-mtp' })
   })
 
   it('renders the remote artifact card, forces the first Instance block and preserves helper opt-out tombstones', async () => {

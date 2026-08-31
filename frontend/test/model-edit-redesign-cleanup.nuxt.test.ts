@@ -18,7 +18,7 @@ describe('Edit model semantic cleanup', () => {
     expect(source).toContain('data-testid="model-edit-defaults"')
     expect(source).toContain("if (!model?.name) throw")
     expect(source).toContain('<UForm v-else-if="loaded" :state="form"')
-    expect(source).toContain('<LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" />')
+    expect(source).toContain('<LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" :exclude-keys="companionOptionKeys" />')
     expect(source).toContain('body: { name: form.name, context_length: form.context_length, options: form.options }')
     expect(source).toContain("await router.push('/models')")
     expect(source).not.toContain('always_on')
