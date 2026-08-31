@@ -47,6 +47,14 @@ function button(wrapper: any, text: string) {
   if (!found) throw new Error(`Missing button: ${text}`)
   return found
 }
+
+async function confirmHuggingFaceRemoval() {
+  await flushPromises()
+  const control = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="confirmation-confirm"]')].at(-1)
+  if (!control) throw new Error('Missing Hugging Face removal confirmation button')
+  control.click()
+  await flushPromises()
+}
 function row(wrapper: any, text: string) {
   const found = wrapper.findAll('tr').find((candidate: any) => candidate.text().includes(text))
   if (!found) throw new Error(`Missing row: ${text}`)
@@ -171,11 +179,11 @@ describe('Phase 10 branch coverage', () => {
     await flushPromises()
     mode = 'data-error'
     await button(wrapper, 'Remove').trigger('click')
-    await flushPromises()
+    await confirmHuggingFaceRemoval()
     expect(wrapper.text()).toContain('hf denied')
     mode = 'configured'
     await button(wrapper, 'Remove').trigger('click')
-    await flushPromises()
+    await confirmHuggingFaceRemoval()
     expect(wrapper.text()).toContain('Not configured')
     wrapper.unmount()
   })

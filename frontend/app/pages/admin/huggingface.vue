@@ -7,6 +7,7 @@ const tokenInput = ref('')
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
+const confirmation = ref<{ request: (options: { title: string; description: string; confirmLabel?: string; confirmTone?: 'default' | 'destructive' }) => Promise<boolean> } | null>(null)
 
 function normalizeTokenStatus(value: any): TokenStatus {
   if (!value || typeof value.configured !== 'boolean') return { configured: false }
@@ -41,6 +42,13 @@ async function save() {
 }
 
 async function remove() {
+  const confirmed = await confirmation.value?.request({
+    title: 'Remove Hugging Face credential?',
+    description: 'Private and gated Hugging Face repository access will stop until another credential is configured.',
+    confirmLabel: 'Remove credential',
+    confirmTone: 'destructive'
+  })
+  if (!confirmed) return
   busy.value = true
   error.value = ''
   saved.value = false
@@ -76,7 +84,7 @@ async function remove() {
           <UInput v-model="tokenInput" class="w-full" type="password" autocomplete="off" placeholder="hf_…" />
         </UFormField>
         <AppButton intent="primary" :loading="busy" :disabled="!tokenInput.trim()" @click="save">{{ tokenStatus.configured ? 'Replace' : 'Save token' }}</AppButton>
-        <AppButton v-if="tokenStatus.configured" intent="secondary" :disabled="busy" @click="remove">Remove</AppButton>
+        <AppButton v-if="tokenStatus.configured" intent="secondary" tone="destructive" :disabled="busy" @click="remove">Remove</AppButton>
       </div>
 
       <div class="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4 text-sm text-[var(--neutral-700)]">
@@ -84,5 +92,6 @@ async function remove() {
         <span>Credentials are sent only to the configured Hugging Face host.</span>
       </div>
     </Frame>
+    <AppConfirmationModal ref="confirmation" />
   </AdminShell>
 </template>

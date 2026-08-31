@@ -26,6 +26,15 @@ function button(wrapper: any, text: string) {
   return found
 }
 
+async function confirmRemove(confirm = true) {
+  await flushPromises()
+  const selector = confirm ? '[data-testid="confirmation-confirm"]' : '[data-testid="confirmation-cancel"]'
+  const control = [...document.body.querySelectorAll<HTMLButtonElement>(selector)].at(-1)
+  if (!control) throw new Error(`Missing ${confirm ? 'confirmation' : 'cancellation'} button`)
+  control.click()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   resetManager()
@@ -66,9 +75,24 @@ describe('Phase 8 Hugging Face administration', () => {
     expect(wrapper.text()).not.toContain('hf_replacement')
 
     await button(wrapper, 'Remove').trigger('click')
-    await flushPromises()
+    await confirmRemove()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/huggingface/token', { method: 'DELETE' })
     expect(wrapper.text()).toContain('Not configured')
+  })
+
+  it('keeps the configured credential when removal is cancelled', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/huggingface/token') return { configured: true, prefix: 'hf_abc' }
+      return []
+    })
+    const wrapper = await mountSuspended(AdminHuggingFacePage, { route: false })
+    await flushPromises()
+    mocks.request.mockClear()
+    await button(wrapper, 'Remove').trigger('click')
+    await confirmRemove(false)
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/huggingface/token', { method: 'DELETE' })
+    expect(wrapper.text()).toContain('Configured')
+    wrapper.unmount()
   })
 
   it('surfaces load, save and remove error variants', async () => {
@@ -128,7 +152,7 @@ describe('Phase 8 Hugging Face administration', () => {
       await flushPromises()
       mode = next
       await button(candidate, 'Remove').trigger('click')
-      await flushPromises()
+      await confirmRemove()
       expect(candidate.text()).toContain(expected)
       candidate.unmount()
     }

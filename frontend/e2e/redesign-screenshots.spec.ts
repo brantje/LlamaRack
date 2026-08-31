@@ -6,6 +6,7 @@ const playgroundHoldRelease = new WeakMap<Page, () => void>()
 const playgroundColdPages = new WeakSet<Page>()
 const instancesStatePages = new WeakSet<Page>()
 const dashboardFailurePages = new WeakSet<Page>()
+const huggingFaceTokenSaveFailurePages = new WeakSet<Page>()
 
 const models = [
   {
@@ -297,6 +298,10 @@ async function installApiFixture(page: Page) {
       return
     }
     const url = new URL(request.url())
+    if (huggingFaceTokenSaveFailurePages.has(page) && url.pathname === '/api/v1/huggingface/token' && request.method() === 'PUT') {
+      await route.fulfill({ status: 422, headers: corsHeaders, body: JSON.stringify({ error: 'Representative Hugging Face credential save failure for visual QA.' }) })
+      return
+    }
     if (instancesStatePages.has(page) && url.pathname === '/api/v1/instances' && request.method() === 'GET') {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify(instances) })
       return
@@ -433,6 +438,39 @@ test('model details expanded metadata screenshot', async ({ page }, testInfo) =>
   await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/model-details-expanded.png`, fullPage: true, animations: 'disabled' })
 })
 
+
+
+test('Hugging Face configured credential and removal confirmation screenshots', async ({ page }, testInfo) => {
+  await page.goto('/admin/huggingface', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  await expect(page.locator('[data-testid="admin-huggingface-card"]')).toContainText('Configured')
+  await expect(page.getByRole('button', { name: 'Replace' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-huggingface-configured.png`, fullPage: true, animations: 'disabled' })
+
+  await page.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Remove credential')
+  await expect(page.getByText('Private and gated Hugging Face repository access will stop', { exact: false })).toBeVisible()
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-huggingface-remove-confirmation.png`, fullPage: true, animations: 'disabled' })
+  await page.locator('[data-testid="confirmation-cancel"]').click()
+})
+
+
+test('Hugging Face credential save success and failure screenshots', async ({ page }, testInfo) => {
+  await page.goto('/admin/huggingface', { waitUntil: 'domcontentloaded' })
+  await waitForManagerPanel(page)
+  const input = page.locator('input[placeholder="hf_…"]')
+  await input.fill('hf_visual_replacement')
+  await page.getByRole('button', { name: 'Replace' }).click()
+  await expect(page.locator('[data-testid="admin-huggingface-card"]')).toContainText('Hugging Face token saved.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-huggingface-save-success.png`, fullPage: true, animations: 'disabled' })
+
+  huggingFaceTokenSaveFailurePages.add(page)
+  await input.fill('hf_visual_failure')
+  await page.getByRole('button', { name: 'Replace' }).click()
+  await expect(page.locator('[data-testid="admin-huggingface-card"]')).toContainText('Representative Hugging Face credential save failure for visual QA.')
+  await page.screenshot({ path: `artifacts/ux-screenshots/${testInfo.project.name}/admin-huggingface-save-failure.png`, fullPage: true, animations: 'disabled' })
+})
 
 test('downloads lifecycle and files screenshot', async ({ page }, testInfo) => {
   await page.goto('/downloads', { waitUntil: 'domcontentloaded' })
