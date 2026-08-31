@@ -30,6 +30,7 @@ describe('Instance form redesign cleanup', () => {
     expect(formSource).toContain(':disabled="!canSubmit || submitDisabled"')
     expect(formSource).toContain('data-testid="instance-dirty-state"')
     expect(formSource).not.toContain("'border-[var(--color-divider)] opacity-60'")
+    expect(editSource).toContain("if (!instance?.name && !instance?.id) throw")
     expect(editSource).toContain('submit-disabled-reason="No changes to save."')
     expect(editSource).toContain('const hasChanges = computed')
   })

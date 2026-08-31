@@ -106,9 +106,7 @@ async function submitAuth() {
 
     <UDashboardPanel id="manager-main" class="min-w-0" :ui="{ body: 'overflow-y-visible' }">
       <template #header>
-        <UDashboardNavbar title="llamacpp-manager" class="lg:hidden">
-          <template #leading><UDashboardSidebarToggle /></template>
-        </UDashboardNavbar>
+        <UDashboardNavbar title="llama.cpp" class="lg:hidden min-w-0" />
       </template>
       <template #body>
         <div class="min-w-0 w-full p-4 sm:p-6 lg:p-10"><slot /></div>

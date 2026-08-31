@@ -241,6 +241,14 @@ describe('Instance configuration pages', () => {
     expect(wrapper.text()).toContain('instance load failed')
     wrapper.unmount()
 
+    resetManager()
+    mocks.request.mockImplementation(async () => ({}))
+    wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instance-edit-load-error"]').text()).toContain('Unable to load Instance')
+    expect(wrapper.findComponent(InstanceOverridesEditor).exists()).toBe(false)
+    wrapper.unmount()
+
     const manager = resetManager()
     const current = instance()
     let failSave = false

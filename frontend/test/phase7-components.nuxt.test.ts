@@ -319,12 +319,18 @@ describe('Phase 7 global llama.cpp administration', () => {
     expect(wrapper.text()).toContain('unknown')
 
     const save = () => wrapper.findAll('button').find(button => button.text().includes('Save defaults'))!
+    expect((save().element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.get('input[aria-label="llama.cpp option value"]').setValue('8192')
+    await flushPromises()
+    expect((save().element as HTMLButtonElement).disabled).toBe(false)
     await save().trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Global llama.cpp defaults saved')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config', { method: 'PUT', body: { options: { 'ctx-size': '4096' } } })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config', { method: 'PUT', body: { options: { 'ctx-size': '8192' } } })
 
     saveMode = 'data'
+    await wrapper.get('input[aria-label="llama.cpp option value"]').setValue('16384')
+    await flushPromises()
     await save().trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('save denied')

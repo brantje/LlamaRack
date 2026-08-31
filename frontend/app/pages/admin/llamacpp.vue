@@ -4,10 +4,16 @@ import type { Profile } from '~/composables/useManager'
 const manager = useManager()
 const { profile } = manager
 const globalOptions = ref<Record<string, string>>({})
+const baseline = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const saved = ref(false)
+
+function optionsFingerprint(value: Record<string, string>) {
+  return JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)))
+}
+const dirty = computed(() => Boolean(baseline.value) && optionsFingerprint(globalOptions.value) !== baseline.value)
 
 async function load() {
   if (!manager.user.value) return
@@ -16,6 +22,7 @@ async function load() {
   try {
     const result = await manager.request<{ profile?: Profile; effective: { global: Record<string, string> } }>('/api/v1/llamacpp/config')
     globalOptions.value = { ...(result.effective.global || {}) }
+    baseline.value = optionsFingerprint(globalOptions.value)
     if (result.profile?.path && Array.isArray(result.profile.options)) profile.value = result.profile
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load llama.cpp configuration'
@@ -26,11 +33,13 @@ async function load() {
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
+  if (!dirty.value) return
   saving.value = true
   error.value = ''
   saved.value = false
   try {
     await manager.request('/api/v1/llamacpp/config', { method: 'PUT', body: { options: globalOptions.value } })
+    baseline.value = optionsFingerprint(globalOptions.value)
     saved.value = true
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to save llama.cpp defaults'
@@ -44,7 +53,7 @@ async function save() {
   <AdminShell title="llama.cpp" description="Binary capabilities and manager-wide llama.cpp defaults.">
     <template #actions>
       <AppButton intent="secondary" :loading="loading" @click="load">Refresh</AppButton>
-      <AppButton intent="primary" :loading="saving" :disabled="loading" @click="save">Save defaults</AppButton>
+      <AppButton intent="primary" :loading="saving" :disabled="loading || !dirty" @click="save">Save defaults</AppButton>
     </template>
 
     <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>

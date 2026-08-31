@@ -42,6 +42,9 @@ export default defineAppConfig({
         title: 'font-[var(--font-heading)] text-[30px] font-semibold tracking-[-.015em] text-highlighted',
         description: 'text-[15px] leading-[1.55] text-muted'
       }
+    },
+    dashboardGroup: {
+      base: () => 'fixed inset-0 flex overflow-auto'
     }
   }
 })

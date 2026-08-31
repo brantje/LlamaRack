@@ -53,6 +53,20 @@ function diagnosticValues(value: unknown): string[] {
   return text ? [text] : []
 }
 
+function formatUptimeSeconds(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '—'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const rest = Math.floor(seconds % 60)
+  const parts: string[] = []
+  if (days) parts.push(`${days}d`)
+  if (hours) parts.push(`${hours}h`)
+  if (minutes) parts.push(`${minutes}m`)
+  if (!days || rest) parts.push(`${rest}s`)
+  return parts.join(' ') || '0s'
+}
+
 const allowedOrigins = computed(() => diagnosticValues(info.value?.network.allowed_origins))
 const trustedProxies = computed(() => diagnosticValues(info.value?.network.trusted_proxies))
 const freshness = computed(() => {
@@ -104,7 +118,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
       <Frame class="p-5" data-testid="admin-system-manager">
         <h2 class="text-base font-semibold">Manager</h2>
         <dl class="mt-4 text-sm">
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd class="min-w-0"><code class="font-mono text-[12.5px] tabular-nums">{{ info.manager.uptime_seconds }} seconds</code></dd></div>
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Uptime</dt><dd class="min-w-0 flex flex-wrap items-baseline gap-x-2"><code class="font-mono text-[12.5px] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}</code><code class="font-mono text-[12.5px] tabular-nums text-[var(--neutral-700)]">{{ info.manager.uptime_seconds.toLocaleString() }} s</code></dd></div>
           <div v-for="(value, key) in info.manager.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ labelFor(String(key), runtimeLabels) }}</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[12.5px] [overflow-wrap:anywhere]">{{ value }}</code></dd></div>
         </dl>
       </Frame>

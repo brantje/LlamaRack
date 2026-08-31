@@ -39,6 +39,7 @@ onMounted(async () => {
       manager.request<any>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`),
       manager.request<Record<string, string>>(`/api/v1/instances/${encodeURIComponent(originalID.value)}/options`)
     ])
+    if (!instance?.name && !instance?.id) throw { data: { error: 'Unable to load Instance' } }
     Object.assign(form, instance, {
       slug: instance.id || originalID.value,
       gpu_devices: [...(instance.gpu_devices || [])],

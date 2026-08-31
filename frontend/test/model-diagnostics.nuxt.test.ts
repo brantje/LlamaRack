@@ -28,6 +28,23 @@ async function clickConfirmation(kind: 'confirm' | 'cancel') {
   await flushPromises()
 }
 
+function overflowMenu(root: any) {
+  const menu = root.findComponent({ name: 'DropdownMenu' }).exists()
+    ? root.findComponent({ name: 'DropdownMenu' })
+    : root.findComponent({ name: 'UDropdownMenu' })
+  if (!menu.exists()) throw new Error('Missing instance overflow menu')
+  return menu
+}
+
+async function selectOverflow(root: any, label: string) {
+  const item = (overflowMenu(root).props('items') as Array<Array<{ label?: string; onSelect?: () => void }>>)
+    .flat()
+    .find(entry => entry.label === label)
+  if (!item?.onSelect) throw new Error(`Missing overflow item ${label}`)
+  item.onSelect()
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.writeText.mockReset().mockResolvedValue(undefined)
@@ -45,7 +62,7 @@ describe('instance control plane', () => {
     expect(wrapper.text()).not.toContain('model=coder-primary')
     expect(wrapper.text()).toContain('UNLOADED')
     expect(wrapper.text()).toContain('Launch')
-    expect(wrapper.text()).toContain('Duplicate')
+    expect(wrapper.find('[data-testid="instance-card-more"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Logs')
 
     const copy = wrapper.find('[data-testid="copy-instance-id"]')
@@ -85,10 +102,9 @@ describe('instance control plane', () => {
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', { method: 'POST' })
 
     for (const label of ['Restart', 'Duplicate']) {
-      await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
-      await flushPromises()
+      await selectOverflow(wrapper, label)
     }
-    await wrapper.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    await selectOverflow(wrapper, 'Kill')
     expect(document.body.textContent).toContain('Active requests may fail')
     await clickConfirmation('confirm')
 
@@ -122,7 +138,7 @@ describe('instance control plane', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=coder-primary&limit=2000')
     expect(document.body.textContent).toContain('worker ready')
-    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    await selectOverflow(wrapper, 'Delete')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary', expect.anything())
     await clickConfirmation('confirm')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary', { method: 'DELETE' })
@@ -142,8 +158,7 @@ describe('instance control plane', () => {
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
 
-    await wrapper.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
-    await flushPromises()
+    await selectOverflow(wrapper, 'Restart')
     expect(wrapper.text()).toContain('worker failed')
     expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
   })
@@ -192,8 +207,7 @@ describe('instance control plane', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Unable to start Instance')
 
-    await protectedCard.findAll('button').find(button => button.text() === 'Restart')!.trigger('click')
-    await flushPromises()
+    await selectOverflow(protectedCard, 'Restart')
     expect(wrapper.text()).toContain('restart failed')
 
     logMode = 'error'
@@ -207,7 +221,7 @@ describe('instance control plane', () => {
     expect(document.body.textContent).toContain('log retrieval failed')
 
     mocks.request.mockClear()
-    await protectedCard.findAll('button').find(button => button.text() === 'Kill')!.trigger('click')
+    await selectOverflow(protectedCard, 'Kill')
     await clickConfirmation('cancel')
     expect(mocks.request).not.toHaveBeenCalled()
   })

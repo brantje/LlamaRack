@@ -255,6 +255,16 @@ async function refreshPage() {
   }
 }
 
+function cardOverflowItems(instance: Instance) {
+  return [[
+    { label: 'Restart', onSelect: () => { void action(instance, 'restart') } },
+    { label: 'Kill', onSelect: () => { void action(instance, 'kill') } },
+    { label: 'Duplicate', onSelect: () => { void action(instance, 'duplicate') } },
+    { type: 'separator' as const },
+    { label: 'Delete', onSelect: () => { void remove(instance) } }
+  ]]
+}
+
 async function action(instance: Instance, operation: 'start' | 'stop' | 'restart' | 'kill' | 'duplicate') {
   if (importBlocked(instance)) return
   if (operation === 'start' && instance.eviction_enabled) {
@@ -482,13 +492,13 @@ onBeforeUnmount(() => {
             <template v-if="!importBlocked(instance)">
               <AppButton v-if="['UNLOADED', 'FAILED'].includes(instanceState(instance))" intent="ghost" size="xs" :loading="pending === `${instance.id}:start`" @click="action(instance, 'start')">Launch</AppButton>
               <AppButton v-else intent="ghost" size="xs" :loading="pending === `${instance.id}:stop`" @click="action(instance, 'stop')">Stop</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending === `${instance.id}:restart`" @click="action(instance, 'restart')">Restart</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending === `${instance.id}:kill`" @click="action(instance, 'kill')">Kill</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending === `${instance.id}:duplicate`" @click="action(instance, 'duplicate')">Duplicate</AppButton>
             </template>
             <AppButton :to="`/instances/${encodeURIComponent(instance.id)}/detail`" intent="ghost" size="xs">Details</AppButton>
             <AppButton v-if="!importBlocked(instance)" intent="ghost" size="xs" @click="showLogs(instance)">Logs</AppButton>
-            <AppButton intent="ghost" size="xs" :loading="pending === `${instance.id}:delete`" @click="remove(instance)">Delete</AppButton>
+            <UDropdownMenu v-if="!importBlocked(instance)" :items="cardOverflowItems(instance)">
+              <AppButton intent="ghost" size="xs" data-testid="instance-card-more" aria-label="More instance actions">More</AppButton>
+            </UDropdownMenu>
+            <AppButton v-else intent="ghost" size="xs" :loading="pending === `${instance.id}:delete`" @click="remove(instance)">Delete</AppButton>
           </div>
         </div>
       </Frame>

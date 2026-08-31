@@ -14,7 +14,8 @@ services:
       LCM_ALWAYS_ON_RECONCILE_SECONDS: ${LCM_ALWAYS_ON_RECONCILE_SECONDS:-15}
     volumes:
       - ./data/config:/config
-      - ./data/models:/models
+      #- ./data/models:/models
+      - /mnt/storage/open-webui/data/llama/models/:/models
       - /proc:/host/proc:ro
     ports:
       - "8888:8000"

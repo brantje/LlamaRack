@@ -360,6 +360,7 @@ async function loadPage() {
       error.value = `Instance “${instanceID.value}” was not found.`
       return
     }
+    if (error.value.includes('was not found')) error.value = ''
     try { settings.value = await manager.request<GeneralSettings>('/api/v1/settings/general') } catch { settings.value = null }
     if (selectedWindow.value > retentionSeconds.value) selectedWindow.value = [...rangeOptions].reverse().find(option => option.value <= retentionSeconds.value)?.value ?? 900
     await Promise.all([loadHistory(), loadCompanions()])
@@ -378,7 +379,11 @@ watch(selectedWindow, (next, previous) => {
   }
   void loadHistory()
 })
-onMounted(loadPage)
+watch([instanceID, () => instance.value?.id], () => {
+  loading.value = true
+  if (error.value.includes('was not found')) error.value = ''
+  void loadPage()
+}, { immediate: true })
 defineExpose({ setSelectedWindow })
 </script>
 
@@ -389,7 +394,7 @@ defineExpose({ setSelectedWindow })
         <p class="text-[10px] font-semibold uppercase tracking-[.18em] text-[var(--accent-700)]">INSTANCE DETAIL</p>
         <div class="mt-2 flex flex-wrap items-center gap-3">
           <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance?.name || instanceID }}</h1>
-          <StatusTag v-if="instance" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
+          <StatusTag v-if="instance && !error.includes('was not found')" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
         </div>
         <p class="mt-2 max-w-3xl text-sm text-[var(--neutral-800)]">Live runtime resources and llama.cpp performance for this Instance.</p>
       </div>

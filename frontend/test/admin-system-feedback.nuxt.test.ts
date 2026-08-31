@@ -78,6 +78,8 @@ describe('Administration System UX feedback', () => {
     expect(wrapper.text()).toContain('Listen address')
     expect(wrapper.findAll('[data-testid="allowed-origin-value"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-testid="trusted-proxy-value"]')).toHaveLength(3)
+    expect(wrapper.text()).toContain('42s')
+    expect(wrapper.text()).toContain('42 s')
     expect(wrapper.text()).toContain('CIDR: 10.0.0.0/8')
     expect(wrapper.text()).toContain('Name: internal')
     expect(wrapper.text()).toContain('192.168.1.1')

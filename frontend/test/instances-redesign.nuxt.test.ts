@@ -106,7 +106,9 @@ describe('Instances redesign', () => {
     expect(readyCard.text()).toContain('Global GPU usage')
     expect(readyCard.text()).toContain('8.0 GiB')
     expect(readyCard.find('[data-testid="instance-id"]').text()).toBe('ready')
-    expect(readyCard.find('[data-testid="copy-instance-id"]').exists()).toBe(true)
+    expect(readyCard.find('[data-testid="instance-card-more"]').exists()).toBe(true)
+    expect(readyCard.text()).not.toContain('Kill')
+    expect(readyCard.text()).not.toContain('Duplicate')
 
     const stoppedCard = cards.find(card => card.text().includes('stopped'))!
     expect(stoppedCard.text()).toContain('Unloaded after 300 s without inference activity.')

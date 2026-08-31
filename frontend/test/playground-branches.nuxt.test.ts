@@ -127,7 +127,7 @@ describe('Playground edge branches', () => {
       await button(wrapper, 'Send').trigger('click')
       await flushPromises()
       expect(wrapper.text()).toContain(message)
-      expect(wrapper.text()).toContain('Failed')
+      expect(wrapper.text()).toContain('Last request failed')
       expect(wrapper.text()).not.toContain('Completed')
     }
     expect(publicFetch).toHaveBeenCalledTimes(5)
@@ -161,7 +161,7 @@ describe('Playground edge branches', () => {
     await button(wrapper, 'Send').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Inference request failed.')
-    expect(wrapper.text()).toContain('Failed')
+    expect(wrapper.text()).toContain('Last request failed')
     expect(wrapper.text()).not.toContain('Completed')
     wrapper.unmount()
   })

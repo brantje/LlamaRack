@@ -139,7 +139,7 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('Be terse')
     expect(wrapper.text()).toContain('from raw JSON')
     expect(wrapper.text()).toContain('raw reply')
-    expect(wrapper.text()).toContain('READY')
+    expect(wrapper.text()).toContain('Instance READY')
     wrapper.unmount()
   })
 

@@ -16,6 +16,8 @@ describe('Edit model semantic cleanup', () => {
   it('keeps the two Model-only peer surfaces and update contract', () => {
     expect(source).toContain('data-testid="model-edit-metadata"')
     expect(source).toContain('data-testid="model-edit-defaults"')
+    expect(source).toContain("if (!model?.name) throw")
+    expect(source).toContain('<UForm v-else-if="loaded" :state="form"')
     expect(source).toContain('<LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" />')
     expect(source).toContain('body: { name: form.name, context_length: form.context_length, options: form.options }')
     expect(source).toContain("await router.push('/models')")

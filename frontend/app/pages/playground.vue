@@ -76,7 +76,7 @@ const selectedTelemetry = computed<RuntimeTelemetry | undefined>(() => selectedI
 const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
 const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
-const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Failed', '': '' }[phase.value]))
+const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Last request failed', '': '' }[phase.value]))
 
 const panelItems = [
   { id: 'parameters' as const, label: 'Parameters' },
@@ -458,8 +458,8 @@ onBeforeUnmount(() => controller?.abort())
       <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">PLAYGROUND</p>
       <div class="mt-1 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="min-w-0 break-all font-mono text-[16px] font-semibold text-[var(--neutral-900)] sm:text-[18px]">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
-          <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState }}</StatusTag>
+          <h1 class="min-w-0 truncate font-mono text-[16px] font-semibold text-[var(--neutral-900)] sm:text-[18px]" :title="selectedInstance?.id || undefined">{{ selectedInstance?.id || 'Select an Instance' }}</h1>
+          <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState === 'READY' ? 'Instance READY' : runtimeState }}</StatusTag>
           <StatusTag v-if="phaseLabel" :variant="phase === 'completed' ? 'ready' : phase === 'failed' ? 'failed' : 'pending'">{{ phaseLabel }}</StatusTag>
         </div>
         <div class="flex flex-wrap gap-1">

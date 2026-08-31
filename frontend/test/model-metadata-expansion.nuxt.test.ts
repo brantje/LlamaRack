@@ -109,4 +109,34 @@ describe('Model metadata lazy expansion', () => {
     expect(wrapper.get('[data-testid="metadata-table"]').text()).toContain('tokenizer.ggml.tokens')
     wrapper.unmount()
   })
+
+  it('uses the metadata row array length when the expanded page total is truncated', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/models/m1/details/value?')) {
+        return {
+          key: 'tokenizer.ggml.tokens',
+          type: 'array<string>',
+          items: ['<|endoftext|>', 'hello'],
+          offset: 0,
+          limit: 100,
+          total: 2,
+          has_more: false
+        }
+      }
+      if (path.startsWith('/api/v1/models/m1/details?')) {
+        return { ...detailsResponse(), metadata: [{ key: 'tokenizer.ggml.tokens', type: 'array<string>', value: '[151936 items]', truncated: true, array_length: 151936 }] }
+      }
+      return {}
+    })
+
+    const wrapper = await mountSuspended(ModelDetailsPage, { route: '/models/m1/details' })
+    await flushPromises()
+    await wrapper.get('[data-testid="metadata-expand"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain('151,936')
+    expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain('truncated')
+    expect(modalButton('Next')?.disabled).toBe(true)
+    wrapper.unmount()
+  })
 })

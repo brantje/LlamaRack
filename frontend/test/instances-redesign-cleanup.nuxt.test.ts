@@ -24,6 +24,7 @@ describe('Instances redesign cleanup', () => {
     expect(instancesSource).toContain("const viewStorageKey = 'llamacpp-manager.instances.view'")
     expect(instancesSource).toContain('data-testid="instance-card"')
     expect(instancesSource).toContain('data-testid="instance-id"')
-    expect(instancesSource).toContain('data-testid="copy-instance-id"')
+    expect(instancesSource).toContain('data-testid="instance-card-more"')
+    expect(instancesSource).toContain('cardOverflowItems')
   })
 })

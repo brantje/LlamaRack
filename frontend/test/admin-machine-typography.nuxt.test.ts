@@ -12,7 +12,8 @@ describe('Administration machine typography', () => {
 
   it('keeps System machine values mono and numeric values tabular', () => {
     const content = source('app/pages/admin/system.vue')
-    expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ info.manager.uptime_seconds }} seconds')
+    expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ formatUptimeSeconds(info.manager.uptime_seconds) }}')
+    expect(content).toContain('{{ info.manager.uptime_seconds.toLocaleString() }} s')
     expect(content).toContain('font-mono text-[12.5px]">{{ info.llamacpp.version || \'unknown\' }}')
     expect(content).toContain('font-mono text-[12.5px] tabular-nums">{{ info.llamacpp.options || 0 }}')
   })

@@ -296,6 +296,9 @@ describe('Phase 10 llama and general branch variants', () => {
     })
     const llama = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
+    await llama.get('[data-testid="add-global-option"]').trigger('click')
+    await llama.get('input[aria-label="llama.cpp flag"]').setValue('threads')
+    await flushPromises()
     for (const [failure, message] of [[{ data: { error: 'save denied' } }, 'save denied'], [new Error('save exploded'), 'save exploded'], [{}, 'Unable to save llama.cpp defaults']] as const) {
       saveFailure = failure; await button(llama, 'Save defaults').trigger('click'); await flushPromises(); expect(llama.text()).toContain(message)
     }

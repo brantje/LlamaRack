@@ -5,6 +5,7 @@ const router = useRouter()
 const id = computed(() => String(route.params.id || ''))
 const busy = ref(false)
 const loading = ref(true)
+const loaded = ref(false)
 const error = ref('')
 const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
 const baselineFingerprint = ref('')
@@ -27,10 +28,12 @@ onMounted(async () => {
       manager.request<any>(`/api/v1/models/${encodeURIComponent(id.value)}`),
       manager.request<Record<string, string>>(`/api/v1/models/${encodeURIComponent(id.value)}/options`)
     ])
+    if (!model?.name) throw { data: { error: 'Unable to load Model' } }
     form.name = model.name
     form.context_length = model.context_length || 0
     form.options = { ...(options || {}) }
     baselineFingerprint.value = formFingerprint()
+    loaded.value = true
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to load Model'
   } finally {
@@ -81,7 +84,7 @@ async function submit() {
       <USkeleton class="h-64 w-full" />
     </div>
 
-    <UForm v-else :state="form" class="space-y-5" @submit="submit">
+    <UForm v-else-if="loaded" :state="form" class="space-y-5" @submit="submit">
       <Frame class="p-5" data-testid="model-edit-metadata">
         <div class="mb-5">
           <div class="text-[10px] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL METADATA</div>

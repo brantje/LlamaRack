@@ -60,6 +60,12 @@ const canPrevious = computed(() => (details.value?.offset || 0) > 0)
 const canNext = computed(() => details.value ? details.value.offset + details.value.metadata.length < details.value.metadata_total : false)
 const valueCanPrevious = computed(() => (valuePage.value?.offset || 0) > 0)
 const valueCanNext = computed(() => Boolean(valuePage.value?.has_more))
+const valueDisplayedTotal = computed(() => Math.max(valuePage.value?.total || 0, selectedEntry.value?.array_length || 0))
+const valueRangeEnd = computed(() => {
+  if (!valuePage.value) return 0
+  const loaded = valuePage.value.items?.length || valuePage.value.value?.length || 0
+  return Math.min(valuePage.value.offset + loaded, valueDisplayedTotal.value)
+})
 
 function formatBytes(value: number) {
   if (!value) return 'Unknown'
@@ -268,7 +274,7 @@ onMounted(() => void load())
           <template v-else-if="valuePage">
             <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--neutral-700)]">
               <span>{{ valuePage.type }}</span>
-              <span>{{ valuePage.offset.toLocaleString() }}–{{ Math.min(valuePage.offset + (valuePage.items?.length || valuePage.value?.length || 0), valuePage.total).toLocaleString() }} of {{ valuePage.total.toLocaleString() }}</span>
+              <span data-testid="metadata-expanded-count">{{ valuePage.offset.toLocaleString() }}–{{ valueRangeEnd.toLocaleString() }} of {{ valueDisplayedTotal.toLocaleString() }}{{ selectedEntry?.array_length && selectedEntry.array_length > (valuePage.total || 0) ? ' (truncated)' : '' }}</span>
             </div>
             <pre v-if="valuePage.value !== undefined" data-testid="metadata-expanded-value" class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all border border-[var(--color-divider)] p-4 font-mono text-xs">{{ valuePage.value }}</pre>
             <div v-else data-testid="metadata-expanded-items" class="max-h-[60vh] overflow-auto border border-[var(--color-divider)] p-2 font-mono text-xs">

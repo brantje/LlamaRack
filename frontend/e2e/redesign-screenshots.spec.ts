@@ -206,6 +206,14 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/me/sessions') return profileSessions
   if (pathname === '/api/v1/me/identities') return profileIdentities
   if (pathname === '/api/v1/models' && method === 'GET') return models
+  if (/^\/api\/v1\/models\/[^/]+$/.test(pathname) && method === 'GET') {
+    return models.find(item => item.id === decodeURIComponent(pathname.split('/')[4] || '')) || {}
+  }
+  if (/^\/api\/v1\/models\/[^/]+\/options$/.test(pathname)) return {}
+  if (/^\/api\/v1\/instances\/[^/]+$/.test(pathname) && method === 'GET') {
+    return instances.find(item => item.id === decodeURIComponent(pathname.split('/')[4] || '')) || {}
+  }
+  if (/^\/api\/v1\/instances\/[^/]+\/options$/.test(pathname)) return {}
   if (pathname === '/api/v1/models/available') return [{
     path: '/models/Qwen3-Vision-8B-Q4_K_M.gguf', name: 'Qwen3 Vision 8B', total_bytes: 5_420_000_000,
     modified_at: new Date(now - 300_000).toISOString(), quantization: 'Q4_K_M',

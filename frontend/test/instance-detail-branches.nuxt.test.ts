@@ -262,6 +262,27 @@ describe('Instance detail edge branches', () => {
     expect(missing.text()).toContain('Instance “missing” was not found.')
     expect(missing.find('[data-testid="instance-detail-summary"]').exists()).toBe(false)
     expect(missing.text()).not.toContain('READY')
+    missing.unmount()
+  })
+
+  it('clears not-found once the Instance appears in manager state', async () => {
+    const manager = useManager()
+    manager.instances.value = []
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/detail/detail' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Instance “detail” was not found.')
+    expect(wrapper.find('[data-testid="instance-detail-summary"]').exists()).toBe(false)
+
+    manager.instances.value = [{
+      id: 'detail', model_id: 'm1', name: 'Detail Instance', enabled: true, autoload_enabled: true,
+      always_on: false, priority: 'normal', eviction_enabled: false, idle_unload_seconds: 0,
+      gpu_mode: 'manual', gpu_devices: ['CUDA0'], request_log_mode: 'metadata'
+    } as any]
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('was not found')
+    expect(wrapper.text()).toContain('Detail Instance')
+    expect(wrapper.find('[data-testid="instance-detail-summary"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 })
 

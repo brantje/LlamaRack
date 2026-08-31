@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
         description="Search Hugging Face GGUF repositories and choose an artifact that fits this manager's hardware."
       />
       <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-list-actions">
-        <AppButton intent="secondary" to="/downloads">Downloads</AppButton>
+        <AppButton intent="secondary" to="/downloads">View downloads</AppButton>
         <AppButton intent="secondary" to="/models">Registered models</AppButton>
       </div>
     </div>
@@ -470,7 +470,7 @@ onBeforeUnmount(() => {
         />
         <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-detail-actions">
           <AppButton intent="secondary" icon="i-lucide-arrow-left" @click="backToResults">Back to Discover</AppButton>
-          <AppButton intent="secondary" to="/downloads">Downloads</AppButton>
+          <AppButton intent="secondary" to="/downloads">View downloads</AppButton>
         </div>
       </div>
 

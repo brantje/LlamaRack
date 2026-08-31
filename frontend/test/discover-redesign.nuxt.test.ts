@@ -12,7 +12,7 @@ describe('Discover redesign hierarchy', () => {
     expect(source).toContain('View artifacts')
     expect(source).toContain('MODEL REGISTRY')
     expect(source).toContain('Registered models')
-    expect(source).toContain('Downloads')
+    expect(source).toContain('View downloads')
     expect(source).toContain('data-testid="discover-list-actions"')
     expect(source).toContain('data-testid="discover-detail-actions"')
     expect(source).toContain('w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end')

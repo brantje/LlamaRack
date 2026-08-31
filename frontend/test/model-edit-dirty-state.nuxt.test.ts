@@ -50,4 +50,12 @@ describe('Edit Model dirty state', () => {
     expect((save.element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.get('[data-testid="model-edit-submit-hint"]').text()).toContain('Required: Model name.')
   })
+
+  it('does not render an empty edit form when the Model payload is missing', async () => {
+    mocks.request.mockImplementation(async () => ({}))
+    const wrapper = await mountSuspended(ModelEditPage, { route: '/models/model-1/edit' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="model-edit-error"]').text()).toContain('Unable to load Model')
+    expect(wrapper.find('[data-testid="model-edit-metadata"]').exists()).toBe(false)
+  })
 })
