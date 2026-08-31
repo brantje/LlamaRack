@@ -795,9 +795,11 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <Frame v-if="error" class="flex shrink-0 items-start gap-2 p-3" data-testid="playground-error">
-      <StatusTag variant="failed">Request error</StatusTag>
-      <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+    <Frame v-if="error" class="w-full shrink-0 p-3" data-testid="playground-error">
+      <div class="flex items-start gap-2">
+        <StatusTag variant="failed">Request error</StatusTag>
+        <p class="min-w-0 flex-1 whitespace-pre-wrap break-words text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
     </Frame>
     <p v-if="notice" class="shrink-0 border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]" data-testid="playground-notice">{{ notice }}</p>
 

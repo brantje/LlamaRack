@@ -43,6 +43,8 @@ describe('Playground redesign cleanup', () => {
   it('uses the shared semantic request error note', () => {
     expect(source).toContain('data-testid="playground-error"')
     expect(source).toContain('<StatusTag variant="failed">Request error</StatusTag>')
+    expect(source).toContain('whitespace-pre-wrap break-words')
+    expect(source).not.toContain('class="flex shrink-0 items-start gap-2 p-3"')
     expect(source).not.toContain('bg-[var(--accent-100)] px-3 py-2 text-xs text-[var(--accent-900)]')
   })
 

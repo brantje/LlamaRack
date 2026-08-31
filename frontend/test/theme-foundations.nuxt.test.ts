@@ -73,6 +73,17 @@ describe('redesign theme foundations', () => {
     expect(frame.classes()).toContain('shadow-none')
     expect(frame.attributes('class')).toContain('var(--color-surface)')
     expect(frame.find('[data-testid="frame-collapse-toggle"]').exists()).toBe(false)
+    expect(frame.element.querySelectorAll(':scope > .flex.w-full')).toHaveLength(0)
+  })
+
+  it('does not inject a full-width collapse row that would shove flex error notes off-screen', async () => {
+    const frame = await mountSuspended(Frame, {
+      route: false,
+      attrs: { class: 'flex items-start gap-2 p-3' },
+      slots: { default: '<span>Request error</span><p>gateway rejected the prompt</p>' }
+    })
+    expect(frame.element.querySelectorAll(':scope > .flex.w-full')).toHaveLength(0)
+    expect(frame.text()).toContain('gateway rejected the prompt')
   })
 
   it('hides collapsible frame content by default and toggles from the top-right control', async () => {
@@ -83,6 +94,7 @@ describe('redesign theme foundations', () => {
     })
 
     expect(frame.find('[data-testid="frame-collapse-toggle"]').exists()).toBe(true)
+    expect(frame.element.querySelectorAll(':scope > .flex.w-full')).toHaveLength(1)
     expect(frame.find('[data-testid="frame-collapse-toggle"]').attributes('aria-expanded')).toBe('false')
     expect(frame.text()).not.toContain('collapsible content')
 

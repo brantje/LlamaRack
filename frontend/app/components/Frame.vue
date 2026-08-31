@@ -38,23 +38,27 @@ function toggleOpen() {
 
 <template>
   <div v-bind="$attrs" class="relative border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-none">
-    <div class="flex w-full" :class="{ 'cursor-pointer': collapsible && !isOpen }" @click="toggleOpen">
-      <div class="mb-4" v-if="(title || description) && collapsible && !isOpen">
-          <h2 class="mt-1 text-base font-semibold">{{ title }}</h2>
-          <p class="mt-1 text-xs text-[var(--neutral-700)]">{{ description }}</p>
+    <div
+      v-if="collapsible"
+      class="flex w-full"
+      :class="{ 'cursor-pointer': !isOpen }"
+      @click="toggleOpen"
+    >
+      <div v-if="(title || description) && !isOpen" class="mb-4">
+        <h2 class="mt-1 text-base font-semibold">{{ title }}</h2>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">{{ description }}</p>
       </div>
       <UButton
-      v-if="collapsible"
-      type="button"
-      color="neutral"
-      variant="ghost"
-      size="xs"
-      class="absolute top-2 right-2 z-10"
-      :icon="isOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-      :aria-label="isOpen ? 'Collapse section' : 'Expand section'"
-      :aria-expanded="isOpen"
-      data-testid="frame-collapse-toggle"
-    />
+        type="button"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        class="absolute top-2 right-2 z-10"
+        :icon="isOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+        :aria-label="isOpen ? 'Collapse section' : 'Expand section'"
+        :aria-expanded="isOpen"
+        data-testid="frame-collapse-toggle"
+      />
     </div>
     <div v-if="!collapsible || isOpen" class="contents">
       <slot />
