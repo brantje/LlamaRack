@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { clearNuxtState } from '#app'
 import AppButton from '~/components/AppButton.vue'
@@ -71,6 +72,43 @@ describe('redesign theme foundations', () => {
     expect(frame.text()).toContain('content')
     expect(frame.classes()).toContain('shadow-none')
     expect(frame.attributes('class')).toContain('var(--color-surface)')
+    expect(frame.find('[data-testid="frame-collapse-toggle"]').exists()).toBe(false)
+  })
+
+  it('hides collapsible frame content by default and toggles from the top-right control', async () => {
+    const frame = await mountSuspended(Frame, {
+      route: false,
+      props: { collapsible: true },
+      slots: { default: 'collapsible content' }
+    })
+
+    expect(frame.find('[data-testid="frame-collapse-toggle"]').exists()).toBe(true)
+    expect(frame.find('[data-testid="frame-collapse-toggle"]').attributes('aria-expanded')).toBe('false')
+    expect(frame.text()).not.toContain('collapsible content')
+
+    await frame.find('[data-testid="frame-collapse-toggle"]').trigger('click')
+    await nextTick()
+    expect(frame.find('[data-testid="frame-collapse-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(frame.text()).toContain('collapsible content')
+
+    await frame.find('[data-testid="frame-collapse-toggle"]').trigger('click')
+    await nextTick()
+    expect(frame.find('[data-testid="frame-collapse-toggle"]').attributes('aria-expanded')).toBe('false')
+    expect(frame.text()).not.toContain('collapsible content')
+  })
+
+  it('supports controlled collapsible frame state', async () => {
+    const frame = await mountSuspended(Frame, {
+      route: false,
+      props: { collapsible: true, open: false, 'onUpdate:open': (value: boolean) => frame.setProps({ open: value }) },
+      slots: { default: 'controlled content' }
+    })
+
+    expect(frame.text()).not.toContain('controlled content')
+    await frame.find('[data-testid="frame-collapse-toggle"]').trigger('click')
+    await nextTick()
+    expect(frame.props('open')).toBe(true)
+    expect(frame.text()).toContain('controlled content')
   })
 
   it('renders every semantic status treatment', async () => {

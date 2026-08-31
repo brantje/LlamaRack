@@ -83,6 +83,10 @@ describe('local GGUF inspection helpers', () => {
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: vision-F16.gguf')
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('MTP draft model: draft-Q4_0.gguf')
 
+    const toggle = wrapper.get('[data-testid="model-form-defaults"]').find('[data-testid="frame-collapse-toggle"]')
+    await toggle.trigger('click')
+    await flushPromises()
+
     const options = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(options.exists()).toBe(true)
     expect(options.props('modelValue')).toMatchObject({

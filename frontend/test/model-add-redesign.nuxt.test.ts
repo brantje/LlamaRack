@@ -22,7 +22,16 @@ function seedManager() {
   manager.profile.value = null
 }
 
-function modelOptions(wrapper: any) {
+async function expandModelDefaults(wrapper: any) {
+  const toggle = wrapper.get('[data-testid="model-form-defaults"]').find('[data-testid="frame-collapse-toggle"]')
+  if (toggle.exists() && toggle.attributes('aria-expanded') === 'false') {
+    await toggle.trigger('click')
+    await flushPromises()
+  }
+}
+
+async function modelOptions(wrapper: any) {
+  await expandModelDefaults(wrapper)
   return wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue') as Record<string, string>
 }
 
@@ -56,6 +65,7 @@ describe('Add model redesign', () => {
     ])
     expect(wrapper.get('[data-testid="model-submit-requirements"]').text()).toContain('Required: a GGUF artifact and Model name.')
     expect(wrapper.get('[data-testid="model-add-header"]').classes()).toContain('flex-wrap')
+    await expandModelDefaults(wrapper)
     expect(wrapper.findComponent(LlamaCppOptionsEditor).exists()).toBe(true)
     expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').exists()).toBe(true)
@@ -142,33 +152,33 @@ describe('Add model redesign', () => {
     expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-testid="companion-candidate-mtp"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[0]!.attributes('aria-pressed')).toBe('true')
-    expect(modelOptions(wrapper)).toMatchObject({
+    expect(await modelOptions(wrapper)).toMatchObject({
       mmproj: selectedProjector,
       'spec-draft-model': selectedDraft,
       'spec-type': 'draft-mtp'
     })
 
     await wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[1]!.trigger('click')
-    expect(modelOptions(wrapper).mmproj).toBe(alternateProjector)
+    expect((await modelOptions(wrapper)).mmproj).toBe(alternateProjector)
     expect(wrapper.findAll('[data-testid="companion-candidate-mmproj"]')[1]!.attributes('aria-pressed')).toBe('true')
 
     const projectorSlot = wrapper.get('[data-testid="companion-mmproj"]')
     await projectorSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
     await flushPromises()
-    expect(modelOptions(wrapper).mmproj).toBe('')
+    expect((await modelOptions(wrapper)).mmproj).toBe('')
     expect(projectorSlot.text()).toContain('Ignored')
     expect(projectorSlot.text()).toContain('value cleared — the flag is not passed')
     expect(projectorSlot.get('[data-testid="companion-disabled-mmproj"]').classes()).toContain('text-[var(--neutral-800)]')
 
     await projectorSlot.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
-    expect(modelOptions(wrapper).mmproj).toBe(selectedProjector)
+    expect((await modelOptions(wrapper)).mmproj).toBe(selectedProjector)
 
     const mtpSlot = wrapper.get('[data-testid="companion-mtp"]')
     await mtpSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
     await flushPromises()
-    expect(modelOptions(wrapper)['spec-draft-model']).toBe('')
-    expect(modelOptions(wrapper)['spec-type']).toBe('')
+    expect((await modelOptions(wrapper))['spec-draft-model']).toBe('')
+    expect((await modelOptions(wrapper))['spec-type']).toBe('')
   })
 
   it('renders the remote artifact card, forces the first Instance block and preserves helper opt-out tombstones', async () => {
@@ -198,9 +208,9 @@ describe('Add model redesign', () => {
     expect(projectorSlot.text()).toContain('Auto-detected')
     await projectorSlot.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
     await flushPromises()
-    expect(modelOptions(wrapper).mmproj).toBe('')
+    expect((await modelOptions(wrapper)).mmproj).toBe('')
     await projectorSlot.findAll('button').find(button => button.text() === 'Enable')!.trigger('click')
     await flushPromises()
-    expect(Object.prototype.hasOwnProperty.call(modelOptions(wrapper), 'mmproj')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(await modelOptions(wrapper), 'mmproj')).toBe(false)
   })
 })

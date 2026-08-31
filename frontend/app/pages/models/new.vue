@@ -70,7 +70,9 @@ const companionDefinitions: CompanionDefinition[] = [
   { key: 'spec-draft-model', kind: 'mtp', title: 'MTP draft model', flag: '--spec-draft-model' }
 ]
 const companionOptionKeys = ['mmproj', 'spec-draft-model', 'spec-type']
-
+const overrideCount = computed(() =>
+  Object.keys(form.options).filter(key => !companionOptionKeys.includes(key)).length
+)
 const form = reactive({
   gguf_path: '',
   name: '',
@@ -544,7 +546,7 @@ async function createModel() {
           <h2 class="mt-1 text-base font-semibold">Model identity</h2>
         </div>
         <div class="grid gap-5 md:grid-cols-2">
-          <UFormField label="Model name" name="name" required>
+          <UFormField label="Model name" name="name" description="Model name is used to identify the model in the manager and in the API." required>
             <UInput v-model="form.name" data-testid="model-name" class="w-full" placeholder="Qwen Coder 32B" required />
           </UFormField>
           <UFormField label="Context capability" name="context_length" description="Maximum context supported by the artifact. The value remains editable.">
@@ -559,7 +561,7 @@ async function createModel() {
         </div>
       </Frame>
 
-      <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults">
+      <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults" collapsible title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
         <div class="mb-4">
           <p class="text-[9.5px] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
           <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>
