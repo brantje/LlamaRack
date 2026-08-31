@@ -11,8 +11,8 @@ export default defineAppConfig({
       secondary: 'neutral',
       success: 'accent',
       info: 'accent',
-      warning: 'accent',
-      error: 'accent',
+      warning: 'neutral',
+      error: 'danger',
       neutral: 'neutral'
     },
     button: {

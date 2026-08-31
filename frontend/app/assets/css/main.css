@@ -21,6 +21,19 @@
   --color-accent-900: var(--accent-900);
   --color-accent-950: var(--accent-900);
 
+  /* Keep Nuxt's error semantic theme-owned without introducing a rainbow status palette. */
+  --color-danger-50: var(--danger-100);
+  --color-danger-100: var(--danger-100);
+  --color-danger-200: color-mix(in srgb, var(--danger-100) 70%, var(--color-danger));
+  --color-danger-300: color-mix(in srgb, var(--danger-100) 45%, var(--color-danger));
+  --color-danger-400: color-mix(in srgb, var(--danger-100) 20%, var(--color-danger));
+  --color-danger-500: var(--color-danger);
+  --color-danger-600: color-mix(in srgb, var(--color-danger) 75%, var(--danger-700));
+  --color-danger-700: var(--danger-700);
+  --color-danger-800: var(--danger-700);
+  --color-danger-900: var(--danger-700);
+  --color-danger-950: var(--danger-700);
+
   --color-neutral-50: var(--neutral-100);
   --color-neutral-100: var(--neutral-100);
   --color-neutral-200: var(--neutral-200);

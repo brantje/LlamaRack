@@ -159,6 +159,16 @@ describe('frontend design rules', () => {
     expect(violations).toEqual([])
   })
 
+  it('does not alias warning and error semantics to the primary accent', () => {
+    const config = readFileSync(resolve(process.cwd(), 'app/app.config.ts'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'app/assets/css/main.css'), 'utf8')
+    expect(config).toContain("warning: 'neutral'")
+    expect(config).toContain("error: 'danger'")
+    expect(config).not.toMatch(/warning:\s*'accent'[\s\S]*error:\s*'accent'/)
+    expect(css).toContain('--color-danger-500: var(--color-danger)')
+    expect(css).toContain('--color-danger-700: var(--danger-700)')
+  })
+
   it('keeps destructive action tone separate from button priority', () => {
     const appRoot = resolve(process.cwd(), 'app')
     const legacyIntent = /<AppButton\b[^>]*\bintent=["']destructive["']/g
