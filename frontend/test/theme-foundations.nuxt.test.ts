@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { nextTick } from 'vue'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { clearNuxtState } from '#app'
@@ -28,6 +30,16 @@ describe('redesign theme foundations', () => {
     expect(themeMeta('removed-theme' as ThemeId).id).toBe('dark')
   })
 
+  it('applies the stored theme before first paint via head script and a client plugin', () => {
+    const app = readFileSync(resolve(process.cwd(), 'app/app.vue'), 'utf8')
+    const plugin = readFileSync(resolve(process.cwd(), 'app/plugins/theme.client.ts'), 'utf8')
+    const config = readFileSync(resolve(process.cwd(), 'nuxt.config.ts'), 'utf8')
+    expect(app).not.toContain('onMounted(initializeTheme)')
+    expect(plugin).toContain('initializeTheme()')
+    expect(config).toContain('themeBootstrap')
+    expect(config).toContain("script: [{ innerHTML: themeBootstrap }]")
+  })
+
   it('applies, persists and restores the selected theme with an unknown-id fallback', () => {
     const theme = useAppTheme()
     theme.initializeTheme()
@@ -47,6 +59,37 @@ describe('redesign theme foundations', () => {
 
     theme.initializeTheme()
     expect(theme.currentTheme.value).toBe('dark')
+  })
+
+  it('keeps the applied theme when localStorage persistence fails', () => {
+    const theme = useAppTheme()
+    theme.initializeTheme()
+    const originalSetItem = Storage.prototype.setItem
+    Storage.prototype.setItem = () => {
+      throw new Error('quota')
+    }
+    try {
+      expect(() => theme.setTheme('light')).not.toThrow()
+      expect(theme.currentTheme.value).toBe('light')
+      expect(document.documentElement.dataset.theme).toBe('light')
+    } finally {
+      Storage.prototype.setItem = originalSetItem
+    }
+  })
+
+  it('falls back to the default theme when localStorage reads fail', () => {
+    const originalGetItem = Storage.prototype.getItem
+    Storage.prototype.getItem = () => {
+      throw new Error('blocked')
+    }
+    try {
+      const theme = useAppTheme()
+      expect(() => theme.initializeTheme()).not.toThrow()
+      expect(theme.currentTheme.value).toBe('dark')
+      expect(document.documentElement.dataset.theme).toBe('dark')
+    } finally {
+      Storage.prototype.getItem = originalGetItem
+    }
   })
 
   it('restores a valid saved choice and rejects a removed saved theme', () => {

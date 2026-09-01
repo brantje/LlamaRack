@@ -12,9 +12,27 @@ export function useAppTheme() {
     document.documentElement.style.colorScheme = metadata.colorScheme
   }
 
+  function readStoredTheme() {
+    if (!import.meta.client) return null
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY)
+    } catch {
+      return null
+    }
+  }
+
+  function writeStoredTheme(id: ThemeId) {
+    if (!import.meta.client) return
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, id)
+    } catch {
+      // Private mode and storage-quota failures must not undo the in-document theme.
+    }
+  }
+
   function initializeTheme() {
     if (!import.meta.client || initialized.value) return
-    const id = resolveThemeId(localStorage.getItem(THEME_STORAGE_KEY))
+    const id = resolveThemeId(readStoredTheme())
     applyTheme(id)
     initialized.value = true
   }
@@ -22,7 +40,7 @@ export function useAppTheme() {
   function setTheme(value: ThemeId | string) {
     const id = resolveThemeId(value)
     applyTheme(id)
-    if (import.meta.client) localStorage.setItem(THEME_STORAGE_KEY, id)
+    writeStoredTheme(id)
   }
 
   return { currentTheme, initialized, initializeTheme, setTheme }
