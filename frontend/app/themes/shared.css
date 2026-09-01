@@ -13,7 +13,7 @@
 
   --font-body: 'Barlow', ui-sans-serif, system-ui, sans-serif;
   --font-heading: 'Barlow Condensed', ui-sans-serif, system-ui, sans-serif;
-  --font-machine: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-machine: ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
 
   --font-size-body: 16.5px;
   --line-height-body: 1.55;
