@@ -169,10 +169,16 @@ jobs:
           build-args: |
             LLAMA_IMAGE=${{ needs.detect.outputs.cpu_image }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}
-            ghcr.io/${{ github.repository }}:llama.cpp-latest
+            ghcr.io/brantje/llamarack:${{ needs.detect.outputs.image_tag }}
+            ghcr.io/brantje/llamarack:llama.cpp-latest
+            ghcr.io/brantje/llamacpp-manager:${{ needs.detect.outputs.image_tag }}
+            ghcr.io/brantje/llamacpp-manager:llama.cpp-latest
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}
+            io.llamarack.build.reason=llama.cpp-update
+            io.llamarack.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.detect.outputs.cpu_image }}
             io.llamacpp-manager.build.reason=llama.cpp-update
             io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
             io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
@@ -189,10 +195,16 @@ jobs:
           build-args: |
             LLAMA_IMAGE=${{ needs.detect.outputs.cuda_image }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.image_tag }}-cuda
-            ghcr.io/${{ github.repository }}:llama.cpp-latest-cuda
+            ghcr.io/brantje/llamarack:${{ needs.detect.outputs.image_tag }}-cuda
+            ghcr.io/brantje/llamarack:llama.cpp-latest-cuda
+            ghcr.io/brantje/llamacpp-manager:${{ needs.detect.outputs.image_tag }}-cuda
+            ghcr.io/brantje/llamacpp-manager:llama.cpp-latest-cuda
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}-cuda
+            io.llamarack.build.reason=llama.cpp-update
+            io.llamarack.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.detect.outputs.cuda_image }}
             io.llamacpp-manager.build.reason=llama.cpp-update
             io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
             io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
@@ -210,7 +222,7 @@ jobs:
           {
             echo '## 🦙 llama.cpp update published'
             echo
-            echo "Rebuilt LlamaCPP Manager because llama.cpp released \`${RELEASE_TAG}\` (build \`${BUILD_TAG}\`)."
+            echo "Rebuilt LlamaRack because llama.cpp released \`${RELEASE_TAG}\` (build \`${BUILD_TAG}\`)."
             echo
             echo 'Published tags:'
             echo "- \`${IMAGE_TAG}\`"

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestListResolvedDetectsHuggingFaceContextAfterCompletion(t *testing.T) {

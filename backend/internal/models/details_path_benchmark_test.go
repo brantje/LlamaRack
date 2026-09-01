@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 // BenchmarkDetailsPathInspectAndSummary mirrors the model-details handler:

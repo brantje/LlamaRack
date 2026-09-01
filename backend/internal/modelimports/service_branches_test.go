@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestPrepareValidationBranches(t *testing.T) {

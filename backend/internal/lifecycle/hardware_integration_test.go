@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 const testGiB int64 = 1024 * 1024 * 1024

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 func TestReplaceGlobalSkipsBlankKeysAndRejectsNormalizedDuplicates(t *testing.T) {

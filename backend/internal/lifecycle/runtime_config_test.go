@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func lifecycleCaptureBinary(t *testing.T) (string, string) {
@@ -19,12 +19,12 @@ func lifecycleCaptureBinary(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_LIFECYCLE_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_LIFECYCLE_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_LIFECYCLE_HELPER", "1")
 	argsFile := filepath.Join(t.TempDir(), "worker-args.txt")
-	t.Setenv("LCM_LIFECYCLE_CAPTURE_ARGS", argsFile)
+	t.Setenv("LLAMARACK_LIFECYCLE_CAPTURE_ARGS", argsFile)
 	path := filepath.Join(t.TempDir(), "fake-llama-capture")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$LCM_LIFECYCLE_CAPTURE_ARGS\"\nexec \"$LCM_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$LLAMARACK_LIFECYCLE_CAPTURE_ARGS\"\nexec \"$LLAMARACK_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ func TestValidateOptionsRejectsManagerOwnedWorkerSecurityOptions(t *testing.T) {
 	} {
 		t.Run(key, func(t *testing.T) {
 			_, err := ValidateOptions(profile, map[string]string{key: "unsafe"})
-			if err == nil || !strings.Contains(err.Error(), "managed by LlamaCPP Manager") {
+			if err == nil || !strings.Contains(err.Error(), "managed by LlamaRack") {
 				t.Fatalf("ValidateOptions(%q) error = %v", key, err)
 			}
 		})

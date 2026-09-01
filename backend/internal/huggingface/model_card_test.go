@@ -37,13 +37,13 @@ This must not become the repository description.
 		switch r.URL.Path {
 		case "/api/models/kai-os/Carnice-V3-GGUF":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "kai-os/Carnice-V3-GGUF",
-				"author": "kai-os",
-				"sha": "rev-card",
+				"id":        "kai-os/Carnice-V3-GGUF",
+				"author":    "kai-os",
+				"sha":       "rev-card",
 				"downloads": 577,
-				"likes": 20,
-				"tags": []string{"gguf", "license:apache-2.0", "base_model:quantized:kai-os/Carnice-V3"},
-				"siblings": []map[string]any{{"rfilename": "Carnice-V3-Q5_K_M.gguf", "size": 100}},
+				"likes":     20,
+				"tags":      []string{"gguf", "license:apache-2.0", "base_model:quantized:kai-os/Carnice-V3"},
+				"siblings":  []map[string]any{{"rfilename": "Carnice-V3-Q5_K_M.gguf", "size": 100}},
 			})
 		case "/kai-os/Carnice-V3-GGUF/raw/rev-card/README.md":
 			readmeRequests++
@@ -94,7 +94,7 @@ func TestDetailWithCardKeepsProviderDescriptionWhenREADMEUnavailable(t *testing.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "acme/demo", "sha": "rev-no-readme",
 			"cardData": map[string]any{"description": "Provider description"},
-			"tags": []string{"license:mit", "base_model:finetune:acme/base", "base_model:finetune:acme/base"},
+			"tags":     []string{"license:mit", "base_model:finetune:acme/base", "base_model:finetune:acme/base"},
 		})
 	}))
 	defer provider.Close()

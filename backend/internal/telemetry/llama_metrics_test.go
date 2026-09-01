@@ -33,21 +33,21 @@ func TestParseLlamaMetricsIncludesAllCurrentServerMetrics(t *testing.T) {
 		t.Fatal("expected recognized metrics")
 	}
 	checks := map[string]*float64{
-		"prompt tokens": metrics.PromptTokensTotal,
-		"prompt seconds": metrics.PromptSecondsTotal,
-		"prompt throughput": metrics.PromptTokensPerSecond,
-		"predicted tokens": metrics.PredictedTokensTotal,
-		"predicted seconds": metrics.PredictedSecondsTotal,
+		"prompt tokens":        metrics.PromptTokensTotal,
+		"prompt seconds":       metrics.PromptSecondsTotal,
+		"prompt throughput":    metrics.PromptTokensPerSecond,
+		"predicted tokens":     metrics.PredictedTokensTotal,
+		"predicted seconds":    metrics.PredictedSecondsTotal,
 		"predicted throughput": metrics.PredictedTokensPerSecond,
-		"processing": metrics.RequestsProcessing,
-		"deferred": metrics.RequestsDeferred,
-		"context max": metrics.ContextTokensMax,
-		"decode total": metrics.DecodeTotal,
-		"busy slots": metrics.BusySlotsPerDecode,
-		"draft tokens": metrics.SpecDraftTokensTotal,
-		"accepted tokens": metrics.SpecAcceptedTokensTotal,
-		"drafts": metrics.SpecDraftsTotal,
-		"acceptance": metrics.SpecAcceptanceRatePct,
+		"processing":           metrics.RequestsProcessing,
+		"deferred":             metrics.RequestsDeferred,
+		"context max":          metrics.ContextTokensMax,
+		"decode total":         metrics.DecodeTotal,
+		"busy slots":           metrics.BusySlotsPerDecode,
+		"draft tokens":         metrics.SpecDraftTokensTotal,
+		"accepted tokens":      metrics.SpecAcceptedTokensTotal,
+		"drafts":               metrics.SpecDraftsTotal,
+		"acceptance":           metrics.SpecAcceptanceRatePct,
 	}
 	for name, value := range checks {
 		if value == nil {

@@ -22,10 +22,17 @@ func TestReadSummaryDerivedAndSkipsUnneededMetadata(t *testing.T) {
 		{"ignored.fixed", 4, func(b *bytes.Buffer) { write(b, uint32(99)) }},
 		{"ignored.string", 8, func(b *bytes.Buffer) { writeString(b, "ignored") }},
 		{"ignored.array", 9, func(b *bytes.Buffer) {
-			write(b, uint32(4)); write(b, uint64(20)); for i := 0; i < 20; i++ { write(b, uint32(i)) }
+			write(b, uint32(4))
+			write(b, uint64(20))
+			for i := 0; i < 20; i++ {
+				write(b, uint32(i))
+			}
 		}},
 		{"ignored.strings", 9, func(b *bytes.Buffer) {
-			write(b, uint32(8)); write(b, uint64(2)); writeString(b, "a"); writeString(b, "b")
+			write(b, uint32(8))
+			write(b, uint64(2))
+			writeString(b, "a")
+			writeString(b, "b")
 		}},
 	})
 	summary, err := ReadSummary(path)
@@ -119,8 +126,13 @@ func TestReadSummaryRejectsMalformedInput(t *testing.T) {
 	}
 	var malformedValue bytes.Buffer
 	malformedValue.WriteString("GGUF")
-	write(&malformedValue, uint32(3)); write(&malformedValue, uint64(0)); write(&malformedValue, uint64(1))
-	writeString(&malformedValue, "general.architecture"); write(&malformedValue, uint32(8)); write(&malformedValue, uint64(5)); malformedValue.WriteString("x")
+	write(&malformedValue, uint32(3))
+	write(&malformedValue, uint64(0))
+	write(&malformedValue, uint64(1))
+	writeString(&malformedValue, "general.architecture")
+	write(&malformedValue, uint32(8))
+	write(&malformedValue, uint64(5))
+	malformedValue.WriteString("x")
 	path := filepath.Join(t.TempDir(), "value.gguf")
 	if err := os.WriteFile(path, malformedValue.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
@@ -161,12 +173,16 @@ func TestSummarySkipHelpersAndTensorBounds(t *testing.T) {
 		t.Fatal("array missing count should fail")
 	}
 	var unsupportedArray bytes.Buffer
-	write(&unsupportedArray, uint32(99)); write(&unsupportedArray, uint64(0))
+	write(&unsupportedArray, uint32(99))
+	write(&unsupportedArray, uint64(0))
 	if err := skipSummaryValue(bytes.NewReader(unsupportedArray.Bytes()), 9); err == nil {
 		t.Fatal("unsupported array element should fail")
 	}
 	var truncatedStrings bytes.Buffer
-	write(&truncatedStrings, uint32(8)); write(&truncatedStrings, uint64(1)); write(&truncatedStrings, uint64(3)); truncatedStrings.WriteByte('x')
+	write(&truncatedStrings, uint32(8))
+	write(&truncatedStrings, uint64(1))
+	write(&truncatedStrings, uint64(3))
+	truncatedStrings.WriteByte('x')
 	if err := skipSummaryValue(bytes.NewReader(truncatedStrings.Bytes()), 9); err != nil {
 		t.Fatalf("seek over a truncated final string should itself succeed: %v", err)
 	}
@@ -187,12 +203,15 @@ func TestSummarySkipHelpersAndTensorBounds(t *testing.T) {
 		t.Fatal("missing tensor dimension should fail")
 	}
 	var missingType bytes.Buffer
-	writeString(&missingType, "tensor"); write(&missingType, uint32(0))
+	writeString(&missingType, "tensor")
+	write(&missingType, uint32(0))
 	if _, err := tensorPrefixPresentCurrent(bytes.NewReader(missingType.Bytes()), 1, "blk.0."); err == nil {
 		t.Fatal("missing tensor type should fail")
 	}
 	var missingOffset bytes.Buffer
-	writeString(&missingOffset, "tensor"); write(&missingOffset, uint32(0)); write(&missingOffset, uint32(0))
+	writeString(&missingOffset, "tensor")
+	write(&missingOffset, uint32(0))
+	write(&missingOffset, uint32(0))
 	if _, err := tensorPrefixPresentCurrent(bytes.NewReader(missingOffset.Bytes()), 1, "blk.0."); err == nil {
 		t.Fatal("missing tensor offset should fail")
 	}

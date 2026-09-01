@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestSecretStoreRoundTripAndKeyReuse(t *testing.T) {

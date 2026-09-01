@@ -11,9 +11,15 @@ import (
 
 func TestHandlerServesFilesAndSPAFallback(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "_nuxt"), 0o755); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>app-shell</html>"), 0o644); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(root, "_nuxt", "app.js"), []byte("console.log('ok')"), 0o644); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(filepath.Join(root, "_nuxt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html>app-shell</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "_nuxt", "app.js"), []byte("console.log('ok')"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	h := New(root)
 	cases := []struct {
@@ -35,8 +41,12 @@ func TestHandlerServesFilesAndSPAFallback(t *testing.T) {
 			w := httptest.NewRecorder()
 			r := httptest.NewRequest(tc.method, "http://manager.test"+tc.path, nil)
 			h.ServeHTTP(w, r)
-			if w.Code != tc.want { t.Fatalf("status=%d want=%d", w.Code, tc.want) }
-			if tc.body != "" && !strings.Contains(w.Body.String(), tc.body) { t.Fatalf("body=%q missing %q", w.Body.String(), tc.body) }
+			if w.Code != tc.want {
+				t.Fatalf("status=%d want=%d", w.Code, tc.want)
+			}
+			if tc.body != "" && !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("body=%q missing %q", w.Body.String(), tc.body)
+			}
 		})
 	}
 }
@@ -44,5 +54,7 @@ func TestHandlerServesFilesAndSPAFallback(t *testing.T) {
 func TestHandlerReturnsNotFoundWithoutIndex(t *testing.T) {
 	w := httptest.NewRecorder()
 	New(t.TempDir()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://manager.test/models", nil))
-	if w.Code != http.StatusNotFound { t.Fatalf("status=%d want=%d", w.Code, http.StatusNotFound) }
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status=%d want=%d", w.Code, http.StatusNotFound)
+	}
 }

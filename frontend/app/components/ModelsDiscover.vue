@@ -12,7 +12,7 @@ type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: nu
 type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
 type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; assume_idle?: boolean; artifacts: ArtifactAdvice[] }
 
-const ASSUME_IDLE_STORAGE_KEY = 'llamacpp-manager-discover-assume-idle'
+const ASSUME_IDLE_STORAGE_KEY = 'llamarack-discover-assume-idle'
 
 const props = defineProps<{ repoId?: string }>()
 const manager = useManager()

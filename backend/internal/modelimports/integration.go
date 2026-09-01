@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
 // RepairArtifactOptions replaces only manager-generated pending helper paths.

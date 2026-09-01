@@ -5,10 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
 )
-
-const headerUpstreamPort = "X-LlamaCPP-Manager-Upstream-Port"
 
 type upstreamPortResponseWriter struct {
 	http.ResponseWriter
@@ -24,7 +22,7 @@ func (w *upstreamPortResponseWriter) resolve() {
 		return
 	}
 	w.resolved = true
-	instanceID := strings.TrimSpace(w.Header().Get(headerInstance))
+	instanceID := strings.TrimSpace(getProductHeader(w.Header(), headerInstance))
 	if instanceID == "" || w.lifecycle == nil {
 		return
 	}
@@ -32,7 +30,7 @@ func (w *upstreamPortResponseWriter) resolve() {
 	if err != nil || runtime.Port <= 0 {
 		return
 	}
-	w.Header().Set(headerUpstreamPort, strconv.Itoa(runtime.Port))
+	setProductHeader(w.Header(), headerUpstreamPort, strconv.Itoa(runtime.Port))
 }
 
 func (w *upstreamPortResponseWriter) WriteHeader(status int) {

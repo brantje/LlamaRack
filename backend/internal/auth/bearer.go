@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	signingKeyFilename          = "management-jwt-ed25519.key"
+	signingKeyFilename            = "management-jwt-ed25519.key"
 	maxWebSocketTicketsPerSession = 8
 	maxWebSocketTicketsGlobal     = 1024
 )
@@ -225,7 +225,7 @@ func (s *Service) parseManagementToken(encoded string) (managementClaims, error)
 			return nil, errors.New("unexpected management token signing method")
 		}
 		return publicKey, nil
-	}, jwt.WithIssuer(managerIssuer), jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}), jwt.WithIssuer(managerIssuer), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil || !parsed.Valid || claims.Issuer != managerIssuer || claims.ExpiresAt == nil || claims.IssuedAt == nil {
 		return managementClaims{}, ErrSessionInvalid
 	}

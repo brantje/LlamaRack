@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/modelimports"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/modelimports"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func newHuggingFaceImportFixture(t *testing.T) huggingFaceFixture {
@@ -68,7 +68,7 @@ func newHuggingFaceImportFixture(t *testing.T) huggingFaceFixture {
 	imports := modelimports.New(db, modelsDir, modelService, downloadManager, nil)
 	return huggingFaceFixture{
 		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager, imports),
-		cookie: &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
+		cookie:  &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
 	}
 }
 

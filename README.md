@@ -1,24 +1,24 @@
-# LlamaCPP Manager
+# LlamaRack
 
 **A self-hosted control plane and OpenAI-compatible gateway for `llama.cpp`.**
 
 Manage GGUF models, run multiple `llama-server` instances, automatically load and unload models, schedule GPU resources, download models from Hugging Face, and expose everything through one stable OpenAI-compatible API.
 
 [![CI](https://github.com/brantje/llamacpp-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/brantje/llamacpp-manager/actions/workflows/ci.yml)
-[![Container](https://img.shields.io/badge/container-GHCR-blue)](https://github.com/brantje/llamacpp-manager/pkgs/container/llamacpp-manager)
+[![Container](https://img.shields.io/badge/container-GHCR-blue)](https://github.com/brantje/llamacpp-manager/pkgs/container/llamarack)
 [![Go](https://img.shields.io/badge/backend-Go-00ADD8?logo=go&logoColor=white)](./backend)
 [![Nuxt](https://img.shields.io/badge/frontend-Nuxt-00DC82?logo=nuxtdotjs&logoColor=white)](./frontend)
 
 > [!NOTE]
-> LlamaCPP Manager is under active development. Interfaces, configuration and persistence may still change before a stable release.
+> LlamaRack is under active development. Interfaces, configuration and persistence may still change before a stable release.
 
 ---
 
-## Why LlamaCPP Manager?
+## Why LlamaRack?
 
 `llama-server` is excellent at serving a model.
 
-LlamaCPP Manager takes care of everything around it.
+LlamaRack takes care of everything around it.
 
 Instead of manually starting individual servers, assigning ports, tracking GPU memory and wiring clients to different endpoints, you run one manager:
 
@@ -29,7 +29,7 @@ Instead of manually starting individual servers, assigning ports, tracking GPU m
                           │
                           ▼
                 ┌──────────────────┐
-                │ LlamaCPP Manager │
+                │ LlamaRack │
                 │      /v1/*       │
                 └────────┬─────────┘
                          │
@@ -75,7 +75,7 @@ Search and download GGUF models without leaving the manager.
 - Detect companion model files.
 - Use authenticated Hugging Face access for gated/private repositories.
 
-LlamaCPP Manager also turns quantization names such as `Q4_K_M` or `Q6_K` into more useful guidance instead of expecting every user to already understand GGUF quantization naming.
+LlamaRack also turns quantization names such as `Q4_K_M` or `Q6_K` into more useful guidance instead of expecting every user to already understand GGUF quantization naming.
 
 For each artifact it can show:
 
@@ -184,7 +184,7 @@ A manual stop of an Always-On Instance remains respected instead of immediately 
 
 ### 🎛 Resource-aware scheduling
 
-LlamaCPP Manager understands that running a model is ultimately a resource-allocation problem.
+LlamaRack understands that running a model is ultimately a resource-allocation problem.
 
 The scheduler considers:
 
@@ -276,7 +276,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8888/v1",
-    api_key="your-lcm-api-key",
+    api_key="your-api-key",
 )
 
 response = client.chat.completions.create(
@@ -296,7 +296,7 @@ The same endpoint can be used by LiteLLM and other OpenAI-compatible clients.
 
 ### 📊 Observability
 
-LlamaCPP Manager observes both the control plane and inference traffic.
+LlamaRack observes both the control plane and inference traffic.
 
 The Dashboard includes live information about:
 
@@ -406,7 +406,7 @@ Provider secrets such as Hugging Face tokens and OIDC client secrets are kept se
 
 ### 🧩 llama.cpp configuration without hiding llama.cpp
 
-LlamaCPP Manager is intended to manage llama.cpp, not replace its configuration model with an incompatible abstraction.
+LlamaRack is intended to manage llama.cpp, not replace its configuration model with an incompatible abstraction.
 
 Available `llama-server` options are discovered from the installed binary.
 
@@ -475,7 +475,7 @@ Published images run as unprivileged UID/GID `1000:1000` by default. Set `PUID` 
 PUID=$(id -u) PGID=$(id -g) docker compose up -d
 ```
 
-Set `LCM_IMAGE_TAG` or `LCM_NVIDIA_IMAGE_TAG` to pin a specific published image instead of `latest` / `latest-cuda`.
+Set `LLAMARACK_IMAGE_TAG` or `LLAMARACK_NVIDIA_IMAGE_TAG` to pin a specific published image instead of `latest` / `latest-cuda`.
 
 ---
 
@@ -506,12 +506,29 @@ GGUF files live under the models volume.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LCM_LISTEN_ADDR` | `:8000` | Internal HTTP listen address |
-| `LCM_DATA_DIR` | `/config` | Persistent manager data |
-| `LCM_MODELS_DIR` | `/models` | GGUF model storage |
-| `LCM_LLAMA_SERVER` | `/app/llama-server` | Managed `llama-server` binary |
-| `LCM_HOST_PROC` | `/host/proc` | Host process information used for telemetry |
-| `LCM_ALWAYS_ON_RECONCILE_SECONDS` | `15` | Always-On reconciliation interval |
+| `LLAMARACK_LISTEN_ADDR` | `:8000` | Internal HTTP listen address |
+| `LLAMARACK_DATA_DIR` | `/config` | Persistent manager data |
+| `LLAMARACK_MODELS_DIR` | `/models` | GGUF model storage |
+| `LLAMARACK_DATABASE_PATH` | `{dataDir}/manager.db` | SQLite database path |
+| `LLAMARACK_LLAMA_SERVER` | `/app/llama-server` | Managed `llama-server` binary |
+| `LLAMARACK_HUGGINGFACE_BASE_URL` | `https://huggingface.co` | Hugging Face API base URL |
+| `LLAMARACK_WORKER_HOST` | `127.0.0.1` | Bind address for managed workers |
+| `LLAMARACK_WORKER_PORT_START` | `10000` | First port assigned to managed workers |
+| `LLAMARACK_STARTUP_TIMEOUT_SECONDS` | `180` | Worker startup timeout |
+| `LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS` | `15` | Always-On reconciliation interval |
+| `LLAMARACK_ALLOWED_ORIGIN` | `http://localhost:3000` | Allowed browser origin |
+| `LLAMARACK_HOST_PROC` | `/host/proc` | Host process information used for telemetry |
+| `LLAMARACK_FRONTEND_DIR` | `/app/frontend` | Built frontend assets directory |
+| `LLAMARACK_SESSION_LIFETIME_SECONDS` | `86400` | Management JWT lifetime |
+| `LLAMARACK_LOGIN_PROTECTION_ENABLED` | `true` | Enable login lockout protection |
+| `LLAMARACK_LOGIN_FAILURE_THRESHOLD` | `5` | Consecutive failures before lockout |
+| `LLAMARACK_LOGIN_LOCKOUT_SECONDS` | `900` | Login lockout duration |
+| `LLAMARACK_TRUSTED_PROXIES` | empty | Trusted reverse-proxy CIDRs |
+| `LLAMARACK_EXTERNAL_URL` | empty | Public URL used for OIDC redirects |
+| `LLAMARACK_PROMETHEUS_AUTH_TOKEN` | empty | Optional bearer token for `/metrics` |
+| `LLAMARACK_IMAGE_TAG` | `latest` | Compose image tag for the CPU image |
+| `LLAMARACK_NVIDIA_IMAGE_TAG` | `latest-cuda` | Compose image tag for the NVIDIA image |
+| `LLAMARACK_HOST_MODELS_DIR` | `./data/models` | Host path mounted as `/models` in Compose |
 | `PUID` | `1000` | Container user ID |
 | `PGID` | `1000` | Container group ID |
 
@@ -519,7 +536,7 @@ The normal Compose service listens on host port `8888`.
 
 ### Docker GPU telemetry
 
-The provided Compose files mount host `/proc` read-only at `/host/proc` and set `LCM_HOST_PROC=/host/proc`. This lets the telemetry collector map GPU-tool host PIDs back to managed `llama-server` processes inside Docker without disabling normal PID isolation.
+The provided Compose files mount host `/proc` read-only at `/host/proc` and set `LLAMARACK_HOST_PROC=/host/proc`. This lets the telemetry collector map GPU-tool host PIDs back to managed `llama-server` processes inside Docker without disabling normal PID isolation.
 
 For NVIDIA deployments, `nvidia-smi` and the host-compatible NVML libraries should be injected by NVIDIA Container Toolkit. The project does not install a distribution-specific NVIDIA driver inside the application image.
 
@@ -528,6 +545,13 @@ If GPU telemetry works but `llama-server` rejects a CUDA device, verify both pie
 ```bash
 docker compose -f docker-compose.dev.yml -f docker-compose.dev.nvidia.yml exec backend nvidia-smi
 docker compose -f docker-compose.dev.yml -f docker-compose.dev.nvidia.yml exec backend /app/llama-server --list-devices
+```
+
+For the published Compose service:
+
+```bash
+docker compose exec llamarack nvidia-smi
+docker compose exec llamarack /app/llama-server --list-devices
 ```
 
 `--list-devices` must include the CUDA devices the manager will pass to `--device`.
@@ -581,7 +605,7 @@ This means one GGUF can be exposed several ways without duplicating the model fi
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│                    LlamaCPP Manager                    │
+│                    LlamaRack                    │
 │                                                        │
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐ │
 │  │ Nuxt Web UI │  │ Management   │  │ OpenAI /v1  │ │
@@ -729,7 +753,7 @@ Planned capabilities include:
 - compare configuration changes before applying them to an Instance;
 - use measured results to improve the manager's configuration recommendations.
 
-The longer-term goal is for LlamaCPP Manager to move beyond estimating whether a model will run and help answer:
+The longer-term goal is for LlamaRack to move beyond estimating whether a model will run and help answer:
 
 ```text
 Which configuration runs this model best on my hardware?
@@ -788,15 +812,15 @@ Broader compatibility testing is planned across:
 
 ## Home Assistant Local OpenAI LLM
 
-Home Assistant's Local OpenAI LLM integration can group Assist requests into one request-log session without a LlamaCPP Manager-specific mode.
+Home Assistant's Local OpenAI LLM integration can group Assist requests into one request-log session without a LlamaRack-specific mode.
 
-Enable **Pass conversation session ID to LiteLLM server**. The integration sends the Assist conversation ID as `metadata.session_id`, which LlamaCPP Manager uses as the request `session_id` while keeping individual `trace_id` values separate.
+Enable **Pass conversation session ID to LiteLLM server**. The integration sends the Assist conversation ID as `metadata.session_id`, which LlamaRack uses as the request `session_id` while keeping individual `trace_id` values separate.
 
 ---
 
 ## What this project is not
 
-LlamaCPP Manager does not try to become another model format, inference engine or hosted AI platform.
+LlamaRack does not try to become another model format, inference engine or hosted AI platform.
 
 It currently focuses on:
 
@@ -807,7 +831,7 @@ It currently focuses on:
 
 `llama.cpp` remains the inference engine.
 
-LlamaCPP Manager is the control plane around it.
+LlamaRack is the control plane around it.
 
 ---
 
@@ -819,7 +843,7 @@ If you're working on a larger feature, check the existing [issues](https://githu
 
 When reporting a problem, useful information includes:
 
-- LlamaCPP Manager version / commit;
+- LlamaRack version / commit;
 - llama.cpp version;
 - CPU / GPU configuration;
 - relevant Instance configuration;
@@ -830,5 +854,5 @@ When reporting a problem, useful information includes:
 ---
 
 <p align="center">
-  <strong>llama.cpp is the runtime. LlamaCPP Manager is the control plane.</strong>
+  <strong>llama.cpp is the runtime. LlamaRack is the control plane.</strong>
 </p>

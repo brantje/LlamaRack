@@ -95,7 +95,7 @@ beforeEach(() => {
   mocks.runtime.state = 'READY'
   sessionStorage.clear()
   localStorage.clear()
-  sessionStorage.setItem('lcm_management_token', 'management-playground')
+  sessionStorage.setItem('llamarack_management_token', 'management-playground')
   vi.unstubAllGlobals()
 })
 
@@ -104,7 +104,7 @@ describe('Playground UX', () => {
     const sse = createSSEStream()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(sse.stream, {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-ux' }
+      headers: { 'X-LlamaRack-Request-ID': 'req-ux' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -147,7 +147,7 @@ describe('Playground UX', () => {
     const sse = createSSEStream()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(sse.stream, {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-reason' }
+      headers: { 'X-LlamaRack-Request-ID': 'req-reason' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -184,7 +184,7 @@ describe('Playground UX', () => {
     const sse = createSSEStream()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(sse.stream, {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-order' }
+      headers: { 'X-LlamaRack-Request-ID': 'req-order' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -209,7 +209,7 @@ describe('Playground UX', () => {
   it('shows an empty-content fallback when a completed stream has no text or reasoning', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-empty' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-empty' } }
     )))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -225,7 +225,7 @@ describe('Playground UX', () => {
   it('confirms clear conversation in a modal and leaves state untouched on cancel', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{"content":"keep me"}}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-clear' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-clear' } }
     )))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -263,7 +263,7 @@ describe('Playground UX', () => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(new Response(
         'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
-        { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-ok' } }
+        { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-ok' } }
       ))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'upstream rejected' } }), { status: 400 }))
     )
@@ -365,7 +365,7 @@ describe('Playground UX', () => {
   it('copies an assistant message and regenerates the last turn', async () => {
     const publicFetch = vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{"content":"first reply"}}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-regen' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-regen' } }
     ))
     vi.stubGlobal('fetch', publicFetch)
     Object.defineProperty(navigator, 'clipboard', {
@@ -392,7 +392,7 @@ describe('Playground UX', () => {
   it('keeps assistant message ids unique after rebuilt conversation turns', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{"content":"next"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-ids' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-ids' } }
     )))
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()

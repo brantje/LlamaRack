@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 func TestProviderDerivedOverridesHubOwnedFieldsOnly(t *testing.T) {
@@ -40,7 +40,7 @@ func TestDerivedMetadataPrefersProviderArchitectureAndContext(t *testing.T) {
 	}
 	detail := ModelDetail{
 		ID: "acme/demo", Revision: "provider-preferred",
-		GGUF: &GGUFInfo{Architecture: "qwen35", ContextLength: 262144},
+		GGUF:      &GGUFInfo{Architecture: "qwen35", ContextLength: 262144},
 		Artifacts: []Artifact{{Complete: true, Files: []File{{Path: "demo-Q4_K_M.gguf", Size: int64(len(payload))}}}},
 	}
 	derived, err := client.DerivedMetadata(context.Background(), detail)

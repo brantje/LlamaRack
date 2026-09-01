@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestAdminAuthAndAPIKeyClosedDatabaseErrors(t *testing.T) {
@@ -67,18 +67,25 @@ func TestAdminAuthAndAPIKeyClosedDatabaseErrors(t *testing.T) {
 	}
 }
 
-func TestClearLegacySessionCookies(t *testing.T) {
+func TestClearSessionCookies(t *testing.T) {
 	for _, secure := range []bool{false, true} {
 		recorder := httptest.NewRecorder()
 		ClearSessionCookies(recorder, secure)
 		cookies := recorder.Result().Cookies()
-		if len(cookies) != 2 {
-			t.Fatalf("secure=%v cookies=%+v", secure, cookies)
-		}
+		names := map[string]bool{}
 		for _, cookie := range cookies {
+			names[cookie.Name] = true
 			if cookie.Value != "" || cookie.MaxAge != -1 || cookie.Secure != secure || cookie.Path != "/" {
 				t.Fatalf("secure=%v cookie=%+v", secure, cookie)
 			}
+		}
+		for _, name := range []string{sessionCookie, csrfCookie} {
+			if !names[name] {
+				t.Fatalf("secure=%v missing cookie %s in %+v", secure, name, cookies)
+			}
+		}
+		if names["lcm_session"] || names["lcm_csrf"] {
+			t.Fatalf("secure=%v previous cookie names still cleared: %+v", secure, cookies)
 		}
 	}
 }

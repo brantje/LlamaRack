@@ -28,7 +28,7 @@ const defaultIdleSeconds = ref(300)
 const viewMode = ref<ViewMode>('table')
 const stateFilter = ref<StateFilter>('all')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
-const viewStorageKey = 'llamacpp-manager.instances.view'
+const viewStorageKey = 'llamarack.instances.view'
 const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'STOPPING'])
 const filterOptions: Array<{ value: StateFilter; label: string }> = [
   { value: 'all', label: 'All' },

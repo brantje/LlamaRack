@@ -52,11 +52,11 @@ func TestBearerValidationAndTicketErrorBranches(t *testing.T) {
 		t.Helper()
 		claims := managementClaims{
 			RegisteredClaims: jwt.RegisteredClaims{
-				Issuer: managerIssuer,
-				Subject: subject,
+				Issuer:    managerIssuer,
+				Subject:   subject,
 				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-				IssuedAt: jwt.NewNumericDate(time.Now()),
-				ID: jti,
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+				ID:        jti,
 			},
 			SessionID: sessionID,
 		}
@@ -67,9 +67,9 @@ func TestBearerValidationAndTicketErrorBranches(t *testing.T) {
 		return token
 	}
 	for name, token := range map[string]string{
-		"bad subject": sign("not-an-id", "session", "jti"),
+		"bad subject":     sign("not-an-id", "session", "jti"),
 		"missing session": sign("1", "", "jti"),
-		"missing jti": sign("1", "session", ""),
+		"missing jti":     sign("1", "session", ""),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := s.AuthenticateBearer(ctx, token); !errors.Is(err, ErrSessionInvalid) {
@@ -80,11 +80,11 @@ func TestBearerValidationAndTicketErrorBranches(t *testing.T) {
 
 	wrongMethod := jwt.NewWithClaims(jwt.SigningMethodHS256, managementClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer: managerIssuer,
-			Subject: "1",
+			Issuer:    managerIssuer,
+			Subject:   "1",
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			IssuedAt: jwt.NewNumericDate(time.Now()),
-			ID: "jti",
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        "jti",
 		},
 		SessionID: "session",
 	})

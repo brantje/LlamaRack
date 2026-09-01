@@ -1,8 +1,8 @@
-# Contributing to LlamaCPP Manager
+# Contributing to LlamaRack
 
-Thank you for your interest in contributing to LlamaCPP Manager.
+Thank you for your interest in contributing to LlamaRack.
 
-LlamaCPP Manager is a self-hosted control plane and OpenAI-compatible gateway for `llama.cpp`. It manages GGUF models, durable `llama-server` instances, resource-aware scheduling, Hugging Face downloads, authentication, observability, and the web management interface.
+LlamaRack is a self-hosted control plane and OpenAI-compatible gateway for `llama.cpp`. It manages GGUF models, durable `llama-server` instances, resource-aware scheduling, Hugging Face downloads, authentication, observability, and the web management interface.
 
 The project is under active development. Correctness, maintainability, test coverage, and compatibility are more important than landing features quickly.
 
@@ -592,7 +592,7 @@ New frontend behavior must include corresponding tests.
 
 # llama.cpp integration
 
-LlamaCPP Manager manages `llama-server`; it should not unnecessarily replace or reinterpret llama.cpp's configuration model.
+LlamaRack manages `llama-server`; it should not unnecessarily replace or reinterpret llama.cpp's configuration model.
 
 When working on llama.cpp integration:
 

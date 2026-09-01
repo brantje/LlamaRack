@@ -6,6 +6,7 @@ frontend/.data/
 
 # Backend
 backend/bin/
+backend/coverage.out
 backend/data/
 backend/*.db
 backend/*.db-shm

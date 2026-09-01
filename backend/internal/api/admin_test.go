@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type adminFixture struct {

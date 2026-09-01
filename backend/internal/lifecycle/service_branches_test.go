@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func slowLifecycleBinary(t *testing.T) string {
@@ -18,10 +18,10 @@ func slowLifecycleBinary(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_LIFECYCLE_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_LIFECYCLE_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_LIFECYCLE_HELPER", "1")
 	path := filepath.Join(t.TempDir(), "slow-llama")
-	script := "#!/bin/sh\nsleep 1\nexec \"$LCM_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"
+	script := "#!/bin/sh\nsleep 1\nexec \"$LLAMARACK_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

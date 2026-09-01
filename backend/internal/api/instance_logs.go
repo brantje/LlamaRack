@@ -81,12 +81,18 @@ func (h *instanceLogHandler) stream(w http.ResponseWriter, r *http.Request, inst
 	w.WriteHeader(http.StatusOK)
 	writeEntry := func(entry logEntry) bool {
 		payload, err := json.Marshal(entry)
-		if err != nil { return false }
-		if _, err := fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload); err != nil { return false }
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload); err != nil {
+			return false
+		}
 		return true
 	}
 	for _, entry := range filterLogEntries(snapshot, source, query, limit) {
-		if !writeEntry(entry) { return }
+		if !writeEntry(entry) {
+			return
+		}
 	}
 	_, _ = w.Write([]byte(": connected\n\n"))
 	flusher.Flush()
@@ -94,15 +100,24 @@ func (h *instanceLogHandler) stream(w http.ResponseWriter, r *http.Request, inst
 	defer keepAlive.Stop()
 	for {
 		select {
-		case <-r.Context().Done(): return
+		case <-r.Context().Done():
+			return
 		case line, open := <-events:
-			if !open { return }
+			if !open {
+				return
+			}
 			entry, ok := parseLogEntry(line)
-			if !ok || !logEntryMatches(entry, source, query) { continue }
-			if !writeEntry(entry) { return }
+			if !ok || !logEntryMatches(entry, source, query) {
+				continue
+			}
+			if !writeEntry(entry) {
+				return
+			}
 			flusher.Flush()
 		case <-keepAlive.C:
-			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil { return }
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -110,35 +125,55 @@ func (h *instanceLogHandler) stream(w http.ResponseWriter, r *http.Request, inst
 
 func normalizeLogSource(value string) (string, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" { value = "all" }
+	if value == "" {
+		value = "all"
+	}
 	switch value {
-	case "all", "stdout", "stderr", "manager": return value, true
-	default: return "", false
+	case "all", "stdout", "stderr", "manager":
+		return value, true
+	default:
+		return "", false
 	}
 }
 
 func parseLogEntry(line string) (logEntry, bool) {
 	parts := strings.SplitN(line, "\t", 3)
-	if len(parts) != 3 { return logEntry{}, false }
+	if len(parts) != 3 {
+		return logEntry{}, false
+	}
 	source := strings.TrimSuffix(strings.TrimPrefix(parts[0], "["), "]")
-	if source != "stdout" && source != "stderr" && source != "manager" { return logEntry{}, false }
-	if _, err := time.Parse(time.RFC3339Nano, parts[1]); err != nil { return logEntry{}, false }
+	if source != "stdout" && source != "stderr" && source != "manager" {
+		return logEntry{}, false
+	}
+	if _, err := time.Parse(time.RFC3339Nano, parts[1]); err != nil {
+		return logEntry{}, false
+	}
 	return logEntry{Source: source, Timestamp: parts[1], Text: parts[2]}, true
 }
 
 func logEntryMatches(entry logEntry, source, query string) bool {
-	if source != "all" && entry.Source != source { return false }
-	if query == "" { return true }
+	if source != "all" && entry.Source != source {
+		return false
+	}
+	if query == "" {
+		return true
+	}
 	return strings.Contains(strings.ToLower(entry.Text), strings.ToLower(query))
 }
 
 func filterLogEntries(lines []string, source, query string, limit int) []logEntry {
-	if limit <= 0 { return []logEntry{} }
+	if limit <= 0 {
+		return []logEntry{}
+	}
 	entries := make([]logEntry, 0, min(len(lines), limit))
 	for _, line := range lines {
 		entry, ok := parseLogEntry(line)
-		if ok && logEntryMatches(entry, source, query) { entries = append(entries, entry) }
+		if ok && logEntryMatches(entry, source, query) {
+			entries = append(entries, entry)
+		}
 	}
-	if len(entries) > limit { entries = entries[len(entries)-limit:] }
+	if len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
 	return entries
 }

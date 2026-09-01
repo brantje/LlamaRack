@@ -28,7 +28,9 @@ func TestAddManagerLogUsesBoundedSessionRing(t *testing.T) {
 
 	s.AddManagerLog("one", "  autoload triggered  ")
 	logs := s.Logs("one")
-	if len(logs) != 1 { t.Fatalf("logs=%v", logs) }
+	if len(logs) != 1 {
+		t.Fatalf("logs=%v", logs)
+	}
 	assertTimestampedLog(t, logs[0], "manager", "autoload triggered")
 
 	initial, ch, cancel := s.SubscribeLogs("one")
@@ -48,5 +50,7 @@ func TestAddManagerLogUsesBoundedSessionRing(t *testing.T) {
 func TestFormatLaunchCommandQuotesEveryArgument(t *testing.T) {
 	got := formatLaunchCommand("/opt/llama server", []string{"--model", "/models/my model.gguf", "--ctx-size", "8192"})
 	want := `"/opt/llama server" "--model" "/models/my model.gguf" "--ctx-size" "8192"`
-	if got != want { t.Fatalf("launch command=%q want=%q", got, want) }
+	if got != want {
+		t.Fatalf("launch command=%q want=%q", got, want)
+	}
 }

@@ -8,14 +8,16 @@ RUN go mod download
 COPY . .
 RUN go mod tidy && \
     go mod verify && \
-    CGO_ENABLED=0 go build -trimpath -o /out/llamacpp-manager ./cmd/llamacpp-manager
+    CGO_ENABLED=0 go build -trimpath -o /out/llamarack ./cmd/llamarack
 
 FROM ${LLAMA_IMAGE}
-COPY --from=build /out/llamacpp-manager /usr/local/bin/llamacpp-manager
-ENV LCM_LISTEN_ADDR=:8000 \
-    LCM_DATA_DIR=/config \
-    LCM_MODELS_DIR=/models \
-    LCM_LLAMA_SERVER=/app/llama-server
+COPY --from=build /out/llamarack /usr/local/bin/llamarack
+RUN ln -s /usr/local/bin/llamarack /usr/local/bin/llamacpp-manager && \
+    mkdir -p /config /models
+ENV LLAMARACK_LISTEN_ADDR=:8000 \
+    LLAMARACK_DATA_DIR=/config \
+    LLAMARACK_MODELS_DIR=/models \
+    LLAMARACK_LLAMA_SERVER=/app/llama-server
 VOLUME ["/config", "/models"]
 EXPOSE 8000
-ENTRYPOINT ["/usr/local/bin/llamacpp-manager"]
+ENTRYPOINT ["/usr/local/bin/llamarack"]

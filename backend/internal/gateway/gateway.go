@@ -19,32 +19,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 const (
 	metadataResponseCaptureLimit = 8 << 20
-	preAuthRequestBodyBytes       = 64 << 10
-	maxRequestBodyBytes           = 32 << 20
-)
-
-const (
-	headerRequestID       = "X-LlamaCPP-Manager-Request-ID"
-	headerTraceID         = "X-LiteLLM-Trace-ID"
-	headerInstance        = "X-LlamaCPP-Manager-Instance"
-	headerAutoloaded      = "X-LlamaCPP-Manager-Autoloaded"
-	headerQueueMS         = "X-LlamaCPP-Manager-Queue-MS"
-	headerLoadMS          = "X-LlamaCPP-Manager-Load-MS"
-	headerTTFTMS          = "X-LlamaCPP-Manager-TTFT-MS"
-	headerPromptTPS       = "X-LlamaCPP-Manager-Prompt-Tokens-Per-Second"
-	headerGenerationTPS   = "X-LlamaCPP-Manager-Generation-Tokens-Per-Second"
-	headerPromptTokens    = "X-LlamaCPP-Manager-Prompt-Tokens"
-	headerGeneratedTokens = "X-LlamaCPP-Manager-Generated-Tokens"
-	headerTotalTokens     = "X-LlamaCPP-Manager-Total-Tokens"
+	preAuthRequestBodyBytes      = 64 << 10
+	maxRequestBodyBytes          = 32 << 20
 )
 
 var requestIDFallback atomic.Uint64
@@ -79,7 +64,7 @@ func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	requestID := newRequestID()
-	w.Header().Set(headerRequestID, requestID)
+	setProductHeader(w.Header(), headerRequestID, requestID)
 
 	// Read only a small metadata budget before authentication. This preserves
 	// useful body-derived metadata for normal/small failed-auth requests without
@@ -227,7 +212,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record.InstanceID = instance.ID
-	w.Header().Set(headerInstance, instance.ID)
+	setProductHeader(w.Header(), headerInstance, instance.ID)
 	if instance.RequestLogMode == "full" {
 		value := string(body)
 		record.RequestBody = &value
@@ -236,7 +221,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
 	record.Autoloaded = preRuntime.State != supervisor.Ready
-	w.Header().Set(headerAutoloaded, strconv.FormatBool(record.Autoloaded))
+	setProductHeader(w.Header(), headerAutoloaded, strconv.FormatBool(record.Autoloaded))
 	// Store the canonical Instance and opt-in request body before worker
 	// acquisition so acquire/autoload failures still have useful detail.
 	g.update(r.Context(), requestID, record)
@@ -247,10 +232,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queueStarted := time.Now()
 	endpoint, release, err := g.lifecycle.Acquire(r.Context(), instance.ID)
 	record.QueueDurationMS = milliseconds(time.Since(queueStarted))
-	w.Header().Set(headerQueueMS, metricFloat(record.QueueDurationMS))
+	setProductHeader(w.Header(), headerQueueMS, metricFloat(record.QueueDurationMS))
 	if record.Autoloaded {
 		record.LoadDurationMS = record.QueueDurationMS
-		w.Header().Set(headerLoadMS, metricFloat(record.LoadDurationMS))
+		setProductHeader(w.Header(), headerLoadMS, metricFloat(record.LoadDurationMS))
 	}
 	if err != nil {
 		if g.observability != nil {
@@ -437,7 +422,7 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
 	out := make([]item, 0, len(items))
 	for _, instance := range items {
 		if instance.Enabled {
-			out = append(out, item{ID: instance.ID, Object: "model", Created: time.Now().Unix(), OwnedBy: "llamacpp-manager"})
+			out = append(out, item{ID: instance.ID, Object: "model", Created: time.Now().Unix(), OwnedBy: "llamarack"})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
@@ -667,22 +652,22 @@ func calculateResponseMetrics(started, firstByte, finished time.Time, usage usag
 
 func addFinalMetricHeaders(header http.Header, endpoint string, metrics responseMetrics) {
 	if metrics.ttftMS != nil {
-		header.Set(headerTTFTMS, metricFloat(*metrics.ttftMS))
+		setProductHeader(header, headerTTFTMS, metricFloat(*metrics.ttftMS))
 	}
 	if metrics.promptTPS != nil {
-		header.Set(headerPromptTPS, metricFloat(*metrics.promptTPS))
+		setProductHeader(header, headerPromptTPS, metricFloat(*metrics.promptTPS))
 	}
 	if endpoint != "/v1/embeddings" && metrics.generationTPS != nil {
-		header.Set(headerGenerationTPS, metricFloat(*metrics.generationTPS))
+		setProductHeader(header, headerGenerationTPS, metricFloat(*metrics.generationTPS))
 	}
 	if metrics.promptTokens > 0 {
-		header.Set(headerPromptTokens, strconv.FormatInt(metrics.promptTokens, 10))
+		setProductHeader(header, headerPromptTokens, strconv.FormatInt(metrics.promptTokens, 10))
 	}
 	if endpoint != "/v1/embeddings" && metrics.generatedTokens > 0 {
-		header.Set(headerGeneratedTokens, strconv.FormatInt(metrics.generatedTokens, 10))
+		setProductHeader(header, headerGeneratedTokens, strconv.FormatInt(metrics.generatedTokens, 10))
 	}
 	if metrics.totalTokens > 0 {
-		header.Set(headerTotalTokens, strconv.FormatInt(metrics.totalTokens, 10))
+		setProductHeader(header, headerTotalTokens, strconv.FormatInt(metrics.totalTokens, 10))
 	}
 }
 
@@ -775,9 +760,9 @@ func numberValue(value any) (float64, bool) {
 func newRequestID() string {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err == nil {
-		return "lcm_" + hex.EncodeToString(random[:])
+		return "lr_" + hex.EncodeToString(random[:])
 	}
-	return fmt.Sprintf("lcm_%x_%x", time.Now().UnixNano(), requestIDFallback.Add(1))
+	return fmt.Sprintf("lr_%x_%x", time.Now().UnixNano(), requestIDFallback.Add(1))
 }
 
 func milliseconds(value time.Duration) float64 { return float64(value.Microseconds()) / 1000 }

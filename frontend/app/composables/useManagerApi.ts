@@ -1,4 +1,4 @@
-const managementTokenKey = 'lcm_management_token'
+const managementTokenKey = 'llamarack_management_token'
 
 export function readManagementToken() {
   if (typeof window === 'undefined') return ''

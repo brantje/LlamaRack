@@ -56,7 +56,7 @@ describe('application shell', () => {
     const manager = resetState()
     manager.backendError.value = 'connection refused'
     let wrapper = await mountSuspended(App, { route: false })
-    expect(wrapper.text()).toContain('Manager connection failed')
+    expect(wrapper.text()).toContain('LlamaRack connection failed')
     wrapper.unmount()
 
     manager.backendError.value = ''

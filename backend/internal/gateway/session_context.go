@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 const headerSessionID = "X-LiteLLM-Session-ID"

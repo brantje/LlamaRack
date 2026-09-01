@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestDiscoverRecommendationHandler(t *testing.T) {
@@ -161,5 +161,7 @@ func apiWriteString(t *testing.T, b *bytes.Buffer, value string) {
 }
 func apiWriteBinary(t *testing.T, b *bytes.Buffer, value any) {
 	t.Helper()
-	if err := binary.Write(b, binary.LittleEndian, value); err != nil { t.Fatal(err) }
+	if err := binary.Write(b, binary.LittleEndian, value); err != nil {
+		t.Fatal(err)
+	}
 }

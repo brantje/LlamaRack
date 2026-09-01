@@ -46,21 +46,21 @@ func TestInferenceOpenAPIResponseHeaders(t *testing.T) {
 	operation := doc.Paths["/v1/chat/completions"]["post"]
 	response := operation.Responses["200"]
 	for _, header := range []string{
-		"x-llamacpp-manager-request-id",
-		"x-llamacpp-manager-instance",
-		"x-llamacpp-manager-autoloaded",
-		"x-llamacpp-manager-queue-ms",
-		"x-llamacpp-manager-load-ms",
-		"x-llamacpp-manager-ttft-ms",
-		"x-llamacpp-manager-prompt-tokens-per-second",
-		"x-llamacpp-manager-generation-tokens-per-second",
+		"x-llamarack-request-id",
+		"x-llamarack-instance",
+		"x-llamarack-autoloaded",
+		"x-llamarack-queue-ms",
+		"x-llamarack-load-ms",
+		"x-llamarack-ttft-ms",
+		"x-llamarack-prompt-tokens-per-second",
+		"x-llamarack-generation-tokens-per-second",
 	} {
 		if _, ok := response.Headers[header]; !ok {
 			t.Fatalf("missing documented inference header %s", header)
 		}
 	}
 	embeddings := doc.Paths["/v1/embeddings"]["post"].Responses["200"].Headers
-	if _, ok := embeddings["x-llamacpp-manager-generation-tokens-per-second"]; ok {
+	if _, ok := embeddings["x-llamarack-generation-tokens-per-second"]; ok {
 		t.Fatal("embeddings should not document generation throughput")
 	}
 }
@@ -80,6 +80,19 @@ func TestMuxServesRuntimeOpenAPIAndScalarDocs(t *testing.T) {
 	}
 	if spec["openapi"] != "3.1.0" {
 		t.Fatalf("openapi=%v", spec["openapi"])
+	}
+	info, _ := spec["info"].(map[string]any)
+	if info["title"] != "LlamaRack API" {
+		t.Fatalf("openapi title=%v", info["title"])
+	}
+	components, _ := spec["components"].(map[string]any)
+	schemes, _ := components["securitySchemes"].(map[string]any)
+	management, _ := schemes["managementBearer"].(map[string]any)
+	if management["type"] != "http" || management["scheme"] != "bearer" {
+		t.Fatalf("management security scheme=%v", management)
+	}
+	if _, ok := schemes["managerSession"]; ok {
+		t.Fatal("stale cookie security scheme must not be documented")
 	}
 
 	w = httptest.NewRecorder()

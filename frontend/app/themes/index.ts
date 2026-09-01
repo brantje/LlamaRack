@@ -1,4 +1,4 @@
-export const THEME_STORAGE_KEY = 'llamacpp-manager-theme'
+export const THEME_STORAGE_KEY = 'llamarack-theme'
 export const DEFAULT_THEME_ID = 'dark'
 
 export const themes = [

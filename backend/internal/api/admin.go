@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type adminHandler struct {
@@ -82,11 +82,11 @@ func (h *adminHandler) current(r *http.Request) (auth.User, auth.Session, bool) 
 	if user, session, ok := managementAuthFromRequest(r); ok {
 		return user, session, true
 	}
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil {
+	cookie := sessionCookieValue(r)
+	if cookie == "" {
 		return auth.User{}, auth.Session{}, false
 	}
-	user, session, err := h.auth.SessionUserWithSession(r.Context(), cookie.Value)
+	user, session, err := h.auth.SessionUserWithSession(r.Context(), cookie)
 	return user, session, err == nil
 }
 

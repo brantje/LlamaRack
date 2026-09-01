@@ -23,7 +23,7 @@ func ValidateOptionsRetaining(profile Profile, options, existing map[string]stri
 			return nil, fmt.Errorf("llama.cpp option key is required")
 		}
 		if managerOwnedOptions[key] {
-			return nil, fmt.Errorf("llama.cpp option %q is managed by LlamaCPP Manager and cannot be overridden here", key)
+			return nil, fmt.Errorf("llama.cpp option %q is managed by LlamaRack and cannot be overridden here", key)
 		}
 		if supported[key] {
 			validated, err := ValidateOptions(profile, map[string]string{key: rawValue})

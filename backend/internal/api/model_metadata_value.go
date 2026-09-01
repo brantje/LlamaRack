@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 type modelMetadataValueHandler struct {

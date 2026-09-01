@@ -63,8 +63,8 @@ describe('useManagerApi', () => {
     fetchMock.mockResolvedValue({ ok: true })
     storeManagementToken('remembered', true)
     expect(readManagementToken()).toBe('remembered')
-    expect(window.localStorage.getItem('lcm_management_token')).toBe('remembered')
-    expect(window.sessionStorage.getItem('lcm_management_token')).toBeNull()
+    expect(window.localStorage.getItem('llamarack_management_token')).toBe('remembered')
+    expect(window.sessionStorage.getItem('llamarack_management_token')).toBeNull()
 
     const { request } = useManagerApi(fetchMock as any)
     await request('/api/v1/me', { headers: { Authorization: 'Bearer explicit' } })
@@ -72,20 +72,20 @@ describe('useManagerApi', () => {
 
     storeManagementToken('temporary', false)
     expect(readManagementToken()).toBe('temporary')
-    expect(window.sessionStorage.getItem('lcm_management_token')).toBe('temporary')
-    expect(window.localStorage.getItem('lcm_management_token')).toBeNull()
+    expect(window.sessionStorage.getItem('llamarack_management_token')).toBe('temporary')
+    expect(window.localStorage.getItem('llamarack_management_token')).toBeNull()
     clearManagementToken()
     expect(readManagementToken()).toBe('')
   })
 
   it('clears both stores when an empty management token is saved', () => {
-    window.sessionStorage.setItem('lcm_management_token', 'stale-session')
-    window.localStorage.setItem('lcm_management_token', 'stale-local')
+    window.sessionStorage.setItem('llamarack_management_token', 'stale-session')
+    window.localStorage.setItem('llamarack_management_token', 'stale-local')
 
     storeManagementToken('', true)
 
-    expect(window.sessionStorage.getItem('lcm_management_token')).toBeNull()
-    expect(window.localStorage.getItem('lcm_management_token')).toBeNull()
+    expect(window.sessionStorage.getItem('llamarack_management_token')).toBeNull()
+    expect(window.localStorage.getItem('llamarack_management_token')).toBeNull()
     expect(readManagementToken()).toBe('')
   })
 

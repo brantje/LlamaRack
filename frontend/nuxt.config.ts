@@ -1,5 +1,5 @@
 const themeBootstrap = `(() => {
-  const key = 'llamacpp-manager-theme'
+  const key = 'llamarack-theme'
   const allowed = new Set(['dark', 'light'])
   let value = 'dark'
   try {
@@ -21,7 +21,7 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
-      title: 'llamacpp-manager',
+      title: 'LlamaRack',
       meta: [
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
         { name: 'color-scheme', content: 'dark light' }

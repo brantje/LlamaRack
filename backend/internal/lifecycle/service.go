@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 const resourcePressureReason = "resource_pressure"

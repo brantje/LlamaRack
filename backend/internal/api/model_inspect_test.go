@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestRecommendationHandler(t *testing.T) {

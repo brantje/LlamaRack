@@ -21,7 +21,7 @@ describe('Instances redesign cleanup', () => {
 
   it('retains the issue-required table, card and identity hooks', () => {
     expect(instancesSource).toContain("const viewMode = ref<ViewMode>('table')")
-    expect(instancesSource).toContain("const viewStorageKey = 'llamacpp-manager.instances.view'")
+    expect(instancesSource).toContain("const viewStorageKey = 'llamarack.instances.view'")
     expect(instancesSource).toContain('data-testid="instance-card"')
     expect(instancesSource).toContain('data-testid="instance-id"')
     expect(instancesSource).toContain('data-testid="instance-card-more"')

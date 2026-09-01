@@ -297,7 +297,7 @@ Compatibility target:
 LiteLLM
    -> OpenAI base URL
    -> model=<instance.id>
-   -> llamacpp-manager
+   -> LlamaRack
    -> exact Instance worker
 ```
 

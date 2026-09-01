@@ -159,7 +159,7 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     expect(toggle).toBeTruthy()
     toggle!.vm.$emit('update:modelValue', false)
     await flushPromises()
-    expect(localStorage.getItem('llamacpp-manager-discover-assume-idle')).toBe('false')
+    expect(localStorage.getItem('llamarack-discover-assume-idle')).toBe('false')
     expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=false'))).toBe(true)
     wrapper.unmount()
   })

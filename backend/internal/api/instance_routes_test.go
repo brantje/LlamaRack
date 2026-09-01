@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
@@ -29,18 +29,18 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	})
 
 	create := doRequest(t, f.server, http.MethodPost, "/api/v1/instances", map[string]any{
-		"model_id": model.ID,
-		"name": "Primary Coder",
-		"enabled": true,
-		"autoload_enabled": true,
-		"always_on": false,
-		"priority": "high",
-		"eviction_enabled": true,
+		"model_id":            model.ID,
+		"name":                "Primary Coder",
+		"enabled":             true,
+		"autoload_enabled":    true,
+		"always_on":           false,
+		"priority":            "high",
+		"eviction_enabled":    true,
 		"idle_unload_seconds": 120,
-		"gpu_mode": "manual",
-		"gpu_devices": []string{"0", "1"},
-		"tensor_split": "1,1",
-		"options": map[string]string{"ctx-size": "8192", "threads": "4"},
+		"gpu_mode":            "manual",
+		"gpu_devices":         []string{"0", "1"},
+		"tensor_split":        "1,1",
+		"options":             map[string]string{"ctx-size": "8192", "threads": "4"},
 	}, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create instance=%d body=%s", create.Code, create.Body.String())
@@ -71,21 +71,23 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	}
 
 	baseUpdate := map[string]any{
-		"model_id": model.ID,
-		"name": "Primary Coder",
-		"enabled": true,
-		"autoload_enabled": true,
-		"always_on": true,
-		"priority": "normal",
-		"eviction_enabled": false,
+		"model_id":            model.ID,
+		"name":                "Primary Coder",
+		"enabled":             true,
+		"autoload_enabled":    true,
+		"always_on":           true,
+		"priority":            "normal",
+		"eviction_enabled":    false,
 		"idle_unload_seconds": 45,
-		"gpu_mode": "auto",
-		"gpu_devices": []string{},
-		"tensor_split": "",
-		"options": map[string]string{"ctx-size": "4096"},
+		"gpu_mode":            "auto",
+		"gpu_devices":         []string{},
+		"tensor_split":        "",
+		"options":             map[string]string{"ctx-size": "4096"},
 	}
 	slugAwareUpdate := map[string]any{}
-	for k, v := range baseUpdate { slugAwareUpdate[k] = v }
+	for k, v := range baseUpdate {
+		slugAwareUpdate[k] = v
+	}
 	slugAwareUpdate["slug"] = "Primary Coder"
 	updated := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", slugAwareUpdate, cookie)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"always_on":true`) {
@@ -93,7 +95,9 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	}
 
 	renameWithoutConfirmation := map[string]any{}
-	for k, v := range baseUpdate { renameWithoutConfirmation[k] = v }
+	for k, v := range baseUpdate {
+		renameWithoutConfirmation[k] = v
+	}
 	renameWithoutConfirmation["name"] = "Renamed Coder"
 	w := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", renameWithoutConfirmation, cookie)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "confirmation required") {
@@ -116,7 +120,9 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	}
 
 	runningRename := map[string]any{}
-	for k, v := range baseUpdate { runningRename[k] = v }
+	for k, v := range baseUpdate {
+		runningRename[k] = v
+	}
 	runningRename["name"] = "Renamed Coder"
 	runningRename["restart_running"] = true
 	runningRename["confirm_model_id_change"] = true
@@ -177,20 +183,22 @@ func TestModelCreationFirstInstanceBranches(t *testing.T) {
 
 	writeGGUF := func(name string) string {
 		path := filepath.Join(f.dir, name)
-		if err := os.WriteFile(path, []byte("gguf"), 0o644); err != nil { t.Fatal(err) }
+		if err := os.WriteFile(path, []byte("gguf"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		return path
 	}
 
 	started := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]any{
-		"name": "Bootstrap Model",
+		"name":      "Bootstrap Model",
 		"gguf_path": writeGGUF("bootstrap-Q4_K_M.gguf"),
 		"first_instance": map[string]any{
-			"name": "Bootstrap Instance",
-			"slug": "Bootstrap API",
-			"always_on": false,
+			"name":             "Bootstrap Instance",
+			"slug":             "Bootstrap API",
+			"always_on":        false,
 			"autoload_enabled": true,
 			"eviction_enabled": true,
-			"start": true,
+			"start":            true,
 		},
 	}, cookie)
 	if started.Code != http.StatusCreated || !strings.Contains(started.Body.String(), `"id":"bootstrap-api"`) || !strings.Contains(started.Body.String(), `"start_error"`) {
@@ -198,8 +206,8 @@ func TestModelCreationFirstInstanceBranches(t *testing.T) {
 	}
 
 	invalidInstance := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]any{
-		"name": "Invalid Bootstrap",
-		"gguf_path": writeGGUF("invalid-Q5_K_M.gguf"),
+		"name":           "Invalid Bootstrap",
+		"gguf_path":      writeGGUF("invalid-Q5_K_M.gguf"),
 		"first_instance": map[string]any{"name": "!!!"},
 	}, cookie)
 	if invalidInstance.Code != http.StatusBadRequest || !strings.Contains(invalidInstance.Body.String(), `"model"`) {

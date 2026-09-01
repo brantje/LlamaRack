@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func lifecycleFakeBinary(t *testing.T) string {
@@ -24,10 +24,10 @@ func lifecycleFakeBinary(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_LIFECYCLE_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_LIFECYCLE_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_LIFECYCLE_HELPER", "1")
 	path := filepath.Join(t.TempDir(), "fake-llama")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec \"$LCM_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec \"$LLAMARACK_LIFECYCLE_TEST_BINARY\" -test.run=TestLifecycleHelperProcess -- \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path

@@ -1,6 +1,6 @@
 services:
-  llamacpp-manager:
-    image: ghcr.io/brantje/llamacpp-manager:${LCM_NVIDIA_IMAGE_TAG:-latest-cuda}
+  llamarack:
+    image: ghcr.io/brantje/llamarack:${LLAMARACK_NVIDIA_IMAGE_TAG:-latest-cuda}
     environment:
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}

@@ -20,10 +20,10 @@ func fakeServerScript(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	path := filepath.Join(t.TempDir(), "fake-llama-server")
-	script := "#!/bin/sh\nexec \"$LCM_TEST_BINARY\" -test.run=TestHelperProcess -- \"$@\"\n"
+	script := "#!/bin/sh\nexec \"$LLAMARACK_TEST_BINARY\" -test.run=TestHelperProcess -- \"$@\"\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,9 @@ func TestStartReadyEndpointLogsAndStop(t *testing.T) {
 		`"--ctx-size" "1024"`,
 		`"--cors-origins" "localhost"`,
 	} {
-		if !strings.Contains(joined, want) { t.Fatalf("launch command missing %q in logs=%v", want, logs) }
+		if !strings.Contains(joined, want) {
+			t.Fatalf("launch command missing %q in logs=%v", want, logs)
+		}
 	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -177,7 +179,9 @@ func TestRingCopyLogsPortAllocationAndShutdown(t *testing.T) {
 	}
 	copyLogs(r, "instance", "model", "stderr", strings.NewReader("a\nb\n"))
 	got := r.lines()
-	if len(got) != 2 { t.Fatalf("copied logs=%v", got) }
+	if len(got) != 2 {
+		t.Fatalf("copied logs=%v", got)
+	}
 	assertTimestampedLog(t, got[0], "stderr", "a")
 	assertTimestampedLog(t, got[1], "stderr", "b")
 

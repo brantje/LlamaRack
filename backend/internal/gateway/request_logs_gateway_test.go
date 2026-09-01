@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/observability"
 )
 
 const (
@@ -118,8 +118,8 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, tc.path, tc.secret, tc.body, map[string]string{
 				headerTraceID: testTraceHeader,
-				"User-Agent": "request-log-test/1.0",
-				"Forwarded":  "for=203.0.113.20",
+				"User-Agent":  "request-log-test/1.0",
+				"Forwarded":   "for=203.0.113.20",
 			})
 			if w.Code != tc.want {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())

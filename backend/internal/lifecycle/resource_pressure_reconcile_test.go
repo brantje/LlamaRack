@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func TestAlwaysOnResourceBlockWaitsForCapacityThenReconciles(t *testing.T) {

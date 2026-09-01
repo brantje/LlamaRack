@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
 type huggingFaceFixture struct {
@@ -75,7 +75,7 @@ func newHuggingFaceFixture(t *testing.T) huggingFaceFixture {
 	downloadManager := downloads.New(context.Background(), db, filepath.Join(root, "models"), hf)
 	return huggingFaceFixture{
 		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager),
-		cookie: &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
+		cookie:  &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
 	}
 }
 

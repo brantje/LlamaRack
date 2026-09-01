@@ -11,7 +11,9 @@ import (
 // and retention behavior as raw worker output.
 func (s *Supervisor) AddManagerLog(instanceID, line string) {
 	line = strings.TrimSpace(line)
-	if instanceID == "" || line == "" { return }
+	if instanceID == "" || line == "" {
+		return
+	}
 	s.mu.Lock()
 	logRing := s.logRingLocked(instanceID)
 	s.mu.Unlock()

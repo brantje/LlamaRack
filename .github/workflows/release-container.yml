@@ -31,7 +31,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: |
+            ghcr.io/brantje/llamarack
+            ghcr.io/brantje/llamacpp-manager
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -47,7 +49,10 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            io.llamarack.build.reason=release
+            io.llamacpp-manager.build.reason=release
           cache-from: type=gha,scope=cpu
           cache-to: type=gha,mode=max,scope=cpu
 
@@ -55,7 +60,9 @@ jobs:
         id: meta-cuda
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: |
+            ghcr.io/brantje/llamarack
+            ghcr.io/brantje/llamacpp-manager
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}}-cuda
@@ -74,6 +81,9 @@ jobs:
           build-args: |
             LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
           tags: ${{ steps.meta-cuda.outputs.tags }}
-          labels: ${{ steps.meta-cuda.outputs.labels }}
+          labels: |
+            ${{ steps.meta-cuda.outputs.labels }}
+            io.llamarack.build.reason=release
+            io.llamacpp-manager.build.reason=release
           cache-from: type=gha,scope=cuda
           cache-to: type=gha,mode=max,scope=cuda

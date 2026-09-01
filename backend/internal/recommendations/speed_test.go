@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 func speedMetadata() Metadata {
@@ -50,9 +50,9 @@ func TestEstimateGenerationSpeedHybridPlacements(t *testing.T) {
 	snapshot := hardware.Snapshot{
 		RAMBandwidthBytesPerSecond: 52_000_000_000,
 		GPUs: []hardware.GPU{{
-			ID: "CUDA0",
+			ID:                            "CUDA0",
 			MemoryBandwidthBytesPerSecond: 288_000_000_000,
-			PCIeBandwidthBytesPerSecond: 15_753_846_153,
+			PCIeBandwidthBytesPerSecond:   15_753_846_153,
 		}},
 	}
 	memory := MemoryEstimate{WeightsBytes: 16 * gib, KVCacheBytes: 2 * gib}
@@ -115,9 +115,9 @@ func TestEstimateGenerationSpeedCoversInvalidInputs(t *testing.T) {
 	bandwidthGPU := hardware.GPU{ID: "CUDA0", MemoryBandwidthBytesPerSecond: 288_000_000_000}
 	metadata := speedMetadata()
 	for name, got := range map[string]GenerationSpeedEstimate{
-		"mode": estimateGenerationSpeed(hardware.Snapshot{}, MemoryEstimate{WeightsBytes: 1}, Offload{}, guide, metadata),
-		"weights": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{}, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide, metadata),
-		"devices": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full"}, guide, metadata),
+		"mode":           estimateGenerationSpeed(hardware.Snapshot{}, MemoryEstimate{WeightsBytes: 1}, Offload{}, guide, metadata),
+		"weights":        estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{}, Offload{Mode: "full", Devices: []string{"CUDA0"}}, guide, metadata),
+		"devices":        estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full"}, guide, metadata),
 		"missing device": estimateGenerationSpeed(hardware.Snapshot{GPUs: []hardware.GPU{bandwidthGPU}}, MemoryEstimate{WeightsBytes: 1}, Offload{Mode: "full", Devices: []string{"CUDA1"}}, guide, metadata),
 	} {
 		if got.Estimated || got.Label != "Estimate unavailable" {

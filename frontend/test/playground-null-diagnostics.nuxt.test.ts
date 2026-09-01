@@ -49,7 +49,7 @@ beforeEach(() => {
   mocks.request.mockReset()
   sessionStorage.clear()
   localStorage.clear()
-  sessionStorage.setItem('lcm_management_token', 'management-playground')
+  sessionStorage.setItem('llamarack_management_token', 'management-playground')
   vi.unstubAllGlobals()
 })
 
@@ -73,7 +73,7 @@ describe('Playground nullable diagnostics', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
       JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-null' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-null' } }
     )))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })

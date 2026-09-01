@@ -12,22 +12,22 @@ import (
 )
 
 const (
-	SessionLifetimeSeconds       = "session_lifetime_seconds"
-	LoginProtectionEnabled      = "login_protection_enabled"
-	LoginFailureThreshold       = "login_failure_threshold"
-	LoginLockoutSeconds         = "login_lockout_seconds"
-	LocalLoginEnabled           = "local_login_enabled"
-	OIDCJITProvisioningEnabled  = "oidc_jit_provisioning_enabled"
-	OIDCAutoLinkEnabled         = "oidc_auto_link_enabled"
-	TrustedProxies              = "trusted_proxies"
-	AllowedOrigins              = "allowed_origins"
-	ExternalURL                 = "external_url"
-	FrontendURL                 = "frontend_url"
-	StartupTimeoutSeconds       = "startup_timeout_seconds"
-	IdleUnloadSeconds           = "idle_unload_seconds"
-	AlwaysOnReconcileSeconds    = "always_on_reconcile_seconds"
-	ObservabilityRetentionDays  = "observability_retention_days"
-	PrometheusAuthToken         = "prometheus_auth_token"
+	SessionLifetimeSeconds     = "session_lifetime_seconds"
+	LoginProtectionEnabled     = "login_protection_enabled"
+	LoginFailureThreshold      = "login_failure_threshold"
+	LoginLockoutSeconds        = "login_lockout_seconds"
+	LocalLoginEnabled          = "local_login_enabled"
+	OIDCJITProvisioningEnabled = "oidc_jit_provisioning_enabled"
+	OIDCAutoLinkEnabled        = "oidc_auto_link_enabled"
+	TrustedProxies             = "trusted_proxies"
+	AllowedOrigins             = "allowed_origins"
+	ExternalURL                = "external_url"
+	FrontendURL                = "frontend_url"
+	StartupTimeoutSeconds      = "startup_timeout_seconds"
+	IdleUnloadSeconds          = "idle_unload_seconds"
+	AlwaysOnReconcileSeconds   = "always_on_reconcile_seconds"
+	ObservabilityRetentionDays = "observability_retention_days"
+	PrometheusAuthToken        = "prometheus_auth_token"
 )
 
 type Defaults struct {
@@ -95,22 +95,22 @@ func New(db *sql.DB, defaults Defaults) *Service {
 	return &Service{
 		db: db,
 		defs: map[string]definition{
-			SessionLifetimeSeconds:       {env: "LCM_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
-			LoginProtectionEnabled:      {env: "LCM_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},
-			LoginFailureThreshold:       {env: "LCM_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
-			LoginLockoutSeconds:         {env: "LCM_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
-			LocalLoginEnabled:           {defaultValue: "true", kind: "bool"},
-			OIDCJITProvisioningEnabled:  {defaultValue: "true", kind: "bool"},
-			OIDCAutoLinkEnabled:         {defaultValue: "false", kind: "bool"},
-			TrustedProxies:              {env: "LCM_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
-			AllowedOrigins:              {env: "LCM_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
-			ExternalURL:                 {env: "LCM_EXTERNAL_URL", defaultValue: "", kind: "string"},
-			FrontendURL:                 {defaultValue: "", kind: "string"},
-			StartupTimeoutSeconds:       {env: "LCM_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
-			IdleUnloadSeconds:           {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
-			AlwaysOnReconcileSeconds:    {env: "LCM_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
-			ObservabilityRetentionDays:  {defaultValue: "30", kind: "int", min: 1, max: 3650},
-			PrometheusAuthToken:         {env: "LCM_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
+			SessionLifetimeSeconds:     {env: "LLAMARACK_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
+			LoginProtectionEnabled:     {env: "LLAMARACK_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},
+			LoginFailureThreshold:      {env: "LLAMARACK_LOGIN_FAILURE_THRESHOLD", defaultValue: "5", kind: "int", min: 2, max: 100},
+			LoginLockoutSeconds:        {env: "LLAMARACK_LOGIN_LOCKOUT_SECONDS", defaultValue: "900", kind: "int", min: 1, max: 24 * 3600},
+			LocalLoginEnabled:          {defaultValue: "true", kind: "bool"},
+			OIDCJITProvisioningEnabled: {defaultValue: "true", kind: "bool"},
+			OIDCAutoLinkEnabled:        {defaultValue: "false", kind: "bool"},
+			TrustedProxies:             {env: "LLAMARACK_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
+			AllowedOrigins:             {env: "LLAMARACK_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
+			ExternalURL:                {env: "LLAMARACK_EXTERNAL_URL", defaultValue: "", kind: "string"},
+			FrontendURL:                {defaultValue: "", kind: "string"},
+			StartupTimeoutSeconds:      {env: "LLAMARACK_STARTUP_TIMEOUT_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.StartupTimeout/time.Second), 10), kind: "int", min: 1, max: 3600},
+			IdleUnloadSeconds:          {defaultValue: "300", kind: "int", min: 0, max: 7 * 24 * 3600},
+			AlwaysOnReconcileSeconds:   {env: "LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.AlwaysOnReconcile/time.Second), 10), kind: "int", min: 0, max: 3600},
+			ObservabilityRetentionDays: {defaultValue: "30", kind: "int", min: 1, max: 3650},
+			PrometheusAuthToken:        {env: "LLAMARACK_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
 		},
 		runtime: RuntimeInfo{DataDir: defaults.DataDir, ModelsDir: defaults.ModelsDir, DatabasePath: defaults.DatabasePath, ListenAddr: defaults.ListenAddr, LlamaServerPath: defaults.LlamaServerPath},
 	}
@@ -118,31 +118,43 @@ func New(db *sql.DB, defaults Defaults) *Service {
 
 func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 	def, ok := s.defs[key]
-	if !ok { return Value{}, fmt.Errorf("unknown manager setting %q", key) }
+	if !ok {
+		return Value{}, fmt.Errorf("unknown manager setting %q", key)
+	}
 	if def.databaseOverridesEnv {
 		var stored string
 		err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
 		if err == nil {
 			parsed, parseErr := parse(def, stored)
-			if parseErr != nil { return Value{}, fmt.Errorf("invalid stored setting %s: %w", key, parseErr) }
+			if parseErr != nil {
+				return Value{}, fmt.Errorf("invalid stored setting %s: %w", key, parseErr)
+			}
 			return Value{Value: parsed, Source: "database", Editable: true}, nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) { return Value{}, err }
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Value{}, err
+		}
 		if def.env != "" {
 			if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
 				parsed, parseErr := parse(def, value)
-				if parseErr != nil { return Value{}, fmt.Errorf("invalid %s: %w", def.env, parseErr) }
+				if parseErr != nil {
+					return Value{}, fmt.Errorf("invalid %s: %w", def.env, parseErr)
+				}
 				return Value{Value: parsed, Source: "environment", Editable: true}, nil
 			}
 		}
 		parsed, parseErr := parse(def, def.defaultValue)
-		if parseErr != nil { return Value{}, parseErr }
+		if parseErr != nil {
+			return Value{}, parseErr
+		}
 		return Value{Value: parsed, Source: "default", Editable: true}, nil
 	}
 	if def.env != "" {
 		if value, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(value) != "" {
 			parsed, err := parse(def, value)
-			if err != nil { return Value{}, fmt.Errorf("invalid %s: %w", def.env, err) }
+			if err != nil {
+				return Value{}, fmt.Errorf("invalid %s: %w", def.env, err)
+			}
 			return Value{Value: parsed, Source: "environment", Editable: false}, nil
 		}
 	}
@@ -150,28 +162,42 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
 	if err == nil {
 		parsed, parseErr := parse(def, stored)
-		if parseErr != nil { return Value{}, fmt.Errorf("invalid stored setting %s: %w", key, parseErr) }
+		if parseErr != nil {
+			return Value{}, fmt.Errorf("invalid stored setting %s: %w", key, parseErr)
+		}
 		return Value{Value: parsed, Source: "database", Editable: true}, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) { return Value{}, err }
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Value{}, err
+	}
 	parsed, err := parse(def, def.defaultValue)
-	if err != nil { return Value{}, err }
+	if err != nil {
+		return Value{}, err
+	}
 	return Value{Value: parsed, Source: "default", Editable: true}, nil
 }
 
 func (s *Service) Set(ctx context.Context, key string, value any) (Value, error) {
 	def, ok := s.defs[key]
-	if !ok { return Value{}, fmt.Errorf("unknown manager setting %q", key) }
+	if !ok {
+		return Value{}, fmt.Errorf("unknown manager setting %q", key)
+	}
 	if def.env != "" && !def.databaseOverridesEnv {
-		if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" { return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env) }
+		if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" {
+			return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
+		}
 	}
 	serialized := fmt.Sprint(value)
 	parsed, err := parse(def, serialized)
-	if err != nil { return Value{}, err }
+	if err != nil {
+		return Value{}, err
+	}
 	serialized = serialize(parsed)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)
 		ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=excluded.updated_at`, key, serialized, time.Now().Unix())
-	if err != nil { return Value{}, err }
+	if err != nil {
+		return Value{}, err
+	}
 	return Value{Value: parsed, Source: "database", Editable: true}, nil
 }
 
@@ -180,7 +206,9 @@ func (s *Service) General(ctx context.Context) (General, error) {
 	values := make(map[string]Value, len(keys))
 	for _, key := range keys {
 		value, err := s.Resolve(ctx, key)
-		if err != nil { return General{}, err }
+		if err != nil {
+			return General{}, err
+		}
 		values[key] = value
 	}
 	return General{
@@ -193,46 +221,72 @@ func (s *Service) General(ctx context.Context) (General, error) {
 
 func (s *Service) String(ctx context.Context, key string) (string, error) {
 	value, err := s.Resolve(ctx, key)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	result, ok := value.Value.(string)
-	if !ok { return "", fmt.Errorf("setting %s is not a string", key) }
+	if !ok {
+		return "", fmt.Errorf("setting %s is not a string", key)
+	}
 	return result, nil
 }
 
 func (s *Service) Int(ctx context.Context, key string) (int, error) {
 	value, err := s.Resolve(ctx, key)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	result, ok := value.Value.(int)
-	if !ok { return 0, fmt.Errorf("setting %s is not an integer", key) }
+	if !ok {
+		return 0, fmt.Errorf("setting %s is not an integer", key)
+	}
 	return result, nil
 }
 
 func (s *Service) Bool(ctx context.Context, key string) (bool, error) {
 	value, err := s.Resolve(ctx, key)
-	if err != nil { return false, err }
+	if err != nil {
+		return false, err
+	}
 	result, ok := value.Value.(bool)
-	if !ok { return false, fmt.Errorf("setting %s is not a boolean", key) }
+	if !ok {
+		return false, fmt.Errorf("setting %s is not a boolean", key)
+	}
 	return result, nil
 }
 
 func parse(def definition, value string) (any, error) {
 	value = strings.TrimSpace(value)
 	switch def.kind {
-	case "string": return value, nil
+	case "string":
+		return value, nil
 	case "bool":
-		parsed, err := strconv.ParseBool(value); if err != nil { return nil, errors.New("must be true or false") }; return parsed, nil
-	case "int":
-		parsed, err := strconv.Atoi(value); if err != nil { return nil, errors.New("must be an integer") }
-		if parsed < def.min || parsed > def.max { return nil, fmt.Errorf("must be between %d and %d", def.min, def.max) }
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, errors.New("must be true or false")
+		}
 		return parsed, nil
-	default: return nil, errors.New("unsupported setting type")
+	case "int":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, errors.New("must be an integer")
+		}
+		if parsed < def.min || parsed > def.max {
+			return nil, fmt.Errorf("must be between %d and %d", def.min, def.max)
+		}
+		return parsed, nil
+	default:
+		return nil, errors.New("unsupported setting type")
 	}
 }
 
 func serialize(value any) string {
 	switch typed := value.(type) {
-	case bool: return strconv.FormatBool(typed)
-	case int: return strconv.Itoa(typed)
-	default: return fmt.Sprint(value)
+	case bool:
+		return strconv.FormatBool(typed)
+	case int:
+		return strconv.Itoa(typed)
+	default:
+		return fmt.Sprint(value)
 	}
 }

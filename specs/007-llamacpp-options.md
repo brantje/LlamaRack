@@ -6,7 +6,7 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how `llamacpp-manager` discovers, stores, validates, presents and applies `llama-server` options.
+This specification defines how LlamaRack discovers, stores, validates, presents and applies `llama-server` options.
 
 The manager must not require a release whenever llama.cpp adds a flag. The active binary is inspected at runtime and a normalized option schema drives validation and UI rendering.
 

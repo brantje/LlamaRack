@@ -62,9 +62,15 @@ func TestInspectDerivedReaderHandlesInterleavedTokenizerMetadata(t *testing.T) {
 }
 
 func TestInspectDerivedReaderGracefulFailures(t *testing.T) {
-	if _, err := InspectDerivedReader(strings.NewReader("nope")); err == nil { t.Fatal("invalid magic should fail") }
-	if _, err := InspectDerivedReader(strings.NewReader("GGU")); err == nil { t.Fatal("short magic should fail") }
-	if _, err := InspectDerivedReader(nil); err == nil { t.Fatal("nil reader should fail") }
+	if _, err := InspectDerivedReader(strings.NewReader("nope")); err == nil {
+		t.Fatal("invalid magic should fail")
+	}
+	if _, err := InspectDerivedReader(strings.NewReader("GGU")); err == nil {
+		t.Fatal("short magic should fail")
+	}
+	if _, err := InspectDerivedReader(nil); err == nil {
+		t.Fatal("nil reader should fail")
+	}
 
 	var b bytes.Buffer
 	b.WriteString("GGUF")
@@ -75,7 +81,9 @@ func TestInspectDerivedReaderGracefulFailures(t *testing.T) {
 	writeDerivedValue(t, &b, uint32(8))
 	writeDerivedString(t, &b, "llama")
 	derived, err := InspectDerivedReader(bytes.NewReader(b.Bytes()))
-	if err == nil || derived.Architecture != "llama" { t.Fatalf("derived=%+v err=%v", derived, err) }
+	if err == nil || derived.Architecture != "llama" {
+		t.Fatalf("derived=%+v err=%v", derived, err)
+	}
 }
 
 func TestInspectDerivedReaderHeaderAndMetadataErrors(t *testing.T) {
@@ -83,9 +91,15 @@ func TestInspectDerivedReaderHeaderAndMetadataErrors(t *testing.T) {
 		var b bytes.Buffer
 		b.WriteString("GGUF")
 		writeDerivedValue(t, &b, version)
-		if tensorCount != nil { writeDerivedValue(t, &b, *tensorCount) }
-		if metadataCount != nil { writeDerivedValue(t, &b, *metadataCount) }
-		if tail != nil { tail(&b) }
+		if tensorCount != nil {
+			writeDerivedValue(t, &b, *tensorCount)
+		}
+		if metadataCount != nil {
+			writeDerivedValue(t, &b, *metadataCount)
+		}
+		if tail != nil {
+			tail(&b)
+		}
 		return b.Bytes()
 	}
 	zero := uint64(0)
@@ -126,7 +140,10 @@ func TestInspectDerivedReaderCompletesWithoutTokenizer(t *testing.T) {
 	writeDerivedString(t, &b, "general.architecture")
 	writeDerivedValue(t, &b, uint32(8))
 	writeDerivedString(t, &b, "llama")
-	for _, item := range []struct { key string; value int64 }{
+	for _, item := range []struct {
+		key   string
+		value int64
+	}{
 		{"llama.block_count", 32},
 		{"llama.embedding_length", 4096},
 		{"llama.attention.head_count", 32},
@@ -136,8 +153,12 @@ func TestInspectDerivedReaderCompletesWithoutTokenizer(t *testing.T) {
 		writeDerivedValue(t, &b, item.value)
 	}
 	derived, err := InspectDerivedReader(bytes.NewReader(b.Bytes()))
-	if err != nil { t.Fatal(err) }
-	if !derivedCoreReady(derived) { t.Fatalf("derived=%+v", derived) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !derivedCoreReady(derived) {
+		t.Fatalf("derived=%+v", derived)
+	}
 }
 
 func TestForwardReadSeeker(t *testing.T) {
@@ -149,8 +170,12 @@ func TestForwardReadSeeker(t *testing.T) {
 	if pos, err := r.Seek(0, io.SeekCurrent); err != nil || pos != 2 {
 		t.Fatalf("zero seek pos=%d err=%v", pos, err)
 	}
-	if _, err := r.Seek(-1, io.SeekCurrent); err == nil { t.Fatal("negative seek should fail") }
-	if _, err := r.Seek(1, io.SeekStart); err == nil { t.Fatal("absolute seek should fail") }
+	if _, err := r.Seek(-1, io.SeekCurrent); err == nil {
+		t.Fatal("negative seek should fail")
+	}
+	if _, err := r.Seek(1, io.SeekStart); err == nil {
+		t.Fatal("absolute seek should fail")
+	}
 	if pos, err := r.Seek(2, io.SeekCurrent); err != nil || pos != 4 {
 		t.Fatalf("forward seek pos=%d err=%v", pos, err)
 	}
@@ -167,5 +192,7 @@ func writeDerivedString(t *testing.T, b *bytes.Buffer, value string) {
 
 func writeDerivedValue(t *testing.T, b *bytes.Buffer, value any) {
 	t.Helper()
-	if err := binary.Write(b, binary.LittleEndian, value); err != nil { t.Fatal(err) }
+	if err := binary.Write(b, binary.LittleEndian, value); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -362,7 +362,7 @@ func GroupArtifacts(repoID, revision string, files []File, parameterCounts ...in
 		artifact := Artifact{
 			ID: artifactID(repoID, revision, g.key), Name: g.name, Quantization: detectQuantization(g.name),
 			BitsPerWeight: artifactBitsPerWeight(modelBytes, parameterCount),
-			ModelBytes: modelBytes, TotalBytes: modelBytes, ShardCount: len(g.files), ExpectedShards: expected,
+			ModelBytes:    modelBytes, TotalBytes: modelBytes, ShardCount: len(g.files), ExpectedShards: expected,
 			Complete: len(g.files) == expected, Files: append([]File(nil), g.files...),
 		}
 		if !artifact.Complete {
@@ -411,7 +411,7 @@ func selectDependency(kind, targetQuant string, candidates []ArtifactDependency)
 			if strings.EqualFold(candidate.Quantization, targetQuant) {
 				return candidate, true
 			}
-	}
+		}
 	}
 	preferences := []string{"F16", "BF16", "Q8_0", "Q4_K_M", "Q4_0"}
 	if kind == "mtp" {

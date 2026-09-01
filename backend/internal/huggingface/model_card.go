@@ -66,8 +66,8 @@ func (c *Client) DetailWithCard(ctx context.Context, repoID string) (ModelDetail
 		metadataPtr = &metadata
 	}
 	return ModelDetailWithCard{
-		ModelDetail:   detail,
-		Description:   description,
+		ModelDetail:  detail,
+		Description:  description,
 		CardMetadata: metadataPtr,
 	}, nil
 }

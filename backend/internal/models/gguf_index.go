@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 type ggufIndexEntry struct {
@@ -29,12 +29,12 @@ FROM gguf_index`)
 	out := make(map[string]ggufIndexEntry)
 	for rows.Next() {
 		var (
-			path                                                                 string
-			entry                                                                ggufIndexEntry
-			version, tensorCount, metadataCount, nextN                            int64
-			architecture                                                         string
+			path                                                                    string
+			entry                                                                   ggufIndexEntry
+			version, tensorCount, metadataCount, nextN                              int64
+			architecture                                                            string
 			contextLength, blockCount, embedding, headCount, kvHead, keyLen, valLen int64
-			hasMTP, mtpOnly, projector                                            int
+			hasMTP, mtpOnly, projector                                              int
 		)
 		if err := rows.Scan(
 			&path, &entry.SizeBytes, &entry.MTimeNS, &version, &tensorCount, &metadataCount, &architecture,

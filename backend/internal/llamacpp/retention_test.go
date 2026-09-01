@@ -24,7 +24,7 @@ func TestValidateOptionsRetainingRejectsChangedUnsupportedAndManagerOwned(t *tes
 	if _, err := ValidateOptionsRetaining(profile, map[string]string{"removed": "changed"}, map[string]string{"removed": "legacy"}); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("changed unsupported option should fail: %v", err)
 	}
-	if _, err := ValidateOptionsRetaining(profile, map[string]string{"device": "CUDA0"}, map[string]string{}); err == nil || !strings.Contains(err.Error(), "managed by LlamaCPP Manager") {
+	if _, err := ValidateOptionsRetaining(profile, map[string]string{"device": "CUDA0"}, map[string]string{}); err == nil || !strings.Contains(err.Error(), "managed by LlamaRack") {
 		t.Fatalf("manager-owned option should fail: %v", err)
 	}
 	if _, err := ValidateOptionsRetaining(profile, map[string]string{"---": "x"}, map[string]string{}); err == nil || !strings.Contains(err.Error(), "key is required") {

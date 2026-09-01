@@ -14,22 +14,22 @@ import (
 // LlamaMetrics is the complete current llama.cpp server /metrics snapshot plus
 // one derived speculative-decoding acceptance percentage.
 type LlamaMetrics struct {
-	PromptTokensTotal              *float64           `json:"prompt_tokens_total,omitempty"`
-	PromptSecondsTotal             *float64           `json:"prompt_seconds_total,omitempty"`
-	PromptTokensPerSecond          *float64           `json:"prompt_tokens_per_second,omitempty"`
-	PredictedTokensTotal           *float64           `json:"predicted_tokens_total,omitempty"`
-	PredictedSecondsTotal          *float64           `json:"predicted_seconds_total,omitempty"`
-	PredictedTokensPerSecond       *float64           `json:"predicted_tokens_per_second,omitempty"`
-	RequestsProcessing             *float64           `json:"requests_processing,omitempty"`
-	RequestsDeferred               *float64           `json:"requests_deferred,omitempty"`
-	ContextTokensMax               *float64           `json:"context_tokens_max,omitempty"`
-	DecodeTotal                    *float64           `json:"decode_total,omitempty"`
-	BusySlotsPerDecode             *float64           `json:"busy_slots_per_decode,omitempty"`
-	SpecDraftTokensTotal           *float64           `json:"spec_draft_tokens_total,omitempty"`
-	SpecAcceptedTokensTotal        *float64           `json:"spec_accepted_tokens_total,omitempty"`
-	SpecDraftsTotal                *float64           `json:"spec_drafts_total,omitempty"`
-	SpecAcceptedTokensPerPosition  map[string]float64 `json:"spec_accepted_tokens_per_position,omitempty"`
-	SpecAcceptanceRatePct          *float64           `json:"spec_acceptance_rate_pct,omitempty"`
+	PromptTokensTotal             *float64           `json:"prompt_tokens_total,omitempty"`
+	PromptSecondsTotal            *float64           `json:"prompt_seconds_total,omitempty"`
+	PromptTokensPerSecond         *float64           `json:"prompt_tokens_per_second,omitempty"`
+	PredictedTokensTotal          *float64           `json:"predicted_tokens_total,omitempty"`
+	PredictedSecondsTotal         *float64           `json:"predicted_seconds_total,omitempty"`
+	PredictedTokensPerSecond      *float64           `json:"predicted_tokens_per_second,omitempty"`
+	RequestsProcessing            *float64           `json:"requests_processing,omitempty"`
+	RequestsDeferred              *float64           `json:"requests_deferred,omitempty"`
+	ContextTokensMax              *float64           `json:"context_tokens_max,omitempty"`
+	DecodeTotal                   *float64           `json:"decode_total,omitempty"`
+	BusySlotsPerDecode            *float64           `json:"busy_slots_per_decode,omitempty"`
+	SpecDraftTokensTotal          *float64           `json:"spec_draft_tokens_total,omitempty"`
+	SpecAcceptedTokensTotal       *float64           `json:"spec_accepted_tokens_total,omitempty"`
+	SpecDraftsTotal               *float64           `json:"spec_drafts_total,omitempty"`
+	SpecAcceptedTokensPerPosition map[string]float64 `json:"spec_accepted_tokens_per_position,omitempty"`
+	SpecAcceptanceRatePct         *float64           `json:"spec_acceptance_rate_pct,omitempty"`
 }
 
 var llamaMetricsHTTPClient = &http.Client{Timeout: 750 * time.Millisecond}

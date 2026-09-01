@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
 func newTestManager(t *testing.T, handler http.Handler) (*Manager, *httptest.Server, context.CancelFunc) {

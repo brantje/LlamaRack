@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 const (

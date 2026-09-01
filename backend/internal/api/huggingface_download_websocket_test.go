@@ -10,8 +10,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
 func TestHuggingFaceDownloadWebSocketStreamsJobUpdates(t *testing.T) {

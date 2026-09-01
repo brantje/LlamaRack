@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 type HardwareOverview struct {
-	Hardware  hardware.Snapshot `json:"hardware"`
+	Hardware  hardware.Snapshot  `json:"hardware"`
 	Telemetry []telemetry.Sample `json:"telemetry"`
 }
 
@@ -68,10 +68,14 @@ func (s *Service) LatestHardware() HardwareOverview {
 func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot, samples []telemetry.Sample) error {
 	s.SetLatestHardware(snapshot, samples)
 	collectedAt := snapshot.CollectedAt.UTC()
-	if collectedAt.IsZero() { collectedAt = time.Now().UTC() }
+	if collectedAt.IsZero() {
+		collectedAt = time.Now().UTC()
+	}
 	timestamp := collectedAt.UnixMilli()
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	insert := func(metric, deviceID, instanceID string, value float64) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO hardware_metric_samples(collected_at,metric,device_id,instance_id,value) VALUES(?,?,?,?,?)`, timestamp, metric, deviceID, instanceID, value)
@@ -79,10 +83,16 @@ func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot
 	}
 
 	if snapshot.RAMTotalBytes > 0 {
-		if err := insert("ram_total_bytes", "", "", float64(snapshot.RAMTotalBytes)); err != nil { return err }
+		if err := insert("ram_total_bytes", "", "", float64(snapshot.RAMTotalBytes)); err != nil {
+			return err
+		}
 		used := snapshot.RAMTotalBytes - snapshot.RAMAvailableBytes
-		if used < 0 { used = 0 }
-		if err := insert("ram_used_bytes", "", "", float64(used)); err != nil { return err }
+		if used < 0 {
+			used = 0
+		}
+		if err := insert("ram_used_bytes", "", "", float64(used)); err != nil {
+			return err
+		}
 	}
 	var totalVRAM, usedVRAM int64
 	var utilization float64
@@ -90,28 +100,48 @@ func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot
 		totalVRAM += gpu.TotalBytes
 		usedVRAM += gpu.UsedBytes
 		utilization += gpu.UtilizationPct
-		if err := insert("vram_total_bytes", gpu.ID, "", float64(gpu.TotalBytes)); err != nil { return err }
-		if err := insert("vram_used_bytes", gpu.ID, "", float64(gpu.UsedBytes)); err != nil { return err }
-		if err := insert("gpu_utilization_pct", gpu.ID, "", gpu.UtilizationPct); err != nil { return err }
+		if err := insert("vram_total_bytes", gpu.ID, "", float64(gpu.TotalBytes)); err != nil {
+			return err
+		}
+		if err := insert("vram_used_bytes", gpu.ID, "", float64(gpu.UsedBytes)); err != nil {
+			return err
+		}
+		if err := insert("gpu_utilization_pct", gpu.ID, "", gpu.UtilizationPct); err != nil {
+			return err
+		}
 	}
 	if len(snapshot.GPUs) > 0 {
-		if err := insert("vram_total_bytes", "", "", float64(totalVRAM)); err != nil { return err }
-		if err := insert("vram_used_bytes", "", "", float64(usedVRAM)); err != nil { return err }
-		if err := insert("gpu_utilization_pct", "", "", utilization/float64(len(snapshot.GPUs))); err != nil { return err }
+		if err := insert("vram_total_bytes", "", "", float64(totalVRAM)); err != nil {
+			return err
+		}
+		if err := insert("vram_used_bytes", "", "", float64(usedVRAM)); err != nil {
+			return err
+		}
+		if err := insert("gpu_utilization_pct", "", "", utilization/float64(len(snapshot.GPUs))); err != nil {
+			return err
+		}
 	}
 	for _, sample := range samples {
 		if sample.VRAMUsedBytes != nil {
-			if err := insert("instance_vram_used_bytes", "", sample.InstanceID, float64(*sample.VRAMUsedBytes)); err != nil { return err }
+			if err := insert("instance_vram_used_bytes", "", sample.InstanceID, float64(*sample.VRAMUsedBytes)); err != nil {
+				return err
+			}
 		}
 		if sample.CPUPercent != nil {
-			if err := insert("instance_cpu_percent", "", sample.InstanceID, *sample.CPUPercent); err != nil { return err }
+			if err := insert("instance_cpu_percent", "", sample.InstanceID, *sample.CPUPercent); err != nil {
+				return err
+			}
 		}
 		if sample.MemoryUsedBytes != nil {
-			if err := insert("instance_memory_used_bytes", "", sample.InstanceID, float64(*sample.MemoryUsedBytes)); err != nil { return err }
+			if err := insert("instance_memory_used_bytes", "", sample.InstanceID, float64(*sample.MemoryUsedBytes)); err != nil {
+				return err
+			}
 		}
 		for _, gpu := range sample.GPUs {
 			if gpu.VRAMUsedBytes != nil {
-				if err := insert("instance_vram_used_bytes", gpu.DeviceID, sample.InstanceID, float64(*gpu.VRAMUsedBytes)); err != nil { return err }
+				if err := insert("instance_vram_used_bytes", gpu.DeviceID, sample.InstanceID, float64(*gpu.VRAMUsedBytes)); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -123,48 +153,81 @@ func (s *Service) HardwareTimeseries(ctx context.Context, metric string, sinceMS
 		"ram_total_bytes": true, "ram_used_bytes": true, "vram_total_bytes": true, "vram_used_bytes": true,
 		"gpu_utilization_pct": true, "instance_vram_used_bytes": true, "instance_cpu_percent": true, "instance_memory_used_bytes": true,
 	}
-	if !allowed[metric] { return nil, fmt.Errorf("unsupported hardware metric %q", metric) }
-	if sinceMS <= 0 { sinceMS = time.Now().Add(-time.Hour).UnixMilli() }
-	if bucketSeconds <= 0 { bucketSeconds = 60 }
-	if bucketSeconds > 24*3600 { bucketSeconds = 24*3600 }
+	if !allowed[metric] {
+		return nil, fmt.Errorf("unsupported hardware metric %q", metric)
+	}
+	if sinceMS <= 0 {
+		sinceMS = time.Now().Add(-time.Hour).UnixMilli()
+	}
+	if bucketSeconds <= 0 {
+		bucketSeconds = 60
+	}
+	if bucketSeconds > 24*3600 {
+		bucketSeconds = 24 * 3600
+	}
 	bucketMS := int64(bucketSeconds) * 1000
 	query := `SELECT (collected_at / ?) * ? AS bucket,device_id,instance_id,AVG(value) FROM hardware_metric_samples WHERE metric=? AND collected_at>=?`
 	args := []any{bucketMS, bucketMS, metric, sinceMS}
-	if deviceID != "" { query += " AND device_id=?"; args = append(args, deviceID) }
-	if instanceID != "" { query += " AND instance_id=?"; args = append(args, instanceID) }
-	if deviceID == "" && instanceID == "" { query += " AND device_id='' AND instance_id=''" }
+	if deviceID != "" {
+		query += " AND device_id=?"
+		args = append(args, deviceID)
+	}
+	if instanceID != "" {
+		query += " AND instance_id=?"
+		args = append(args, instanceID)
+	}
+	if deviceID == "" && instanceID == "" {
+		query += " AND device_id='' AND instance_id=''"
+	}
 	query += " GROUP BY bucket,device_id,instance_id ORDER BY bucket,device_id,instance_id"
 	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var out []HardwareSeriesPoint
 	for rows.Next() {
 		var point HardwareSeriesPoint
 		var value sql.NullFloat64
-		if err := rows.Scan(&point.Timestamp, &point.DeviceID, &point.InstanceID, &value); err != nil { return nil, err }
-		if value.Valid { point.Value = value.Float64 }
+		if err := rows.Scan(&point.Timestamp, &point.DeviceID, &point.InstanceID, &value); err != nil {
+			return nil, err
+		}
+		if value.Valid {
+			point.Value = value.Float64
+		}
 		out = append(out, point)
 	}
 	return out, rows.Err()
 }
 
 func (s *Service) LifecycleSummary(ctx context.Context, sinceMS int64) (LifecycleSummary, error) {
-	if sinceMS < 0 { sinceMS = 0 }
+	if sinceMS < 0 {
+		sinceMS = 0
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0) FROM observability_counters WHERE metric IN ('load_total','eviction_total','idle_unload_total') GROUP BY metric`)
-	if err != nil { return LifecycleSummary{}, err }
+	if err != nil {
+		return LifecycleSummary{}, err
+	}
 	defer rows.Close()
 	var summary LifecycleSummary
 	for rows.Next() {
 		var metric string
 		var value float64
-		if err := rows.Scan(&metric, &value); err != nil { return LifecycleSummary{}, err }
+		if err := rows.Scan(&metric, &value); err != nil {
+			return LifecycleSummary{}, err
+		}
 		switch strings.TrimSpace(metric) {
-		case "load_total": summary.Loads = int64(value)
-		case "eviction_total": summary.Evictions = int64(value)
-		case "idle_unload_total": summary.IdleUnloads = int64(value)
+		case "load_total":
+			summary.Loads = int64(value)
+		case "eviction_total":
+			summary.Evictions = int64(value)
+		case "idle_unload_total":
+			summary.IdleUnloads = int64(value)
 		}
 	}
-	if err := rows.Err(); err != nil { return LifecycleSummary{}, err }
+	if err := rows.Err(); err != nil {
+		return LifecycleSummary{}, err
+	}
 	// Cold-start KPIs are request-attributed so the dashboard window applies:
 	// load → idle-unload → load again is two autoloads, and the same start is
 	// not counted once from lifecycle events and again from the request row.
@@ -179,8 +242,10 @@ func (s *Service) LifecycleSummary(ctx context.Context, sinceMS int64) (Lifecycl
 }
 
 func (s *Service) PruneHardware(ctx context.Context, retentionDays int) error {
-	if retentionDays <= 0 { retentionDays = DefaultRetentionDays }
-	cutoff := time.Now().Add(-time.Duration(retentionDays)*24*time.Hour).UnixMilli()
+	if retentionDays <= 0 {
+		retentionDays = DefaultRetentionDays
+	}
+	cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour).UnixMilli()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM hardware_metric_samples WHERE collected_at<?`, cutoff)
 	return err
 }
@@ -189,17 +254,21 @@ func (s *Service) RunHardwareRetention(ctx context.Context, retentionDays func(c
 	prune := func() {
 		days := DefaultRetentionDays
 		if retentionDays != nil {
-			if value := retentionDays(ctx); value > 0 { days = value }
+			if value := retentionDays(ctx); value > 0 {
+				days = value
+			}
 		}
 		_ = s.PruneHardware(ctx, days)
 	}
 	prune()
-	ticker := time.NewTicker(6*time.Hour)
+	ticker := time.NewTicker(6 * time.Hour)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done(): return
-		case <-ticker.C: prune()
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prune()
 		}
 	}
 }

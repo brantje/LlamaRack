@@ -37,7 +37,7 @@ function resetManager() {
   mocks.request.mockReset()
   sessionStorage.clear()
   localStorage.clear()
-  sessionStorage.setItem('lcm_management_token', 'management-branch')
+  sessionStorage.setItem('llamarack_management_token', 'management-branch')
   vi.unstubAllGlobals()
 }
 
@@ -77,7 +77,7 @@ describe('Playground edge branches', () => {
     })
     const publicFetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ text: 'legacy text choice' }] }), {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'raw-all', 'X-LlamaCPP-Manager-Upstream-Port': '9101' }
+      headers: { 'X-LlamaRack-Request-ID': 'raw-all', 'X-LlamaRack-Upstream-Port': '9101' }
     }))
     vi.stubGlobal('fetch', publicFetch)
 
@@ -103,7 +103,7 @@ describe('Playground edge branches', () => {
     expect(wrapper.text()).toContain('2.20 s')
     expect(wrapper.text()).toContain('—')
     await activateTab(wrapper, 'Response')
-    expect(wrapper.text()).toContain('x-llamacpp-manager-upstream-port: 9101')
+    expect(wrapper.text()).toContain('x-llamarack-upstream-port: 9101')
     wrapper.unmount()
   })
 
@@ -197,7 +197,7 @@ describe('Playground edge branches', () => {
       })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }), {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'retry-me' }
+      headers: { 'X-LlamaRack-Request-ID': 'retry-me' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -217,7 +217,7 @@ describe('Playground edge branches', () => {
     mocks.request.mockRejectedValue(new Error('diagnostics unavailable'))
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'answer survived' } }] }), {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'missing-diag' }
+      headers: { 'X-LlamaRack-Request-ID': 'missing-diag' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -288,7 +288,7 @@ describe('Playground edge branches', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'vision reply' } }] }), {
       status: 200,
-      headers: { 'X-LlamaCPP-Manager-Request-ID': 'raw-image' }
+      headers: { 'X-LlamaRack-Request-ID': 'raw-image' }
     })))
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })

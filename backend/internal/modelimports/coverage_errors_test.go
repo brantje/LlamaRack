@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestPrepareCleansPendingModelWhenInstanceSlugConflicts(t *testing.T) {
@@ -177,7 +177,9 @@ func TestImportDatabaseErrorBranches(t *testing.T) {
 		{"cleanup", func() error { return service.CleanupJob(ctx, "x") }},
 		{"cleanup safe", func() error { return service.CleanupJobSafe(ctx, "x") }},
 		{"reconcile", func() error { return service.Reconcile(ctx) }},
-		{"repair", func() error { return service.RepairArtifactOptions(ctx, "m", "acme/demo", huggingface.Artifact{Dependencies: []huggingface.ArtifactDependency{{Kind: "mmproj", Files: []huggingface.File{{Path: "mmproj.gguf"}}}}}) }},
+		{"repair", func() error {
+			return service.RepairArtifactOptions(ctx, "m", "acme/demo", huggingface.Artifact{Dependencies: []huggingface.ArtifactDependency{{Kind: "mmproj", Files: []huggingface.File{{Path: "mmproj.gguf"}}}}})
+		}},
 	}
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {

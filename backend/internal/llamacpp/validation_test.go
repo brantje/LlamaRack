@@ -42,7 +42,7 @@ func TestValidateOptionsRejectsUnsupportedReservedAndInvalidValues(t *testing.T)
 		text string
 	}{
 		{"unsupported", map[string]string{"made-up": "1"}, "unsupported llama.cpp option"},
-		{"reserved", map[string]string{"port": "9000"}, "managed by LlamaCPP Manager"},
+		{"reserved", map[string]string{"port": "9000"}, "managed by LlamaRack"},
 		{"integer", map[string]string{"ctx-size": "large"}, "integer value"},
 		{"number", map[string]string{"temperature": "warm"}, "numeric value"},
 		{"boolean", map[string]string{"flash-attn": "yes"}, "true or false"},

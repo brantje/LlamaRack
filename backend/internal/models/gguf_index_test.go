@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 func TestGGUFSummaryUsesFingerprintCacheAndInvalidates(t *testing.T) {

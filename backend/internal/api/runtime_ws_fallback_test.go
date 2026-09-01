@@ -3,8 +3,8 @@ package api
 import (
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 func TestApplyGlobalTelemetryFallbackFillsOnlyMissingMetrics(t *testing.T) {

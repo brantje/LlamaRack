@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	ErrArtifactShared      = errors.New("model artifact is still referenced by another registered Model")
-	ErrUnsafeArtifactPath  = errors.New("unsafe model artifact path")
-	removeArtifactFile     = os.Remove
-	removeModelDirectory   = os.RemoveAll
+	ErrArtifactShared     = errors.New("model artifact is still referenced by another registered Model")
+	ErrUnsafeArtifactPath = errors.New("unsafe model artifact path")
+	removeArtifactFile    = os.Remove
+	removeModelDirectory  = os.RemoveAll
 )
 
 type FileDeletePlan struct {
@@ -276,8 +276,8 @@ func (s *Service) resolveModelDirectory(primary artifactFile) (*artifactDirector
 		return nil, err
 	}
 	return &artifactDirectory{
-		relativePath: filepath.ToSlash(relative),
-		absolutePath: directory,
+		relativePath:  filepath.ToSlash(relative),
+		absolutePath:  directory,
 		canonicalPath: canonical,
 	}, nil
 }

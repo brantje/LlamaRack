@@ -8,7 +8,7 @@ SAML and RBAC are explicitly out of scope for v1.
 
 ## Security domains
 
-llamacpp-manager has two independent credential domains:
+LlamaRack has two independent credential domains:
 
 - **Management plane** — the Nuxt UI and `/api/v1/*` use manager-issued JWT bearer credentials backed by server-side sessions.
 - **Inference plane** — `/v1/*` uses inference API keys.
@@ -29,7 +29,7 @@ JWT requirements:
 - signing key persisted under the manager data directory and reused across restarts;
 - one JWT per management session;
 - no refresh-token pair;
-- issuer `llamacpp-manager`;
+- issuer `llamarack`;
 - claims include `sub` (user ID), `sid` (server-side session ID), `iat`, `exp` and `jti`;
 - no passwords, provider tokens, provider claims or other unnecessary personal information.
 

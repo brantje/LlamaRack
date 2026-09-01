@@ -38,6 +38,8 @@ describe('redesign theme foundations', () => {
     expect(plugin).toContain('initializeTheme()')
     expect(config).toContain('themeBootstrap')
     expect(config).toContain("script: [{ innerHTML: themeBootstrap }]")
+    expect(config).toContain("const key = 'llamarack-theme'")
+    expect(config).not.toContain('llamacpp-manager-theme')
   })
 
   it('applies, persists and restores the selected theme with an unknown-id fallback', () => {

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/settings"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )

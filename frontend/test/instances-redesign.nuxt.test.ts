@@ -103,7 +103,7 @@ describe('Instances redesign', () => {
     await wrapper.get('[data-testid="instances-view-cards"]').trigger('click')
     await flushPromises()
 
-    expect(sessionStorage.getItem('llamacpp-manager.instances.view')).toBe('cards')
+    expect(sessionStorage.getItem('llamarack.instances.view')).toBe('cards')
     expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(4)
     const cards = wrapper.findAll('[data-testid="instance-card"]')
     const readyCard = cards.find(card => card.text().includes('ready'))!
@@ -177,10 +177,11 @@ describe('Instances redesign', () => {
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: -5 } }
       return []
     })
-    sessionStorage.setItem('llamacpp-manager.instances.view', 'cards')
+    sessionStorage.setItem('llamarack.instances.view', 'cards')
 
     const wrapper = await mountSuspended(InstancesPage, { route: '/instances' })
     await flushPromises()
+    expect(sessionStorage.getItem('llamarack.instances.view')).toBe('cards')
     const text = wrapper.text()
     expect(wrapper.get('[data-testid="instances-telemetry-snapshot"]').text()).toContain('not-a-date')
     expect(text).toContain('missing')

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
@@ -40,12 +40,12 @@ func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
 	}
 	network := managersecurity.NewNetwork(managerSettings)
 	h := &adminHandler{
-		auth: authService,
+		auth:     authService,
 		settings: managerSettings,
-		secrets: secrets,
-		network: network,
-		profile: func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("unavailable") },
-		started: time.Now(),
+		secrets:  secrets,
+		network:  network,
+		profile:  func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("unavailable") },
+		started:  time.Now(),
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -64,26 +64,42 @@ func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
 	}
 
 	w := request(http.MethodGet, "/api/v1/users", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.users(w, r, actor) })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("users status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("users status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodGet, "/api/v1/me/sessions", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.listSessions(w, r, actor.ID, "current") })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("sessions status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("sessions status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodDelete, "/api/v1/sessions/session", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.sessionRoute(w, r, actor, "session") })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("revoke status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("revoke status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodGet, "/api/v1/settings/general", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.generalSettings(w, r, actor) })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("settings get status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("settings get status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodPut, "/api/v1/settings/general", map[string]any{"allowed_origins": "https://other.example.test"}, func(w *httptest.ResponseRecorder, r *http.Request) { h.generalSettings(w, r, actor) })
-	if w.Code != http.StatusBadRequest { t.Fatalf("settings put status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("settings put status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodGet, "/api/v1/admin/summary", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.summary(w, r) })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("summary status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("summary status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodGet, "/api/v1/system", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.system(w, r) })
-	if w.Code != http.StatusInternalServerError { t.Fatalf("system status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("system status=%d body=%s", w.Code, w.Body.String())
+	}
 
 	w = request(http.MethodPatch, "/api/v1/users/1", map[string]any{"enabled": false}, func(w *httptest.ResponseRecorder, r *http.Request) { h.userRoute(w, r, actor, auth.Session{}, "1") })
-	if w.Code != http.StatusBadRequest { t.Fatalf("user mutation status=%d body=%s", w.Code, w.Body.String()) }
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("user mutation status=%d body=%s", w.Code, w.Body.String())
+	}
 }

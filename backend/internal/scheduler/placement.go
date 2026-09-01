@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 const defaultVRAMReserveBytes int64 = 512 * 1024 * 1024
@@ -19,11 +19,11 @@ type PlacementRequest struct {
 }
 
 type Placement struct {
-	Devices       []string `json:"devices"`
-	TensorSplit   string   `json:"tensor_split,omitempty"`
-	RequiredBytes int64    `json:"required_bytes"`
-	AvailableBytes int64   `json:"available_bytes"`
-	Fits          bool     `json:"fits"`
+	Devices        []string `json:"devices"`
+	TensorSplit    string   `json:"tensor_split,omitempty"`
+	RequiredBytes  int64    `json:"required_bytes"`
+	AvailableBytes int64    `json:"available_bytes"`
+	Fits           bool     `json:"fits"`
 }
 
 // PlanPlacement is deliberately single-GPU first. Automatic placement only

@@ -7,12 +7,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 type runtimeWebSocketHandler struct {

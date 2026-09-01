@@ -15,13 +15,15 @@ func testLogLine(source, text string) string {
 }
 
 type fakeInstanceLogs struct {
-	lines []string
+	lines  []string
 	events chan string
 }
 
 func (f *fakeInstanceLogs) Logs(string) []string { return append([]string(nil), f.lines...) }
 func (f *fakeInstanceLogs) SubscribeLogs(string) ([]string, <-chan string, func()) {
-	if f.events == nil { f.events = make(chan string) }
+	if f.events == nil {
+		f.events = make(chan string)
+	}
 	return append([]string(nil), f.lines...), f.events, func() {}
 }
 
@@ -49,11 +51,15 @@ func TestInstanceLogSearchAndValidation(t *testing.T) {
 	} {
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		if w.Code != http.StatusBadRequest { t.Fatalf("%s => %d %s", path, w.Code, w.Body.String()) }
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s => %d %s", path, w.Code, w.Body.String())
+		}
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/logs?instance_id=one", nil))
-	if w.Code != http.StatusMethodNotAllowed { t.Fatalf("method=%d", w.Code) }
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("method=%d", w.Code)
+	}
 }
 
 func TestInstanceLogStreamAndHelpers(t *testing.T) {
@@ -73,16 +79,34 @@ func TestInstanceLogStreamAndHelpers(t *testing.T) {
 	}
 
 	entry, ok := parseLogEntry(testLogLine("stdout", "hello"))
-	if !ok || entry.Source != "stdout" || entry.Timestamp != testLogTimestamp || entry.Text != "hello" { t.Fatalf("entry=%+v ok=%v", entry, ok) }
-	for _, malformed := range []string{"[stdout] hello", "plain", "[bogus]\t" + testLogTimestamp + "\thello", "[stdout]\tbad-time\thello"} {
-		if _, ok := parseLogEntry(malformed); ok { t.Fatalf("malformed log accepted: %q", malformed) }
+	if !ok || entry.Source != "stdout" || entry.Timestamp != testLogTimestamp || entry.Text != "hello" {
+		t.Fatalf("entry=%+v ok=%v", entry, ok)
 	}
-	if source, ok := normalizeLogSource(""); !ok || source != "all" { t.Fatalf("default source=%q %v", source, ok) }
-	if _, ok := normalizeLogSource("invalid"); ok { t.Fatal("invalid source accepted") }
-	if !logEntryMatches(logEntry{Source:"stderr", Timestamp:testLogTimestamp, Text:"CUDA Error"}, "stderr", "cuda") { t.Fatal("expected case-insensitive match") }
-	if logEntryMatches(logEntry{Source:"stdout", Timestamp:testLogTimestamp, Text:"ok"}, "stderr", "") { t.Fatal("unexpected source match") }
+	for _, malformed := range []string{"[stdout] hello", "plain", "[bogus]\t" + testLogTimestamp + "\thello", "[stdout]\tbad-time\thello"} {
+		if _, ok := parseLogEntry(malformed); ok {
+			t.Fatalf("malformed log accepted: %q", malformed)
+		}
+	}
+	if source, ok := normalizeLogSource(""); !ok || source != "all" {
+		t.Fatalf("default source=%q %v", source, ok)
+	}
+	if _, ok := normalizeLogSource("invalid"); ok {
+		t.Fatal("invalid source accepted")
+	}
+	if !logEntryMatches(logEntry{Source: "stderr", Timestamp: testLogTimestamp, Text: "CUDA Error"}, "stderr", "cuda") {
+		t.Fatal("expected case-insensitive match")
+	}
+	if logEntryMatches(logEntry{Source: "stdout", Timestamp: testLogTimestamp, Text: "ok"}, "stderr", "") {
+		t.Fatal("unexpected source match")
+	}
 	filtered := filterLogEntries([]string{testLogLine("stdout", "1"), testLogLine("stdout", "2"), testLogLine("stdout", "3")}, "stdout", "", 2)
-	if len(filtered) != 2 || filtered[0].Text != "2" || filtered[1].Text != "3" { t.Fatalf("tail=%+v", filtered) }
-	if got := filterLogEntries([]string{"x"}, "all", "", 10); len(got) != 0 { t.Fatalf("malformed=%v", got) }
-	if got := filterLogEntries([]string{testLogLine("stdout", "x")}, "all", "", 0); len(got) != 0 { t.Fatalf("zero limit=%v", got) }
+	if len(filtered) != 2 || filtered[0].Text != "2" || filtered[1].Text != "3" {
+		t.Fatalf("tail=%+v", filtered)
+	}
+	if got := filterLogEntries([]string{"x"}, "all", "", 10); len(got) != 0 {
+		t.Fatalf("malformed=%v", got)
+	}
+	if got := filterLogEntries([]string{testLogLine("stdout", "x")}, "all", "", 0); len(got) != 0 {
+		t.Fatalf("zero limit=%v", got)
+	}
 }
