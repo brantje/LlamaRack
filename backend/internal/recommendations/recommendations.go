@@ -134,40 +134,28 @@ func chooseContext(requested int64) (int64, bool) {
 }
 
 func estimateMemory(weights, context int64, metadata Metadata) MemoryEstimate {
-	if weights < 0 {
-		weights = 0
-	}
-	overhead := int64(math.Ceil(float64(weights) * 0.05))
-	if overhead < 256*mib {
-		overhead = 256 * mib
-	}
-	kv := estimateKV(context, metadata)
+	demand := scheduler.EstimateDemand(scheduler.DemandInput{
+		WeightsBytes: weights,
+		Context:      context,
+		Metadata: scheduler.KVMetadata{
+			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
+			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
+			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength,
+		},
+	})
+	total := demand.WeightsBytes + demand.KVCacheBytes + demand.RuntimeOverheadBytes
 	return MemoryEstimate{
-		WeightsBytes: weights, KVCacheBytes: kv, RuntimeOverheadBytes: overhead,
-		CPUOnlyRAMBytes: weights + kv + overhead, FullOffloadVRAMBytes: weights + kv + overhead,
+		WeightsBytes: demand.WeightsBytes, KVCacheBytes: demand.KVCacheBytes, RuntimeOverheadBytes: demand.RuntimeOverheadBytes,
+		CPUOnlyRAMBytes: total, FullOffloadVRAMBytes: total,
 	}
 }
 
 func estimateKV(context int64, m Metadata) int64 {
-	if context <= 0 || m.BlockCount <= 0 || m.Embedding <= 0 || m.HeadCount <= 0 {
-		return 0
-	}
-	kvHeads := m.KVHeadCount
-	if kvHeads <= 0 {
-		kvHeads = m.HeadCount
-	}
-	headDim := m.Embedding / m.HeadCount
-	keyDim, valueDim := m.KeyLength, m.ValueLength
-	if keyDim <= 0 {
-		keyDim = headDim
-	}
-	if valueDim <= 0 {
-		valueDim = headDim
-	}
-	if headDim <= 0 || keyDim <= 0 || valueDim <= 0 {
-		return 0
-	}
-	return context * m.BlockCount * kvHeads * (keyDim + valueDim) * 2
+	return scheduler.EstimateDemand(scheduler.DemandInput{Context: context, Metadata: scheduler.KVMetadata{
+		Architecture: m.Architecture, ContextLength: m.ContextLength, BlockCount: m.BlockCount,
+		Embedding: m.Embedding, HeadCount: m.HeadCount, KVHeadCount: m.KVHeadCount,
+		KeyLength: m.KeyLength, ValueLength: m.ValueLength,
+	}}).KVCacheBytes
 }
 
 func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata) (bool, Offload) {
