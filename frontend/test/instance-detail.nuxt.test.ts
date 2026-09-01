@@ -134,4 +134,21 @@ describe('Instance detail page', () => {
     expect(wrapper.text()).toContain('No retained samples in this range.')
     expect(wrapper.get('[data-testid="instance-detail-vram-allocation"]').text()).toContain('No GPU allocation is available')
   })
+
+  it('shows startup backoff and last error on the runtime snapshot', async () => {
+    const manager = seed()
+    manager.runtimes.value = { m1: [{
+      instance_id: 'gemma-4',
+      model_id: 'm1',
+      state: 'FAILED',
+      last_error: 'CUDA allocation failed',
+      consecutive_start_failures: 2,
+      retry_after: new Date(Date.now() + 45_000).toISOString()
+    }] }
+    manager.runtimeTelemetry.value = {}
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="instance-detail-startup-backoff"]').text()).toContain('CUDA allocation failed')
+    expect(wrapper.get('[data-testid="instance-detail-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
+  })
 })

@@ -83,3 +83,20 @@ func TestRuntimeSubscriptionIsNonBlockingAndCancelable(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishRuntimeEmitsToSubscribers(t *testing.T) {
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	_, events, cancel := s.SubscribeRuntimes()
+	defer cancel()
+	s.PublishRuntime(Runtime{InstanceID: "overlay", State: Failed, LastError: "boom", ConsecutiveStartFailures: 2})
+	select {
+	case runtime := <-events:
+		if runtime.InstanceID != "overlay" || runtime.State != Failed || runtime.ConsecutiveStartFailures != 2 || runtime.LastError != "boom" {
+			t.Fatalf("runtime=%+v", runtime)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for published runtime")
+	}
+	var nilSupervisor *Supervisor
+	nilSupervisor.PublishRuntime(Runtime{})
+}

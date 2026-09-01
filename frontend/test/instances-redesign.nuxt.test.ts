@@ -34,7 +34,7 @@ function seed() {
   manager.runtimes.value = { m1: [
     { instance_id: 'ready', model_id: 'm1', state: 'READY', pid: 42, port: 9010 },
     { instance_id: 'stopped', model_id: 'm1', state: 'UNLOADED' },
-    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed' },
+    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(Date.now() + 45_000).toISOString() },
     { instance_id: 'downloading', model_id: 'm1', state: 'UNLOADED' }
   ] }
   manager.runtimeTelemetry.value = { ready: telemetry('ready') }
@@ -95,6 +95,7 @@ describe('Instances redesign', () => {
     await wrapper.get('[data-testid="instances-filter-problems"]').trigger('click')
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
     expect(wrapper.text()).toContain('CUDA allocation failed')
+    expect(wrapper.get('[data-testid="instance-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
   })
 
   it('persists card view and renders required card states', async () => {
@@ -122,6 +123,7 @@ describe('Instances redesign', () => {
     expect(stoppedCard.text()).toContain('Unloaded after 300 s without inference activity.')
     const failedCard = cards.find(card => card.text().includes('failed'))!
     expect(failedCard.text()).toContain('CUDA allocation failed')
+    expect(failedCard.text()).toContain('Retry in 45s (2 consecutive start failures)')
     const downloadingCard = cards.find(card => card.text().includes('downloading'))!
     expect(downloadingCard.text()).toContain('Model is downloading')
     expect(downloadingCard.text()).toContain('launch automatically')

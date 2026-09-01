@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { HardwareGPU, HardwareSnapshot, RuntimeTelemetry } from '~/composables/useManager'
+import { startupBackoffMessage } from '~/utils/startupBackoff'
 
 const manager = useManager()
 const { instances, runtimes, observabilityLive } = manager
@@ -275,10 +276,11 @@ function gpuSegments(gpu: HardwareGPU): VRAMSegment[] {
 const attention = computed<AttentionItem[]>(() => {
   const items: AttentionItem[] = []
   for (const runtime of runtimeList.value.filter(runtime => runtime.state === 'FAILED')) {
+    const backoff = startupBackoffMessage(runtime)
     items.push({
       key: `failed-${runtime.instance_id}`,
       title: `${runtime.instance_id} failed to start`,
-      detail: runtime.last_error || 'The managed llama-server process is in FAILED state.',
+      detail: backoff || runtime.last_error || 'The managed llama-server process is in FAILED state.',
       to: `/instances/${encodeURIComponent(runtime.instance_id)}/detail`
     })
   }
@@ -292,10 +294,11 @@ const attention = computed<AttentionItem[]>(() => {
   }
   for (const instance of instances.value) {
     if (!instance.always_on || manager.instanceState(instance) !== 'UNLOADED') continue
+    const backoff = startupBackoffMessage(manager.runtimeForInstance(instance))
     items.push({
       key: `always-${instance.id}`,
       title: `${instance.id} is Always-On but unloaded`,
-      detail: 'The Instance may have been stopped manually or could be waiting for resources.',
+      detail: backoff || 'The Instance may have been stopped manually or could be waiting for resources.',
       to: `/instances/${encodeURIComponent(instance.id)}/detail`
     })
   }
