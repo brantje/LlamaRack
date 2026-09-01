@@ -11,6 +11,7 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
 
 func TestAnalyzeFullPartialHybridCPUAndTotalFit(t *testing.T) {
@@ -102,6 +103,34 @@ func TestHelpersAndQuantizationBranches(t *testing.T) {
 		if !strings.Contains(strings.ToLower(info.Summary), tc.word) {
 			t.Fatalf("%s=%+v", tc.q, info)
 		}
+	}
+}
+
+func TestAnalyzeMatchesCanonicalEstimator(t *testing.T) {
+	path := writeMetadataGGUF(t, "qwen2", map[string]int64{
+		"qwen2.context_length": 262144, "qwen2.block_count": 32, "qwen2.embedding_length": 4096,
+		"qwen2.attention.head_count": 32, "qwen2.attention.head_count_kv": 8,
+	})
+	model := models.Model{ID: "m1", TotalBytes: 4 * 1024 * 1024 * 1024, Quantization: "Q4_K_M"}
+	rec := Analyze(model, path, hardware.Snapshot{}, 4096, nil)
+	meta, err := ReadMetadata(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand := scheduler.EstimateDemand(scheduler.DemandInput{
+		WeightsBytes: model.TotalBytes,
+		Context:      4096,
+		Metadata: scheduler.KVMetadata{
+			Architecture: meta.Architecture, ContextLength: meta.ContextLength, BlockCount: meta.BlockCount,
+			Embedding: meta.Embedding, HeadCount: meta.HeadCount, KVHeadCount: meta.KVHeadCount,
+			KeyLength: meta.KeyLength, ValueLength: meta.ValueLength,
+		},
+	})
+	if rec.Memory.WeightsBytes != demand.WeightsBytes || rec.Memory.KVCacheBytes != demand.KVCacheBytes || rec.Memory.RuntimeOverheadBytes != demand.RuntimeOverheadBytes {
+		t.Fatalf("recommendation=%+v demand=%+v", rec.Memory, demand)
+	}
+	if rec.Memory.FullOffloadVRAMBytes != demand.VRAMBytes() {
+		t.Fatalf("full offload %d vs vram %d", rec.Memory.FullOffloadVRAMBytes, demand.VRAMBytes())
 	}
 }
 

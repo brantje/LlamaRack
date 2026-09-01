@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
@@ -34,19 +35,23 @@ func TestAlwaysOnResourceBlockWaitsForCapacityThenReconciles(t *testing.T) {
 		t.Fatal("resource-pressure eviction must not set manual-stop suppression")
 	}
 
-	// While another resource-aware start is still in progress, do not consume
-	// the capacity it just freed even if the snapshot momentarily looks large.
+	// While another start holds a reservation for the just-freed capacity, the
+	// blocked Always-On victim must not steal it even if the snapshot looks large.
 	gapHardware := &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * testGiB}}}}}
 	s.hardware = gapHardware
-	s.beginResourceStart()
-	s.reconcileResourceBlocked(victim.ID)
-	s.endResourceStart()
-	if gapHardware.calls != 0 {
-		t.Fatalf("blocked victim probed hardware during active resource start: calls=%d", gapHardware.calls)
+	requesterLease, err := s.reservations.Acquire(scheduler.AcquireRequest{
+		InstanceID: "requester",
+		Snapshot:   hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * testGiB}}},
+		Placement:  scheduler.PlacementRequest{RequiredBytes: 2 * testGiB},
+	})
+	if err != nil || !requesterLease.Placement.Fits {
+		t.Fatalf("requester reservation=%+v err=%v", requesterLease, err)
 	}
+	s.reconcileResourceBlocked(victim.ID)
 	if state := sup.Status(victim.ID).State; state != supervisor.Unloaded {
 		t.Fatalf("blocked victim restarted during resource-start gap: %s", state)
 	}
+	s.reservations.Release(requesterLease.ID)
 
 	// Automatic reconciliation probes without evicting anything. Insufficient
 	// capacity keeps the desired-running Instance explicitly resource-blocked.

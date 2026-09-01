@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/recommendations"
 	"github.com/brantje/llamarack/backend/internal/scheduler"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
@@ -40,11 +42,11 @@ type Service struct {
 	hardware              hardware.Snapshotter
 	profile               func() (llamacpp.Profile, error)
 	observabilityRecorder ObservabilityRecorder
+	reservations          *scheduler.Ledger
 	mu                    sync.Mutex
 	loads                 map[string]*loadCall
 	manuallyStopped       map[string]bool
 	resourceBlocked       map[string]string
-	resourceStarts        int
 	activities            map[string]Activity
 	idleLocks             map[string]*sync.Mutex
 	operationGates        map[string]chan struct{}
@@ -65,7 +67,8 @@ type loadCall struct {
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 	return &Service{
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
-		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
+		reservations: scheduler.NewLedger(),
+		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{}, now: time.Now,
 	}
@@ -198,6 +201,9 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 		s.abortDrainClaim(id)
 		return "", err
 	}
+	if s.reservations != nil {
+		s.reservations.ReleaseInstance(id)
+	}
 	s.finishDrainWait(id)
 	endpoint, err := s.startOne(ctx, i)
 	if err == nil {
@@ -225,6 +231,7 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 		return err
 	}
 	_ = s.sup.WaitInactive(ctx, id)
+	s.releaseReservation(id)
 	s.finishDrainWait(id)
 	s.AddManagerLog(id, "worker killed")
 	return nil
@@ -324,10 +331,17 @@ func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (schedu
 			return scheduler.Plan{}, err
 		}
 		activity := s.Activity(i.ID)
+		estimated := m.TotalBytes
+		if path, err := s.models.ModelAbsolutePath(m); err == nil {
+			options, optErr := s.resolveLaunchOptions(ctx, m.ID, i.ID)
+			if optErr == nil {
+				estimated = s.estimateDemand(m, path, options).VRAMBytes()
+			}
+		}
 		candidates = append(candidates, scheduler.Candidate{
 			ModelID: i.ModelID, InstanceID: i.ID, Priority: i.Priority, AlwaysOn: i.AlwaysOn,
 			EvictionEnabled: i.EvictionEnabled, ActiveRequests: activity.ActiveRequests, LastUsed: activity.LastUsed,
-			EstimatedBytes: m.TotalBytes, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
+			EstimatedBytes: estimated, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
 		})
 	}
 	return scheduler.PlanEvictions(candidates, requiredBytes), nil
@@ -363,15 +377,12 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 }
 
 func (s *Service) reconcileResourceBlocked(id string) {
-	if s.resourceStartActive() {
-		return
-	}
 	release, err := s.acquireOperation(context.Background(), id)
 	if err != nil {
 		return
 	}
 	defer release()
-	if s.resourceStartActive() || s.resourceBlockReason(id) == "" || s.isManuallyStopped(id) {
+	if s.resourceBlockReason(id) == "" || s.isManuallyStopped(id) {
 		return
 	}
 	i, err := s.instances.Get(context.Background(), id)
@@ -581,6 +592,7 @@ func (s *Service) stopWorker(ctx context.Context, id string) error {
 		s.abortDrainClaim(id)
 		return err
 	}
+	s.releaseReservation(id)
 	s.finishDrainWait(id)
 	return nil
 }
@@ -699,24 +711,6 @@ func (s *Service) resourceBlockReason(id string) string {
 	defer s.mu.Unlock()
 	return s.resourceBlocked[id]
 }
-func (s *Service) beginResourceStart() {
-	s.mu.Lock()
-	s.resourceStarts++
-	s.mu.Unlock()
-}
-func (s *Service) endResourceStart() {
-	s.mu.Lock()
-	if s.resourceStarts > 0 {
-		s.resourceStarts--
-	}
-	s.mu.Unlock()
-}
-func (s *Service) resourceStartActive() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.resourceStarts > 0
-}
-
 func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, autoload ...bool) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -805,7 +799,11 @@ func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, e
 
 func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance, allowEviction bool) (endpoint string, err error) {
 	started := time.Now()
+	committed := false
 	defer func() {
+		if !committed {
+			s.releaseReservation(i.ID)
+		}
 		duration := time.Since(started)
 		if err == nil {
 			s.recordObservabilityEvent(ctx, ObservabilityLoad, i.ID, duration)
@@ -819,10 +817,6 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())
 	}()
 
-	if allowEviction {
-		s.beginResourceStart()
-		defer s.endResourceStart()
-	}
 	m, err := s.models.GetByID(ctx, i.ModelID)
 	if err != nil {
 		return "", err
@@ -849,9 +843,13 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
 
-	placement, placementErr := s.preparePlacementWithEviction(ctx, i, m.TotalBytes, allowEviction)
+	demand := s.estimateDemand(m, path, effective.Values)
+	placement, placementErr := s.preparePlacementWithDemand(ctx, i, demand, allowEviction)
 	if placementErr != nil {
 		return "", placementErr
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	var workerEnv []string
 	if len(placement.Devices) > 0 {
@@ -870,6 +868,10 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	if !ok {
 		return "", errors.New("worker did not reach ready state")
 	}
+	if err := s.commitReservation(i.ID); err != nil {
+		return "", err
+	}
+	committed = true
 	s.touch(i.ID)
 	return endpoint, nil
 }
@@ -879,6 +881,11 @@ func (s *Service) preparePlacement(ctx context.Context, i instances.Instance, re
 }
 
 func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.Instance, requiredBytes int64, allowEviction bool) (scheduler.Placement, error) {
+	return s.preparePlacementWithDemand(ctx, i, scheduler.ResourceDemand{GPU: []scheduler.GPUResourceDemand{{Bytes: requiredBytes}}}, allowEviction)
+}
+
+func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.Instance, demand scheduler.ResourceDemand, allowEviction bool) (scheduler.Placement, error) {
+	requiredBytes := demand.VRAMBytes()
 	snapshot, err := s.hardware.Snapshot(ctx)
 	if err != nil {
 		slog.Warn("hardware snapshot unavailable; preserving compatibility placement", "instance_id", i.ID, "error", err)
@@ -888,18 +895,19 @@ func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.
 		return scheduler.Placement{}, nil
 	}
 	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
-	placement, err := scheduler.PlanPlacement(snapshot, request)
+	lease, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, HostRAM: demand.HostRAMBytes})
 	if err != nil {
 		return scheduler.Placement{}, err
 	}
-	if placement.Fits {
-		return placement, nil
+	if lease.Placement.Fits {
+		s.logReservation("reserved", i.ID, lease)
+		return lease.Placement, nil
 	}
 	if !allowEviction {
-		return scheduler.Placement{}, fmt.Errorf("%w: need %d bytes, have %d", errResourcePressureBlocked, requiredBytes, placement.AvailableBytes)
+		return scheduler.Placement{}, fmt.Errorf("%w: need %d bytes, have %d", errResourcePressureBlocked, requiredBytes, lease.Placement.AvailableBytes)
 	}
 
-	shortfall := requiredBytes - placement.AvailableBytes
+	shortfall := requiredBytes - lease.Placement.AvailableBytes
 	if shortfall < 1 {
 		shortfall = requiredBytes
 	}
@@ -920,6 +928,22 @@ func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.
 				return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
 			}
 		}
+		credits := make([]scheduler.Credit, 0, len(plan.Evict))
+		for _, candidate := range plan.Evict {
+			if candidate.InstanceID == i.ID {
+				continue
+			}
+			credits = append(credits, scheduler.Credit{InstanceID: candidate.InstanceID, Bytes: candidate.EstimatedBytes})
+		}
+		lease, err = s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, Credits: credits, HostRAM: demand.HostRAMBytes})
+		if err != nil {
+			return scheduler.Placement{}, err
+		}
+		if !lease.Placement.Fits {
+			return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
+		}
+		s.logReservation("reserved", i.ID, lease)
+
 		stale := false
 		for _, candidate := range plan.Evict {
 			if candidate.InstanceID == i.ID {
@@ -927,32 +951,82 @@ func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.
 			}
 			if err := s.evictInstance(ctx, candidate.InstanceID); err != nil {
 				if errors.Is(err, errEvictionIneligible) {
+					s.releaseReservation(i.ID)
 					stale = true
 					break
 				}
+				s.releaseReservation(i.ID)
 				return scheduler.Placement{}, fmt.Errorf("evict %s: %w", candidate.InstanceID, err)
 			}
 		}
 		if !stale {
-			break
+			refreshed, err := s.hardware.Snapshot(ctx)
+			if err != nil {
+				s.releaseReservation(i.ID)
+				return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
+			}
+			if err := placementDevicesPresent(refreshed, lease.Placement.Devices); err != nil {
+				s.releaseReservation(i.ID)
+				return scheduler.Placement{}, err
+			}
+			return lease.Placement, nil
 		}
 		if attempt == maxEvictionPlanAttempts-1 {
 			return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
 		}
 	}
+	return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
+}
 
-	refreshed, err := s.hardware.Snapshot(ctx)
-	if err != nil {
-		return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
+func placementDevicesPresent(snapshot hardware.Snapshot, devices []string) error {
+	if len(devices) == 0 {
+		return nil
 	}
-	placement, err = scheduler.PlanPlacement(refreshed, request)
-	if err != nil {
-		return scheduler.Placement{}, err
+	byID := make(map[string]bool, len(snapshot.GPUs))
+	for _, gpu := range snapshot.GPUs {
+		byID[gpu.ID] = true
 	}
-	if !placement.Fits {
-		return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM after eviction: need %d bytes, have %d", requiredBytes, placement.AvailableBytes)
+	for _, id := range devices {
+		if !byID[id] {
+			return fmt.Errorf("configured GPU device is not available: %s", id)
+		}
 	}
-	return placement, nil
+	return nil
+}
+
+func (s *Service) logReservation(action, instanceID string, lease scheduler.ResourceLease) {
+	if s == nil || strings.TrimSpace(instanceID) == "" {
+		return
+	}
+	parts := make([]string, 0, len(lease.GPUs))
+	for _, gpu := range lease.GPUs {
+		parts = append(parts, fmt.Sprintf("%s=%d", gpu.DeviceID, gpu.Bytes))
+	}
+	s.AddManagerLog(instanceID, fmt.Sprintf("%s lease %s state=%s devices=%s", action, lease.ID, lease.State, strings.Join(parts, ",")))
+}
+
+func (s *Service) commitReservation(instanceID string) error {
+	if s == nil || s.reservations == nil {
+		return nil
+	}
+	if err := s.reservations.CommitInstance(instanceID); err != nil {
+		return err
+	}
+	if lease, ok := s.reservations.GetByInstance(instanceID); ok {
+		s.logReservation("committed", instanceID, lease)
+	}
+	return nil
+}
+
+func (s *Service) releaseReservation(instanceID string) {
+	if s == nil || s.reservations == nil {
+		return
+	}
+	lease, ok := s.reservations.GetByInstance(instanceID)
+	s.reservations.ReleaseInstance(instanceID)
+	if ok {
+		s.logReservation("released", instanceID, lease)
+	}
 }
 
 func (s *Service) evictInstance(ctx context.Context, id string) error {
@@ -981,6 +1055,47 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 	s.AddManagerLog(id, "evicted for resource pressure")
 	slog.Info("evicted instance for resource pressure", "instance_id", id, "always_on", i.AlwaysOn)
 	return nil
+}
+
+func (s *Service) resolveLaunchOptions(ctx context.Context, modelID, instanceID string) (map[string]string, error) {
+	effective, err := llamaconfig.New(s.models.DB()).Effective(ctx, modelID, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return effective.Values, nil
+}
+
+func (s *Service) estimateDemand(m models.Model, path string, options map[string]string) scheduler.ResourceDemand {
+	metadata, metaErr := recommendations.ReadMetadata(path)
+	return scheduler.EstimateDemand(scheduler.DemandInput{
+		WeightsBytes: m.TotalBytes + companionBytes(options),
+		Metadata: scheduler.KVMetadata{
+			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
+			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
+			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength,
+		},
+		MetadataErr: metaErr,
+		Options:     options,
+	})
+}
+
+func companionBytes(options map[string]string) int64 {
+	if options == nil {
+		return 0
+	}
+	total := int64(0)
+	for _, key := range []string{"mmproj", "spec-draft-model"} {
+		path := strings.TrimSpace(options[key])
+		if path == "" {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		total += info.Size()
+	}
+	return total
 }
 
 func appendPlacementLaunchArgs(args []string, devices []string, tensorSplit string, hasTensorSplitOverride bool) ([]string, []string) {
