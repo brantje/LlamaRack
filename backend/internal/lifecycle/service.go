@@ -38,8 +38,9 @@ func isStartupInterrupt(err error) bool {
 }
 
 type Activity struct {
-	ActiveRequests int       `json:"active_requests"`
-	LastUsed       time.Time `json:"last_used,omitempty"`
+	PendingRequests int       `json:"pending_requests"`
+	ActiveRequests  int       `json:"active_requests"`
+	LastUsed        time.Time `json:"last_used,omitempty"`
 }
 
 type Service struct {
@@ -61,6 +62,8 @@ type Service struct {
 	drainWaits            map[string]chan struct{}
 	startupGen            map[string]uint64
 	startupCancel         map[string]context.CancelFunc
+	pendingLimits         func(context.Context) (perInstance, global int)
+	holdLoad              func(id string)
 	beforeEvictionLock    func(id string)
 	afterEvictionClaim    func(id string)
 	afterIdleDrainClaim   func(id string)
@@ -99,16 +102,21 @@ func (s *Service) Acquire(ctx context.Context, instanceID string) (string, func(
 	if err != nil {
 		return "", nil, err
 	}
+	if err := s.reservePending(ctx, i); err != nil {
+		return "", nil, err
+	}
 	if err := s.admitRequest(ctx, i.ID); err != nil {
+		s.releasePending(i.ID)
 		return "", nil, err
 	}
 	endpoint, err := s.ensureReadyInstance(ctx, i, true)
 	if err != nil {
-		s.finishRequest(i.ID)
+		s.releasePending(i.ID)
 		return "", nil, err
 	}
+	s.activateRequest(i.ID)
 	var once sync.Once
-	return endpoint, func() { once.Do(func() { s.finishRequest(i.ID) }) }, nil
+	return endpoint, func() { once.Do(func() { s.finishActive(i.ID) }) }, nil
 }
 
 func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, error) {
@@ -343,6 +351,7 @@ func (s *Service) Activity(id string) Activity {
 		s.mu.Lock()
 		a := s.activities[i.ID]
 		s.mu.Unlock()
+		out.PendingRequests += a.PendingRequests
 		out.ActiveRequests += a.ActiveRequests
 		if a.LastUsed.After(out.LastUsed) {
 			out.LastUsed = a.LastUsed
@@ -372,7 +381,7 @@ func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (schedu
 		}
 		candidates = append(candidates, scheduler.Candidate{
 			ModelID: i.ModelID, InstanceID: i.ID, Priority: i.Priority, AlwaysOn: i.AlwaysOn,
-			EvictionEnabled: i.EvictionEnabled, ActiveRequests: activity.ActiveRequests, LastUsed: activity.LastUsed,
+			EvictionEnabled: i.EvictionEnabled, ActiveRequests: activity.demand(), LastUsed: activity.LastUsed,
 			EstimatedBytes: estimated, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
 		})
 	}
@@ -465,7 +474,7 @@ func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Dura
 		lock := s.idleLock(i.ID)
 		lock.Lock()
 		activity := s.Activity(i.ID)
-		if activity.ActiveRequests > 0 || activity.LastUsed.IsZero() || now.Sub(activity.LastUsed) < idleTimeout {
+		if activity.demand() > 0 || activity.LastUsed.IsZero() || now.Sub(activity.LastUsed) < idleTimeout {
 			lock.Unlock()
 			continue
 		}
@@ -550,7 +559,7 @@ func (s *Service) admitRequest(ctx context.Context, id string) error {
 			}
 			continue
 		}
-		s.beginRequest(id)
+		s.admitReady(id)
 		lock.Unlock()
 		return nil
 	}
@@ -609,7 +618,7 @@ func (s *Service) claimEviction(ctx context.Context, id string) error {
 	lock.Lock()
 	defer lock.Unlock()
 	activity := s.Activity(id)
-	if !i.EvictionEnabled || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
+	if !i.EvictionEnabled || activity.demand() > 0 || s.sup.Status(id).State != supervisor.Ready {
 		return errEvictionIneligible
 	}
 	if !s.sup.BeginDrain(id) {
@@ -665,20 +674,9 @@ func (s *Service) finishDrainWait(id string) {
 	}
 }
 
-func (s *Service) beginRequest(id string) {
+func (s *Service) admitReady(id string) {
 	s.mu.Lock()
 	a := s.activities[id]
-	a.ActiveRequests++
-	a.LastUsed = s.now().UTC()
-	s.activities[id] = a
-	s.mu.Unlock()
-}
-func (s *Service) finishRequest(id string) {
-	s.mu.Lock()
-	a := s.activities[id]
-	if a.ActiveRequests > 0 {
-		a.ActiveRequests--
-	}
 	a.LastUsed = s.now().UTC()
 	s.activities[id] = a
 	s.mu.Unlock()
@@ -849,6 +847,9 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 }
 
 func (s *Service) runLoad(id string, c *loadCall) {
+	if s.holdLoad != nil {
+		s.holdLoad(id)
+	}
 	if err := s.waitDrain(context.Background(), id); err != nil {
 		if c.autoload {
 			s.AddManagerLog(id, "autoload triggered by inference request")

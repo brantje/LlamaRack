@@ -32,7 +32,7 @@ describe('Instance form empty identity branches', () => {
     const state = reactive({
       model_id: 'm1', name: 'Coder', slug: 'coder', enabled: true, always_on: false,
       autoload_enabled: true, priority: 'normal', eviction_enabled: true,
-      idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '',
+      idle_unload_seconds: 0, max_pending_requests: 0, gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '',
       request_log_mode: 'metadata', options: {} as Record<string, string>
     })
     const wrapper = await mountSuspended(InstanceForm, {

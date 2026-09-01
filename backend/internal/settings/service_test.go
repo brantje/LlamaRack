@@ -36,6 +36,12 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	if general.IdleUnloadTimeout.Value != 300 || general.IdleUnloadTimeout.Source != "default" || !general.IdleUnloadTimeout.Editable {
 		t.Fatalf("idle unload default=%+v", general.IdleUnloadTimeout)
 	}
+	if general.MaxPendingPerInstance.Value != 32 || general.MaxPendingPerInstance.Source != "default" || !general.MaxPendingPerInstance.Editable {
+		t.Fatalf("pending per instance default=%+v", general.MaxPendingPerInstance)
+	}
+	if general.MaxPendingGlobal.Value != 128 || general.MaxPendingGlobal.Source != "default" || !general.MaxPendingGlobal.Editable {
+		t.Fatalf("pending global default=%+v", general.MaxPendingGlobal)
+	}
 	if general.ObservabilityRetention.Value != 30 || general.ObservabilityRetention.Source != "default" || !general.ObservabilityRetention.Editable {
 		t.Fatalf("observability retention default=%+v", general.ObservabilityRetention)
 	}
@@ -69,6 +75,18 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	}
 	if got, err := s.Int(ctx, IdleUnloadSeconds); err != nil || got != 600 {
 		t.Fatalf("idle unload=%d err=%v", got, err)
+	}
+	if _, err := s.Set(ctx, MaxPendingRequestsPerInstance, 8); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Int(ctx, MaxPendingRequestsPerInstance); err != nil || got != 8 {
+		t.Fatalf("pending per instance=%d err=%v", got, err)
+	}
+	if _, err := s.Set(ctx, MaxPendingRequestsGlobal, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Int(ctx, MaxPendingRequestsGlobal); err != nil || got != 0 {
+		t.Fatalf("pending global=%d err=%v", got, err)
 	}
 	if _, err := s.Set(ctx, ObservabilityRetentionDays, 45); err != nil {
 		t.Fatal(err)
@@ -136,6 +154,21 @@ func TestPreviousEnvPrefixDoesNotControlSettings(t *testing.T) {
 	}
 }
 
+func TestPendingRequestLimitsHonorEnvironment(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LLAMARACK_MAX_PENDING_REQUESTS_PER_INSTANCE", "4")
+	t.Setenv("LLAMARACK_MAX_PENDING_REQUESTS_GLOBAL", "9")
+	s := testSettings(t)
+	value, err := s.Resolve(ctx, MaxPendingRequestsPerInstance)
+	if err != nil || value.Value != 4 || value.Source != "environment" || value.Editable {
+		t.Fatalf("pending per instance env=%+v err=%v", value, err)
+	}
+	value, err = s.Resolve(ctx, MaxPendingRequestsGlobal)
+	if err != nil || value.Value != 9 || value.Source != "environment" || value.Editable {
+		t.Fatalf("pending global env=%+v err=%v", value, err)
+	}
+}
+
 func TestIdleUnloadIgnoresLegacyEnvironmentVariable(t *testing.T) {
 	ctx := context.Background()
 	s := testSettings(t)
@@ -161,7 +194,7 @@ func TestSettingValidationAndTypeErrors(t *testing.T) {
 		key   string
 		value any
 	}{
-		{SessionLifetimeSeconds, 1}, {LoginFailureThreshold, 1}, {LoginLockoutSeconds, 0}, {StartupTimeoutSeconds, 0}, {IdleUnloadSeconds, -1}, {AlwaysOnReconcileSeconds, -1}, {ObservabilityRetentionDays, 0}, {ObservabilityRetentionDays, 3651},
+		{SessionLifetimeSeconds, 1}, {LoginFailureThreshold, 1}, {LoginLockoutSeconds, 0}, {StartupTimeoutSeconds, 0}, {IdleUnloadSeconds, -1}, {AlwaysOnReconcileSeconds, -1}, {MaxPendingRequestsPerInstance, -1}, {MaxPendingRequestsGlobal, 10001}, {ObservabilityRetentionDays, 0}, {ObservabilityRetentionDays, 3651},
 	} {
 		if _, err := s.Set(ctx, tc.key, tc.value); err == nil {
 			t.Fatalf("expected validation error for %s", tc.key)

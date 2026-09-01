@@ -11,6 +11,8 @@ type GeneralSettings = {
   startup_timeout_seconds: SettingValue<number>
   idle_unload_seconds: SettingValue<number>
   always_on_reconcile_seconds: SettingValue<number>
+  max_pending_requests_per_instance: SettingValue<number>
+  max_pending_requests_global: SettingValue<number>
   observability_retention_days?: SettingValue<number>
   prometheus_auth_token?: SettingValue<string>
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
@@ -33,6 +35,8 @@ const form = reactive({
   startup_timeout_seconds: 180,
   idle_unload_seconds: 300,
   always_on_reconcile_seconds: 15,
+  max_pending_requests_per_instance: 32,
+  max_pending_requests_global: 128,
   observability_retention_days: 30,
   prometheus_auth_token: ''
 })
@@ -43,7 +47,8 @@ const busy = ref(false)
 const baseline = ref('')
 const legacySettingKeys = [
   'session_lifetime_seconds', 'login_protection_enabled', 'login_failure_threshold', 'login_lockout_seconds',
-  'trusted_proxies', 'allowed_origins', 'external_url', 'startup_timeout_seconds', 'idle_unload_seconds', 'always_on_reconcile_seconds'
+  'trusted_proxies', 'allowed_origins', 'external_url', 'startup_timeout_seconds', 'idle_unload_seconds', 'always_on_reconcile_seconds',
+  'max_pending_requests_per_instance', 'max_pending_requests_global'
 ] as const
 
 function isGeneralSettings(value: unknown): value is GeneralSettings {
@@ -194,7 +199,7 @@ function editable(key: keyof typeof form) {
 
       <Frame class="p-5" data-testid="admin-general-resources">
         <h2 class="text-base font-semibold">Resource defaults</h2>
-        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Global idle unload defaults to 300 seconds; set it to 0 to disable the global idle timeout. Streaming responses keep an Instance active until the proxied response completes.</p>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Global idle unload defaults to 300 seconds; set it to 0 to disable the global idle timeout. Streaming responses keep an Instance active until the proxied response completes. Pending-request limits default to 32 per Instance and 128 manager-wide; set either to 0 for unlimited. Instances may override the per-Instance default.</p>
         <div class="mt-5 grid gap-5 md:grid-cols-3">
           <AdminSettingField label="Worker startup timeout (seconds)" :source="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></AdminSettingField>
           <AdminSettingField label="Global idle unload (seconds)" :source="source('idle_unload_seconds')">
@@ -202,6 +207,16 @@ function editable(key: keyof typeof form) {
             <template #help>Defaults to 300 seconds (5 minutes). Set to 0 to disable the global idle timeout.</template>
           </AdminSettingField>
           <AdminSettingField label="Always-on reconcile (seconds)" :source="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></AdminSettingField>
+        </div>
+        <div class="mt-5 grid gap-5 md:grid-cols-2">
+          <AdminSettingField label="Max pending requests per Instance" :source="source('max_pending_requests_per_instance')">
+            <UInputNumber v-model="form.max_pending_requests_per_instance" class="w-full" :min="0" :max="10000" :disabled="!editable('max_pending_requests_per_instance')" />
+            <template #help>Default 32. Set to 0 for unlimited. Instances may override this default.</template>
+          </AdminSettingField>
+          <AdminSettingField label="Max pending requests global" :source="source('max_pending_requests_global')">
+            <UInputNumber v-model="form.max_pending_requests_global" class="w-full" :min="0" :max="10000" :disabled="!editable('max_pending_requests_global')" />
+            <template #help>Default 128 waiter ceiling across all Instances. Set to 0 for unlimited. Instance overrides cannot bypass this.</template>
+          </AdminSettingField>
         </div>
 
         <div class="mt-5 grid gap-5 border-t border-[var(--color-divider)] pt-5 md:grid-cols-2">

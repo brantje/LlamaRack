@@ -57,7 +57,7 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 			t.Fatalf("models.%s missing", column)
 		}
 	}
-	for _, column := range []string{"model_id", "name", "autoload_enabled", "always_on", "priority", "eviction_enabled", "idle_unload_seconds", "gpu_mode", "gpu_devices", "tensor_split"} {
+	for _, column := range []string{"model_id", "name", "autoload_enabled", "always_on", "priority", "eviction_enabled", "idle_unload_seconds", "max_pending_requests", "gpu_mode", "gpu_devices", "tensor_split"} {
 		if !hasColumn(t, ctx, db, "instances", column) {
 			t.Fatalf("instances.%s missing", column)
 		}
@@ -83,6 +83,9 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE instances SET idle_unload_seconds=-1 WHERE id='one'"); err == nil {
 		t.Fatal("expected non-negative idle timeout constraint")
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE instances SET max_pending_requests=-1 WHERE id='one'"); err == nil {
+		t.Fatal("expected non-negative pending request constraint")
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO models(id,name,gguf_path,total_bytes) VALUES('m2','Two','same.gguf',1)"); err == nil {
 		t.Fatal("expected unique GGUF path constraint")
@@ -120,6 +123,36 @@ func TestInitializeSchemaIsIdempotentAndClosedDBFails(t *testing.T) {
 	}
 	if err := initializeSchema(ctx, db); err == nil {
 		t.Fatal("expected initializeSchema on closed DB to fail")
+	}
+}
+
+func TestEnsureInstanceColumnsAddsMaxPending(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, `CREATE TABLE instances (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, name TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if hasColumn(t, ctx, db, "instances", "max_pending_requests") {
+		t.Fatal("legacy table should not already have max_pending_requests")
+	}
+	if err := ensureInstanceColumns(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if !hasColumn(t, ctx, db, "instances", "max_pending_requests") {
+		t.Fatal("expected ALTER TABLE to add max_pending_requests")
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('one','m1','One')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE instances SET max_pending_requests=-1 WHERE id='one'`); err == nil {
+		t.Fatal("expected migrated max_pending_requests to reject negatives")
+	}
+	if err := ensureInstanceColumns(ctx, db); err != nil {
+		t.Fatalf("idempotent ensure: %v", err)
 	}
 }
 

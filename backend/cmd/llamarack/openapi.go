@@ -202,7 +202,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 				}},
 				"400": manageropenapi.ErrorResponse("Invalid request"),
 				"401": manageropenapi.ErrorResponse("Invalid API key"),
-				"503": {Description: "Model or worker unavailable", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
+				"503": {Description: "Model or worker unavailable, or pending-request admission limit exceeded", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
 			},
 		})
 	}
@@ -220,7 +220,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			}},
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
-			"503": {Description: "Model or worker unavailable", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
+			"503": {Description: "Model or worker unavailable, or pending-request admission limit exceeded", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
 		},
 	})
 	doc.MustRegister(http.MethodGet, "/v1/responses/{response_id}", manageropenapi.Operation{
@@ -291,7 +291,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
 			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
-			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
 	})
 	doc.MustRegister(http.MethodPost, "/v1/audio/transcriptions", manageropenapi.Operation{
@@ -306,7 +306,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
 			"413": manageropenapi.ErrorResponse("Request body is too large"),
-			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
 	})
 	doc.MustRegister(http.MethodPost, "/v1/chat/completions/input_tokens", manageropenapi.Operation{
@@ -321,7 +321,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
 			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
-			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
 	})
 	doc.MustRegister(http.MethodPost, "/v1/chat/completions/control", manageropenapi.Operation{
@@ -335,7 +335,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"200": manageropenapi.JSONResponse("Control result", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
 			"404": manageropenapi.ErrorResponse("Unknown in-flight completion"),
-			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
 	})
 	for _, endpoint := range []struct{ path, id, summary string }{
@@ -353,7 +353,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 				"200": {Description: "Rerank result", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
 				"400": manageropenapi.ErrorResponse("Invalid request"),
 				"401": manageropenapi.ErrorResponse("Invalid API key"),
-				"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+				"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 			},
 		})
 	}

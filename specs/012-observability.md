@@ -294,6 +294,12 @@ Expose Prometheus text exposition at `GET /metrics` using the `llamarack_` prefi
 
 Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-state metrics without high-cardinality request/log metadata labels.
 
+Pending-request admission must remain visible:
+
+- per-Instance queued/pending gauges already exposed as `llamarack_gateway_queued_requests`;
+- configured manager limits as `llamarack_gateway_pending_request_limit{scope="instance|global"}`;
+- rejections as `llamarack_gateway_queue_limit_rejections_total{instance_id,limit="instance|global"}`.
+
 ## Performance and privacy constraints
 
 - Streaming inference must remain streaming; do not buffer streaming responses before forwarding.

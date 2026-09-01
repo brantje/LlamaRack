@@ -229,6 +229,7 @@ Suggested mappings:
 | invalid request/config | 400 | invalid request |
 | unsupported capability | 400 | unsupported capability |
 | Autoload disabled while stopped | 503 | model unavailable |
+| pending-request admission limit exceeded | 503 | overloaded |
 | insufficient resources | 503 | insufficient resources |
 | worker startup failure | 503 | backend unavailable |
 | startup timeout | 504 | model startup timeout |

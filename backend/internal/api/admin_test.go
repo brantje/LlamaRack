@@ -258,14 +258,16 @@ func TestAdminGeneralSettingsSummaryAndSystem(t *testing.T) {
 		t.Fatalf("settings get=%d body=%s", w.Code, w.Body.String())
 	}
 	w = doRequest(t, f.handler, http.MethodPut, "/api/v1/settings/general", map[string]any{
-		"session_lifetime_seconds":    7200,
-		"login_failure_threshold":     6,
-		"trusted_proxies":             "10.0.0.0/8",
-		"allowed_origins":             "https://manager.example.test",
-		"external_url":                "https://manager.example.test",
-		"startup_timeout_seconds":     240,
-		"idle_unload_seconds":         600,
-		"always_on_reconcile_seconds": 20,
+		"session_lifetime_seconds":          7200,
+		"login_failure_threshold":           6,
+		"trusted_proxies":                   "10.0.0.0/8",
+		"allowed_origins":                   "https://manager.example.test",
+		"external_url":                      "https://manager.example.test",
+		"startup_timeout_seconds":           240,
+		"idle_unload_seconds":               600,
+		"always_on_reconcile_seconds":       20,
+		"max_pending_requests_per_instance": 16,
+		"max_pending_requests_global":       64,
 	}, f.cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"database"`) {
 		t.Fatalf("settings put=%d body=%s", w.Code, w.Body.String())

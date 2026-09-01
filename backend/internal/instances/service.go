@@ -11,36 +11,38 @@ import (
 )
 
 type Instance struct {
-	ID                string   `json:"id"`
-	ModelID           string   `json:"model_id"`
-	Name              string   `json:"name"`
-	Enabled           bool     `json:"enabled"`
-	Autoload          bool     `json:"autoload_enabled"`
-	AlwaysOn          bool     `json:"always_on"`
-	Priority          string   `json:"priority"`
-	EvictionEnabled   bool     `json:"eviction_enabled"`
-	IdleUnloadSeconds int      `json:"idle_unload_seconds"`
-	GPUMode           string   `json:"gpu_mode"`
-	GPUDevices        []string `json:"gpu_devices,omitempty"`
-	TensorSplit       string   `json:"tensor_split,omitempty"`
-	RequestLogMode    string   `json:"request_log_mode"`
+	ID                 string   `json:"id"`
+	ModelID            string   `json:"model_id"`
+	Name               string   `json:"name"`
+	Enabled            bool     `json:"enabled"`
+	Autoload           bool     `json:"autoload_enabled"`
+	AlwaysOn           bool     `json:"always_on"`
+	Priority           string   `json:"priority"`
+	EvictionEnabled    bool     `json:"eviction_enabled"`
+	IdleUnloadSeconds  int      `json:"idle_unload_seconds"`
+	MaxPendingRequests int      `json:"max_pending_requests"`
+	GPUMode            string   `json:"gpu_mode"`
+	GPUDevices         []string `json:"gpu_devices,omitempty"`
+	TensorSplit        string   `json:"tensor_split,omitempty"`
+	RequestLogMode     string   `json:"request_log_mode"`
 }
 
 type CreateInput struct {
-	ModelID           string            `json:"model_id"`
-	Name              string            `json:"name"`
-	Slug              string            `json:"slug,omitempty"`
-	Enabled           *bool             `json:"enabled,omitempty"`
-	Autoload          *bool             `json:"autoload_enabled,omitempty"`
-	AlwaysOn          bool              `json:"always_on"`
-	Priority          string            `json:"priority,omitempty"`
-	EvictionEnabled   *bool             `json:"eviction_enabled,omitempty"`
-	IdleUnloadSeconds int               `json:"idle_unload_seconds,omitempty"`
-	GPUMode           string            `json:"gpu_mode,omitempty"`
-	GPUDevices        []string          `json:"gpu_devices,omitempty"`
-	TensorSplit       string            `json:"tensor_split,omitempty"`
-	RequestLogMode    string            `json:"request_log_mode,omitempty"`
-	Options           map[string]string `json:"options,omitempty"`
+	ModelID            string            `json:"model_id"`
+	Name               string            `json:"name"`
+	Slug               string            `json:"slug,omitempty"`
+	Enabled            *bool             `json:"enabled,omitempty"`
+	Autoload           *bool             `json:"autoload_enabled,omitempty"`
+	AlwaysOn           bool              `json:"always_on"`
+	Priority           string            `json:"priority,omitempty"`
+	EvictionEnabled    *bool             `json:"eviction_enabled,omitempty"`
+	IdleUnloadSeconds  int               `json:"idle_unload_seconds,omitempty"`
+	MaxPendingRequests *int              `json:"max_pending_requests,omitempty"`
+	GPUMode            string            `json:"gpu_mode,omitempty"`
+	GPUDevices         []string          `json:"gpu_devices,omitempty"`
+	TensorSplit        string            `json:"tensor_split,omitempty"`
+	RequestLogMode     string            `json:"request_log_mode,omitempty"`
+	Options            map[string]string `json:"options,omitempty"`
 }
 
 type UpdateInput = CreateInput
@@ -81,8 +83,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 		return Instance{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		i.ID, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		i.ID, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil {
 		return Instance{}, err
 	}
 	if err := replaceOptions(ctx, tx, i.ID, in.Options); err != nil {
@@ -109,13 +111,16 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err != nil {
 		return Instance{}, err
 	}
+	if in.MaxPendingRequests == nil {
+		i.MaxPendingRequests = current.MaxPendingRequests
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Instance{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE instances SET id=?,model_id=?,name=?,enabled=?,autoload_enabled=?,always_on=?,priority=?,eviction_enabled=?,idle_unload_seconds=?,gpu_mode=?,gpu_devices=?,tensor_split=?,request_log_mode=?,updated_at=unixepoch() WHERE id=?`,
-		i.ID, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode, currentID)
+	result, err := tx.ExecContext(ctx, `UPDATE instances SET id=?,model_id=?,name=?,enabled=?,autoload_enabled=?,always_on=?,priority=?,eviction_enabled=?,idle_unload_seconds=?,max_pending_requests=?,gpu_mode=?,gpu_devices=?,tensor_split=?,request_log_mode=?,updated_at=unixepoch() WHERE id=?`,
+		i.ID, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode, currentID)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -151,7 +156,7 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 		copy, err := s.Create(ctx, CreateInput{
 			ModelID: base.ModelID, Name: name, Enabled: &enabled, Autoload: &autoload,
 			AlwaysOn: base.AlwaysOn, Priority: base.Priority, EvictionEnabled: &eviction,
-			IdleUnloadSeconds: base.IdleUnloadSeconds, GPUMode: base.GPUMode,
+			IdleUnloadSeconds: base.IdleUnloadSeconds, MaxPendingRequests: &base.MaxPendingRequests, GPUMode: base.GPUMode,
 			GPUDevices: append([]string(nil), base.GPUDevices...), TensorSplit: base.TensorSplit, RequestLogMode: base.RequestLogMode, Options: opts,
 		})
 		if err == nil {
@@ -165,15 +170,15 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Instance, error) {
-	return scan(s.db.QueryRowContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE id=?`, id))
+	return scan(s.db.QueryRowContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE id=?`, id))
 }
 
 func (s *Service) List(ctx context.Context) ([]Instance, error) {
-	return s.list(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances ORDER BY name,id`)
+	return s.list(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances ORDER BY name,id`)
 }
 
 func (s *Service) ListByModel(ctx context.Context, modelID string) ([]Instance, error) {
-	return s.list(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE model_id=? ORDER BY name,id`, modelID)
+	return s.list(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE model_id=? ORDER BY name,id`, modelID)
 }
 
 func (s *Service) list(ctx context.Context, query string, args ...any) ([]Instance, error) {
@@ -227,7 +232,7 @@ func scan(row scanner) (Instance, error) {
 	var i Instance
 	var enabled, autoload, alwaysOn, eviction int
 	var devices, split sql.NullString
-	if err := row.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.GPUMode, &devices, &split, &i.RequestLogMode); err != nil {
+	if err := row.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.MaxPendingRequests, &i.GPUMode, &devices, &split, &i.RequestLogMode); err != nil {
 		return Instance{}, err
 	}
 	i.Enabled = enabled != 0
@@ -269,6 +274,13 @@ func normalize(in CreateInput) (Instance, error) {
 	}
 	if in.IdleUnloadSeconds < 0 {
 		return Instance{}, errors.New("idle_unload_seconds must be zero or greater")
+	}
+	pending := 0
+	if in.MaxPendingRequests != nil {
+		if *in.MaxPendingRequests < 0 {
+			return Instance{}, errors.New("max_pending_requests must be zero or greater")
+		}
+		pending = *in.MaxPendingRequests
 	}
 	enabled := true
 	if in.Enabled != nil {
@@ -315,7 +327,7 @@ func normalize(in CreateInput) (Instance, error) {
 	return Instance{
 		ID: id, ModelID: modelID, Name: name, Enabled: enabled, Autoload: autoload,
 		AlwaysOn: in.AlwaysOn, Priority: priority, EvictionEnabled: eviction,
-		IdleUnloadSeconds: in.IdleUnloadSeconds, GPUMode: gpuMode, GPUDevices: devices,
+		IdleUnloadSeconds: in.IdleUnloadSeconds, MaxPendingRequests: pending, GPUMode: gpuMode, GPUDevices: devices,
 		TensorSplit: strings.TrimSpace(in.TensorSplit), RequestLogMode: requestLogMode,
 	}, nil
 }
