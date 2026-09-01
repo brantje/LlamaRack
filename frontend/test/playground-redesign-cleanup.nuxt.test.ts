@@ -94,6 +94,6 @@ describe('Playground redesign cleanup', () => {
     expect(source).not.toContain('backdrop-blur')
     const css = readFileSync(resolve(process.cwd(), 'app/assets/css/main.css'), 'utf8')
     expect(css).toContain("form:has(textarea:focus-visible)")
-    expect(css).toContain('--tw-ring-color: var(--color-divider) !important')
+    expect(css).toContain('--tw-ring-color: var(--color-accent) !important')
   })
 })

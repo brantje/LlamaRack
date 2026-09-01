@@ -1151,6 +1151,6 @@ onBeforeUnmount(() => {
 
 :deep([data-testid='playground-composer'] form:has(textarea:focus-visible)) {
   outline: none;
-  --tw-ring-color: var(--color-divider);
+  --tw-ring-color: var(--color-accent);
 }
 </style>
