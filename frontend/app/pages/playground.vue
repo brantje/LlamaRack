@@ -599,7 +599,7 @@ async function send(options: { allowEmpty?: boolean } = {}) {
   }
   selectedInstanceID.value = target.id
 
-  conversation.value.push(toThreadMessage('assistant', [{ type: 'text', text: '', state: 'streaming' }], nextMessageId('assistant')))
+  conversation.value.push(toThreadMessage('assistant', [{ type: 'text', text: '', state: 'streaming' }], `assistant-${conversation.value.length}`))
   composer.value = ''
   clearAttachments()
   rawResponse.value = ''

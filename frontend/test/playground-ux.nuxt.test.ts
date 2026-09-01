@@ -388,4 +388,28 @@ describe('Playground UX', () => {
     expect(publicFetch).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
+
+  it('keeps assistant message ids unique after rebuilt conversation turns', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"next"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-ids' } }
+    )))
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    ;(wrapper.vm as any).adoptBody({
+      model: 'coder',
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'hello' }
+      ]
+    })
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('again')
+    await sendPlayground(wrapper)
+    await flushPromises()
+    const ids = ((wrapper.vm as any).conversation as Array<{ id: string }>).map(message => message.id)
+    expect(ids.length).toBeGreaterThanOrEqual(3)
+    expect(new Set(ids).size).toBe(ids.length)
+    wrapper.unmount()
+  })
 })
