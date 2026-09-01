@@ -28,7 +28,14 @@ const maxEvictionPlanAttempts = 2
 var (
 	errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
 	errEvictionIneligible      = errors.New("instance is no longer eligible for resource-pressure eviction")
+	errStartupKilled           = errors.New("startup killed")
 )
+
+type startupGenContextKey struct{}
+
+func isStartupInterrupt(err error) bool {
+	return errors.Is(err, errStartupKilled) || errors.Is(err, supervisor.ErrKilled) || errors.Is(err, context.Canceled)
+}
 
 type Activity struct {
 	ActiveRequests int       `json:"active_requests"`
@@ -51,6 +58,8 @@ type Service struct {
 	idleLocks             map[string]*sync.Mutex
 	operationGates        map[string]chan struct{}
 	drainWaits            map[string]chan struct{}
+	startupGen            map[string]uint64
+	startupCancel         map[string]context.CancelFunc
 	beforeEvictionLock    func(id string)
 	afterEvictionClaim    func(id string)
 	afterIdleDrainClaim   func(id string)
@@ -59,6 +68,7 @@ type Service struct {
 
 type loadCall struct {
 	done     chan struct{}
+	complete sync.Once
 	endpoint string
 	err      error
 	autoload bool
@@ -70,7 +80,8 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 		reservations: scheduler.NewLedger(),
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
-		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{}, now: time.Now,
+		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{},
+		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{}, now: time.Now,
 	}
 }
 
@@ -195,6 +206,7 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	}
 	defer release()
 
+	s.cancelStartup(id)
 	s.clearManualStop(id)
 	s.clearResourceBlock(id)
 	if err := s.sup.Stop(ctx, id); err != nil {
@@ -205,7 +217,16 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 		s.reservations.ReleaseInstance(id)
 	}
 	s.finishDrainWait(id)
-	endpoint, err := s.startOne(ctx, i)
+	startCtx, gen := s.beginStartup(id)
+	release()
+	endpoint, err := s.startOne(startCtx, i)
+	if !s.startupLive(id, gen) {
+		if _, ok := s.sup.Endpoint(id); ok {
+			_ = s.sup.Kill(id)
+		}
+		return "", errStartupKilled
+	}
+	s.finishStartup(id, gen)
 	if err == nil {
 		s.AddManagerLog(id, "restart completed")
 	}
@@ -222,14 +243,17 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 		s.abortDrainClaim(id)
 		return err
 	}
-	defer release()
 
+	s.cancelStartup(id)
 	s.clearResourceBlock(id)
 	s.markManualStop(id)
 	if err := s.sup.Kill(id); err != nil {
+		release()
 		s.abortDrainClaim(id)
 		return err
 	}
+	release()
+	_ = s.waitLoad(ctx, id)
 	_ = s.sup.WaitInactive(ctx, id)
 	s.releaseReservation(id)
 	s.finishDrainWait(id)
@@ -394,7 +418,13 @@ func (s *Service) reconcileResourceBlocked(id string) {
 		s.clearResourceBlock(id)
 		return
 	}
-	_, err = s.startOneWithEviction(context.Background(), i, false)
+	startCtx, gen := s.beginStartup(id)
+	release()
+	_, err = s.startOneWithEviction(startCtx, i, false)
+	if !s.startupLive(id, gen) {
+		return
+	}
+	s.finishStartup(id, gen)
 	if err == nil {
 		s.clearResourceBlock(id)
 		return
@@ -588,6 +618,7 @@ func (s *Service) stopWorker(ctx context.Context, id string) error {
 		return err
 	}
 	defer release()
+	s.cancelStartup(id)
 	if err := s.sup.Stop(ctx, id); err != nil {
 		s.abortDrainClaim(id)
 		return err
@@ -681,6 +712,74 @@ func (s *Service) acquireOperation(ctx context.Context, id string) (func(), erro
 		return nil, ctx.Err()
 	}
 }
+
+func (s *Service) beginStartup(id string) (context.Context, uint64) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	prev := s.startupCancel[id]
+	s.startupGen[id]++
+	gen := s.startupGen[id]
+	s.startupCancel[id] = cancel
+	s.mu.Unlock()
+	if prev != nil {
+		prev()
+	}
+	return context.WithValue(ctx, startupGenContextKey{}, gen), gen
+}
+
+func (s *Service) cancelStartup(id string) {
+	s.mu.Lock()
+	s.startupGen[id]++
+	cancel := s.startupCancel[id]
+	delete(s.startupCancel, id)
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) finishStartup(id string, gen uint64) {
+	s.mu.Lock()
+	if s.startupGen[id] != gen {
+		s.mu.Unlock()
+		return
+	}
+	cancel := s.startupCancel[id]
+	delete(s.startupCancel, id)
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) startupLive(id string, gen uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startupGen[id] == gen
+}
+
+func (s *Service) generationLive(ctx context.Context, id string) bool {
+	gen, ok := ctx.Value(startupGenContextKey{}).(uint64)
+	if !ok || gen == 0 {
+		return true
+	}
+	return s.startupLive(id, gen)
+}
+
+func (s *Service) waitLoad(ctx context.Context, id string) error {
+	s.mu.Lock()
+	c := s.loads[id]
+	s.mu.Unlock()
+	if c == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return nil
+	}
+}
 func (s *Service) markManualStop(id string) {
 	s.mu.Lock()
 	s.manuallyStopped[id] = true
@@ -772,7 +871,18 @@ func (s *Service) runLoad(id string, c *loadCall) {
 			if readyEndpoint, ok := s.sup.Endpoint(id); ok {
 				endpoint = readyEndpoint
 			} else {
-				endpoint, err = s.startOne(context.Background(), i)
+				startCtx, gen := s.beginStartup(id)
+				release()
+				endpoint, err = s.startOne(startCtx, i)
+				if !s.startupLive(id, gen) {
+					if _, ok := s.sup.Endpoint(id); ok {
+						_ = s.sup.Kill(id)
+					}
+					endpoint = ""
+					err = errStartupKilled
+				} else {
+					s.finishStartup(id, gen)
+				}
 			}
 		}
 	}
@@ -783,14 +893,16 @@ func (s *Service) runLoad(id string, c *loadCall) {
 }
 
 func (s *Service) completeLoad(id string, c *loadCall, endpoint string, err error) {
-	s.mu.Lock()
-	c.endpoint = endpoint
-	c.err = err
-	if s.loads[id] == c {
-		delete(s.loads, id)
-	}
-	close(c.done)
-	s.mu.Unlock()
+	c.complete.Do(func() {
+		s.mu.Lock()
+		c.endpoint = endpoint
+		c.err = err
+		if s.loads[id] == c {
+			delete(s.loads, id)
+		}
+		close(c.done)
+		s.mu.Unlock()
+	})
 }
 
 func (s *Service) startOne(ctx context.Context, i instances.Instance) (string, error) {
@@ -810,12 +922,19 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 			s.AddManagerLog(i.ID, fmt.Sprintf("worker ready after %s", duration.Round(time.Millisecond)))
 			return
 		}
-		if errors.Is(err, errResourcePressureBlocked) {
+		if errors.Is(err, errResourcePressureBlocked) || isStartupInterrupt(err) {
+			if errors.Is(err, errStartupKilled) || errors.Is(err, supervisor.ErrKilled) {
+				s.AddManagerLog(i.ID, "startup killed")
+			}
 			return
 		}
 		s.recordObservabilityEvent(ctx, ObservabilityFailedStart, i.ID, duration)
 		s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())
 	}()
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	m, err := s.models.GetByID(ctx, i.ModelID)
 	if err != nil {
@@ -862,7 +981,17 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 
 	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv)
 	if err != nil {
+		if isStartupInterrupt(err) {
+			return "", fmt.Errorf("%w: %w", errStartupKilled, err)
+		}
 		return "", err
+	}
+	if err := ctx.Err(); err != nil || !s.generationLive(ctx, i.ID) {
+		_ = s.sup.Kill(i.ID)
+		if err == nil {
+			err = errStartupKilled
+		}
+		return "", fmt.Errorf("%w: %w", errStartupKilled, err)
 	}
 	endpoint, ok := s.sup.Endpoint(i.ID)
 	if !ok {

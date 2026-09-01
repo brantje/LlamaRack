@@ -45,12 +45,16 @@ func TestHelperProcess(t *testing.T) {
 	args = args[idx:]
 	var port int
 	var model string
+	readyDelay := time.Duration(0)
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
 		case "--port":
 			port, _ = strconv.Atoi(args[i+1])
 		case "--model":
 			model = args[i+1]
+		case "--test-ready-delay-ms":
+			milliseconds, _ := strconv.Atoi(args[i+1])
+			readyDelay = time.Duration(milliseconds) * time.Millisecond
 		}
 	}
 	if strings.Contains(model, "exit-immediately") {
@@ -63,8 +67,15 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(3)
 	}
 	fmt.Println("fake worker online")
+	readyAt := time.Now().Add(readyDelay)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		if time.Now().Before(readyAt) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(w, r.Body)
 	})
