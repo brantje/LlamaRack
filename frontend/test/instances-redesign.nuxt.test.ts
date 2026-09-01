@@ -231,9 +231,11 @@ describe('Instances redesign', () => {
     await launch.trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/manual-launch/start', { method: 'POST' })
+    wrapper.unmount()
   })
 
   it('shows a completed import warning together with startup backoff', async () => {
+    const manager = seed()
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/imports') {
         return [{
@@ -242,6 +244,17 @@ describe('Instances redesign', () => {
         }]
       }
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances') return manager.instances.value
+      const runtimeMatch = path.match(/^\/api\/v1\/instances\/([^/]+)\/runtime$/)
+      if (runtimeMatch) {
+        const id = decodeURIComponent(runtimeMatch[1])
+        for (const group of Object.values(manager.runtimes.value)) {
+          const runtime = group.find(item => item.instance_id === id)
+          if (runtime) return runtime
+        }
+        return { instance_id: id, model_id: 'm1', state: 'UNLOADED' }
+      }
       return []
     })
 
@@ -252,5 +265,6 @@ describe('Instances redesign', () => {
     expect(failedRow.get('[data-testid="import-metadata-warning"]').text()).toContain('Context capability could not be detected automatically')
     expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('CUDA allocation failed')
     expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
+    wrapper.unmount()
   })
 })
