@@ -311,6 +311,6 @@ func ensureInstanceColumns(ctx context.Context, db *sql.DB) error {
 	if hasMaxPending {
 		return nil
 	}
-	_, err = db.ExecContext(ctx, `ALTER TABLE instances ADD COLUMN max_pending_requests INTEGER NOT NULL DEFAULT 0`)
+	_, err = db.ExecContext(ctx, `ALTER TABLE instances ADD COLUMN max_pending_requests INTEGER NOT NULL DEFAULT 0 CHECK(max_pending_requests >= 0)`)
 	return err
 }

@@ -145,6 +145,12 @@ func TestEnsureInstanceColumnsAddsMaxPending(t *testing.T) {
 	if !hasColumn(t, ctx, db, "instances", "max_pending_requests") {
 		t.Fatal("expected ALTER TABLE to add max_pending_requests")
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('one','m1','One')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE instances SET max_pending_requests=-1 WHERE id='one'`); err == nil {
+		t.Fatal("expected migrated max_pending_requests to reject negatives")
+	}
 	if err := ensureInstanceColumns(ctx, db); err != nil {
 		t.Fatalf("idempotent ensure: %v", err)
 	}

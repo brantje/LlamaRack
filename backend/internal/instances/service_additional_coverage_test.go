@@ -26,7 +26,7 @@ func TestUpdateValidationConflictAndNilOptionsBranches(t *testing.T) {
 	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", IdleUnloadSeconds: -1}); err == nil {
 		t.Fatal("expected invalid update idle timeout")
 	}
-	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", MaxPendingRequests: -1}); err == nil {
+	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", MaxPendingRequests: intp(-1)}); err == nil {
 		t.Fatal("expected invalid update pending limit")
 	}
 	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", Slug: second.ID}); err == nil {
@@ -41,6 +41,29 @@ func TestUpdateValidationConflictAndNilOptionsBranches(t *testing.T) {
 	}
 	if updated.ID != "first-defaulted" || !updated.Enabled || !updated.Autoload || !updated.EvictionEnabled || updated.Priority != "normal" || updated.GPUMode != "auto" {
 		t.Fatalf("unexpected updated defaults: %+v", updated)
+	}
+}
+
+func TestUpdatePreservesPendingLimitUnlessExplicit(t *testing.T) {
+	ctx := context.Background()
+	s, _ := testService(t)
+	created, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Queued", MaxPendingRequests: intp(8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.Update(ctx, created.ID, UpdateInput{Name: "Queued Renamed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Queued Renamed" || updated.MaxPendingRequests != 8 {
+		t.Fatalf("omitted pending limit should keep override=%+v", updated)
+	}
+	cleared, err := s.Update(ctx, updated.ID, UpdateInput{Name: "Queued Renamed", MaxPendingRequests: intp(0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.MaxPendingRequests != 0 {
+		t.Fatalf("explicit zero should inherit=%+v", cleared)
 	}
 }
 

@@ -334,7 +334,7 @@ onMounted(() => {
             </div>
           </div>
           <UFormField :label="`Idle unload timeout (seconds · 0 inherits the global ${globalIdleSeconds} s)`" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
-          <UFormField :label="`Max pending requests (0 inherits the global ${globalPendingPerInstance})`" name="max_pending_requests"><UInputNumber v-model="form.max_pending_requests" class="w-full" :min="0" /></UFormField>
+          <UFormField :label="`Max pending requests (0 inherits the per-Instance default ${globalPendingPerInstance})`" name="max_pending_requests"><UInputNumber v-model="form.max_pending_requests" class="w-full" :min="0" /></UFormField>
         </div>
         <div class="mt-5 grid gap-4 md:grid-cols-2">
           <UCheckbox v-model="form.enabled" label="Enabled" />

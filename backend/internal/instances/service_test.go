@@ -24,6 +24,8 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 
 func boolp(v bool) *bool { return &v }
 
+func intp(v int) *int { return &v }
+
 func TestSlugifyAndValidation(t *testing.T) {
 	if got := Slugify("  My Instance / GPU 0  "); got != "my-instance-gpu-0" {
 		t.Fatalf("slug=%q", got)
@@ -39,7 +41,7 @@ func TestSlugifyAndValidation(t *testing.T) {
 		{ModelID: "m1", Name: "One", Priority: "urgent"},
 		{ModelID: "m1", Name: "One", GPUMode: "magic"},
 		{ModelID: "m1", Name: "One", IdleUnloadSeconds: -1},
-		{ModelID: "m1", Name: "One", MaxPendingRequests: -1},
+		{ModelID: "m1", Name: "One", MaxPendingRequests: intp(-1)},
 	} {
 		if _, err := normalize(in); err == nil {
 			t.Fatalf("expected validation error for %+v", in)
@@ -52,7 +54,7 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	s, _ := testService(t)
 	i, err := s.Create(ctx, CreateInput{
 		ModelID: "m1", Name: "Coder Primary", Slug: "Coding API", Enabled: boolp(false), Autoload: boolp(false), AlwaysOn: true,
-		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90, MaxPendingRequests: 8,
+		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90, MaxPendingRequests: intp(8),
 		GPUMode: "manual", GPUDevices: []string{"0", " 1 ", "0", ""}, TensorSplit: "1,1",
 		Options: map[string]string{"ctx-size": "8192", " threads ": "8", "": "ignored"},
 	})
@@ -85,6 +87,9 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	}
 	if updated.ID != "renamed-api" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload {
 		t.Fatalf("updated=%+v", updated)
+	}
+	if updated.MaxPendingRequests != 8 {
+		t.Fatalf("omitted pending limit should keep override=%+v", updated)
 	}
 	if _, err := s.Get(ctx, i.ID); err == nil {
 		t.Fatal("old id should no longer resolve")

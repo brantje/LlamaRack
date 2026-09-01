@@ -37,7 +37,7 @@ type CreateInput struct {
 	Priority           string            `json:"priority,omitempty"`
 	EvictionEnabled    *bool             `json:"eviction_enabled,omitempty"`
 	IdleUnloadSeconds  int               `json:"idle_unload_seconds,omitempty"`
-	MaxPendingRequests int               `json:"max_pending_requests,omitempty"`
+	MaxPendingRequests *int              `json:"max_pending_requests,omitempty"`
 	GPUMode            string            `json:"gpu_mode,omitempty"`
 	GPUDevices         []string          `json:"gpu_devices,omitempty"`
 	TensorSplit        string            `json:"tensor_split,omitempty"`
@@ -111,6 +111,9 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err != nil {
 		return Instance{}, err
 	}
+	if in.MaxPendingRequests == nil {
+		i.MaxPendingRequests = current.MaxPendingRequests
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Instance{}, err
@@ -153,7 +156,7 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 		copy, err := s.Create(ctx, CreateInput{
 			ModelID: base.ModelID, Name: name, Enabled: &enabled, Autoload: &autoload,
 			AlwaysOn: base.AlwaysOn, Priority: base.Priority, EvictionEnabled: &eviction,
-			IdleUnloadSeconds: base.IdleUnloadSeconds, MaxPendingRequests: base.MaxPendingRequests, GPUMode: base.GPUMode,
+			IdleUnloadSeconds: base.IdleUnloadSeconds, MaxPendingRequests: &base.MaxPendingRequests, GPUMode: base.GPUMode,
 			GPUDevices: append([]string(nil), base.GPUDevices...), TensorSplit: base.TensorSplit, RequestLogMode: base.RequestLogMode, Options: opts,
 		})
 		if err == nil {
@@ -272,8 +275,12 @@ func normalize(in CreateInput) (Instance, error) {
 	if in.IdleUnloadSeconds < 0 {
 		return Instance{}, errors.New("idle_unload_seconds must be zero or greater")
 	}
-	if in.MaxPendingRequests < 0 {
-		return Instance{}, errors.New("max_pending_requests must be zero or greater")
+	pending := 0
+	if in.MaxPendingRequests != nil {
+		if *in.MaxPendingRequests < 0 {
+			return Instance{}, errors.New("max_pending_requests must be zero or greater")
+		}
+		pending = *in.MaxPendingRequests
 	}
 	enabled := true
 	if in.Enabled != nil {
@@ -320,7 +327,7 @@ func normalize(in CreateInput) (Instance, error) {
 	return Instance{
 		ID: id, ModelID: modelID, Name: name, Enabled: enabled, Autoload: autoload,
 		AlwaysOn: in.AlwaysOn, Priority: priority, EvictionEnabled: eviction,
-		IdleUnloadSeconds: in.IdleUnloadSeconds, MaxPendingRequests: in.MaxPendingRequests, GPUMode: gpuMode, GPUDevices: devices,
+		IdleUnloadSeconds: in.IdleUnloadSeconds, MaxPendingRequests: pending, GPUMode: gpuMode, GPUDevices: devices,
 		TensorSplit: strings.TrimSpace(in.TensorSplit), RequestLogMode: requestLogMode,
 	}, nil
 }

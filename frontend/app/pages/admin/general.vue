@@ -210,11 +210,11 @@ function editable(key: keyof typeof form) {
         </div>
         <div class="mt-5 grid gap-5 md:grid-cols-2">
           <AdminSettingField label="Max pending requests per Instance" :source="source('max_pending_requests_per_instance')">
-            <UInputNumber v-model="form.max_pending_requests_per_instance" class="w-full" :min="0" :disabled="!editable('max_pending_requests_per_instance')" />
+            <UInputNumber v-model="form.max_pending_requests_per_instance" class="w-full" :min="0" :max="10000" :disabled="!editable('max_pending_requests_per_instance')" />
             <template #help>Default 32. Set to 0 for unlimited. Instances may override this default.</template>
           </AdminSettingField>
           <AdminSettingField label="Max pending requests global" :source="source('max_pending_requests_global')">
-            <UInputNumber v-model="form.max_pending_requests_global" class="w-full" :min="0" :disabled="!editable('max_pending_requests_global')" />
+            <UInputNumber v-model="form.max_pending_requests_global" class="w-full" :min="0" :max="10000" :disabled="!editable('max_pending_requests_global')" />
             <template #help>Default 128 waiter ceiling across all Instances. Set to 0 for unlimited. Instance overrides cannot bypass this.</template>
           </AdminSettingField>
         </div>

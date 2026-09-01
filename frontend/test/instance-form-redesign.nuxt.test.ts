@@ -105,7 +105,7 @@ describe('shared Instance form redesign', () => {
     expect(wrapper.get('[data-testid="priority-low"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[data-testid="priority-high"]').trigger('click')
     expect(state.priority).toBe('high')
-    expect(wrapper.text()).toContain('Max pending requests (0 inherits the global 16)')
+    expect(wrapper.text()).toContain('Max pending requests (0 inherits the per-Instance default 16)')
 
     const launch = controls(wrapper, 'Checkbox', 'UCheckbox').find((item: any) => item.props('label') === 'Launch after creation')!
     launch.vm.$emit('update:modelValue', true)
