@@ -225,6 +225,8 @@ describe('frontend design rules', () => {
     const instanceForm = readFileSync(resolve(appRoot, 'components/InstanceForm.vue'), 'utf8')
     const hardwarePlacement = readFileSync(resolve(appRoot, 'components/HardwarePlacementEditor.vue'), 'utf8')
     expect(instanceForm).toContain('<HardwarePlacementEditor')
+    expect(instanceForm).toContain('hide-placement-controls')
+    expect(instanceForm).not.toContain(':deep(')
     expect(hardwarePlacement, 'HardwarePlacementEditor is embedded inside the Placement Frame and must not create nested Frames').not.toContain('<Frame')
 
     const deleteModal = readFileSync(resolve(appRoot, 'components/ModelDeleteModal.vue'), 'utf8')
@@ -233,5 +235,15 @@ describe('frontend design rules', () => {
     const layout = readFileSync(resolve(appRoot, 'layouts/default.vue'), 'utf8')
     expect(layout).not.toContain('rounded-full')
     expect(layout).toContain('rounded-none')
+  })
+
+  it('quotes named machine fonts and keeps accent keyboard focus on form controls', () => {
+    const shared = readFileSync(resolve(process.cwd(), 'app/themes/shared.css'), 'utf8')
+    expect(shared).toContain("'SFMono-Regular'")
+    expect(shared).toContain("'Menlo'")
+
+    const main = readFileSync(resolve(process.cwd(), 'app/assets/css/main.css'), 'utf8')
+    expect(main).toContain('--tw-ring-color: var(--color-accent)')
+    expect(main).not.toContain('--tw-ring-color: var(--color-divider)')
   })
 })
