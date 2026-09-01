@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
@@ -38,6 +39,7 @@ type Gateway struct {
 	auth          *auth.Service
 	lifecycle     *lifecycle.Service
 	observability *observability.Service
+	active        *activeRegistry
 }
 
 type requestEnvelope struct {
@@ -49,7 +51,7 @@ type requestEnvelope struct {
 }
 
 func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*observability.Service) *Gateway {
-	g := &Gateway{auth: a, lifecycle: l}
+	g := &Gateway{auth: a, lifecycle: l, active: newActiveRegistry()}
 	if len(services) > 0 {
 		g.observability = services[0]
 		if g.observability != nil {
@@ -65,6 +67,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	requestID := newRequestID()
 	setProductHeader(w.Header(), headerRequestID, requestID)
+	spec, params, known := classify(r.Method, r.URL.Path)
+	if spec.CallType == "" && known {
+		spec.CallType = callType(r.URL.Path)
+	}
 
 	// Read only a small metadata budget before authentication. This preserves
 	// useful body-derived metadata for normal/small failed-auth requests without
@@ -76,18 +82,22 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var envelope requestEnvelope
 	parseErr := error(nil)
-	if len(bytes.TrimSpace(prefix)) > 0 {
+	if spec.Body != bodyMultipart && looksLikeJSON(prefix) {
 		parseErr = json.Unmarshal(prefix, &envelope)
 	}
 	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
 	w.Header().Set(headerTraceID, traceID)
 
+	callTypeValue := spec.CallType
+	if !known {
+		callTypeValue = ""
+	}
 	record := observability.RequestRecord{
 		StartedAt:  started.UnixMilli(),
 		InstanceID: strings.TrimSpace(envelope.Model),
 		Endpoint:   r.URL.Path,
 		TraceID:    traceID,
-		CallType:   callType(r.URL.Path),
+		CallType:   callTypeValue,
 		ClientIP:   clientIP(r),
 		UserAgent:  boundedMetadata(r.UserAgent(), 2048),
 		Streaming:  envelope.Stream,
@@ -155,7 +165,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// normal limit so oversized bodies are rejected instead of truncated.
 	body := append([]byte(nil), prefix...)
 	bodyTooLarge := false
-	if bodyReadErr == nil && r.Body != nil {
+	if spec.Body != bodyNone && bodyReadErr == nil && r.Body != nil {
 		remaining := int64(maxRequestBodyBytes + 1 - len(body))
 		if remaining > 0 {
 			rest, readErr := io.ReadAll(io.LimitReader(r.Body, remaining))
@@ -167,11 +177,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyTooLarge = true
 		body = nil
 	}
-	if bodyReadErr == nil && !bodyTooLarge {
+	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge {
 		var fullEnvelope requestEnvelope
 		parseErr = nil
-		if len(bytes.TrimSpace(body)) > 0 {
+		if looksLikeJSON(body) {
 			parseErr = json.Unmarshal(body, &fullEnvelope)
+		} else if len(bytes.TrimSpace(body)) > 0 {
+			parseErr = errors.New("invalid json")
 		}
 		envelope = fullEnvelope
 		record.InstanceID = strings.TrimSpace(envelope.Model)
@@ -184,172 +196,52 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	g.update(r.Context(), requestID, record)
 
-	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
-		g.listModels(observed, r)
-		return
-	}
-	if r.Method != http.MethodPost || !supported(r.URL.Path) {
+	if !known {
 		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
 		return
 	}
-	if bodyReadErr != nil {
-		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
-		return
-	}
-	if bodyTooLarge {
-		writeError(observed, http.StatusRequestEntityTooLarge, "invalid_request_error", "body_too_large", "Request body is too large")
-		return
-	}
-	if parseErr != nil || strings.TrimSpace(envelope.Model) == "" {
-		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
-		return
-	}
-
-	instance, err := g.lifecycle.Instances().Get(r.Context(), record.InstanceID)
-	if err != nil {
-		record.Error = sanitizeError(err.Error())
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		return
-	}
-	record.InstanceID = instance.ID
-	setProductHeader(w.Header(), headerInstance, instance.ID)
-	if instance.RequestLogMode == "full" {
-		value := string(body)
-		record.RequestBody = &value
-		observed.captureAll = true
-	}
-
-	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
-	record.Autoloaded = preRuntime.State != supervisor.Ready
-	setProductHeader(w.Header(), headerAutoloaded, strconv.FormatBool(record.Autoloaded))
-	// Store the canonical Instance and opt-in request body before worker
-	// acquisition so acquire/autoload failures still have useful detail.
-	g.update(r.Context(), requestID, record)
-
-	if g.observability != nil {
-		g.observability.Queue(instance.ID)
-	}
-	queueStarted := time.Now()
-	endpoint, release, err := g.lifecycle.Acquire(r.Context(), instance.ID)
-	record.QueueDurationMS = milliseconds(time.Since(queueStarted))
-	setProductHeader(w.Header(), headerQueueMS, metricFloat(record.QueueDurationMS))
-	if record.Autoloaded {
-		record.LoadDurationMS = record.QueueDurationMS
-		setProductHeader(w.Header(), headerLoadMS, metricFloat(record.LoadDurationMS))
-	}
-	if err != nil {
-		if g.observability != nil {
-			g.observability.EndQueued(instance.ID)
+	if spec.Body != bodyNone {
+		if bodyReadErr != nil {
+			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
+			return
 		}
-		record.Error = sanitizeError(err.Error())
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		return
-	}
-	defer release()
-
-	target, err := url.Parse(endpoint)
-	if err != nil {
-		if g.observability != nil {
-			g.observability.EndQueued(instance.ID)
-		}
-		record.Error = "Invalid worker endpoint"
-		writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
-		return
-	}
-	if g.observability != nil {
-		g.observability.Activate(instance.ID)
-	}
-	active := true
-	defer func() {
-		if active && g.observability != nil {
-			g.observability.EndActive(instance.ID)
-		}
-	}()
-
-	workerStarted := time.Now()
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-	r.Header.Del("Authorization")
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	original := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		original(req)
-		req.Host = target.Host
-		req.Header.Del("Authorization")
-	}
-	proxy.FlushInterval = -1
-	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
-		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)
-		record.Error = sanitizeError(proxyErr.Error())
-		writeError(writer, http.StatusServiceUnavailable, "server_error", "backend_unavailable", "Model worker unavailable")
-	}
-
-	var completed *responseMetrics
-	if !envelope.Stream {
-		proxy.ModifyResponse = func(resp *http.Response) error {
-			tracked := &firstReadCloser{ReadCloser: resp.Body}
-			payload, readErr := io.ReadAll(tracked)
-			closeErr := resp.Body.Close()
-			if readErr != nil {
-				return readErr
-			}
-			if closeErr != nil {
-				return closeErr
-			}
-			resp.Body = io.NopCloser(bytes.NewReader(payload))
-			resp.ContentLength = int64(len(payload))
-			resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
-			metrics := calculateResponseMetrics(workerStarted, tracked.firstRead, time.Now(), parseUsage(payload))
-			completed = &metrics
-			addFinalMetricHeaders(resp.Header, r.URL.Path, metrics)
-			return nil
+		if bodyTooLarge {
+			writeError(observed, http.StatusRequestEntityTooLarge, "invalid_request_error", "body_too_large", "Request body is too large")
+			return
 		}
 	}
 
-	func() {
-		defer func() {
-			proxyPanic = recover()
-		}()
-		proxy.ServeHTTP(observed, r)
-	}()
-	finished := time.Now()
-	active = false
-	if g.observability != nil {
-		g.observability.EndActive(instance.ID)
+	switch spec.Kind {
+	case routeListModels:
+		g.listModels(observed, r)
+	case routeGetModel:
+		g.getModel(observed, r, params["model"])
+	case routeGetResponse:
+		g.getStoredResponse(observed, r, params["response_id"])
+	case routeDeleteResponse:
+		g.deleteStoredResponse(observed, r, params["response_id"])
+	case routeGetInputItems:
+		g.getResponseInputItems(observed, r, params["response_id"])
+	case routeCancelResponse:
+		g.cancelStoredResponse(observed, r, params["response_id"])
+	case routeChatControl:
+		g.proxyChatControl(observed, r, spec, requestID, &record, body, started, &promptTPS, &proxyPanic)
+	case routeMultipartProxy:
+		g.proxyMultipart(observed, r, spec, requestID, &record, body, started, &promptTPS, &proxyPanic)
+	case routeJSONProxy:
+		if parseErr != nil || strings.TrimSpace(envelope.Model) == "" {
+			writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
+			return
+		}
+		g.proxyJSON(observed, r, spec, requestID, &record, envelope, body, started, &promptTPS, &proxyPanic)
+	default:
+		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
 	}
+}
 
-	record.StatusCode = observed.StatusCode()
-	if record.StatusCode >= 200 && record.StatusCode < 400 {
-		record.Result = "success"
-	} else {
-		record.Result = "error"
-	}
-	record.FinishedAt = finished.UnixMilli()
-	record.DurationMS = milliseconds(finished.Sub(started))
-	responseSample := observed.Bytes()
-	metrics := responseMetrics{}
-	if completed != nil {
-		metrics = *completed
-	} else {
-		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
-	}
-	record.TTFTMS = metrics.ttftMS
-	record.PromptTokens = metrics.promptTokens
-	record.GeneratedTokens = metrics.generatedTokens
-	record.TotalTokens = metrics.totalTokens
-	record.TokensPerSecond = metrics.generationTPS
-	promptTPS = metrics.promptTPS
-	if record.Result == "error" && record.Error == "" {
-		record.Error = responseError(record.StatusCode, responseSample)
-	}
-	if observed.captureAll {
-		value := string(responseSample)
-		record.ResponseBody = &value
-	}
-	if proxyPanic != nil {
-		panic(proxyPanic)
-	}
+func looksLikeJSON(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -413,42 +305,424 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "server_error", "database_error", "Unable to list models")
 		return
 	}
-	type item struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
-	}
-	out := make([]item, 0, len(items))
+	out := make([]map[string]any, 0, len(items))
 	for _, instance := range items {
 		if instance.Enabled {
-			out = append(out, item{ID: instance.ID, Object: "model", Created: time.Now().Unix(), OwnedBy: "llamarack"})
+			out = append(out, openaiModelObject(instance.ID))
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
 }
 
-func supported(path string) bool {
-	switch path {
-	case "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings":
-		return true
+func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, modelID string) {
+	modelID = strings.TrimSpace(modelID)
+	instance, err := g.lifecycle.Instances().Get(r.Context(), modelID)
+	if err != nil || !instance.Enabled {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+		return
 	}
-	return false
+	writeJSON(w, http.StatusOK, openaiModelObject(instance.ID))
 }
 
-func callType(path string) string {
-	switch path {
-	case "/v1/chat/completions":
-		return "chat_completion"
-	case "/v1/completions":
-		return "completion"
-	case "/v1/responses":
-		return "response"
-	case "/v1/embeddings":
-		return "embedding"
-	default:
-		return ""
+func openaiModelObject(id string) map[string]any {
+	return map[string]any{"id": id, "object": "model", "created": time.Now().Unix(), "owned_by": "llamarack"}
+}
+
+func (g *Gateway) proxyJSON(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, envelope requestEnvelope, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
+	instance, ok := g.resolveInstance(observed, r, record, strings.TrimSpace(envelope.Model))
+	if !ok {
+		return
 	}
+	if instance.RequestLogMode == "full" {
+		value := string(body)
+		record.RequestBody = &value
+		observed.captureAll = true
+	}
+	g.proxyAcquired(observed, r, spec, requestID, record, instance, body, envelope.Stream, started, promptTPS, proxyPanic)
+}
+
+func (g *Gateway) proxyMultipart(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
+	model, logJSON, err := parseMultipartModel(body, r.Header.Get("Content-Type"))
+	if err != nil {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid multipart body")
+		return
+	}
+	if strings.TrimSpace(model) == "" {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
+		return
+	}
+	record.InstanceID = model
+	instance, ok := g.resolveInstance(observed, r, record, model)
+	if !ok {
+		return
+	}
+	if instance.RequestLogMode == "full" {
+		record.RequestBody = &logJSON
+		observed.captureAll = true
+	}
+	g.proxyAcquired(observed, r, spec, requestID, record, instance, body, false, started, promptTPS, proxyPanic)
+}
+
+func (g *Gateway) proxyChatControl(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
+	var envelope struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(body, &envelope)
+	active := g.active.getByUpstream(strings.TrimSpace(envelope.ID))
+	if active == nil || active.target == nil {
+		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown in-flight completion")
+		return
+	}
+	record.InstanceID = active.instanceID
+	instance, ok := g.resolveInstance(observed, r, record, active.instanceID)
+	if !ok {
+		return
+	}
+	if instance.RequestLogMode == "full" {
+		value := string(body)
+		record.RequestBody = &value
+		observed.captureAll = true
+	}
+	g.proxyToTarget(observed, r, spec, requestID, record, instance, active.target, body, false, started, promptTPS, proxyPanic, false)
+}
+
+func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, record *observability.RequestRecord, instanceID string) (instances.Instance, bool) {
+	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
+	if err != nil {
+		record.Error = sanitizeError(err.Error())
+		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		return instances.Instance{}, false
+	}
+	return instance, true
+}
+
+func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any) {
+	record.InstanceID = instance.ID
+	setProductHeader(wHeader(observed), headerInstance, instance.ID)
+	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
+	record.Autoloaded = preRuntime.State != supervisor.Ready
+	setProductHeader(wHeader(observed), headerAutoloaded, strconv.FormatBool(record.Autoloaded))
+	g.update(r.Context(), requestID, *record)
+
+	if g.observability != nil {
+		g.observability.Queue(instance.ID)
+	}
+	queueStarted := time.Now()
+	endpoint, release, err := g.lifecycle.Acquire(r.Context(), instance.ID)
+	record.QueueDurationMS = milliseconds(time.Since(queueStarted))
+	setProductHeader(wHeader(observed), headerQueueMS, metricFloat(record.QueueDurationMS))
+	if record.Autoloaded {
+		record.LoadDurationMS = record.QueueDurationMS
+		setProductHeader(wHeader(observed), headerLoadMS, metricFloat(record.LoadDurationMS))
+	}
+	if err != nil {
+		if g.observability != nil {
+			g.observability.EndQueued(instance.ID)
+		}
+		record.Error = sanitizeError(err.Error())
+		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		return
+	}
+	defer release()
+
+	target, err := url.Parse(endpoint)
+	if err != nil {
+		if g.observability != nil {
+			g.observability.EndQueued(instance.ID)
+		}
+		record.Error = "Invalid worker endpoint"
+		writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
+		return
+	}
+	g.proxyToTarget(observed, r, spec, requestID, record, instance, target, body, stream, started, promptTPS, proxyPanic, true)
+}
+
+func wHeader(observed *responseObserver) http.Header {
+	return observed.Header()
+}
+
+func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, target *url.URL, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any, registerActive bool) {
+	if g.observability != nil {
+		g.observability.Activate(instance.ID)
+	}
+	active := true
+	defer func() {
+		if active && g.observability != nil {
+			g.observability.EndActive(instance.ID)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	r = r.WithContext(ctx)
+	entry := &activeRequest{
+		managerRequestID: requestID,
+		instanceID:       instance.ID,
+		target:           target,
+		cancel:           cancel,
+		endpoint:         r.URL.Path,
+		startedAt:        record.StartedAt,
+		model:            instance.ID,
+	}
+	if registerActive {
+		g.active.register(entry)
+		defer g.active.remove(requestID)
+	}
+
+	workerStarted := time.Now()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	r.Header.Del("Authorization")
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	original := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		original(req)
+		req.Host = target.Host
+		req.Header.Del("Authorization")
+	}
+	proxy.FlushInterval = -1
+	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
+		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)
+		record.Error = sanitizeError(proxyErr.Error())
+		writeError(writer, http.StatusServiceUnavailable, "server_error", "backend_unavailable", "Model worker unavailable")
+	}
+
+	var completed *responseMetrics
+	onUpstreamID := func(id string) {
+		if id == "" {
+			return
+		}
+		g.active.setUpstreamID(requestID, id)
+		if spec.CaptureResponseID {
+			g.persistOpenAIResponseID(r.Context(), requestID, id)
+		}
+	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if spec.MapNotImplemented && resp.StatusCode == http.StatusNotFound {
+			payload, _ := json.Marshal(map[string]any{"error": map[string]any{
+				"message": "This llama.cpp worker does not implement this route",
+				"type":    "invalid_request_error",
+				"param":   nil,
+				"code":    "not_implemented",
+			}})
+			resp.StatusCode = http.StatusNotImplemented
+			resp.Body = io.NopCloser(bytes.NewReader(payload))
+			resp.ContentLength = int64(len(payload))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
+			resp.Header.Set("Content-Type", "application/json")
+			return nil
+		}
+		if stream {
+			resp.Body = &idCaptureStream{ReadCloser: resp.Body, onID: onUpstreamID, captureResponse: spec.CaptureResponseID, captureCompletion: spec.CaptureCompletionID}
+			return nil
+		}
+		tracked := &firstReadCloser{ReadCloser: resp.Body}
+		payload, readErr := io.ReadAll(tracked)
+		closeErr := resp.Body.Close()
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(payload))
+		resp.ContentLength = int64(len(payload))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
+		if spec.CaptureResponseID {
+			onUpstreamID(firstNonEmpty(extractJSONID(payload), parseResponseIDFromSSE(payload)))
+		}
+		if spec.CaptureCompletionID {
+			onUpstreamID(extractJSONID(payload))
+		}
+		metrics := calculateResponseMetrics(workerStarted, tracked.firstRead, time.Now(), parseUsage(payload))
+		completed = &metrics
+		addFinalMetricHeaders(resp.Header, spec.Metrics, metrics)
+		return nil
+	}
+
+	func() {
+		defer func() {
+			*proxyPanic = recover()
+		}()
+		proxy.ServeHTTP(observed, r)
+	}()
+	finished := time.Now()
+	active = false
+	if g.observability != nil {
+		g.observability.EndActive(instance.ID)
+	}
+
+	record.StatusCode = observed.StatusCode()
+	if record.StatusCode >= 200 && record.StatusCode < 400 {
+		record.Result = "success"
+	} else {
+		record.Result = "error"
+	}
+	record.FinishedAt = finished.UnixMilli()
+	record.DurationMS = milliseconds(finished.Sub(started))
+	responseSample := observed.Bytes()
+	metrics := responseMetrics{}
+	if completed != nil {
+		metrics = *completed
+	} else {
+		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
+	}
+	record.TTFTMS = metrics.ttftMS
+	record.PromptTokens = metrics.promptTokens
+	record.GeneratedTokens = metrics.generatedTokens
+	record.TotalTokens = metrics.totalTokens
+	record.TokensPerSecond = metrics.generationTPS
+	*promptTPS = metrics.promptTPS
+	if record.Result == "error" && record.Error == "" {
+		record.Error = responseError(record.StatusCode, responseSample)
+	}
+	if observed.captureAll {
+		value := string(responseSample)
+		record.ResponseBody = &value
+	}
+	if *proxyPanic != nil {
+		panic(*proxyPanic)
+	}
+}
+
+func (g *Gateway) persistOpenAIResponseID(ctx context.Context, requestID, openaiID string) {
+	if g.observability == nil || strings.TrimSpace(openaiID) == "" {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
+	if err := g.observability.SetOpenAIResponseID(persistCtx, requestID, openaiID); err != nil && !errors.Is(err, observability.ErrDuplicateOpenAIResponseID) {
+		slog.Warn("persist openai response id failed", "request_id", requestID, "openai_response_id", openaiID, "error", err)
+	} else if errors.Is(err, observability.ErrDuplicateOpenAIResponseID) {
+		slog.Warn("duplicate openai response id ignored", "request_id", requestID, "openai_response_id", openaiID)
+	}
+}
+
+type idCaptureStream struct {
+	io.ReadCloser
+	buf               []byte
+	onID              func(string)
+	seen              bool
+	captureResponse   bool
+	captureCompletion bool
+}
+
+func (s *idCaptureStream) Read(p []byte) (int, error) {
+	n, err := s.ReadCloser.Read(p)
+	if n > 0 && !s.seen {
+		s.buf = append(s.buf, p[:n]...)
+		id := ""
+		if s.captureResponse {
+			id = parseResponseIDFromSSE(s.buf)
+		}
+		if id == "" && s.captureCompletion {
+			id = extractJSONID(s.buf)
+			if id == "" {
+				id = parseResponseIDFromSSE(s.buf)
+			}
+		}
+		if id == "" {
+			id = extractQuotedID(s.buf)
+			if s.captureResponse && id != "" && !strings.HasPrefix(id, "resp_") {
+				id = ""
+			}
+		}
+		if id != "" {
+			s.seen = true
+			s.onID(id)
+		}
+		if len(s.buf) > 1<<20 {
+			s.buf = s.buf[len(s.buf)/2:]
+		}
+	}
+	return n, err
+}
+
+func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
+	responseID = strings.TrimSpace(responseID)
+	if inFlight := g.active.getByUpstream(responseID); inFlight != nil && strings.HasPrefix(inFlight.endpoint, "/v1/responses") {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id": responseID, "object": "response", "status": "in_progress",
+			"model": inFlight.model, "created_at": inFlight.startedAt / 1000,
+		})
+		return
+	}
+	stored, err := g.lookupStoredResponse(r.Context(), responseID)
+	if err != nil || stored.Deleted || stored.ResponseBody == nil || strings.TrimSpace(*stored.ResponseBody) == "" {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	payload, ok := parseFinalResponseJSON([]byte(*stored.ResponseBody))
+	if !ok {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+	if !bytes.HasSuffix(payload, []byte("\n")) {
+		_, _ = w.Write([]byte("\n"))
+	}
+}
+
+func (g *Gateway) deleteStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
+	if g.observability == nil {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	if err := g.observability.MarkOpenAIResponseDeleted(r.Context(), responseID); err != nil {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": responseID, "object": "response", "deleted": true})
+}
+
+func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, responseID string) {
+	stored, err := g.lookupStoredResponse(r.Context(), responseID)
+	if err != nil || stored.Deleted || stored.RequestBody == nil || strings.TrimSpace(*stored.RequestBody) == "" {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	items := normalizeInputItems([]byte(*stored.RequestBody))
+	writeJSON(w, http.StatusOK, inputItemsList(items, r.URL.Query().Get("after"), parseLimitQuery(r.URL.Query().Get("limit"))))
+}
+
+func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
+	responseID = strings.TrimSpace(responseID)
+	if entry, ok := g.active.cancelByUpstream(responseID); ok {
+		_ = g.active.waitRemoved(entry.managerRequestID, 2*time.Second)
+		if stored, err := g.lookupStoredResponse(r.Context(), responseID); err == nil && stored.ResponseBody != nil {
+			if payload, parsed := parseFinalResponseJSON([]byte(*stored.ResponseBody)); parsed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(payload)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id": responseID, "object": "response", "status": "cancelled",
+			"model": entry.model,
+		})
+		return
+	}
+	if entry := g.active.getByUpstream(responseID); entry != nil && entry.cancelled {
+		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is already cancelled")
+		return
+	}
+	stored, err := g.lookupStoredResponse(r.Context(), responseID)
+	if err != nil || stored.Deleted {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is not cancellable")
+}
+
+func (g *Gateway) lookupStoredResponse(ctx context.Context, responseID string) (observability.StoredOpenAIResponse, error) {
+	if g.observability == nil {
+		return observability.StoredOpenAIResponse{}, errors.New("observability unavailable")
+	}
+	return g.observability.GetStoredOpenAIResponse(ctx, responseID)
 }
 
 func suppliedTraceID(r *http.Request, bodyTraceID string) (string, bool) {
@@ -650,20 +924,23 @@ func calculateResponseMetrics(started, firstByte, finished time.Time, usage usag
 	return metrics
 }
 
-func addFinalMetricHeaders(header http.Header, endpoint string, metrics responseMetrics) {
+func addFinalMetricHeaders(header http.Header, kind metricKind, metrics responseMetrics) {
+	if kind == metricNone {
+		return
+	}
 	if metrics.ttftMS != nil {
 		setProductHeader(header, headerTTFTMS, metricFloat(*metrics.ttftMS))
 	}
 	if metrics.promptTPS != nil {
 		setProductHeader(header, headerPromptTPS, metricFloat(*metrics.promptTPS))
 	}
-	if endpoint != "/v1/embeddings" && metrics.generationTPS != nil {
+	if kind == metricGeneration && metrics.generationTPS != nil {
 		setProductHeader(header, headerGenerationTPS, metricFloat(*metrics.generationTPS))
 	}
 	if metrics.promptTokens > 0 {
 		setProductHeader(header, headerPromptTokens, strconv.FormatInt(metrics.promptTokens, 10))
 	}
-	if endpoint != "/v1/embeddings" && metrics.generatedTokens > 0 {
+	if kind == metricGeneration && metrics.generatedTokens > 0 {
 		setProductHeader(header, headerGeneratedTokens, strconv.FormatInt(metrics.generatedTokens, 10))
 	}
 	if metrics.totalTokens > 0 {

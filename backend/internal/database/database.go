@@ -171,13 +171,16 @@ CREATE TABLE IF NOT EXISTS inference_requests (
  trace_id TEXT NOT NULL DEFAULT '',
  call_type TEXT NOT NULL DEFAULT '',
  client_ip TEXT NOT NULL DEFAULT '',
- user_agent TEXT NOT NULL DEFAULT ''
+ user_agent TEXT NOT NULL DEFAULT '',
+ openai_response_id TEXT,
+ openai_response_deleted INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS inference_requests_started_at_idx ON inference_requests(started_at DESC);
 CREATE INDEX IF NOT EXISTS inference_requests_instance_started_idx ON inference_requests(instance_id,started_at DESC);
 CREATE INDEX IF NOT EXISTS inference_requests_api_key_started_idx ON inference_requests(api_key_id,started_at DESC);
 CREATE INDEX IF NOT EXISTS inference_requests_trace_started_idx ON inference_requests(trace_id,started_at);
 CREATE INDEX IF NOT EXISTS inference_requests_endpoint_started_idx ON inference_requests(endpoint,started_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS inference_requests_openai_response_id_uidx ON inference_requests(openai_response_id) WHERE openai_response_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS inference_request_correlations (
  request_id TEXT PRIMARY KEY,
  inference_request_id INTEGER NOT NULL UNIQUE REFERENCES inference_requests(id) ON DELETE CASCADE,

@@ -62,11 +62,15 @@ func TestTraceResolutionPrecedenceAndGeneration(t *testing.T) {
 
 func TestCallTypeMapping(t *testing.T) {
 	cases := map[string]string{
-		"/v1/chat/completions": "chat_completion",
-		"/v1/completions":      "completion",
-		"/v1/responses":        "response",
-		"/v1/embeddings":       "embedding",
-		"/v1/unknown":          "",
+		"/v1/chat/completions":              "chat_completion",
+		"/v1/completions":                   "completion",
+		"/v1/responses":                     "response",
+		"/v1/embeddings":                    "embedding",
+		"/v1/unknown":                       "",
+		"/v1/responses/input_tokens":        "response_input_tokens",
+		"/v1/chat/completions/input_tokens": "chat_input_tokens",
+		"/v1/rerank":                        "rerank",
+		"/v1/audio/transcriptions":          "transcription",
 	}
 	for path, want := range cases {
 		if got := callType(path); got != want {

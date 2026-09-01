@@ -249,3 +249,7 @@ func ArraySchema(items Schema) Schema { return Schema{Type: "array", Items: &ite
 func JSONBody(schema Schema, required bool) *RequestBody {
 	return &RequestBody{Required: required, Content: map[string]MediaType{"application/json": {Schema: schema}}}
 }
+
+func MultipartBody(required bool) *RequestBody {
+	return &RequestBody{Required: required, Content: map[string]MediaType{"multipart/form-data": {Schema: ObjectSchema()}}}
+}
