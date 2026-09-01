@@ -31,6 +31,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, string>] }>()
+const nativeMTPIgnored = ref(false)
 
 function filename(value: string) {
   return value.split(/[\\/]/).pop() || value
@@ -78,7 +79,7 @@ function nativeMTP() {
 }
 
 function nativeMTPCompanion(definition: CompanionDefinition) {
-  return definition.kind === 'mtp' && nativeMTP()
+  return definition.kind === 'mtp' && (nativeMTP() || nativeMTPIgnored.value)
 }
 
 function companionTitle(definition: CompanionDefinition) {
@@ -144,6 +145,7 @@ function mtpSuggestedValue(key: (typeof nativeMTPOptionKeys)[number]) {
 function disableCompanion(definition: CompanionDefinition) {
   const next = { ...props.modelValue }
   if (nativeMTPCompanion(definition)) {
+    nativeMTPIgnored.value = true
     for (const key of nativeMTPOptionKeys) next[key] = ''
   } else {
     next[definition.key] = ''
@@ -155,6 +157,7 @@ function disableCompanion(definition: CompanionDefinition) {
 function enableCompanion(definition: CompanionDefinition) {
   const next = { ...props.modelValue }
   if (nativeMTPCompanion(definition)) {
+    nativeMTPIgnored.value = false
     for (const key of nativeMTPOptionKeys) next[key] = mtpSuggestedValue(key)
     setOptions(next)
     return
