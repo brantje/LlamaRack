@@ -171,7 +171,7 @@ func (s *Service) attachStartFailure(runtime supervisor.Runtime) supervisor.Runt
 		retryAfter := state.RetryAfter.UTC()
 		runtime.RetryAfter = &retryAfter
 	}
-	if runtime.LastError == "" && state.LastError != "" {
+	if state.LastError != "" {
 		runtime.LastError = state.LastError
 	}
 	return runtime

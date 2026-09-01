@@ -119,6 +119,32 @@ func TestRuntimeOmitsZeroRetryAfter(t *testing.T) {
 	}
 }
 
+func TestAttachStartFailurePrefersRecordedLastError(t *testing.T) {
+	s := &Service{now: func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }}
+	s.startFailures = map[string]StartFailureState{
+		"stale":  {ConsecutiveFailures: 2, LastError: "CUDA allocation failed"},
+		"empty":  {ConsecutiveFailures: 1},
+		"filled": {ConsecutiveFailures: 1, LastError: "exec: missing"},
+	}
+
+	replaced := s.attachStartFailure(supervisor.Runtime{InstanceID: "stale", LastError: "worker exited unexpectedly"})
+	if replaced.LastError != "CUDA allocation failed" {
+		t.Fatalf("stale runtime last_error=%q", replaced.LastError)
+	}
+	kept := s.attachStartFailure(supervisor.Runtime{InstanceID: "empty", LastError: "worker exited unexpectedly"})
+	if kept.LastError != "worker exited unexpectedly" {
+		t.Fatalf("empty state last_error=%q", kept.LastError)
+	}
+	filled := s.attachStartFailure(supervisor.Runtime{InstanceID: "filled"})
+	if filled.LastError != "exec: missing" {
+		t.Fatalf("empty runtime last_error=%q", filled.LastError)
+	}
+	untouched := s.attachStartFailure(supervisor.Runtime{InstanceID: "unknown", LastError: "keep me"})
+	if untouched.LastError != "keep me" {
+		t.Fatalf("missing state last_error=%q", untouched.LastError)
+	}
+}
+
 func TestStartFailureStateIsConcurrencySafe(t *testing.T) {
 	s := &Service{now: func() time.Time { return time.Unix(1, 0).UTC() }}
 	var wg sync.WaitGroup
