@@ -66,6 +66,12 @@ function strokeClass(token?: ChartSeries['token']) {
   return 'stroke-[var(--color-accent)]'
 }
 
+function swatchClass(token?: ChartSeries['token']) {
+  if (token === 'accent-strong') return 'bg-[var(--accent-800)]'
+  if (token === 'neutral') return 'bg-[var(--neutral-800)]'
+  return 'bg-[var(--color-accent)]'
+}
+
 function dotClass(token?: ChartSeries['token']) {
   if (token === 'accent-strong') return 'fill-[var(--accent-800)]'
   if (token === 'neutral') return 'fill-[var(--neutral-800)]'
@@ -90,7 +96,7 @@ function formatTime(timestamp?: number) {
   <div class="space-y-3">
     <div v-if="series.length > 1" class="flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">
       <span v-for="item in series" :key="item.label" class="inline-flex items-center gap-1.5">
-        <span class="h-px w-4" :class="strokeClass(item.token).replace('stroke-', 'bg-')" />{{ item.label }}
+        <span class="h-px w-4" :class="swatchClass(item.token)" />{{ item.label }}
       </span>
     </div>
     <svg v-if="presentValues.length" :viewBox="`0 0 ${width} ${height}`" class="h-40 w-full overflow-visible" role="img" aria-label="History line chart">
