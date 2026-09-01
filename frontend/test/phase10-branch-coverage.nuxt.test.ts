@@ -331,6 +331,7 @@ describe('Phase 10 branch coverage', () => {
     expect(createCancel).toBeTruthy()
     createCancel?.click()
     await flushPromises()
+    expect(wrapper.text()).not.toContain('Confirm password')
 
     let disabledRow = row(wrapper, 'disabled')
     expect(disabledRow.text()).not.toContain('Delete')
