@@ -164,6 +164,27 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     wrapper.unmount()
   })
 
+  it('keeps the default assume-idle value when Web Storage is unavailable', async () => {
+    const storage = window.localStorage
+    vi.spyOn(storage, 'getItem').mockImplementation(() => { throw new DOMException('denied') })
+    vi.spyOn(storage, 'setItem').mockImplementation(() => { throw new DOMException('denied') })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
+      if (path.startsWith('/api/v1/huggingface/recommendations?')) return recommendationResponse()
+      return []
+    })
+
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    toggle!.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=false'))).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shows generic guidance when hardware telemetry is unavailable', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }

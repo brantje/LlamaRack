@@ -45,8 +45,12 @@ let loadObserver: IntersectionObserver | undefined
 
 function readAssumeIdlePreference(): boolean {
   if (!import.meta.client) return true
-  const raw = localStorage.getItem(ASSUME_IDLE_STORAGE_KEY)
-  if (raw === 'false') return false
+  try {
+    const raw = localStorage.getItem(ASSUME_IDLE_STORAGE_KEY)
+    if (raw === 'false') return false
+  } catch {
+    return true
+  }
   return true
 }
 
@@ -300,7 +304,13 @@ function selectContext(value: number | number[]) {
 function setAssumeIdle(value: boolean | 'indeterminate') {
   const next = value === true
   assumeIdle.value = next
-  if (import.meta.client) localStorage.setItem(ASSUME_IDLE_STORAGE_KEY, next ? 'true' : 'false')
+  if (import.meta.client) {
+    try {
+      localStorage.setItem(ASSUME_IDLE_STORAGE_KEY, next ? 'true' : 'false')
+    } catch {
+      // Web Storage can throw in private mode; still refresh recommendations.
+    }
+  }
   if (!repoID.value) return
   clearRecommendationDebounce()
   void loadRecommendations(recommendations.value ? selectedContext.value : undefined)
