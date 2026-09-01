@@ -174,6 +174,13 @@ func (m *Manager) ResumePending(ctx context.Context) error {
 }
 
 func (m *Manager) Retry(ctx context.Context, id string) (Job, error) {
+	job, err := m.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if job.State != StateFailed && job.State != StateCancelled {
+		return Job{}, errors.New("download is not retryable")
+	}
 	if err := m.waitForLaunchSlot(ctx, id); err != nil {
 		return Job{}, err
 	}

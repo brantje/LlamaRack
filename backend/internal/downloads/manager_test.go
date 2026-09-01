@@ -227,6 +227,87 @@ func TestRangeUnsupportedRestartsFromZero(t *testing.T) {
 	}
 }
 
+func TestRetryRejectsActiveDownloadImmediately(t *testing.T) {
+	started := make(chan struct{})
+	manager, _, _ := newTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", "v1")
+		w.Header().Set("X-Linked-Size", "6")
+		if r.Method == http.MethodHead {
+			return
+		}
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			_, _ = io.WriteString(w, "abc")
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	detail, selected := artifact("acme/demo", "rev", "active-retry", huggingface.File{Path: "demo.gguf", Size: 6})
+	job, err := manager.CreateHuggingFace(context.Background(), detail, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("download did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	startedRetry := time.Now()
+	_, err = manager.Retry(ctx, job.ID)
+	elapsed := time.Since(startedRetry)
+	if err == nil || err.Error() != "download is not retryable" {
+		t.Fatalf("retry err = %v", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("retry blocked for %s instead of rejecting the active download immediately", elapsed)
+	}
+
+	if err := manager.Cancel(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, manager, job.ID, StateCancelled)
+}
+
+func TestRetryFailedJob(t *testing.T) {
+	manager, _, _ := newTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", "v1")
+		w.Header().Set("X-Linked-Size", "6")
+		if r.Method == http.MethodHead {
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	detail, selected := artifact("acme/demo", "rev", "fail-retry", huggingface.File{Path: "demo.gguf", Size: 6})
+	job, err := manager.CreateHuggingFace(context.Background(), detail, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := waitJob(t, manager, job.ID, StateFailed)
+	if failed.State != StateFailed {
+		t.Fatalf("failed = %+v", failed)
+	}
+
+	manager.hf, _ = huggingface.NewClientWithHTTP("http://example.invalid", nil, &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		body := "abcdef"
+		if r.Method == http.MethodHead {
+			return response(r, http.StatusOK, "", map[string]string{"ETag": "v1", "X-Linked-Size": "6"}), nil
+		}
+		return response(r, http.StatusOK, body, nil), nil
+	})})
+	retried, err := manager.Retry(context.Background(), job.ID)
+	if err != nil || retried.ID != job.ID {
+		t.Fatalf("retry = %+v err=%v", retried, err)
+	}
+	waitJob(t, manager, job.ID, StateCompleted)
+}
+
 func TestCancelAndRetry(t *testing.T) {
 	started := make(chan struct{})
 	manager, _, _ := newTestManager(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
