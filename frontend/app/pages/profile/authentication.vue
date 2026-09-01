@@ -43,7 +43,7 @@ async function unlinkIdentity(identity: ExternalIdentity) {
   })
   if (!confirmed) return
   try {
-    await manager.request(`/api/v1/admin/auth/identities/${encodeURIComponent(identity.id)}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/me/identities/${encodeURIComponent(identity.id)}`, { method: 'DELETE' })
     success.value = `${name} unlinked.`
     await load()
   } catch (value: any) {

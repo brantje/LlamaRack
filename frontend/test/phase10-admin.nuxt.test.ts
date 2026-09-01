@@ -244,7 +244,7 @@ describe('Phase 10 profile', () => {
     ]
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/me/sessions') return sessions
-      if (path === '/api/v1/sessions/other%2Fsession' && options?.method === 'DELETE') return {}
+      if (path === '/api/v1/me/sessions/other%2Fsession' && options?.method === 'DELETE') return {}
       if (path === '/api/v1/me/sessions/revoke-others' && options?.method === 'POST') return { revoked: 1 }
       if (path === '/api/v1/me/sessions/revoke-all' && options?.method === 'POST') return {}
       if (path === '/api/v1/models' || path === '/api/v1/instances') return []

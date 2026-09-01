@@ -169,6 +169,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/auth/ws-ticket", phase10OIDC)
 	managementAPI.Handle("/api/v1/admin/auth/", phase10OIDC)
 	managementAPI.Handle("/api/v1/me/identities", phase10OIDC)
+	managementAPI.Handle("/api/v1/me/identities/", phase10OIDC)
 	phase10 := api.NewPhase10Handler(authService, managerSettings, providerSecrets, network, profileGetter)
 	managementAPI.Handle("GET /api/v1/me", phase10)
 	managementAPI.Handle("/api/v1/me/", phase10)

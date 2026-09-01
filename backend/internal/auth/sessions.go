@@ -134,6 +134,25 @@ func (s *Service) RevokeSession(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Service) RevokeOwnSession(ctx context.Context, userID int64, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" || userID <= 0 {
+		return sql.ErrNoRows
+	}
+	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE id=? AND user_id=?", id, userID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Service) RevokeOtherSessions(ctx context.Context, userID int64, keepSessionID string) (int64, error) {
 	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=? AND id<>?", userID, keepSessionID)
 	if err != nil {

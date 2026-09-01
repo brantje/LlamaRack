@@ -42,6 +42,7 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		{http.MethodGet, "/api/v1/me", "getCurrentUser", "Get the current management user", "Profile", true, false, "200"},
 		{http.MethodPost, "/api/v1/me/password", "changeCurrentUserPassword", "Change the current user's password", "Profile", true, true, "204"},
 		{http.MethodGet, "/api/v1/me/sessions", "listCurrentUserSessions", "List the current user's sessions", "Profile", true, false, "200"},
+		{http.MethodDelete, "/api/v1/me/sessions/{id}", "revokeCurrentUserSession", "Revoke one of the current user's sessions", "Profile", true, false, "204"},
 		{http.MethodPost, "/api/v1/me/sessions/revoke-others", "revokeOtherSessions", "Revoke the current user's other sessions", "Profile", true, false, "200"},
 		{http.MethodPost, "/api/v1/me/sessions/revoke-all", "revokeAllSessions", "Revoke all sessions for the current user", "Profile", true, false, "204"},
 		{http.MethodGet, "/api/v1/users", "listUsers", "List management users", "Users", true, false, "200"},

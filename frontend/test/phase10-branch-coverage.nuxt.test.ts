@@ -283,9 +283,9 @@ describe('Phase 10 branch coverage', () => {
     const revokeButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Revoke')
     await revokeButtons[0]!.trigger('click')
     await confirm('cancel')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/sessions/chrome', { method: 'DELETE' })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/me/sessions/chrome', { method: 'DELETE' })
 
-    failPath = '/api/v1/sessions/chrome'
+    failPath = '/api/v1/me/sessions/chrome'
     failMode = 'fallback'
     await revokeButtons[0]!.trigger('click')
     await confirm('confirm')
@@ -328,6 +328,7 @@ describe('Phase 10 branch coverage', () => {
     expect(wrapper.text()).toContain('Unable to create user')
 
     const createCancel = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === 'Cancel')
+    expect(createCancel).toBeTruthy()
     createCancel?.click()
     await flushPromises()
 

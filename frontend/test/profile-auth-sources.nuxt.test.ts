@@ -54,7 +54,7 @@ describe('profile authentication sources', () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/me/identities') return identities
       if (path === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [{ id: 'authentik', name: 'Authentik' }] }
-      if (path === '/api/v1/admin/auth/identities/identity%2Fone' && options?.method === 'DELETE') {
+      if (path === '/api/v1/me/identities/identity%2Fone' && options?.method === 'DELETE') {
         identities = []
         return undefined
       }
@@ -72,7 +72,7 @@ describe('profile authentication sources', () => {
     await unlinkButton(wrapper).trigger('click')
     await confirm('confirm')
 
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/admin/auth/identities/identity%2Fone', { method: 'DELETE' })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/me/identities/identity%2Fone', { method: 'DELETE' })
     expect(wrapper.text()).toContain('Authentik unlinked.')
     expect(wrapper.text()).toContain('No linked authentication sources')
     wrapper.unmount()
@@ -92,7 +92,7 @@ describe('profile authentication sources', () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/me/identities') return [identity]
       if (path === '/api/v1/auth/providers') return { local_login_enabled: true, providers: [] }
-      if (path === '/api/v1/admin/auth/identities/identity-two' && options?.method === 'DELETE') {
+      if (path === '/api/v1/me/identities/identity-two' && options?.method === 'DELETE') {
         if (failUnlink) throw { data: { error: 'unlink denied' } }
         return undefined
       }
@@ -105,7 +105,7 @@ describe('profile authentication sources', () => {
 
     await unlinkButton(wrapper).trigger('click')
     await confirm('cancel')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/admin/auth/identities/identity-two', { method: 'DELETE' })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/me/identities/identity-two', { method: 'DELETE' })
 
     failUnlink = true
     await unlinkButton(wrapper).trigger('click')

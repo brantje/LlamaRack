@@ -43,6 +43,8 @@ func (h *phase10Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.changePassword(w, r, user, session)
 	case path == "/api/v1/me/sessions" && r.Method == http.MethodGet:
 		h.listSessions(w, r, user.ID, session.ID)
+	case strings.HasPrefix(path, "/api/v1/me/sessions/") && r.Method == http.MethodDelete:
+		h.revokeOwnSession(w, r, user, strings.TrimPrefix(path, "/api/v1/me/sessions/"))
 	case path == "/api/v1/me/sessions/revoke-others" && r.Method == http.MethodPost:
 		count, err := h.auth.RevokeOtherSessions(r.Context(), user.ID, session.ID)
 		if err != nil {
@@ -247,6 +249,23 @@ func (h *phase10Handler) sessionRoute(w http.ResponseWriter, r *http.Request, ac
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *phase10Handler) revokeOwnSession(w http.ResponseWriter, r *http.Request, actor auth.User, id string) {
+	if strings.Contains(id, "/") || id == "" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if err := h.auth.RevokeOwnSession(r.Context(), actor.ID, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	slog.Info("security event", "event", "session.revoked", "actor_user_id", actor.ID, "session_id", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *phase10Handler) generalSettings(w http.ResponseWriter, r *http.Request, actor auth.User) {
 	if r.Method == http.MethodGet {
 		general, err := h.settings.General(r.Context())
@@ -262,7 +281,7 @@ func (h *phase10Handler) generalSettings(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var in struct {
-		SessionLifetimeSeconds      *int    `json:"session_lifetime_seconds"`
+		SessionLifetimeSeconds     *int    `json:"session_lifetime_seconds"`
 		LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
 		LoginFailureThreshold      *int    `json:"login_failure_threshold"`
 		LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
@@ -279,18 +298,42 @@ func (h *phase10Handler) generalSettings(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	updates := map[string]any{}
-	if in.SessionLifetimeSeconds != nil { updates[settings.SessionLifetimeSeconds] = *in.SessionLifetimeSeconds }
-	if in.LoginProtectionEnabled != nil { updates[settings.LoginProtectionEnabled] = *in.LoginProtectionEnabled }
-	if in.LoginFailureThreshold != nil { updates[settings.LoginFailureThreshold] = *in.LoginFailureThreshold }
-	if in.LoginLockoutSeconds != nil { updates[settings.LoginLockoutSeconds] = *in.LoginLockoutSeconds }
-	if in.TrustedProxies != nil { updates[settings.TrustedProxies] = *in.TrustedProxies }
-	if in.AllowedOrigins != nil { updates[settings.AllowedOrigins] = *in.AllowedOrigins }
-	if in.ExternalURL != nil { updates[settings.ExternalURL] = *in.ExternalURL }
-	if in.StartupTimeoutSeconds != nil { updates[settings.StartupTimeoutSeconds] = *in.StartupTimeoutSeconds }
-	if in.IdleUnloadSeconds != nil { updates[settings.IdleUnloadSeconds] = *in.IdleUnloadSeconds }
-	if in.AlwaysOnReconcileSeconds != nil { updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds }
-	if in.ObservabilityRetentionDays != nil { updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays }
-	if in.PrometheusAuthToken != nil { updates[settings.PrometheusAuthToken] = *in.PrometheusAuthToken }
+	if in.SessionLifetimeSeconds != nil {
+		updates[settings.SessionLifetimeSeconds] = *in.SessionLifetimeSeconds
+	}
+	if in.LoginProtectionEnabled != nil {
+		updates[settings.LoginProtectionEnabled] = *in.LoginProtectionEnabled
+	}
+	if in.LoginFailureThreshold != nil {
+		updates[settings.LoginFailureThreshold] = *in.LoginFailureThreshold
+	}
+	if in.LoginLockoutSeconds != nil {
+		updates[settings.LoginLockoutSeconds] = *in.LoginLockoutSeconds
+	}
+	if in.TrustedProxies != nil {
+		updates[settings.TrustedProxies] = *in.TrustedProxies
+	}
+	if in.AllowedOrigins != nil {
+		updates[settings.AllowedOrigins] = *in.AllowedOrigins
+	}
+	if in.ExternalURL != nil {
+		updates[settings.ExternalURL] = *in.ExternalURL
+	}
+	if in.StartupTimeoutSeconds != nil {
+		updates[settings.StartupTimeoutSeconds] = *in.StartupTimeoutSeconds
+	}
+	if in.IdleUnloadSeconds != nil {
+		updates[settings.IdleUnloadSeconds] = *in.IdleUnloadSeconds
+	}
+	if in.AlwaysOnReconcileSeconds != nil {
+		updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds
+	}
+	if in.ObservabilityRetentionDays != nil {
+		updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays
+	}
+	if in.PrometheusAuthToken != nil {
+		updates[settings.PrometheusAuthToken] = *in.PrometheusAuthToken
+	}
 	for key, value := range updates {
 		if _, err := h.settings.Set(r.Context(), key, value); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
@@ -319,7 +362,9 @@ func (h *phase10Handler) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled := 0
 	for _, user := range users {
-		if user.Enabled { enabled++ }
+		if user.Enabled {
+			enabled++
+		}
 	}
 	hfStatus, err := h.secrets.TokenStatus(r.Context())
 	if err != nil {
@@ -334,9 +379,9 @@ func (h *phase10Handler) summary(w http.ResponseWriter, r *http.Request) {
 		llama["fingerprint"] = profile.Fingerprint
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"users": map[string]int{"total": len(users), "enabled": enabled},
+		"users":       map[string]int{"total": len(users), "enabled": enabled},
 		"huggingface": hfStatus,
-		"llamacpp": llama,
+		"llamacpp":    llama,
 	})
 }
 
@@ -355,8 +400,8 @@ func (h *phase10Handler) system(w http.ResponseWriter, r *http.Request) {
 		llama["options"] = len(profile.Options)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"manager": map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
-		"network": map[string]any{"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r), "allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL},
+		"manager":  map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
+		"network":  map[string]any{"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r), "allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL},
 		"llamacpp": llama,
 	})
 }

@@ -31,7 +31,7 @@ async function revokeSession(session: Session) {
   const confirmed = await confirmation.value?.request({ title: 'Revoke session', description: 'Sign this session out immediately?', confirmLabel: 'Revoke session', confirmTone: 'destructive' })
   if (!confirmed) return
   try {
-    await manager.request(`/api/v1/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/me/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
     await load()
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to revoke session'

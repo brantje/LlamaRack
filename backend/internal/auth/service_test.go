@@ -169,6 +169,9 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if err := s.RevokeSession(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing revoke=%v", err)
 	}
+	if err := s.RevokeOwnSession(ctx, admin.ID, "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing own revoke=%v", err)
+	}
 	if _, err := s.RevokeAllSessions(ctx, admin.ID); err != nil {
 		t.Fatal(err)
 	}
