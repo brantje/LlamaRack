@@ -54,7 +54,7 @@ func TestBootstrapLoginSessionLogout(t *testing.T) {
 		t.Fatalf("expected invalid credentials, got %v", err)
 	}
 
-	token, csrf, loggedIn, err := s.LoginWithMetadata(ctx, " admin ", "correct-horse-battery", "192.0.2.10", "phase10-test")
+	token, csrf, loggedIn, err := s.LoginWithMetadata(ctx, " admin ", "correct-horse-battery", "192.0.2.10", "auth-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestBootstrapLoginSessionLogout(t *testing.T) {
 		t.Fatalf("login token/csrf/user invalid: %q %q %+v", token, csrf, loggedIn)
 	}
 	sessionUser, session, err := s.SessionUserWithSession(ctx, token)
-	if err != nil || sessionUser.ID != u.ID || session.RemoteAddress != "192.0.2.10" || session.UserAgent != "phase10-test" || session.ID == "" {
+	if err != nil || sessionUser.ID != u.ID || session.RemoteAddress != "192.0.2.10" || session.UserAgent != "auth-test" || session.ID == "" {
 		t.Fatalf("session user=%+v session=%+v err=%v", sessionUser, session, err)
 	}
 	if err := s.ValidateCSRF(ctx, token, csrf); err != nil {

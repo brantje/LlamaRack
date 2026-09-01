@@ -252,7 +252,7 @@ Inputs include:
 
 The scheduler returns plans. It never directly starts/stops processes.
 
-Actual hardware-aware pre-load eviction is a Phase 7 requirement.
+Actual hardware-aware pre-load eviction is a hardware-integration requirement.
 
 ### 7.6 Model service
 
@@ -351,7 +351,7 @@ Instance rename additionally requires an API-breaking-change warning because it 
 
 The project is still in active development.
 
-For Phase 5.5 and related development-only schema restructuring:
+For Model/Instance control-plane separation and related development-only schema restructuring:
 
 - modify the current schema directly;
 - update fixtures/seeds/tests directly;
@@ -374,19 +374,19 @@ On manager startup:
 8. start HTTP services;
 9. reconcile Always-On Instances unless temporarily suppressed only within the current session (suppression therefore does not survive restart).
 
-## 15. Phase boundaries
+## 15. Capability boundaries
 
-### Phase 5.5 — Model / Instance control-plane separation
+### Model / Instance control-plane separation
 
 Introduces the durable separation, Instance identity, `/instances`, Instance-owned lifecycle/scheduler configuration, Model defaults + Instance overrides, and direct Instance routing.
 
 No migrations are required.
 
-### Phase 6 — Multi-instance support
+### Multi-instance support
 
 Builds remaining concurrent multi-Instance behavior on the durable Instance model.
 
-### Phase 7 — Hardware integration
+### Hardware integration
 
 The first task remains completing the llama.cpp options GUI. Then implement real NVIDIA/AMD hardware state, single-GPU-first placement, tensor split and actual pre-load resource-pressure eviction.
 
@@ -419,5 +419,5 @@ The architecture is correctly implemented when:
 - an Always-On Instance is reconciled independently of sibling Instances;
 - a manual Stop can suppress Always-On reconciliation until manual Launch, inference need or manager restart;
 - running Instance edits confirm and automatically restart;
-- Phase 7 performs real GPU-aware placement/eviction;
-- no Phase 5.5 migration files are introduced.
+- hardware integration performs real GPU-aware placement/eviction;
+- no control-plane-separation migration files are introduced.

@@ -10,9 +10,9 @@ This specification defines how `llamacpp-manager` discovers, stores, validates, 
 
 The manager must not require a release whenever llama.cpp adds a flag. The active binary is inspected at runtime and a normalized option schema drives validation and UI rendering.
 
-## 2. Phase 7 first task
+## 2. Hardware-integration first task
 
-The llama.cpp configuration GUI remains the **first implementation task in Phase 7** before hardware integration proceeds.
+The llama.cpp configuration GUI remains the **first hardware-integration task** before GPU inventory, placement and eviction proceed.
 
 This catch-up task must complete:
 
@@ -27,7 +27,7 @@ This catch-up task must complete:
 - protected manager-owned options;
 - integration points for later GPU placement/tensor split controls.
 
-Phase 7 is not complete if the option GUI remains missing.
+Hardware integration is not complete if the option GUI remains missing.
 
 ## 3. Configuration layers
 
@@ -331,7 +331,7 @@ GPU assignment and the manager's placement tensor split are first-class Instance
 
 The placement representation maps into the same final launch argv. Device selection remains manager-owned. `tensor-split` remains editable in the llama.cpp option hierarchy; when an effective override exists, the placement layer must keep its device selection but suppress its own generated `--tensor-split` value.
 
-Phase 7 automatic placement remains single-GPU first.
+Hardware-aware automatic placement remains single-GPU first.
 
 ## 24. Configuration fingerprint
 

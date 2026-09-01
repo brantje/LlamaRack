@@ -1,12 +1,12 @@
-# Phase 11 — Observability
+# 012 — Observability
 
 ## Status
 
-Approved implementation contract for Phase 11, including the dedicated inference request-log explorer added by issue #60.
+Approved implementation contract for observability, including the dedicated inference request-log explorer added by issue #60.
 
-Phase 11 provides persistent inference/request observability, historical hardware telemetry, session-only structured Instance logs, Prometheus exposition, the operational Dashboard, and a dedicated `/logs` request-history surface. It reuses the existing SQLite observability store, runtime WebSocket, hardware/telemetry pipeline, llama.cpp metrics scraping, supervisor log stream, and exact `instance.id` gateway routing.
+Observability provides persistent inference/request history, historical hardware telemetry, session-only structured Instance logs, Prometheus exposition, the operational Dashboard, and a dedicated `/logs` request-history surface. It reuses the existing SQLite observability store, runtime WebSocket, hardware/telemetry pipeline, llama.cpp metrics scraping, supervisor log stream, and exact `instance.id` gateway routing.
 
-Phase 11 does not add OpenTelemetry span export or a second request-log database.
+This specification does not add OpenTelemetry span export or a second request-log database.
 
 ## Product goals
 
@@ -27,7 +27,7 @@ The manager must make it possible to answer:
 
 ## Persistence and retention
 
-Observability request and hardware history survives manager restarts and uses the existing SQLite database. During active development, update the current schema directly; do not introduce a migration framework solely for Phase 11. Development databases created with an incompatible earlier schema may be recreated rather than silently ALTERed/backfilled at runtime.
+Observability request and hardware history survives manager restarts and uses the existing SQLite database. During active development, update the current schema directly; do not introduce a migration framework solely for observability. Development databases created with an incompatible earlier schema may be recreated rather than silently ALTERed/backfilled at runtime.
 
 Persist individual inference request records rather than only aggregate buckets. Retention is configurable and defaults to **30 days**. Retention applies to request history, request network metadata, and historical hardware samples. Cleanup runs incrementally in the background and must not block inference traffic.
 

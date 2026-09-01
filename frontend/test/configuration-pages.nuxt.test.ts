@@ -43,7 +43,7 @@ function resetManager() {
   return manager
 }
 
-function phase7Response(path: string) {
+function hardwareAndLlamaCppResponse(path: string) {
   if (path === '/api/v1/hardware') {
     return {
       ram_total_bytes: 64 * 1024 ** 3,
@@ -112,8 +112,8 @@ describe('Instance configuration pages', () => {
   it('creates a fully configured Instance with visual placement and structured llama.cpp overrides', async () => {
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'custom-coder' }
       if (path === '/api/v1/instances/custom-coder/start') return { state: 'READY' }
       if (path === '/api/v1/models') return manager.models.value
@@ -165,8 +165,8 @@ describe('Instance configuration pages', () => {
     const manager = resetManager()
     let failCreate = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances' && options?.method === 'POST') {
         if (failCreate) throw { data: { error: 'create failed' } }
         return { id: 'cancelled-launch' }
@@ -200,8 +200,8 @@ describe('Instance configuration pages', () => {
     manager.instances.value = [current]
     manager.runtimes.value = { m1: [{ instance_id: current.id, model_id: 'm1', state: 'READY' }] }
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances/primary-coder') {
         if (options?.method === 'PUT') return { id: 'renamed-coder' }
         return current
@@ -264,8 +264,8 @@ describe('Instance configuration pages', () => {
     const current = instance()
     let failSave = false
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances/primary-coder' && options?.method === 'PUT') {
         if (failSave) throw { data: { error: 'save failed' } }
         return current
@@ -298,8 +298,8 @@ describe('Model edit page', () => {
   it('loads reusable defaults and saves edited metadata/options', async () => {
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/models/m1') {
         if (options?.method === 'PUT') return model({ name: 'Updated Model', context_length: 32768 })
         return model()
@@ -335,8 +335,8 @@ describe('Model edit page', () => {
 
     const manager = resetManager()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      const phase7 = phase7Response(path)
-      if (phase7 !== undefined) return phase7
+      const hardware = hardwareAndLlamaCppResponse(path)
+      if (hardware !== undefined) return hardware
       if (path === '/api/v1/models/m1' && options?.method === 'PUT') throw { data: { error: 'save failed' } }
       if (path === '/api/v1/models/m1') return model()
       if (path === '/api/v1/models/m1/options') return {}

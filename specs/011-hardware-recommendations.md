@@ -4,11 +4,9 @@ Status: Draft
 
 Related issues: #1, #25
 
-Target branch: `feature/phase-9-hardware-recommendations`
-
 ## 1. Purpose
 
-Phase 9 should turn the existing small GGUF reader into a reusable GGUF inspection service.
+This specification turns the existing small GGUF reader into a reusable GGUF inspection service.
 
 The same inspector is used by:
 
@@ -20,9 +18,9 @@ The same inspector is used by:
 
 The inspector must read GGUF metadata without starting `llama-server` or loading model tensor payloads into RAM/VRAM.
 
-## 2. Existing Phase 9 baseline
+## 2. Existing baseline
 
-The branch already contains:
+The codebase already contains:
 
 - `backend/internal/recommendations`;
 - `GET /api/v1/models/:id/recommendation`;
@@ -95,7 +93,7 @@ Avoid building a large hard-coded catalogue of architecture/tokenizer/MoE/UI fie
 
 ## 6. Tensor information
 
-Phase 9 may inspect the GGUF tensor directory when it materially improves hardware recommendations, for example to derive parameter counts or more accurate weight/layer sizing.
+Hardware recommendations may inspect the GGUF tensor directory when it materially improves estimates, for example to derive parameter counts or more accurate weight/layer sizing.
 
 This remains an internal recommendation input and is separate from the requirement for `/models/:id/details`.
 

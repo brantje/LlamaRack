@@ -152,7 +152,7 @@ Runtime, log and observability streams continue over the authenticated WebSocket
 
 ## Logout
 
-Initial logout is manager-local only. `POST /api/v1/auth/logout` revokes the current authoritative manager session. The frontend removes the stored JWT and closes runtime WebSockets. OIDC RP-initiated logout is not part of this phase.
+Initial logout is manager-local only. `POST /api/v1/auth/logout` revokes the current authoritative manager session. The frontend removes the stored JWT and closes runtime WebSockets. OIDC RP-initiated logout is not part of this specification.
 
 ## API surface
 
