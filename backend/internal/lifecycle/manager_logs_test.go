@@ -34,7 +34,7 @@ func TestManagerLogDefensiveBranches(t *testing.T) {
 	s.logReleasedEstimate("missing", false)
 }
 
-func TestManagerLogReadyAndStopResetBackoff(t *testing.T) {
+func TestManagerLogReadyClearsBackoffWhileStopAndKillPreserveIt(t *testing.T) {
 	s, _, _, sup, _ := setupLifecycle(t, true, false)
 	s.recordStartFailure("worker-a", "boom")
 	s.sup = sup
@@ -44,12 +44,12 @@ func TestManagerLogReadyAndStopResetBackoff(t *testing.T) {
 	}
 	s.recordStartFailure("worker-b", "boom")
 	s.AddManagerLog("worker-b", "worker stopped")
-	if _, ok := s.startFailureState("worker-b"); ok {
-		t.Fatal("stop log did not reset failure state")
+	if _, ok := s.startFailureState("worker-b"); !ok {
+		t.Fatal("stop log reset failure state")
 	}
 	s.recordStartFailure("worker-c", "boom")
 	s.AddManagerLog("worker-c", "worker killed")
-	if _, ok := s.startFailureState("worker-c"); ok {
-		t.Fatal("kill log did not reset failure state")
+	if _, ok := s.startFailureState("worker-c"); !ok {
+		t.Fatal("kill log reset failure state")
 	}
 }

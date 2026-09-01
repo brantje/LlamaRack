@@ -26,10 +26,8 @@ func (s *Service) AddManagerLog(instanceID, line string) {
 	case strings.HasPrefix(line, "worker ready after "):
 		s.resetStartFailures(instanceID)
 	case line == "worker stopped":
-		s.resetStartFailures(instanceID)
 		s.logReleasedEstimate(instanceID, false)
 	case line == "worker killed":
-		s.resetStartFailures(instanceID)
 	case line == "evicted for resource pressure":
 		s.logReleasedEstimate(instanceID, true)
 	default:

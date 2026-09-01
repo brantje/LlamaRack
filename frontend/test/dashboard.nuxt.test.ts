@@ -46,9 +46,11 @@ function resetManager() {
 }
 
 const gib = 1024 ** 3
+const now = Date.parse('2026-09-01T12:00:00.000Z')
 
 beforeEach(() => {
   mocks.request.mockReset()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
   resetManager()
 })
 
@@ -59,7 +61,7 @@ describe('Phase 11 Dashboard', () => {
     manager.runtimes.value = {
       m1: [
         { instance_id: 'coder', model_id: 'm1', state: 'READY', pid: 101 },
-        { instance_id: 'broken', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 3, retry_after: new Date(Date.now() + 60_000).toISOString() }
+        { instance_id: 'broken', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 3, retry_after: new Date(now + 60_000).toISOString() }
       ]
     }
     manager.observabilityLive.value = {

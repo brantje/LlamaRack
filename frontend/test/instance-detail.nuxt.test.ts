@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 const gib = 1024 ** 3
-const now = Date.now()
+const now = Date.parse('2026-09-01T12:00:00.000Z')
 const bucket = Math.floor(now / 60_000) * 60_000
 
 function seed() {
@@ -63,6 +63,7 @@ function series(metric: string) {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
   mocks.request.mockImplementation(async (path: string) => {
     if (path === '/api/v1/settings/general') return { observability_retention_days: { value: 30, source: 'default', editable: true } }
     if (path.startsWith('/api/v1/observability/timeseries?')) {
@@ -143,7 +144,7 @@ describe('Instance detail page', () => {
       state: 'FAILED',
       last_error: 'CUDA allocation failed',
       consecutive_start_failures: 2,
-      retry_after: new Date(Date.now() + 45_000).toISOString()
+      retry_after: new Date(now + 45_000).toISOString()
     }] }
     manager.runtimeTelemetry.value = {}
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })

@@ -168,7 +168,8 @@ func (s *Service) attachStartFailure(runtime supervisor.Runtime) supervisor.Runt
 	}
 	runtime.ConsecutiveStartFailures = state.ConsecutiveFailures
 	if !state.RetryAfter.IsZero() {
-		runtime.RetryAfter = state.RetryAfter.UTC()
+		retryAfter := state.RetryAfter.UTC()
+		runtime.RetryAfter = &retryAfter
 	}
 	if runtime.LastError == "" && state.LastError != "" {
 		runtime.LastError = state.LastError

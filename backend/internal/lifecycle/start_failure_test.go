@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"path/filepath"
@@ -102,6 +103,22 @@ func TestStartFailureResetOverrideAndStopDoNotCount(t *testing.T) {
 	s.overrideStartBackoff("missing")
 }
 
+func TestRuntimeOmitsZeroRetryAfter(t *testing.T) {
+	s := &Service{now: func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) }}
+	data, err := json.Marshal(s.attachStartFailure(supervisor.Runtime{InstanceID: "one", State: supervisor.Failed}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "retry_after") {
+		t.Fatalf("zero retry_after encoded=%s", data)
+	}
+	s.recordStartFailure("one", "boom")
+	data, err = json.Marshal(s.attachStartFailure(supervisor.Runtime{InstanceID: "one", State: supervisor.Failed}))
+	if err != nil || !strings.Contains(string(data), `"retry_after"`) {
+		t.Fatalf("active retry_after encoded=%s err=%v", data, err)
+	}
+}
+
 func TestStartFailureStateIsConcurrencySafe(t *testing.T) {
 	s := &Service{now: func() time.Time { return time.Unix(1, 0).UTC() }}
 	var wg sync.WaitGroup
@@ -123,7 +140,22 @@ func TestStartFailureStateIsConcurrencySafe(t *testing.T) {
 	}
 }
 
-func attachBrokenSupervisor(t *testing.T, s *Service) *supervisor.Supervisor {
+func syncedClock(t *testing.T, start time.Time) (now func() time.Time, advance func(time.Duration)) {
+	t.Helper()
+	var mu sync.Mutex
+	current := start
+	return func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			return current
+		}, func(d time.Duration) {
+			mu.Lock()
+			current = current.Add(d)
+			mu.Unlock()
+		}
+}
+
+func freePort(t *testing.T) int {
 	t.Helper()
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -133,7 +165,12 @@ func attachBrokenSupervisor(t *testing.T, s *Service) *supervisor.Supervisor {
 	if err := probe.Close(); err != nil {
 		t.Fatal(err)
 	}
-	broken := supervisor.New(filepath.Join(t.TempDir(), "missing-llama-server"), "127.0.0.1", port, time.Second)
+	return port
+}
+
+func attachBrokenSupervisor(t *testing.T, s *Service) *supervisor.Supervisor {
+	t.Helper()
+	broken := supervisor.New(filepath.Join(t.TempDir(), "missing-llama-server"), "127.0.0.1", freePort(t), time.Second)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -165,13 +202,14 @@ func TestRepeatedAlwaysOnFailuresIncreaseCooldownAndSkipReconcile(t *testing.T) 
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	id := items[0].ID
-	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	s.now = func() time.Time { return now }
+	start := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	nowFn, advance := syncedClock(t, start)
+	s.now = nowFn
 	attachBrokenSupervisor(t, s)
 
 	s.ReconcileAlwaysOn(ctx)
 	first := waitStartFailures(t, s, id, 1)
-	if !first.RetryAfter.Equal(now.Add(15 * time.Second)) {
+	if !first.RetryAfter.Equal(start.Add(15 * time.Second)) {
 		t.Fatalf("first retry=%s", first.RetryAfter)
 	}
 
@@ -188,25 +226,16 @@ func TestRepeatedAlwaysOnFailuresIncreaseCooldownAndSkipReconcile(t *testing.T) 
 		t.Fatal("expected explicit launch to attempt and fail")
 	}
 	second := waitStartFailures(t, s, id, 2)
-	if second.ConsecutiveFailures != 2 || !second.RetryAfter.Equal(now.Add(30*time.Second)) {
+	if second.ConsecutiveFailures != 2 || !second.RetryAfter.Equal(start.Add(30*time.Second)) {
 		t.Fatalf("explicit launch state=%+v", second)
 	}
 
-	now = now.Add(31 * time.Second)
-	s.now = func() time.Time { return now }
+	advance(31 * time.Second)
 	s.ReconcileAlwaysOn(ctx)
 	waitStartFailures(t, s, id, 3)
 
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	if err := probe.Close(); err != nil {
-		t.Fatal(err)
-	}
 	s.overrideStartBackoff(id)
-	good := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", port, 5*time.Second)
+	good := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", freePort(t), 5*time.Second)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -267,7 +296,7 @@ func TestInferenceDuringStartBackoffDoesNotSpawn(t *testing.T) {
 	}
 
 	rt, err := s.RuntimeInstance(ctx, id)
-	if err != nil || rt.ConsecutiveStartFailures != 1 || rt.RetryAfter.IsZero() || rt.LastError == "" {
+	if err != nil || rt.ConsecutiveStartFailures != 1 || rt.RetryAfter == nil || rt.LastError == "" {
 		t.Fatalf("runtime overlay=%+v err=%v", rt, err)
 	}
 }
@@ -294,8 +323,9 @@ func TestManualStopDoesNotCountAsStartFailure(t *testing.T) {
 	if err := s.StopInstance(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.startFailureState(id); ok {
-		t.Fatal("manual stop left leftover backoff")
+	state, ok := s.startFailureState(id)
+	if !ok || state.ConsecutiveFailures != 1 {
+		t.Fatalf("manual stop reset failure streak: %+v ok=%v", state, ok)
 	}
 }
 
@@ -325,15 +355,7 @@ func TestReadinessTimeoutCountsAsStartFailure(t *testing.T) {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	instance := items[0]
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	if err := probe.Close(); err != nil {
-		t.Fatal(err)
-	}
-	readyDelay := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", port, 80*time.Millisecond)
+	readyDelay := supervisor.New(lifecycleFakeBinary(t), "127.0.0.1", freePort(t), 80*time.Millisecond)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -371,7 +393,7 @@ func TestRuntimeOverlayAndSubscribeIncludeBackoff(t *testing.T) {
 	for _, rt := range snapshot {
 		if rt.InstanceID == id {
 			found = true
-			if rt.ConsecutiveStartFailures != 1 || rt.RetryAfter.IsZero() || rt.LastError != "exec: missing" {
+			if rt.ConsecutiveStartFailures != 1 || rt.RetryAfter == nil || rt.LastError != "exec: missing" {
 				t.Fatalf("snapshot overlay=%+v", rt)
 			}
 		}

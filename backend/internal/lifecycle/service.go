@@ -182,7 +182,6 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	s.resetStartFailures(id)
 	s.AddManagerLog(id, "worker stopped")
 	return nil
 }
@@ -235,7 +234,6 @@ func (s *Service) KillInstance(ctx context.Context, id string) error {
 
 	s.clearResourceBlock(id)
 	s.markManualStop(id)
-	s.resetStartFailures(id)
 	if err := s.sup.Kill(id); err != nil {
 		s.abortDrainClaim(id)
 		return err

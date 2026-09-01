@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 const gib = 1024 ** 3
+const now = Date.parse('2026-09-01T12:00:00.000Z')
 
 function instance(id: string, overrides: Partial<Instance> = {}): Instance {
   return { id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
@@ -34,7 +35,7 @@ function seed() {
   manager.runtimes.value = { m1: [
     { instance_id: 'ready', model_id: 'm1', state: 'READY', pid: 42, port: 9010 },
     { instance_id: 'stopped', model_id: 'm1', state: 'UNLOADED' },
-    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(Date.now() + 45_000).toISOString() },
+    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(now + 45_000).toISOString() },
     { instance_id: 'downloading', model_id: 'm1', state: 'UNLOADED' }
   ] }
   manager.runtimeTelemetry.value = { ready: telemetry('ready') }
@@ -51,6 +52,7 @@ function seed() {
 beforeEach(() => {
   mocks.request.mockReset()
   sessionStorage.clear()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
   seed()
   mocks.request.mockImplementation(async (path: string) => {
     if (path === '/api/v1/imports') return [{ id: 'imp-1', job_id: 'job-1', model_id: 'm1', instance_id: 'downloading', state: 'DOWNLOADING', start_when_ready: true }]

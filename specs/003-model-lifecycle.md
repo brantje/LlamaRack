@@ -162,7 +162,7 @@ Automatic retry delay after consecutive failures:
 15s → 30s → 60s → 2m → 5m (cap)
 ```
 
-Automatic starts (Always-On reconcile and inference autoload) must not spawn a worker while `now < retry_after`. An explicit user Launch or Restart overrides the current cooldown and may try immediately; the streak resets only after a successful READY transition. A targeted inference request during cooldown returns a clear unavailable/backoff error and does not start the worker. After `retry_after`, the next reconcile tick or later inference request may try once (single-flight). Do not create an unbounded retry loop inside a request.
+Automatic starts (Always-On reconcile and inference autoload) must not spawn a worker while `now < retry_after`. An explicit user Launch or Restart overrides the current cooldown and may try immediately; the streak resets only after a successful READY transition. Manual Stop and Kill do not increment or reset the streak. A targeted inference request during cooldown returns a clear unavailable/backoff error and does not start the worker. After `retry_after`, the next reconcile tick or later inference request may try once (single-flight). Do not create an unbounded retry loop inside a request.
 
 ### 9.3 Resource contention
 
