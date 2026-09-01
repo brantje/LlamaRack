@@ -74,7 +74,7 @@ func (s *Service) RequestTimeseries(ctx context.Context, metric string, sinceMS 
 	}
 
 	if metric == "instance_context_tokens_max" {
-		query := `SELECT (collected_at / ?) * ? AS bucket,AVG(value) FROM hardware_metric_samples WHERE metric='instance_context_tokens_max' AND collected_at>=?`
+		query := `SELECT (collected_at / ?) * ? AS bucket,MAX(value) FROM hardware_metric_samples WHERE metric='instance_context_tokens_max' AND collected_at>=?`
 		args := []any{bucketMS, bucketMS, sinceMS}
 		if instanceID != "" {
 			query += " AND instance_id=?"

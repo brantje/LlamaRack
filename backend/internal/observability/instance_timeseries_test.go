@@ -57,6 +57,23 @@ func TestContextHistoryPersistsOnlyDerivedGauge(t *testing.T) {
 	if err != nil || len(other) != 0 { t.Fatalf("negative context should not persist: %+v err=%v", other, err) }
 }
 
+func TestContextHistoryBucketsUseMaxWatermark(t *testing.T) {
+	ctx := context.Background()
+	s := testService(t)
+	at := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	low := 1000.0
+	high := 8000.0
+	if err := s.RecordContextMetrics(ctx, at, []RuntimeTelemetrySample{
+		{Sample: telemetry.Sample{InstanceID: "alpha", PID: 1}, LlamaMetrics: &telemetry.LlamaMetrics{ContextTokensMax: &low}},
+	}); err != nil { t.Fatal(err) }
+	if err := s.RecordContextMetrics(ctx, at.Add(time.Second), []RuntimeTelemetrySample{
+		{Sample: telemetry.Sample{InstanceID: "alpha", PID: 1}, LlamaMetrics: &telemetry.LlamaMetrics{ContextTokensMax: &high}},
+	}); err != nil { t.Fatal(err) }
+
+	points, err := s.RequestTimeseries(ctx, "instance_context_tokens_max", at.Add(-time.Minute).UnixMilli(), 60, "alpha")
+	if err != nil || len(points) != 1 || points[0].Value != 8000 { t.Fatalf("context watermark=%+v err=%v", points, err) }
+}
+
 func TestManagementTimeseriesPassesInstanceFilter(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
