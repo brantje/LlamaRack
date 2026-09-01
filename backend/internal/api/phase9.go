@@ -102,7 +102,14 @@ func (h *phase9ModelInspectHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, inspection)
+	candidates, candidateErr := h.models.InspectGGUFArtifactCandidates(r.Context(), in.GGUFPath)
+	if candidateErr != nil {
+		candidates = nil
+	}
+	writeJSON(w, http.StatusOK, struct {
+		models.GGUFInspection
+		DependencyCandidates []models.GGUFArtifactDependencyCandidate `json:"dependency_candidates,omitempty"`
+	}{GGUFInspection: inspection, DependencyCandidates: candidates})
 }
 
 func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +156,7 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		warnings = append(warnings, "Context capability could not be detected automatically from GGUF metadata.")
 	}
 	page, total := ggufmeta.Filter(inspection.Metadata, query, offset, limit)
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"model":                   model,
 		"gguf_version":            inspection.Version,
 		"tensor_count":            inspection.TensorCount,
@@ -158,10 +165,12 @@ func (h *phase9ModelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		"metadata":                page,
 		"architecture":            inspection.Derived.Architecture,
 		"detected_context_length": inspection.Derived.ContextLength,
+		"features":                inspection.Features,
 		"offset":                  offset,
 		"limit":                   limit,
 		"warnings":                warnings,
-	})
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func modelIDFromRequest(r *http.Request) string {

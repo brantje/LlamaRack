@@ -57,13 +57,29 @@ func TestDiscoverRecommendationHandler(t *testing.T) {
 	if got := doRequest(t, handler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=acme%2Fdemo&context_length=nope", nil, cookie).Code; got != http.StatusBadRequest {
 		t.Fatalf("invalid context=%d", got)
 	}
+	if got := doRequest(t, handler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=acme%2Fdemo&assume_idle=maybe", nil, cookie).Code; got != http.StatusBadRequest {
+		t.Fatalf("invalid assume_idle=%d", got)
+	}
 
 	w := doRequest(t, handler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=acme%2Fdemo&context_length=8192", nil, cookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"context_length":8192`) || !strings.Contains(w.Body.String(), `"artifact_id"`) || !strings.Contains(w.Body.String(), `"fit_label":"Fits on GPU"`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"context_length":8192`) || !strings.Contains(w.Body.String(), `"artifact_id"`) || !strings.Contains(w.Body.String(), `"fit_label":"Fits on GPU"`) || !strings.Contains(w.Body.String(), `"assume_idle":true`) {
 		t.Fatalf("recommendations=%d body=%s", w.Code, w.Body.String())
 	}
 	if strings.Count(w.Body.String(), `"recommended":true`) != 1 {
 		t.Fatalf("expected exactly one recommendation: %s", w.Body.String())
+	}
+
+	occupiedHandler := NewDiscoverRecommendationHandler(f.auth, hf, staticHardware{snapshot: hardware.Snapshot{
+		RAMAvailableBytes: 2 << 30, RAMTotalBytes: 32 << 30,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 1 << 30, TotalBytes: 8 << 30}},
+	}}, managerSettings)
+	w = doRequest(t, occupiedHandler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=acme%2Fdemo&context_length=8192&assume_idle=true", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"fit_label":"Fits on GPU"`) || !strings.Contains(w.Body.String(), `"assume_idle":true`) {
+		t.Fatalf("assume_idle=true occupied=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doRequest(t, occupiedHandler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=acme%2Fdemo&context_length=8192&assume_idle=false", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"assume_idle":false`) || strings.Contains(w.Body.String(), `"fit_label":"Fits on GPU"`) {
+		t.Fatalf("assume_idle=false occupied=%d body=%s", w.Code, w.Body.String())
 	}
 
 	failedHardware := NewDiscoverRecommendationHandler(f.auth, hf, staticHardware{err: errors.New("probe failed")}, managerSettings)

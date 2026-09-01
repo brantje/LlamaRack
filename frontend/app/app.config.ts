@@ -1,30 +1,80 @@
 export default defineAppConfig({
+  icon: {
+    customize: (content: string, _name: string, prefix: string, _provider: string) => {
+      if (prefix !== 'lucide') return content
+      return content.replace(/stroke-width="[^"]*"/g, 'stroke-width="1.5"')
+    }
+  },
   ui: {
     colors: {
-      primary: 'mint',
-      secondary: 'purple',
-      success: 'mint',
-      info: 'sky',
-      warning: 'warn',
+      primary: 'accent',
+      secondary: 'neutral',
+      success: 'accent',
+      info: 'accent',
+      warning: 'neutral',
       error: 'danger',
-      neutral: 'slate'
+      neutral: 'neutral'
     },
     button: {
       slots: {
-        base: 'font-semibold'
+        base: 'cursor-pointer font-semibold rounded-none max-lg:min-h-11 max-lg:min-w-11'
+      }
+    },
+    input: {
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
+    },
+    textarea: {
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
+    },
+    select: {
+      slots: {
+        base: 'rounded-none max-lg:min-h-11'
+      },
+      compoundVariants: [
+        { color: 'primary', variant: ['outline', 'subtle'], class: 'focus-visible:ring-[var(--color-divider)] focus-visible:outline-none' }
+      ]
+    },
+    badge: {
+      slots: {
+        base: 'rounded-none'
       }
     },
     card: {
       slots: {
-        root: 'bg-elevated/90 border-default'
+        root: 'rounded-none border border-default bg-elevated shadow-none'
       }
     },
     pageHeader: {
       slots: {
-        root: 'border-0 py-0',
-        headline: 'text-[11px] font-extrabold tracking-[0.18em] text-muted',
-        title: 'text-3xl sm:text-[34px] font-bold text-highlighted',
-        description: 'text-sm sm:text-base text-muted'
+        root: 'w-full basis-full border-0 py-0 sm:basis-auto',
+        headline: 'text-xs uppercase tracking-[.1em] text-muted',
+        title: 'font-[var(--font-heading)] text-[length:var(--font-size-screen-title)] font-semibold tracking-[-.015em] text-highlighted',
+        description: 'text-[length:var(--font-size-body)] leading-[1.55] text-muted'
+      }
+    },
+    dashboardGroup: {
+      base: () => 'fixed inset-0 flex overflow-auto'
+    },
+    chatPrompt: {
+      slots: {
+        root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)] has-[textarea:focus-visible]:ring-[var(--color-divider)] has-[textarea:focus-visible]:outline-none'
+      },
+      variants: {
+        variant: {
+          outline: {
+            root: 'bg-[var(--color-surface)] ring ring-[var(--color-divider)]'
+          },
+          soft: {
+            root: 'bg-[var(--color-surface)]'
+          },
+          subtle: {
+            root: 'bg-[var(--color-surface)] ring ring-[var(--color-divider)]'
+          }
+        }
       }
     }
   }

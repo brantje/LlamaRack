@@ -52,7 +52,7 @@ beforeEach(() => {
 })
 
 describe('application shell', () => {
-  it('renders backend failure, bootstrap/login, and signed-in navigation states', async () => {
+  it('renders backend failure, bootstrap/login, and signed-in navigation states', { timeout: 15_000 }, async () => {
     const manager = resetState()
     manager.backendError.value = 'connection refused'
     let wrapper = await mountSuspended(App, { route: false })

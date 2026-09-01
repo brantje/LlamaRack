@@ -133,7 +133,9 @@ func NewOIDCManager(a *Service, managerSettings *settings.Service, secrets Provi
 	}
 }
 
-func oidcSecretName(providerID string) string { return "oidc_provider:" + providerID + ":client_secret" }
+func oidcSecretName(providerID string) string {
+	return "oidc_provider:" + providerID + ":client_secret"
+}
 
 func normalizeScopes(scopes []string) []string {
 	seen := map[string]bool{"openid": true}
@@ -372,7 +374,9 @@ func (m *OIDCManager) probeJWKS(ctx context.Context, endpoint string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("OIDC JWKS endpoint returned HTTP %d", resp.StatusCode)
 	}
-	var doc struct{ Keys []json.RawMessage `json:"keys"` }
+	var doc struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
 		return fmt.Errorf("decode OIDC JWKS: %w", err)
 	}
@@ -382,7 +386,9 @@ func (m *OIDCManager) probeJWKS(ctx context.Context, endpoint string) error {
 	return nil
 }
 
-func (m *OIDCManager) CanDisableLocalLogin(ctx context.Context) (bool, error) { return m.hasUsableProvider(ctx, "") }
+func (m *OIDCManager) CanDisableLocalLogin(ctx context.Context) (bool, error) {
+	return m.hasUsableProvider(ctx, "")
+}
 
 func (m *OIDCManager) hasUsableProvider(ctx context.Context, excludeID string) (bool, error) {
 	query, args := "SELECT COUNT(*) FROM oidc_providers WHERE enabled=1 AND last_test_succeeded=1", []any{}
@@ -442,9 +448,15 @@ func (m *OIDCManager) resolveProvider(ctx context.Context, provider OIDCProvider
 		// optional trailing slash, trust the discovery document's canonical
 		// issuer so ID-token verification uses the exact value emitted by the IdP.
 		resolved.Issuer = document.Issuer
-		if resolved.AuthorizationEndpoint == "" { resolved.AuthorizationEndpoint = document.AuthorizationEndpoint }
-		if resolved.TokenEndpoint == "" { resolved.TokenEndpoint = document.TokenEndpoint }
-		if resolved.JWKSURL == "" { resolved.JWKSURL = document.JWKSURL }
+		if resolved.AuthorizationEndpoint == "" {
+			resolved.AuthorizationEndpoint = document.AuthorizationEndpoint
+		}
+		if resolved.TokenEndpoint == "" {
+			resolved.TokenEndpoint = document.TokenEndpoint
+		}
+		if resolved.JWKSURL == "" {
+			resolved.JWKSURL = document.JWKSURL
+		}
 	}
 	for name, value := range map[string]string{"authorization endpoint": resolved.AuthorizationEndpoint, "token endpoint": resolved.TokenEndpoint, "JWKS URL": resolved.JWKSURL} {
 		parsed, err := url.Parse(value)
@@ -457,17 +469,36 @@ func (m *OIDCManager) resolveProvider(ctx context.Context, provider OIDCProvider
 
 func (m *OIDCManager) Start(ctx context.Context, providerID string, remember bool, remoteAddress, userAgent, externalURL string) (string, error) {
 	provider, err := m.GetProvider(ctx, providerID)
-	if err != nil { return "", err }
-	if !provider.Enabled { return "", errors.New("OIDC provider is disabled") }
+	if err != nil {
+		return "", err
+	}
+	if !provider.Enabled {
+		return "", errors.New("OIDC provider is disabled")
+	}
 	resolved, err := m.resolveProvider(ctx, provider)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	secret, err := m.secrets.GetSecret(ctx, oidcSecretName(provider.ID))
-	if err != nil || secret == "" { return "", errors.New("OIDC provider client secret is unavailable") }
+	if err != nil || secret == "" {
+		return "", errors.New("OIDC provider client secret is unavailable")
+	}
 	redirectURL, err := oidcCallbackURL(externalURL, provider.ID)
-	if err != nil { return "", err }
-	state, err := randomToken(24); if err != nil { return "", err }
-	nonce, err := randomToken(24); if err != nil { return "", err }
-	verifier, err := randomToken(32); if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+	state, err := randomToken(24)
+	if err != nil {
+		return "", err
+	}
+	nonce, err := randomToken(24)
+	if err != nil {
+		return "", err
+	}
+	verifier, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	config := oauth2.Config{ClientID: provider.ClientID, ClientSecret: secret, RedirectURL: redirectURL, Scopes: provider.Scopes, Endpoint: oauth2.Endpoint{AuthURL: resolved.AuthorizationEndpoint, TokenURL: resolved.TokenEndpoint}}
@@ -489,32 +520,56 @@ func (m *OIDCManager) CompleteCallback(ctx context.Context, providerID, state, c
 		return "", errors.New("invalid or expired OIDC state")
 	}
 	provider, err := m.GetProvider(ctx, providerID)
-	if err != nil || !provider.Enabled { return "", errors.New("OIDC provider is unavailable") }
+	if err != nil || !provider.Enabled {
+		return "", errors.New("OIDC provider is unavailable")
+	}
 	resolved, err := m.resolveProvider(ctx, provider)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	secret, err := m.secrets.GetSecret(ctx, oidcSecretName(provider.ID))
-	if err != nil || secret == "" { return "", errors.New("OIDC provider client secret is unavailable") }
+	if err != nil || secret == "" {
+		return "", errors.New("OIDC provider client secret is unavailable")
+	}
 	redirectURL, err := oidcCallbackURL(externalURL, provider.ID)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, m.client)
 	config := oauth2.Config{ClientID: provider.ClientID, ClientSecret: secret, RedirectURL: redirectURL, Scopes: provider.Scopes, Endpoint: oauth2.Endpoint{AuthURL: resolved.AuthorizationEndpoint, TokenURL: resolved.TokenEndpoint}}
 	token, err := config.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", transaction.Verifier))
-	if err != nil { return "", fmt.Errorf("OIDC code exchange failed: %w", err) }
+	if err != nil {
+		return "", fmt.Errorf("OIDC code exchange failed: %w", err)
+	}
 	rawIDToken, ok := token.Extra("id_token").(string)
-	if !ok || rawIDToken == "" { return "", errors.New("OIDC token response did not include id_token") }
+	if !ok || rawIDToken == "" {
+		return "", errors.New("OIDC token response did not include id_token")
+	}
 	verifier := oidc.NewVerifier(resolved.Issuer, oidc.NewRemoteKeySet(ctx, resolved.JWKSURL), &oidc.Config{ClientID: provider.ClientID})
 	idToken, err := verifier.Verify(ctx, rawIDToken)
-	if err != nil { return "", fmt.Errorf("verify OIDC ID token: %w", err) }
+	if err != nil {
+		return "", fmt.Errorf("verify OIDC ID token: %w", err)
+	}
 	var claims map[string]any
-	if err := idToken.Claims(&claims); err != nil { return "", err }
+	if err := idToken.Claims(&claims); err != nil {
+		return "", err
+	}
 	nonce, _ := claims["nonce"].(string)
-	if nonce == "" || nonce != transaction.Nonce { return "", errors.New("OIDC nonce validation failed") }
+	if nonce == "" || nonce != transaction.Nonce {
+		return "", errors.New("OIDC nonce validation failed")
+	}
 	user, err := m.resolveIdentity(ctx, provider, idToken.Subject, oidcUsername(provider, claims, idToken.Subject))
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	result, err := m.auth.CreateBearerSession(ctx, user, transaction.RemoteAddr, transaction.UserAgent)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	now := time.Now().Unix()
-	if _, err := m.auth.db.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", now, user.ID); err == nil { result.User.LastLoginAt = &now }
+	if _, err := m.auth.db.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", now, user.ID); err == nil {
+		result.User.LastLoginAt = &now
+	}
 	exchangeCode, err := randomToken(24)
 	if err != nil {
 		_ = m.auth.RevokeSession(ctx, resultSessionID(result.AccessToken, m.auth))
@@ -529,7 +584,9 @@ func (m *OIDCManager) CompleteCallback(ctx context.Context, providerID, state, c
 
 func resultSessionID(token string, service *Service) string {
 	claims, err := service.parseManagementToken(token)
-	if err != nil { return "" }
+	if err != nil {
+		return ""
+	}
 	return claims.SessionID
 }
 
@@ -540,18 +597,30 @@ func (m *OIDCManager) Exchange(code string) (OIDCExchangeResult, error) {
 	code = strings.TrimSpace(code)
 	item, ok := m.exchanges[code]
 	delete(m.exchanges, code)
-	if !ok || !item.ExpiresAt.After(time.Now()) { return OIDCExchangeResult{}, errors.New("invalid or expired OIDC exchange code") }
+	if !ok || !item.ExpiresAt.After(time.Now()) {
+		return OIDCExchangeResult{}, errors.New("invalid or expired OIDC exchange code")
+	}
 	return item.Result, nil
 }
 
 func (m *OIDCManager) cleanupLocked(now time.Time) {
-	for key, item := range m.transactions { if !item.ExpiresAt.After(now) { delete(m.transactions, key) } }
-	for key, item := range m.exchanges { if !item.ExpiresAt.After(now) { delete(m.exchanges, key) } }
+	for key, item := range m.transactions {
+		if !item.ExpiresAt.After(now) {
+			delete(m.transactions, key)
+		}
+	}
+	for key, item := range m.exchanges {
+		if !item.ExpiresAt.After(now) {
+			delete(m.exchanges, key)
+		}
+	}
 }
 
 func oidcCallbackURL(externalURL, providerID string) (string, error) {
 	base, err := url.Parse(strings.TrimSpace(externalURL))
-	if err != nil || base.Scheme == "" || base.Host == "" { return "", errors.New("external/public URL must be configured before OIDC can be used") }
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return "", errors.New("external/public URL must be configured before OIDC can be used")
+	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/api/v1/auth/oidc/" + url.PathEscape(providerID) + "/callback"
 	base.RawQuery, base.Fragment = "", ""
 	return base.String(), nil
@@ -559,74 +628,125 @@ func oidcCallbackURL(externalURL, providerID string) (string, error) {
 
 func frontendExchangeURL(externalURL, code string) (string, error) {
 	base, err := url.Parse(strings.TrimSpace(externalURL))
-	if err != nil || base.Scheme == "" || base.Host == "" { return "", errors.New("external/public URL must be configured before OIDC can be used") }
-	query := base.Query(); query.Set("oidc_exchange", code); base.RawQuery, base.Fragment = query.Encode(), ""
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return "", errors.New("external/public URL must be configured before OIDC can be used")
+	}
+	query := base.Query()
+	query.Set("oidc_exchange", code)
+	base.RawQuery, base.Fragment = query.Encode(), ""
 	return base.String(), nil
 }
 
 func oidcUsername(provider OIDCProvider, claims map[string]any, subject string) string {
 	seen := map[string]bool{}
 	for _, key := range []string{provider.UsernameClaim, "preferred_username", "email", "name"} {
-		if key == "" || seen[key] { continue }
+		if key == "" || seen[key] {
+			continue
+		}
 		seen[key] = true
 		value, _ := claims[key].(string)
-		if value = strings.TrimSpace(value); value != "" { return value }
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
 	}
 	return "oidc-" + subject
 }
 
 func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider, subject, username string) (User, error) {
 	subject = strings.TrimSpace(subject)
-	if subject == "" { return User{}, errors.New("OIDC subject is missing") }
+	if subject == "" {
+		return User{}, errors.New("OIDC subject is missing")
+	}
 	var userID int64
 	err := m.auth.db.QueryRowContext(ctx, "SELECT user_id FROM external_identities WHERE provider_id=? AND issuer=? AND subject=?", provider.ID, provider.Issuer, subject).Scan(&userID)
 	if err == nil {
 		user, err := m.auth.UserByID(ctx, userID)
-		if err != nil || !user.Enabled { return User{}, ErrSessionInvalid }
+		if err != nil || !user.Enabled {
+			return User{}, ErrSessionInvalid
+		}
 		return user, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) { return User{}, err }
+	if !errors.Is(err, sql.ErrNoRows) {
+		return User{}, err
+	}
 	jit, err := m.settings.Bool(ctx, settings.OIDCJITProvisioningEnabled)
-	if err != nil { return User{}, err }
-	if !jit { return User{}, ErrOIDCLinkRequired }
+	if err != nil {
+		return User{}, err
+	}
+	if !jit {
+		return User{}, ErrOIDCLinkRequired
+	}
 	username = strings.TrimSpace(username)
-	if len(username) < 2 { return User{}, errors.New("OIDC username claim is too short") }
+	if len(username) < 2 {
+		return User{}, errors.New("OIDC username claim is too short")
+	}
 	var existingID int64
 	err = m.auth.db.QueryRowContext(ctx, "SELECT id FROM users WHERE username=? COLLATE NOCASE", username).Scan(&existingID)
 	if err == nil {
 		autoLink, err := m.settings.Bool(ctx, settings.OIDCAutoLinkEnabled)
-		if err != nil { return User{}, err }
-		if !autoLink { return User{}, ErrOIDCUsernameTaken }
+		if err != nil {
+			return User{}, err
+		}
+		if !autoLink {
+			return User{}, ErrOIDCUsernameTaken
+		}
 		user, err := m.auth.UserByID(ctx, existingID)
-		if err != nil || !user.Enabled { return User{}, ErrSessionInvalid }
-		if _, err := m.linkIdentity(ctx, user.ID, provider.ID, provider.Issuer, subject); err != nil { return User{}, err }
+		if err != nil || !user.Enabled {
+			return User{}, ErrSessionInvalid
+		}
+		if _, err := m.linkIdentity(ctx, user.ID, provider.ID, provider.Issuer, subject); err != nil {
+			return User{}, err
+		}
 		return user, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) { return User{}, err }
+	if !errors.Is(err, sql.ErrNoRows) {
+		return User{}, err
+	}
 	tx, err := m.auth.db.BeginTx(ctx, nil)
-	if err != nil { return User{}, err }
+	if err != nil {
+		return User{}, err
+	}
 	defer tx.Rollback()
 	now := time.Now().Unix()
 	result, err := tx.ExecContext(ctx, "INSERT INTO users(username,password_hash,enabled,created_at) VALUES(?,?,1,?)", username, "!oidc", now)
-	if err != nil { return User{}, err }
-	id, err := result.LastInsertId(); if err != nil { return User{}, err }
-	identityID, err := randomToken(12); if err != nil { return User{}, err }
-	if _, err := tx.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", identityID, provider.ID, provider.Issuer, subject, id, now); err != nil { return User{}, err }
-	if err := tx.Commit(); err != nil { return User{}, err }
+	if err != nil {
+		return User{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return User{}, err
+	}
+	identityID, err := randomToken(12)
+	if err != nil {
+		return User{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", identityID, provider.ID, provider.Issuer, subject, id, now); err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
 	return User{ID: id, Username: username, Enabled: true, CreatedAt: now}, nil
 }
 
 func (m *OIDCManager) ListIdentities(ctx context.Context, userID int64) ([]ExternalIdentity, error) {
 	query, args := "SELECT id,provider_id,issuer,subject,user_id,created_at FROM external_identities", []any{}
-	if userID > 0 { query += " WHERE user_id=?"; args = append(args, userID) }
+	if userID > 0 {
+		query += " WHERE user_id=?"
+		args = append(args, userID)
+	}
 	query += " ORDER BY created_at,id"
 	rows, err := m.auth.db.QueryContext(ctx, query, args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	out := make([]ExternalIdentity, 0)
 	for rows.Next() {
 		var item ExternalIdentity
-		if err := rows.Scan(&item.ID, &item.ProviderID, &item.Issuer, &item.Subject, &item.UserID, &item.CreatedAt); err != nil { return nil, err }
+		if err := rows.Scan(&item.ID, &item.ProviderID, &item.Issuer, &item.Subject, &item.UserID, &item.CreatedAt); err != nil {
+			return nil, err
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
@@ -634,37 +754,90 @@ func (m *OIDCManager) ListIdentities(ctx context.Context, userID int64) ([]Exter
 
 func (m *OIDCManager) LinkIdentity(ctx context.Context, userID int64, providerID, issuer, subject string) (ExternalIdentity, error) {
 	provider, err := m.GetProvider(ctx, providerID)
-	if err != nil { return ExternalIdentity{}, err }
+	if err != nil {
+		return ExternalIdentity{}, err
+	}
 	issuer = strings.TrimSpace(issuer)
-	if issuer == "" { issuer = provider.Issuer }
-	if issuer != provider.Issuer { return ExternalIdentity{}, errors.New("identity issuer must match provider issuer") }
-	if _, err := m.auth.UserByID(ctx, userID); err != nil { return ExternalIdentity{}, err }
+	if issuer == "" {
+		issuer = provider.Issuer
+	}
+	if issuer != provider.Issuer {
+		return ExternalIdentity{}, errors.New("identity issuer must match provider issuer")
+	}
+	if _, err := m.auth.UserByID(ctx, userID); err != nil {
+		return ExternalIdentity{}, err
+	}
 	return m.linkIdentity(ctx, userID, providerID, issuer, subject)
 }
 
 func (m *OIDCManager) linkIdentity(ctx context.Context, userID int64, providerID, issuer, subject string) (ExternalIdentity, error) {
 	subject = strings.TrimSpace(subject)
-	if subject == "" { return ExternalIdentity{}, errors.New("subject is required") }
-	id, err := randomToken(12); if err != nil { return ExternalIdentity{}, err }
+	if subject == "" {
+		return ExternalIdentity{}, errors.New("subject is required")
+	}
+	id, err := randomToken(12)
+	if err != nil {
+		return ExternalIdentity{}, err
+	}
 	now := time.Now().Unix()
-	if _, err := m.auth.db.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", id, providerID, issuer, subject, userID, now); err != nil { return ExternalIdentity{}, err }
+	if _, err := m.auth.db.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", id, providerID, issuer, subject, userID, now); err != nil {
+		return ExternalIdentity{}, err
+	}
 	return ExternalIdentity{ID: id, ProviderID: providerID, Issuer: issuer, Subject: subject, UserID: userID, CreatedAt: now}, nil
 }
 
 func (m *OIDCManager) UnlinkIdentity(ctx context.Context, id string) error {
 	result, err := m.auth.db.ExecContext(ctx, "DELETE FROM external_identities WHERE id=?", strings.TrimSpace(id))
-	if err != nil { return err }
-	rows, err := result.RowsAffected(); if err != nil { return err }
-	if rows != 1 { return sql.ErrNoRows }
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
 	return nil
 }
 
-func boolInt(value bool) int { if value { return 1 }; return 0 }
+func (m *OIDCManager) UnlinkOwnIdentity(ctx context.Context, userID int64, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" || userID <= 0 {
+		return sql.ErrNoRows
+	}
+	result, err := m.auth.db.ExecContext(ctx, "DELETE FROM external_identities WHERE id=? AND user_id=?", id, userID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
 
 func stringSlicesEqual(left, right []string) bool {
-	if len(left) != len(right) { return false }
+	if len(left) != len(right) {
+		return false
+	}
 	leftCopy, rightCopy := append([]string(nil), left...), append([]string(nil), right...)
-	sort.Strings(leftCopy); sort.Strings(rightCopy)
-	for i := range leftCopy { if leftCopy[i] != rightCopy[i] { return false } }
+	sort.Strings(leftCopy)
+	sort.Strings(rightCopy)
+	for i := range leftCopy {
+		if leftCopy[i] != rightCopy[i] {
+			return false
+		}
+	}
 	return true
 }

@@ -9,7 +9,8 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e:screenshots": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.125",
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@nuxt/test-utils": "latest",
+    "@playwright/test": "latest",
     "@vitest/coverage-v8": "latest",
     "@vue/test-utils": "latest",
     "happy-dom": "latest",

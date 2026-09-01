@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	maxValuePageArrayItems = uint64(100)
+	maxValuePageArrayItems  = uint64(100)
 	maxValuePageStringBytes = uint64(16 * 1024)
 )
 
@@ -41,25 +41,26 @@ func ReadValuePage(path, key string, offset, limit uint64) (ValuePage, error) {
 		return ValuePage{}, err
 	}
 	defer f.Close()
+	r := bufferedReader(f)
 
 	var magic [4]byte
-	if _, err := io.ReadFull(f, magic[:]); err != nil {
+	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return ValuePage{}, err
 	}
 	if string(magic[:]) != "GGUF" {
 		return ValuePage{}, errors.New("GGUF metadata unavailable: invalid magic")
 	}
-	version, err := readU32(f)
+	version, err := readU32(r)
 	if err != nil {
 		return ValuePage{}, err
 	}
 	if version < 2 || version > 3 {
 		return ValuePage{}, fmt.Errorf("GGUF metadata unavailable: unsupported version %d", version)
 	}
-	if _, err := readU64(f); err != nil {
+	if _, err := readU64(r); err != nil {
 		return ValuePage{}, err
 	}
-	metadataCount, err := readU64(f)
+	metadataCount, err := readU64(r)
 	if err != nil {
 		return ValuePage{}, err
 	}
@@ -68,30 +69,30 @@ func ReadValuePage(path, key string, offset, limit uint64) (ValuePage, error) {
 	}
 
 	for index := uint64(0); index < metadataCount; index++ {
-		candidate, err := readKey(f)
+		candidate, err := readKey(r)
 		if err != nil {
 			return ValuePage{}, err
 		}
-		typeID, err := readU32(f)
+		typeID, err := readU32(r)
 		if err != nil {
 			return ValuePage{}, err
 		}
 		if candidate == key {
-			page, err := readValuePage(f, typeID, offset, limit)
+			page, err := readValuePage(r, typeID, offset, limit)
 			if err != nil {
 				return ValuePage{}, fmt.Errorf("GGUF metadata %q: %w", key, err)
 			}
 			page.Key = key
 			return page, nil
 		}
-		if _, err := readValue(f, typeID); err != nil {
+		if err := skipSummaryValue(r, typeID); err != nil {
 			return ValuePage{}, fmt.Errorf("GGUF metadata %q: %w", candidate, err)
 		}
 	}
 	return ValuePage{}, ErrMetadataKeyNotFound
 }
 
-func readValuePage(r io.ReadSeeker, typeID uint32, offset, limit uint64) (ValuePage, error) {
+func readValuePage(r io.Reader, typeID uint32, offset, limit uint64) (ValuePage, error) {
 	switch typeID {
 	case 8:
 		return readStringPage(r, offset, limit)
@@ -106,7 +107,7 @@ func readValuePage(r io.ReadSeeker, typeID uint32, offset, limit uint64) (ValueP
 	}
 }
 
-func readStringPage(r io.ReadSeeker, offset, limit uint64) (ValuePage, error) {
+func readStringPage(r io.Reader, offset, limit uint64) (ValuePage, error) {
 	total, err := readU64(r)
 	if err != nil {
 		return ValuePage{}, err
@@ -120,7 +121,7 @@ func readStringPage(r io.ReadSeeker, offset, limit uint64) (ValuePage, error) {
 	if limit == 0 || limit > maxValuePageStringBytes {
 		limit = maxValuePageStringBytes
 	}
-	if _, err := r.Seek(int64(offset), io.SeekCurrent); err != nil {
+	if err := skipBytes(r, int64(offset)); err != nil {
 		return ValuePage{}, err
 	}
 	take := limit
@@ -137,7 +138,7 @@ func readStringPage(r io.ReadSeeker, offset, limit uint64) (ValuePage, error) {
 	}, nil
 }
 
-func readArrayPage(r io.ReadSeeker, offset, limit uint64) (ValuePage, error) {
+func readArrayPage(r io.Reader, offset, limit uint64) (ValuePage, error) {
 	elemType, err := readU32(r)
 	if err != nil {
 		return ValuePage{}, err

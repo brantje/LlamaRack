@@ -29,6 +29,29 @@ Preserve the existing llamacpp-manager theme unless a task explicitly requests a
 
 **Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered/elevated containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface. Components with surfaced defaults must also stay flat when nested: for example, `UEmpty` defaults to an outlined surface, so use `variant="naked"` whenever `UEmpty` is rendered inside a card.
 
+## Redesign theme architecture — hard rules
+
+The redesigned application uses a file-based semantic theme system. These rules apply to every frontend page and component.
+
+- Every complete theme lives in its **own file** under `frontend/app/themes/` and implements the full shared semantic variable contract.
+- The available themes and their metadata are registered centrally in `frontend/app/themes/index.ts`.
+- Page/component code consumes semantic variables only. Raw theme hex values, page-local light/dark palettes, and direct imports of individual theme palette files are prohibited.
+- Adding a new theme means adding one complete theme file and one central registry entry. It must not require editing individual pages, `Frame`, `StatusTag`, tables, modals, or form controls.
+- Existing theme colors are changed in that theme's file rather than by chasing color literals through pages/components.
+- Dark is the product default unless a product requirement explicitly changes it. The user's explicit theme selection persists locally; unknown or removed stored theme ids safely fall back to Dark.
+- The active theme must be applied before the application becomes visible so refreshes do not flash the wrong theme. Root `color-scheme` follows the registered theme metadata.
+- `border-radius: 0` is the application rule for every surface/control except the radio dot. Do not introduce rounded cards, buttons, inputs, tags, badges, modals, avatars, progress bars, switches, or decorative pills.
+- Decorative registration marks, crop marks, crosshairs, corner `+` symbols, or equivalent ornament are not part of the design system and must never be added.
+- Gradients (`linear-gradient`, `radial-gradient`, `conic-gradient`, gradient utility classes), glow/halo effects, glassmorphism, decorative backdrop blur, color fades, and ornamental background imagery are prohibited throughout application UI.
+- Normal cards, tables, panels, inputs, and utility surfaces use the flat semantic `--color-surface` fill plus `--color-divider` border. Shadows are reserved for functional overlays such as modals/popovers.
+- Use the shared semantic `StatusTag` treatments instead of page-local success/warning/error rainbow styling.
+- Use the shared button action hierarchy: primary for the single task-advancing action, secondary for alternatives, ghost for low-emphasis utility actions, and destructive for irreversible actions. Destructive is orthogonal to priority.
+- Every button must render with `cursor: pointer`, and icon-only controls require an accessible name.
+- Machine values (IDs, slugs, paths, flags, PIDs, ports, bytes, percentages, timestamps, log lines) use the mono/tabular stack.
+- Every page title has the redesign kicker/eyebrow treatment; headings use Barlow Condensed and body copy uses Barlow.
+- Focus is the shared accent outline; do not rely on browser-default focus styling.
+- CI/design-rule tests must continue to enforce statically detectable theme boundaries and the gradient/effects prohibition. Do not weaken those tests to land a page change.
+
 ## Confirmation dialogs — hard rule
 
 Native browser confirmation dialogs are prohibited in the frontend. Never call `confirm()`, `window.confirm()`, or `globalThis.confirm()` from first-party application code.

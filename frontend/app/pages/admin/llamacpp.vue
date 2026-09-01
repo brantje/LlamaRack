@@ -4,50 +4,82 @@ import type { Profile } from '~/composables/useManager'
 const manager = useManager()
 const { profile } = manager
 const globalOptions = ref<Record<string, string>>({})
+const baseline = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const saved = ref(false)
 
+function optionsFingerprint(value: Record<string, string>) {
+  return JSON.stringify(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)))
+}
+const dirty = computed(() => Boolean(baseline.value) && optionsFingerprint(globalOptions.value) !== baseline.value)
+
 async function load() {
   if (!manager.user.value) return
-  loading.value = true; error.value = ''
+  loading.value = true
+  error.value = ''
   try {
     const result = await manager.request<{ profile?: Profile; effective: { global: Record<string, string> } }>('/api/v1/llamacpp/config')
     globalOptions.value = { ...(result.effective.global || {}) }
+    baseline.value = optionsFingerprint(globalOptions.value)
     if (result.profile?.path && Array.isArray(result.profile.options)) profile.value = result.profile
-  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to load llama.cpp configuration' } finally { loading.value = false }
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to load llama.cpp configuration'
+  } finally {
+    loading.value = false
+  }
 }
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
-  saving.value = true; error.value = ''; saved.value = false
-  try { await manager.request('/api/v1/llamacpp/config', { method: 'PUT', body: { options: globalOptions.value } }); saved.value = true }
-  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to save llama.cpp defaults' } finally { saving.value = false }
+  if (!dirty.value) return
+  saving.value = true
+  error.value = ''
+  saved.value = false
+  try {
+    await manager.request('/api/v1/llamacpp/config', { method: 'PUT', body: { options: globalOptions.value } })
+    baseline.value = optionsFingerprint(globalOptions.value)
+    saved.value = true
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to save llama.cpp defaults'
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
 <template>
-  <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="llama.cpp" description="Detected backend binary capabilities and manager-wide llama.cpp defaults." /><UButton color="neutral" variant="soft" @click="load">Refresh</UButton></div>
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="saved" color="success" variant="subtle" description="Global llama.cpp defaults saved." />
+  <AdminShell title="llama.cpp" description="Binary capabilities and manager-wide llama.cpp defaults.">
+    <template #actions>
+      <AppButton intent="secondary" :loading="loading" @click="load">Refresh</AppButton>
+      <AppButton intent="primary" :loading="saving" :disabled="loading || !dirty" @click="save">Save defaults</AppButton>
+    </template>
 
-    <UCard>
-      <template #header><h2 class="text-xl font-bold">Binary capabilities</h2></template>
-      <dl v-if="profile" class="divide-y divide-default text-sm">
-        <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Binary</dt><dd><code class="break-all font-mono">{{ profile.path }}</code></dd></div>
-        <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Version</dt><dd><code class="font-mono">{{ profile.version || 'unknown' }}</code></dd></div>
-        <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Fingerprint</dt><dd><code class="break-all font-mono">{{ profile.fingerprint }}</code></dd></div>
-        <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Discovered options</dt><dd>{{ profile.options.length }}</dd></div>
-      </dl>
-      <UAlert v-else color="warning" variant="subtle" description="llama-server could not be discovered. Management features remain available, but workers cannot start until the binary path is valid." />
-    </UCard>
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
+    <Frame v-if="saved" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Global llama.cpp defaults saved.</p></div></Frame>
 
-    <UCard>
-      <template #header><div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-xl font-bold">Global defaults</h2><p class="text-sm text-muted">Inherited by Models and Instances unless a lower layer overrides a value.</p></div><UButton :loading="saving" :disabled="loading" @click="save">Save defaults</UButton></div></template>
-      <div v-if="loading" class="space-y-2"><USkeleton v-for="n in 3" :key="n" class="h-20 w-full" /></div>
-      <LlamaCppOptionsEditor v-else v-model="globalOptions" scope="global" />
-    </UCard>
-  </div>
+    <div class="space-y-5">
+      <Frame class="p-5" data-testid="admin-llamacpp-capabilities">
+        <h2 class="text-base font-semibold">Binary capabilities</h2>
+        <dl v-if="profile" class="mt-4 text-sm">
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 first:border-t-0 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Binary</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ profile.path }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Version</dt><dd><code class="font-mono text-[length:var(--font-size-h6)]">{{ profile.version || 'unknown' }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Fingerprint</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ profile.fingerprint }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Discovered options</dt><dd><code class="font-mono text-[length:var(--font-size-h6)] tabular-nums">{{ profile.options.length }}</code></dd></div>
+        </dl>
+        <div v-else class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] p-4" data-testid="llamacpp-unavailable-warning">
+          <StatusTag variant="pending">Unavailable</StatusTag>
+          <div><p class="text-sm font-semibold">llama-server could not be discovered.</p><p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Management features remain available, but workers cannot start until the binary path is valid.</p></div>
+        </div>
+      </Frame>
+
+      <Frame class="p-5" data-testid="admin-llamacpp-defaults">
+        <h2 class="text-base font-semibold">Global defaults</h2>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">Inherited by Models and Instances unless a lower layer overrides a value.</p>
+        <div v-if="loading" class="mt-4 space-y-2"><USkeleton v-for="n in 3" :key="n" class="h-14 w-full" /></div>
+        <LlamaCppOptionsEditor v-else v-model="globalOptions" class="mt-4" scope="global" />
+      </Frame>
+    </div>
+  </AdminShell>
 </template>

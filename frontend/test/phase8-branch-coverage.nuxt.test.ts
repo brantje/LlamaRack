@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
+import { useState } from '#imports'
 import DiscoverPage from '~/components/ModelsDiscover.vue'
 import DownloadsPage from '~/pages/downloads.vue'
 import { useManager } from '~/composables/useManager'
@@ -19,6 +20,14 @@ function seedManager() {
   manager.instances.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
+
+  useState<string>('models-discover-query').value = ''
+  useState<string>('models-discover-author').value = ''
+  useState<string>('models-discover-sort').value = 'trending_score'
+  useState<any[]>('models-discover-results').value = []
+  useState<string>('models-discover-next-cursor').value = ''
+  useState<boolean>('models-discover-has-searched').value = false
+  useState<number>('models-discover-scroll-position').value = 0
   return manager
 }
 
@@ -50,11 +59,11 @@ describe('Discover formatting and URL branches', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     const text = wrapper.text()
-    expect(text).toContain('Model size 500 params')
-    expect(text).toContain('Model size 1.5K params')
-    expect(text).toContain('Model size 1.5M params')
-    expect(text).toContain('Model size 2B params')
-    expect(text).toContain('Model size 1.5T params')
+    expect(text).toContain('500 params')
+    expect(text).toContain('1.5K params')
+    expect(text).toContain('1.5M params')
+    expect(text).toContain('2B params')
+    expect(text).toContain('1.5T params')
     expect(text).toContain('Updated just now')
     expect(text).toContain('Updated 5m ago')
     expect(text).toContain('Updated 2h ago')
@@ -137,15 +146,24 @@ describe('Downloads live-event and formatting branches', () => {
     }
   }
 
+  function downloadRequest(jobs: unknown[] = []) {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'download-ticket' }
+      if (path === '/api/v1/downloads') return jobs
+      return []
+    })
+  }
+
   it('handles websocket snapshots, updates, inserts, deletes, malformed messages and reconnects', async () => {
     vi.useFakeTimers()
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket as any)
-    mocks.request.mockResolvedValue([job('initial', 'QUEUED')])
+    downloadRequest([job('initial', 'QUEUED')])
     const wrapper = await mountSuspended(DownloadsPage, { route: false })
     await flushPromises()
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/auth/ws-ticket', { method: 'POST' })
     const socket = FakeWebSocket.instances[0]!
-    expect(socket.url).toContain('/api/v1/downloads/ws')
+    expect(socket.url).toBe('ws://manager.test:8888/api/v1/downloads/ws?ticket=download-ticket')
     socket.open(); await flushPromises()
     expect(wrapper.text()).toContain('Live updates')
     socket.message('{bad json'); await flushPromises()
@@ -162,6 +180,7 @@ describe('Downloads live-event and formatting branches', () => {
     socket.disconnect(); await flushPromises()
     expect(wrapper.text()).toContain('Reconnecting')
     await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
     expect(FakeWebSocket.instances.length).toBeGreaterThan(1)
     wrapper.unmount()
   })
@@ -195,18 +214,14 @@ describe('Downloads live-event and formatting branches', () => {
     expect(text).toContain('0 B / 0 B')
     expect(text).toContain('boom')
     expect(text).toContain('Q4')
-    const cards = [
-      ...wrapper.findAllComponents({ name: 'UCard' }),
-      ...wrapper.findAllComponents({ name: 'Card' })
-    ]
-    const overCard = cards.find(card => card.text().includes('over.gguf'))!
+    const jobRows = wrapper.findAll('[data-testid="download-job"]')
+    const overCard = jobRows.find(row => row.text().includes('over.gguf'))!
     const filesToggle = overCard.findAll('button').find(button => button.text().includes('1 file'))
-    if (filesToggle) {
-      await filesToggle.trigger('click')
-      await flushPromises()
-      expect(overCard.text()).toContain('local/model.gguf')
-    }
-    const card = cards.find(card => card.text().includes('cancelled.gguf'))!
+    expect(filesToggle).toBeTruthy()
+    await filesToggle!.trigger('click')
+    await flushPromises()
+    expect(overCard.text()).toContain('local/model.gguf')
+    const card = jobRows.find(row => row.text().includes('cancelled.gguf'))!
     const retry = card.findAll('button').find(button => button.text() === 'Retry')!
     await retry.trigger('click'); await flushPromises()
     const remove = card.findAll('button').find(button => button.text() === 'Remove')!
@@ -218,10 +233,70 @@ describe('Downloads live-event and formatting branches', () => {
   it('survives WebSocket constructor failure', async () => {
     class ThrowingSocket { constructor() { throw new Error('blocked') } }
     vi.stubGlobal('WebSocket', ThrowingSocket as any)
-    mocks.request.mockResolvedValue([])
+    downloadRequest()
     const wrapper = await mountSuspended(DownloadsPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('Reconnecting')
+    wrapper.unmount()
+  })
+
+  it('retries after websocket ticket minting fails and ignores a ticket after unmount', async () => {
+    vi.useFakeTimers()
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket as any)
+    let ticketCalls = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        ticketCalls++
+        if (ticketCalls === 1) throw { message: 'ticket denied' }
+        return { ticket: 'retry-ticket' }
+      }
+      return []
+    })
+    const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(wrapper.text()).toContain('Reconnecting')
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(FakeWebSocket.instances[0]?.url).toContain('ticket=retry-ticket')
+    wrapper.unmount()
+
+    let resolveTicket: ((value: { ticket: string }) => void) | undefined
+    FakeWebSocket.instances = []
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        return await new Promise<{ ticket: string }>(resolve => { resolveTicket = resolve })
+      }
+      return []
+    })
+    const pending = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    pending.unmount()
+    expect(resolveTicket).toEqual(expect.any(Function))
+    resolveTicket!({ ticket: 'late-ticket' })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+  })
+
+  it('retries when the websocket ticket is empty', async () => {
+    vi.useFakeTimers()
+    FakeWebSocket.instances = []
+    vi.stubGlobal('WebSocket', FakeWebSocket as any)
+    let ticketCalls = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/auth/ws-ticket') {
+        ticketCalls++
+        return ticketCalls === 1 ? {} : { ticket: 'filled-ticket' }
+      }
+      return []
+    })
+    const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(FakeWebSocket.instances[0]?.url).toContain('ticket=filled-ticket')
     wrapper.unmount()
   })
 })

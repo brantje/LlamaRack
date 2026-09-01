@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -31,5 +32,31 @@ func TestSanitizeLlamaArgEnvironment(t *testing.T) {
 	}
 	if got := os.Getenv("LCM_TEST_KEEP"); got != "yes" {
 		t.Fatalf("unrelated environment changed: %q", got)
+	}
+}
+
+func TestWorkerEnvironOverridesVisibleDevices(t *testing.T) {
+	t.Setenv("CUDA_VISIBLE_DEVICES", "all")
+	t.Setenv("LCM_TEST_KEEP", "yes")
+	got := workerEnviron([]string{"CUDA_VISIBLE_DEVICES=1"})
+	found := false
+	keep := false
+	for _, entry := range got {
+		key, value, _ := strings.Cut(entry, "=")
+		switch key {
+		case "CUDA_VISIBLE_DEVICES":
+			if found {
+				t.Fatal("CUDA_VISIBLE_DEVICES duplicated")
+			}
+			found = true
+			if value != "1" {
+				t.Fatalf("CUDA_VISIBLE_DEVICES=%q want 1", value)
+			}
+		case "LCM_TEST_KEEP":
+			keep = value == "yes"
+		}
+	}
+	if !found || !keep {
+		t.Fatalf("workerEnviron missing override or keep flag: %v", got)
 	}
 }

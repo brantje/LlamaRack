@@ -46,8 +46,8 @@ function gpuDetail(device: RuntimeTelemetry['gpus'][number]) {
     <USeparator />
     <div class="flex items-center justify-between gap-3">
       <p class="text-xs font-semibold text-highlighted">Live Instance resources</p>
-      <span v-if="telemetry" class="font-mono text-[11px] text-dimmed">PID {{ telemetry.pid }}</span>
-      <span v-else class="text-[11px] text-dimmed">Collecting…</span>
+      <span v-if="telemetry" class="font-mono text-[length:var(--font-size-table-header)] text-dimmed">PID {{ telemetry.pid }}</span>
+      <span v-else class="text-[length:var(--font-size-table-header)] text-dimmed">Collecting…</span>
     </div>
     <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
       <div>
@@ -72,9 +72,9 @@ function gpuDetail(device: RuntimeTelemetry['gpus'][number]) {
       </div>
     </dl>
     <div v-if="telemetry?.gpus?.length" class="flex flex-wrap gap-1.5" data-testid="instance-gpu-details">
-      <UBadge v-for="gpu in telemetry.gpus" :key="gpu.device_id" color="neutral" variant="soft" size="sm">
+      <StatusTag v-for="gpu in telemetry.gpus" :key="gpu.device_id" variant="neutral">
         {{ gpuDetail(gpu) }}
-      </UBadge>
+      </StatusTag>
     </div>
   </div>
 </template>

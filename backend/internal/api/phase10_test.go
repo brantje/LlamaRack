@@ -44,15 +44,15 @@ func newPhase10Fixture(t *testing.T) *phase10Fixture {
 		t.Fatal(err)
 	}
 	managerSettings := settings.New(db, settings.Defaults{
-		SessionLifetime: time.Hour,
-		AllowedOrigins: "http://manager.test",
-		StartupTimeout: 3 * time.Minute,
+		SessionLifetime:   time.Hour,
+		AllowedOrigins:    "http://manager.test",
+		StartupTimeout:    3 * time.Minute,
 		AlwaysOnReconcile: 15 * time.Second,
-		DataDir: root,
-		ModelsDir: filepath.Join(root, "models"),
-		DatabasePath: filepath.Join(root, "manager.db"),
-		ListenAddr: ":8000",
-		LlamaServerPath: "/app/llama-server",
+		DataDir:           root,
+		ModelsDir:         filepath.Join(root, "models"),
+		DatabasePath:      filepath.Join(root, "manager.db"),
+		ListenAddr:        ":8000",
+		LlamaServerPath:   "/app/llama-server",
 	})
 	secrets, err := huggingface.NewSecretStore(db, root)
 	if err != nil {
@@ -63,10 +63,10 @@ func newPhase10Fixture(t *testing.T) *phase10Fixture {
 		return llamacpp.Profile{Path: "/app/llama-server", Version: "phase10", Fingerprint: "abc", Options: []llamacpp.Option{{Key: "ctx-size"}}}, nil
 	}
 	return &phase10Fixture{
-		handler: NewPhase10Handler(authService, managerSettings, secrets, network, profile),
-		auth: authService,
+		handler:  NewPhase10Handler(authService, managerSettings, secrets, network, profile),
+		auth:     authService,
 		settings: managerSettings,
-		cookie: &http.Cookie{Name: sessionCookie, Value: token},
+		cookie:   &http.Cookie{Name: sessionCookie, Value: token},
 	}
 }
 
@@ -225,6 +225,23 @@ func TestPhase10SelfServicePasswordAndSessions(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("missing session=%d", w.Code)
 	}
+
+	fifthToken, _, _, err := f.auth.LoginWithMetadata(t.Context(), "admin", "new-password-one", "", "fifth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fifthSession, err := f.auth.SessionUserWithSession(t.Context(), fifthToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = doRequest(t, f.handler, http.MethodDelete, "/api/v1/me/sessions/"+fifthSession.ID, nil, f.cookie)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("revoke own session=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doRequest(t, f.handler, http.MethodDelete, "/api/v1/me/sessions/missing", nil, f.cookie)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("missing own session=%d", w.Code)
+	}
 	w = doRequest(t, f.handler, http.MethodPost, "/api/v1/me/sessions/revoke-all", nil, f.cookie)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("revoke all=%d body=%s", w.Code, w.Body.String())
@@ -241,13 +258,13 @@ func TestPhase10GeneralSettingsSummaryAndSystem(t *testing.T) {
 		t.Fatalf("settings get=%d body=%s", w.Code, w.Body.String())
 	}
 	w = doRequest(t, f.handler, http.MethodPut, "/api/v1/settings/general", map[string]any{
-		"session_lifetime_seconds": 7200,
-		"login_failure_threshold": 6,
-		"trusted_proxies": "10.0.0.0/8",
-		"allowed_origins": "https://manager.example.test",
-		"external_url": "https://manager.example.test",
-		"startup_timeout_seconds": 240,
-		"idle_unload_seconds": 600,
+		"session_lifetime_seconds":    7200,
+		"login_failure_threshold":     6,
+		"trusted_proxies":             "10.0.0.0/8",
+		"allowed_origins":             "https://manager.example.test",
+		"external_url":                "https://manager.example.test",
+		"startup_timeout_seconds":     240,
+		"idle_unload_seconds":         600,
 		"always_on_reconcile_seconds": 20,
 	}, f.cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"database"`) {

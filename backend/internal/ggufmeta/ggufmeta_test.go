@@ -1,6 +1,7 @@
 package ggufmeta
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -33,22 +34,49 @@ func TestInspectAllMetadataTypesAndDerived(t *testing.T) {
 		{"test.bool", 7, func(b *bytes.Buffer) { b.WriteByte(1) }},
 		{"test.f64", 12, func(b *bytes.Buffer) { write(b, math.Float64bits(2.5)) }},
 		{"test.array", 9, func(b *bytes.Buffer) {
-			write(b, uint32(4)); write(b, uint64(20)); for i := 0; i < 20; i++ { write(b, uint32(i)) }
+			write(b, uint32(4))
+			write(b, uint64(20))
+			for i := 0; i < 20; i++ {
+				write(b, uint32(i))
+			}
 		}},
-		{"test.strings", 9, func(b *bytes.Buffer) { write(b, uint32(8)); write(b, uint64(2)); writeString(b, "a"); writeString(b, "b") }},
+		{"test.strings", 9, func(b *bytes.Buffer) {
+			write(b, uint32(8))
+			write(b, uint64(2))
+			writeString(b, "a")
+			writeString(b, "b")
+		}},
 	}
 	path := writeGGUF(t, 3, 7, items)
 	got, err := Inspect(path)
-	if err != nil { t.Fatal(err) }
-	if got.Version != 3 || got.TensorCount != 7 || got.MetadataCount != uint64(len(items)) { t.Fatalf("header=%+v", got) }
-	if got.Derived.Architecture != "qwen2" || got.Derived.ContextLength != 32768 || got.Derived.BlockCount != 40 || got.Derived.Embedding != 4096 || got.Derived.HeadCount != 32 || got.Derived.KVHeadCount != 8 || got.Derived.KeyLength != 128 || got.Derived.ValueLength != 128 { t.Fatalf("derived=%+v", got.Derived) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != 3 || got.TensorCount != 7 || got.MetadataCount != uint64(len(items)) {
+		t.Fatalf("header=%+v", got)
+	}
+	if got.Derived.Architecture != "qwen2" || got.Derived.ContextLength != 32768 || got.Derived.BlockCount != 40 || got.Derived.Embedding != 4096 || got.Derived.HeadCount != 32 || got.Derived.KVHeadCount != 8 || got.Derived.KeyLength != 128 || got.Derived.ValueLength != 128 {
+		t.Fatalf("derived=%+v", got.Derived)
+	}
 	byKey := map[string]Entry{}
-	for _, e := range got.Metadata { byKey[e.Key] = e }
-	if byKey["test.i8"].Value != "-1" || byKey["test.f32"].Value != "1.5" || byKey["test.bool"].Value != "true" || byKey["test.f64"].Value != "2.5" { t.Fatalf("scalars=%+v", byKey) }
+	for _, e := range got.Metadata {
+		byKey[e.Key] = e
+	}
+	if byKey["test.i8"].Value != "-1" || byKey["test.f32"].Value != "1.5" || byKey["test.bool"].Value != "true" || byKey["test.f64"].Value != "2.5" {
+		t.Fatalf("scalars=%+v", byKey)
+	}
 	arr := byKey["test.array"]
-	if arr.Type != "array<uint32>" || arr.ArrayLength != 20 || !arr.Truncated || !strings.Contains(arr.Value, "4 more") { t.Fatalf("array=%+v", arr) }
-	if byKey["test.strings"].Value != `["a", "b"]` { t.Fatalf("string array=%+v", byKey["test.strings"]) }
-	for i := 1; i < len(got.Metadata); i++ { if got.Metadata[i-1].Key > got.Metadata[i].Key { t.Fatal("metadata not sorted") } }
+	if arr.Type != "array<uint32>" || arr.ArrayLength != 20 || !arr.Truncated || !strings.Contains(arr.Value, "4 more") {
+		t.Fatalf("array=%+v", arr)
+	}
+	if byKey["test.strings"].Value != `["a", "b"]` {
+		t.Fatalf("string array=%+v", byKey["test.strings"])
+	}
+	for i := 1; i < len(got.Metadata); i++ {
+		if got.Metadata[i-1].Key > got.Metadata[i].Key {
+			t.Fatal("metadata not sorted")
+		}
+	}
 }
 
 func TestInspectLongValuesAndFilter(t *testing.T) {
@@ -58,101 +86,258 @@ func TestInspectLongValuesAndFilter(t *testing.T) {
 		{"other", 4, func(b *bytes.Buffer) { write(b, uint32(2)) }},
 	})
 	got, err := Inspect(path)
-	if err != nil { t.Fatal(err) }
-	if !got.Metadata[0].Truncated || len(got.Metadata[0].Value) <= int(maxDisplayBytes) { t.Fatalf("long=%+v", got.Metadata[0]) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Metadata[0].Truncated || len(got.Metadata[0].Value) <= int(maxDisplayBytes) {
+		t.Fatalf("long=%+v", got.Metadata[0])
+	}
 	page, total := Filter(got.Metadata, "long", 0, 10)
-	if total != 1 || len(page) != 1 || page[0].Key != "long.value" { t.Fatalf("filter=%v total=%d", page, total) }
+	if total != 1 || len(page) != 1 || page[0].Key != "long.value" {
+		t.Fatalf("filter=%v total=%d", page, total)
+	}
 	page, total = Filter(got.Metadata, "", 1, 1)
-	if total != 2 || len(page) != 1 { t.Fatalf("page=%v total=%d", page, total) }
+	if total != 2 || len(page) != 1 {
+		t.Fatalf("page=%v total=%d", page, total)
+	}
 	page, _ = Filter(got.Metadata, "", 99, 1)
-	if len(page) != 0 { t.Fatalf("past end=%v", page) }
+	if len(page) != 0 {
+		t.Fatalf("past end=%v", page)
+	}
 	page, _ = Filter(got.Metadata, "", -1, 9999)
-	if len(page) != 2 { t.Fatalf("clamped=%v", page) }
+	if len(page) != 2 {
+		t.Fatalf("clamped=%v", page)
+	}
 }
 
 func TestInspectRejectsMalformedInput(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Inspect(filepath.Join(dir, "missing.gguf")); err == nil { t.Fatal("missing should fail") }
+	if _, err := Inspect(filepath.Join(dir, "missing.gguf")); err == nil {
+		t.Fatal("missing should fail")
+	}
 	bad := filepath.Join(dir, "bad.gguf")
 	_ = os.WriteFile(bad, []byte("nope"), 0o644)
-	if _, err := Inspect(bad); err == nil || !strings.Contains(err.Error(), "magic") { t.Fatalf("bad=%v", err) }
+	if _, err := Inspect(bad); err == nil || !strings.Contains(err.Error(), "magic") {
+		t.Fatalf("bad=%v", err)
+	}
 	unsupported := writeHeader(t, 1, 0, 0)
-	if _, err := Inspect(unsupported); err == nil || !strings.Contains(err.Error(), "version") { t.Fatalf("version=%v", err) }
+	if _, err := Inspect(unsupported); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("version=%v", err)
+	}
 	count := writeHeader(t, 3, 0, maxMetadataCount+1)
-	if _, err := Inspect(count); err == nil || !strings.Contains(err.Error(), "metadata count") { t.Fatalf("count=%v", err) }
+	if _, err := Inspect(count); err == nil || !strings.Contains(err.Error(), "metadata count") {
+		t.Fatalf("count=%v", err)
+	}
 	nested := writeGGUF(t, 3, 0, []kv{{"nested", 9, func(b *bytes.Buffer) { write(b, uint32(9)); write(b, uint64(1)) }}})
-	if _, err := Inspect(nested); err == nil || !strings.Contains(err.Error(), "nested") { t.Fatalf("nested=%v", err) }
+	if _, err := Inspect(nested); err == nil || !strings.Contains(err.Error(), "nested") {
+		t.Fatalf("nested=%v", err)
+	}
 	hugeArray := writeGGUF(t, 3, 0, []kv{{"huge", 9, func(b *bytes.Buffer) { write(b, uint32(4)); write(b, maxArrayCount+1) }}})
-	if _, err := Inspect(hugeArray); err == nil || !strings.Contains(err.Error(), "array") { t.Fatalf("array=%v", err) }
+	if _, err := Inspect(hugeArray); err == nil || !strings.Contains(err.Error(), "array") {
+		t.Fatalf("array=%v", err)
+	}
 	unsupportedType := writeGGUF(t, 3, 0, []kv{{"bad", 99, func(*bytes.Buffer) {}}})
-	if _, err := Inspect(unsupportedType); err == nil || !strings.Contains(err.Error(), "unsupported") { t.Fatalf("type=%v", err) }
+	if _, err := Inspect(unsupportedType); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("type=%v", err)
+	}
 
 	truncatedHeader := filepath.Join(dir, "header.gguf")
 	_ = os.WriteFile(truncatedHeader, []byte("GGUF\x03\x00\x00\x00"), 0o644)
-	if _, err := Inspect(truncatedHeader); err == nil { t.Fatal("truncated counts should fail") }
+	if _, err := Inspect(truncatedHeader); err == nil {
+		t.Fatal("truncated counts should fail")
+	}
 
 	var key bytes.Buffer
-	key.WriteString("GGUF"); write(&key, uint32(3)); write(&key, uint64(0)); write(&key, uint64(1)); write(&key, maxKeyBytes+1)
-	keyPath := filepath.Join(dir, "key.gguf"); _ = os.WriteFile(keyPath, key.Bytes(), 0o644)
-	if _, err := Inspect(keyPath); err == nil || !strings.Contains(err.Error(), "key") { t.Fatalf("key=%v", err) }
+	key.WriteString("GGUF")
+	write(&key, uint32(3))
+	write(&key, uint64(0))
+	write(&key, uint64(1))
+	write(&key, maxKeyBytes+1)
+	keyPath := filepath.Join(dir, "key.gguf")
+	_ = os.WriteFile(keyPath, key.Bytes(), 0o644)
+	if _, err := Inspect(keyPath); err == nil || !strings.Contains(err.Error(), "key") {
+		t.Fatalf("key=%v", err)
+	}
 }
 
 func TestLowLevelSkipAndBounds(t *testing.T) {
 	for _, typeID := range []uint32{0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12} {
-		if _, ok := fixedSize(typeID); !ok { t.Fatalf("fixed type %d", typeID) }
-		if _, ok := typeName(typeID); !ok { t.Fatalf("named type %d", typeID) }
+		if _, ok := fixedSize(typeID); !ok {
+			t.Fatalf("fixed type %d", typeID)
+		}
+		if _, ok := typeName(typeID); !ok {
+			t.Fatalf("named type %d", typeID)
+		}
 	}
-	if _, ok := fixedSize(8); ok { t.Fatal("string fixed") }
-	if _, ok := typeName(99); ok { t.Fatal("unknown type") }
+	if _, ok := fixedSize(8); ok {
+		t.Fatal("string fixed")
+	}
+	if _, ok := typeName(99); ok {
+		t.Fatal("unknown type")
+	}
 
 	fixed := bytes.NewReader(make([]byte, 8))
-	if err := skipValue(fixed, 4); err != nil { t.Fatal(err) }
+	if err := skipValue(fixed, 4); err != nil {
+		t.Fatal(err)
+	}
 	pos, _ := fixed.Seek(0, io.SeekCurrent)
-	if pos != 4 { t.Fatalf("fixed skip=%d", pos) }
+	if pos != 4 {
+		t.Fatalf("fixed skip=%d", pos)
+	}
 
 	var text bytes.Buffer
 	writeString(&text, "hello")
-	if err := skipValue(bytes.NewReader(text.Bytes()), 8); err != nil { t.Fatal(err) }
+	if err := skipValue(bytes.NewReader(text.Bytes()), 8); err != nil {
+		t.Fatal(err)
+	}
 	var huge bytes.Buffer
 	write(&huge, maxStringBytes+1)
-	if err := skipValue(bytes.NewReader(huge.Bytes()), 8); err == nil { t.Fatal("huge skip string") }
-	if err := skipValue(bytes.NewReader(nil), 99); err == nil { t.Fatal("unsupported skip") }
+	if err := skipValue(bytes.NewReader(huge.Bytes()), 8); err == nil {
+		t.Fatal("huge skip string")
+	}
+	if err := skipValue(bytes.NewReader(nil), 99); err == nil {
+		t.Fatal("unsupported skip")
+	}
 
 	var manyStrings bytes.Buffer
-	write(&manyStrings, uint32(8)); write(&manyStrings, uint64(maxArrayPreview+2))
-	for i := uint64(0); i < maxArrayPreview+2; i++ { writeString(&manyStrings, "v") }
+	write(&manyStrings, uint32(8))
+	write(&manyStrings, uint64(maxArrayPreview+2))
+	for i := uint64(0); i < maxArrayPreview+2; i++ {
+		writeString(&manyStrings, "v")
+	}
 	array, err := readArray(bytes.NewReader(manyStrings.Bytes()))
-	if err != nil || !array.truncated || array.arrayLength != maxArrayPreview+2 { t.Fatalf("strings=%+v err=%v", array, err) }
+	if err != nil || !array.truncated || array.arrayLength != maxArrayPreview+2 {
+		t.Fatalf("strings=%+v err=%v", array, err)
+	}
 
 	var unsupported bytes.Buffer
-	write(&unsupported, uint32(99)); write(&unsupported, uint64(0))
-	if _, err := readArray(bytes.NewReader(unsupported.Bytes())); err == nil { t.Fatal("unsupported element") }
-	if _, err := readArray(bytes.NewReader(nil)); err == nil { t.Fatal("missing element type") }
+	write(&unsupported, uint32(99))
+	write(&unsupported, uint64(0))
+	if _, err := readArray(bytes.NewReader(unsupported.Bytes())); err == nil {
+		t.Fatal("unsupported element")
+	}
+	if _, err := readArray(bytes.NewReader(nil)); err == nil {
+		t.Fatal("missing element type")
+	}
 
-	if _, err := scalarResult("x", uint64(0), errors.New("boom")); err == nil { t.Fatal("scalar error") }
-	if _, err := readUint(bytes.NewReader(nil), 4); err == nil { t.Fatal("truncated uint") }
-	if _, err := readUint(bytes.NewReader(make([]byte, 3)), 3); err == nil { t.Fatal("invalid uint width") }
-	if _, err := readInt(bytes.NewReader(make([]byte, 3)), 3); err == nil { t.Fatal("invalid int width") }
+	if _, err := scalarResult("x", uint64(0), errors.New("boom")); err == nil {
+		t.Fatal("scalar error")
+	}
+	if _, err := readUint(bytes.NewReader(nil), 4); err == nil {
+		t.Fatal("truncated uint")
+	}
+	if _, err := readUint(bytes.NewReader(make([]byte, 3)), 3); err == nil {
+		t.Fatal("invalid uint width")
+	}
+	if _, err := readInt(bytes.NewReader(make([]byte, 3)), 3); err == nil {
+		t.Fatal("invalid int width")
+	}
 
 	var hugeString bytes.Buffer
 	write(&hugeString, maxStringBytes+1)
-	if _, _, err := readString(bytes.NewReader(hugeString.Bytes())); err == nil { t.Fatal("huge string") }
+	if _, _, err := readString(bytes.NewReader(hugeString.Bytes())); err == nil {
+		t.Fatal("huge string")
+	}
 	var truncatedString bytes.Buffer
-	write(&truncatedString, uint64(5)); truncatedString.WriteString("ab")
-	if _, _, err := readString(bytes.NewReader(truncatedString.Bytes())); err == nil { t.Fatal("truncated string") }
+	write(&truncatedString, uint64(5))
+	truncatedString.WriteString("ab")
+	if _, _, err := readString(bytes.NewReader(truncatedString.Bytes())); err == nil {
+		t.Fatal("truncated string")
+	}
 
 	var truncatedKey bytes.Buffer
-	write(&truncatedKey, uint64(5)); truncatedKey.WriteString("ab")
-	if _, err := readKey(bytes.NewReader(truncatedKey.Bytes())); err == nil { t.Fatal("truncated key") }
+	write(&truncatedKey, uint64(5))
+	truncatedKey.WriteString("ab")
+	if _, err := readKey(bytes.NewReader(truncatedKey.Bytes())); err == nil {
+		t.Fatal("truncated key")
+	}
 
-	if _, err := readValue(bytes.NewReader(nil), 6); err == nil { t.Fatal("truncated float") }
-	if _, err := readValue(bytes.NewReader(nil), 12); err == nil { t.Fatal("truncated double") }
+	if _, err := readValue(bytes.NewReader(nil), 6); err == nil {
+		t.Fatal("truncated float")
+	}
+	if _, err := readValue(bytes.NewReader(nil), 12); err == nil {
+		t.Fatal("truncated double")
+	}
+
+	if err := skipBytes(bytes.NewReader(nil), 0); err != nil {
+		t.Fatal(err)
+	}
+	copyReader := struct{ io.Reader }{bytes.NewReader([]byte{1, 2, 3, 4})}
+	if err := skipBytes(copyReader, 2); err != nil {
+		t.Fatal(err)
+	}
+	rest, err := io.ReadAll(copyReader)
+	if err != nil || len(rest) != 2 {
+		t.Fatalf("copy skip rest=%d err=%v", len(rest), err)
+	}
+	buffered := bufio.NewReader(bytes.NewReader([]byte{9, 8, 7, 6}))
+	if err := skipBytes(buffered, 3); err != nil {
+		t.Fatal(err)
+	}
+	next, err := buffered.ReadByte()
+	if err != nil || next != 6 {
+		t.Fatalf("discard skip next=%d err=%v", next, err)
+	}
+	if err := skipBytes(zeroDiscarder{}, 4); err != io.EOF {
+		t.Fatalf("zero discard err=%v", err)
+	}
+	if err := skipBytes(struct{ io.Reader }{bytes.NewReader([]byte{1})}, 4); err == nil {
+		t.Fatal("short copy skip")
+	}
+	if err := skipBytes(bufio.NewReader(bytes.NewReader(nil)), 4); err == nil {
+		t.Fatal("short discard skip")
+	}
+
+	var manyFixed bytes.Buffer
+	write(&manyFixed, uint32(4))
+	write(&manyFixed, uint64(maxArrayPreview+4))
+	for i := uint64(0); i < maxArrayPreview+4; i++ {
+		write(&manyFixed, uint32(i))
+	}
+	fixedArray, err := readArray(bytes.NewReader(manyFixed.Bytes()))
+	if err != nil || !fixedArray.truncated || fixedArray.arrayLength != maxArrayPreview+4 {
+		t.Fatalf("fixed array=%+v err=%v", fixedArray, err)
+	}
+	if err := skipArrayRemainder(bytes.NewReader(nil), 4, uint64(^uint64(0)>>1)/4+1); err == nil {
+		t.Fatal("overflow remainder")
+	}
+
+	peeked := bufio.NewReader(bytes.NewReader([]byte{1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0}))
+	got32, err := readU32(peeked)
+	if err != nil || got32 != 1 {
+		t.Fatalf("peek u32=%d err=%v", got32, err)
+	}
+	got64, err := readU64(peeked)
+	if err != nil || got64 != 2 {
+		t.Fatalf("peek u64=%d err=%v", got64, err)
+	}
+	if _, err := readU32(bufio.NewReader(bytes.NewReader([]byte{1, 2}))); err == nil {
+		t.Fatal("truncated peek u32")
+	}
+	if _, err := readU64(bufio.NewReader(bytes.NewReader([]byte{1, 2, 3, 4}))); err == nil {
+		t.Fatal("truncated peek u64")
+	}
+	existing := bufio.NewReader(bytes.NewReader([]byte("x")))
+	if bufferedReader(existing) != existing {
+		t.Fatal("buffered reader should keep an existing bufio.Reader")
+	}
 }
 
+type zeroDiscarder struct{}
+
+func (zeroDiscarder) Read([]byte) (int, error) { return 0, io.EOF }
+func (zeroDiscarder) Discard(int) (int, error) { return 0, nil }
+
 func TestExactIntAndHelpers(t *testing.T) {
-	if exactInt(map[string]string{"x": "9223372036854775807"}, "x") != math.MaxInt64 { t.Fatal("max int") }
-	if exactInt(map[string]string{"x": "18446744073709551615"}, "x") != 0 || exactInt(map[string]string{"x": "bad"}, "x") != 0 || exactInt(nil, "x") != 0 { t.Fatal("invalid ints") }
-	if derive(map[string]string{"general.architecture": ""}).ContextLength != 0 { t.Fatal("empty architecture") }
+	if exactInt(map[string]string{"x": "9223372036854775807"}, "x") != math.MaxInt64 {
+		t.Fatal("max int")
+	}
+	if exactInt(map[string]string{"x": "18446744073709551615"}, "x") != 0 || exactInt(map[string]string{"x": "bad"}, "x") != 0 || exactInt(nil, "x") != 0 {
+		t.Fatal("invalid ints")
+	}
+	if derive(map[string]string{"general.architecture": ""}).ContextLength != 0 {
+		t.Fatal("empty architecture")
+	}
 }
 
 func writeGGUF(t *testing.T, version uint32, tensors uint64, items []kv) string {
@@ -162,9 +347,15 @@ func writeGGUF(t *testing.T, version uint32, tensors uint64, items []kv) string 
 	write(&b, version)
 	write(&b, tensors)
 	write(&b, uint64(len(items)))
-	for _, item := range items { writeString(&b, item.key); write(&b, item.typ); item.write(&b) }
+	for _, item := range items {
+		writeString(&b, item.key)
+		write(&b, item.typ)
+		item.write(&b)
+	}
 	path := filepath.Join(t.TempDir(), "model.gguf")
-	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return path
 }
 
@@ -176,9 +367,15 @@ func writeHeader(t *testing.T, version uint32, tensors, metadata uint64) string 
 	write(&b, tensors)
 	write(&b, metadata)
 	path := filepath.Join(t.TempDir(), "header.gguf")
-	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return path
 }
 
 func writeString(b *bytes.Buffer, s string) { write(b, uint64(len(s))); b.WriteString(s) }
-func write(b *bytes.Buffer, v any) { if err := binary.Write(b, binary.LittleEndian, v); err != nil { panic(err) } }
+func write(b *bytes.Buffer, v any) {
+	if err := binary.Write(b, binary.LittleEndian, v); err != nil {
+		panic(err)
+	}
+}

@@ -287,4 +287,16 @@ describe('GPU placement cards', () => {
     expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
     expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(true)
   })
+
+  it('hides duplicate placement fields when requested by the Instance form', async () => {
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', hidePlacementControls: true }
+    })
+    await flushPromises()
+    expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Single-GPU first')
+    expect(wrapper.text()).toContain('GPU placement')
+    wrapper.unmount()
+  })
 })

@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 )
 
 type State string
@@ -63,6 +65,10 @@ func New(binary, host string, portStart int, startupTimeout time.Duration) *Supe
 }
 
 func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, args []string) (Runtime, error) {
+	return s.StartWithEnv(ctx, instanceID, modelID, modelPath, args, nil)
+}
+
+func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, modelPath string, args, env []string) (Runtime, error) {
 	s.mu.Lock()
 	if w := s.workers[instanceID]; w != nil && w.runtime.State != Unloaded && w.runtime.State != Failed {
 		rt := w.runtime
@@ -76,12 +82,16 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 		slog.Error("unable to allocate llama-server port", "instance_id", instanceID, "model_id", modelID, "error", err)
 		return Runtime{}, err
 	}
+	resolvedArgs := sanitizeWorkerOwnedArgs(args)
 	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
-	workerArgs = append(workerArgs, sanitizeWorkerOwnedArgs(args)...)
+	workerArgs = append(workerArgs, resolvedArgs...)
 	// Managed workers are internal backend targets, not browser-facing APIs.
 	// The manager owns worker CORS/auth configuration and applies it exactly once.
 	workerArgs = append(workerArgs, "--cors-origins", "localhost")
 	cmd := exec.Command(s.binary, workerArgs...)
+	if len(env) > 0 {
+		cmd.Env = workerEnviron(env)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.mu.Unlock()
@@ -95,15 +105,21 @@ func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath s
 	logRing := s.logRingLocked(instanceID)
 	logRing.reset()
 	logRing.add(formatStoredLogLine("manager", "launch command: "+formatLaunchCommand(s.binary, workerArgs)))
+	launchLine := "start " + instanceID
+	if len(resolvedArgs) > 0 {
+		launchLine += " " + strings.Join(resolvedArgs, " ")
+	}
+	systemlog.Log(systemlog.Info, "manager", launchLine)
 	w := &worker{runtime: Runtime{InstanceID: instanceID, ModelID: modelID, State: Starting, Port: port, StartedAt: time.Now().UTC()}, logs: logRing, done: make(chan struct{})}
 	s.workers[instanceID] = w
 	s.emitRuntimeLocked(w.runtime)
-	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs)
+	slog.Info("starting llama-server worker", "instance_id", instanceID, "model_id", modelID, "binary", s.binary, "model_path", modelPath, "host", s.host, "port", port, "args", workerArgs, "env", env)
 	if err := cmd.Start(); err != nil {
 		w.runtime.State = Failed
 		w.runtime.LastError = err.Error()
 		s.emitRuntimeLocked(w.runtime)
 		s.mu.Unlock()
+		systemlog.Log(systemlog.Error, instanceID, "failed to start: "+err.Error())
 		slog.Error("failed to start llama-server worker", "instance_id", instanceID, "model_id", modelID, "error", err)
 		return w.runtime, err
 	}
@@ -272,12 +288,18 @@ func (s *Supervisor) wait(w *worker) {
 	}
 	state := w.runtime.State
 	lastError := w.runtime.LastError
+	stderrTail := lastStoredLogText(w.logs.lines(), "stderr")
 	s.emitRuntimeLocked(w.runtime)
 	close(w.done)
 	s.mu.Unlock()
 	if wasStopping {
 		slog.Info("llama-server process exited", "instance_id", instanceID, "model_id", modelID, "state", state)
 	} else {
+		message := lastError
+		if stderrTail != "" {
+			message += ": " + stderrTail
+		}
+		systemlog.Log(systemlog.Error, instanceID, message)
 		slog.Error("llama-server process exited unexpectedly", "instance_id", instanceID, "model_id", modelID, "state", state, "error", lastError)
 	}
 }
@@ -431,11 +453,27 @@ func (r *ring) subscribe() ([]string, <-chan string, func()) {
 	}
 	return snapshot, ch, cancel
 }
+
+func lastStoredLogText(lines []string, source string) string {
+	prefix := "[" + source + "]\t"
+	for index := len(lines) - 1; index >= 0; index-- {
+		if !strings.HasPrefix(lines[index], prefix) {
+			continue
+		}
+		parts := strings.SplitN(lines[index], "\t", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return ""
+}
+
 func copyLogs(dst *ring, instanceID, modelID, source string, reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
 		dst.add(formatStoredLogLine(source, line))
+		systemlog.Log(systemlog.Info, instanceID, line)
 		slog.Info("llama-server output", "instance_id", instanceID, "model_id", modelID, "stream", source, "line", line)
 	}
 }

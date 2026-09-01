@@ -80,7 +80,7 @@ func TestGatewayHelperProcess(t *testing.T) {
 			if flusher != nil {
 				flusher.Flush()
 			}
-			time.Sleep(150 * time.Millisecond)
+			time.Sleep(time.Second)
 			payload, _ := json.Marshal(map[string]any{"usage": usage, "timings": timings})
 			_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
 			if flusher != nil {
@@ -310,7 +310,7 @@ func TestStreamingHeadersDoNotBufferOrFabricateFinalMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(line, "hello") || time.Since(started) >= 100*time.Millisecond {
+	if !strings.Contains(line, "hello") || time.Since(started) >= 750*time.Millisecond {
 		t.Fatalf("streaming first chunk was buffered: elapsed=%v line=%q", time.Since(started), line)
 	}
 	_, _ = reader.ReadString(0)

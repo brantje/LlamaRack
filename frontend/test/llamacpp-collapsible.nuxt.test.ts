@@ -33,8 +33,8 @@ beforeEach(() => {
   manager.profile.value = null
 })
 
-describe('collapsible llama.cpp overrides', () => {
-  it('keeps instance overrides compact until the user expands them', async () => {
+describe('llama.cpp override editors', () => {
+  it('keeps the legacy editor compact until the user expands it', async () => {
     const wrapper = await mountSuspended(LlamaCppOptionsEditor, {
       route: false,
       props: {
@@ -59,13 +59,41 @@ describe('collapsible llama.cpp overrides', () => {
     expect(wrapper.text()).toContain('No overrides configured · inheriting all values')
   })
 
-  it('makes the new Instance form use the collapsed default', async () => {
+  it('uses the structured llama.cpp editor on the shared New Instance form', async () => {
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await flushPromises()
+    const toggle = wrapper.get('[data-testid="instance-form-overrides"]').find('[data-testid="frame-collapse-toggle"]')
+    if (toggle.exists() && toggle.attributes('aria-expanded') === 'false') {
+      await toggle.trigger('click')
+      await flushPromises()
+    }
     const editor = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(editor.exists()).toBe(true)
-    expect(editor.props('defaultOpen')).toBe(false)
-    expect(wrapper.text()).toContain('Instance llama.cpp configuration')
-    expect(wrapper.text()).not.toContain('--ctx-size')
+    expect(editor.props('scope')).toBe('instance')
+    expect(wrapper.text()).toContain('Instance llama.cpp overrides')
+    expect(wrapper.text()).toContain('Applied over the Model defaults, which are applied over the global defaults.')
+    expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').text()).toBe('Basic')
+    expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').text()).toBe('Advanced')
+  })
+
+  it('hides excluded companion keys from both views while keeping them in the stored map', async () => {
+    const wrapper = await mountSuspended(LlamaCppOptionsEditor, {
+      route: false,
+      props: {
+        modelValue: { 'ctx-size': '8192', mmproj: '/models/mmproj.gguf' },
+        scope: 'model',
+        excludeKeys: ['mmproj']
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('--ctx-size')
+    expect(wrapper.text()).not.toContain('--mmproj')
+    expect(wrapper.text()).toContain('1 override configured · remaining values inherited')
+
+    await wrapper.get('[data-testid="llamacpp-mode-advanced"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('--ctx-size')
+    expect(wrapper.text()).not.toContain('--mmproj')
   })
 })

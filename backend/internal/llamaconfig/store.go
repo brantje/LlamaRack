@@ -16,6 +16,11 @@ var managerDefaults = map[string]string{
 	"ctx-size": DefaultContextSize,
 }
 
+var companionOptions = map[string]bool{
+	"mmproj":           true,
+	"spec-draft-model": true,
+}
+
 type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
@@ -98,7 +103,7 @@ func (s *Store) Effective(ctx context.Context, modelID, instanceID string) (Effe
 			return Effective{}, detectErr
 		}
 		for key, value := range defaults {
-			if _, resolved := result.Values[key]; resolved {
+			if _, resolved := result.Sources[key]; resolved {
 				continue
 			}
 			result.Values[key] = value
@@ -166,6 +171,11 @@ func launchProfileLabel(profile llamacpp.Profile) string {
 
 func apply(values, sources, layer map[string]string, source string) {
 	for key, value := range layer {
+		if companionOptions[key] && strings.TrimSpace(value) == "" {
+			delete(values, key)
+			sources[key] = source
+			continue
+		}
 		values[key] = value
 		sources[key] = source
 	}

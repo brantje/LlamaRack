@@ -157,6 +157,7 @@ describe('Request logs live updates', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="request-log-table"]').text()).toContain('lcm_26')
     expect(wrapper.get('[data-testid="request-logs-live-state"]').text()).toContain('paused')
+    expect(wrapper.get('[data-testid="request-logs-live-toggle"]').text()).toContain('Return to live')
 
     const callsBeforeLive = mocks.request.mock.calls.filter(call => String(call[0]).startsWith('/api/v1/observability/requests?')).length
     firstPage = [request('lcm_3'), first]
@@ -165,11 +166,24 @@ describe('Request logs live updates', () => {
     expect(mocks.request.mock.calls.filter(call => String(call[0]).startsWith('/api/v1/observability/requests?'))).toHaveLength(callsBeforeLive)
     expect(wrapper.get('[data-testid="request-log-table"]').text()).toContain('lcm_26')
 
-    const previous = wrapper.findAll('button').find(button => button.text().trim() === 'Previous')
-    await previous!.trigger('click')
+    await wrapper.get('[data-testid="request-logs-live-toggle"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="request-log-table"]').text()).toContain('lcm_3')
     expect(wrapper.get('[data-testid="request-logs-live-state"]').text()).toBe('Live')
+    expect(wrapper.get('[data-testid="request-logs-live-toggle"]').text()).toContain('Pause live')
+    wrapper.unmount()
+  })
+
+  it('offers reconnect instead of pause while the shared live stream is disconnected', async () => {
+    const manager = resetManager()
+    manager.runtimeEventsConnected.value = false
+    mocks.request.mockResolvedValue({ items: [], has_more: false })
+
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="request-logs-live-state"]').text()).toBe('Disconnected')
+    expect(wrapper.get('[data-testid="request-logs-live-toggle"]').text()).toContain('Reconnect')
+    expect(wrapper.get('[data-testid="request-logs-live-toggle"]').text()).not.toContain('Pause live')
     wrapper.unmount()
   })
 

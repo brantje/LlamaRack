@@ -22,6 +22,11 @@ const sourceItems = [
   { label: 'Manager lifecycle', value: 'manager' }
 ]
 
+const aggregateLogsTo = computed(() => ({
+  path: '/admin/system-logs',
+  query: { source: props.instanceId }
+}))
+
 const visibleEntries = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return entries.value.filter((entry) => {
@@ -29,12 +34,6 @@ const visibleEntries = computed(() => {
     return needle === '' || entry.text.toLowerCase().includes(needle)
   })
 })
-
-function sourceColor(value: LogSource) {
-  if (value === 'stderr') return 'error'
-  if (value === 'manager') return 'primary'
-  return 'neutral'
-}
 
 function formatTimestamp(value: string) {
   const date = new Date(value)
@@ -145,50 +144,54 @@ onBeforeUnmount(closeStream)
 </script>
 
 <template>
-  <UCard
+  <Frame
     id="logs"
     data-testid="instance-log-viewer"
-    :ui="props.embedded ? {
-      root: 'rounded-none bg-transparent shadow-none ring-0 divide-y-0',
-      header: 'px-0 pt-0 pb-4 sm:px-0',
-      body: 'p-0 sm:p-0'
-    } : undefined"
+    :class="props.embedded ? '!border-0 !bg-transparent !p-0' : 'p-4'"
   >
-    <template #header>
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-sm font-semibold text-highlighted">Current-session logs</p>
-          <p class="mt-1 text-xs text-muted">Live llama-server stdout/stderr plus manager lifecycle events. Raw log lines stay in memory and are not persisted across manager restarts.</p>
-        </div>
-        <UBadge :color="live ? 'success' : 'neutral'" variant="subtle">{{ live ? 'Live' : 'Snapshot / disconnected' }}</UBadge>
+    <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-divider)] pb-4">
+      <div>
+        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">INSTANCE OUTPUT</p>
+        <h3 class="mt-1 text-sm font-semibold text-[var(--color-text)]">Current-session logs</h3>
+        <p class="mt-1 max-w-3xl text-xs leading-5 text-[var(--neutral-700)]">Live llama-server stdout/stderr plus manager lifecycle events. Raw log lines stay in memory and are not persisted across manager restarts.</p>
       </div>
-    </template>
+      <div class="flex items-center gap-2">
+        <StatusTag :variant="live ? 'ready' : 'neutral'">{{ live ? 'Live' : 'Snapshot / disconnected' }}</StatusTag>
+        <AppButton :to="aggregateLogsTo" intent="ghost" size="xs" data-testid="open-aggregate-logs">Open diagnostics</AppButton>
+      </div>
+    </div>
 
-    <div class="space-y-4">
+    <div class="space-y-4 pt-4">
       <div class="grid gap-3 md:grid-cols-[minmax(11rem,14rem)_minmax(14rem,1fr)_auto_auto]">
         <USelectMenu v-model="source" :items="sourceItems" label-key="label" value-key="value" aria-label="Log source" />
         <UInput v-model="search" icon="i-lucide-search" placeholder="Search current-session logs" aria-label="Search logs" />
-        <UButton color="neutral" variant="soft" :loading="loading" @click="connectStream">{{ live ? 'Reload' : 'Reconnect' }}</UButton>
-        <UButton color="neutral" variant="ghost" :disabled="!entries.length" @click="clearView">Clear view</UButton>
+        <AppButton intent="secondary" :loading="loading" @click="connectStream">{{ live ? 'Reload' : 'Reconnect' }}</AppButton>
+        <AppButton intent="ghost" :disabled="!entries.length" @click="clearView">Clear view</AppButton>
       </div>
 
-      <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
+      <div v-if="error" class="border-l-2 border-[var(--color-accent)] pl-3" data-testid="instance-log-error">
+        <p class="text-sm font-semibold text-[var(--color-text)]">Log stream unavailable</p>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
 
       <div
         v-if="visibleEntries.length"
         ref="output"
         data-testid="instance-log-output"
-        class="max-h-[34rem] min-h-64 overflow-auto rounded-md bg-elevated p-3 font-mono text-xs"
+        class="max-h-[34rem] min-h-64 overflow-auto border border-[var(--color-divider)] bg-[var(--neutral-100)] font-mono text-xs"
       >
-        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.timestamp}-${entry.source}-${entry.text}`" class="grid grid-cols-[12rem_5rem_minmax(0,1fr)] gap-3 border-b border-default py-1.5 last:border-b-0">
-          <time :datetime="entry.timestamp" class="whitespace-nowrap text-muted">{{ formatTimestamp(entry.timestamp) }}</time>
-          <div><UBadge :color="sourceColor(entry.source)" variant="soft" size="xs">{{ entry.source }}</UBadge></div>
-          <pre class="whitespace-pre-wrap break-words text-highlighted">{{ entry.text }}</pre>
+        <div v-for="(entry, index) in visibleEntries" :key="`${index}-${entry.timestamp}-${entry.source}-${entry.text}`" class="grid grid-cols-[12rem_6rem_minmax(0,1fr)] gap-3 border-b border-[var(--color-divider)] px-3 py-1.5 last:border-b-0">
+          <time :datetime="entry.timestamp" class="whitespace-nowrap text-[var(--neutral-700)]">{{ formatTimestamp(entry.timestamp) }}</time>
+          <div><StatusTag :variant="entry.source === 'stderr' ? 'failed' : entry.source === 'manager' ? 'pending' : 'neutral'">{{ entry.source }}</StatusTag></div>
+          <pre class="whitespace-pre-wrap break-words text-[var(--color-text)]">{{ entry.text }}</pre>
         </div>
       </div>
-      <UEmpty v-else variant="naked" :title="entries.length ? 'No logs match the current filters' : 'No logs in the current view'" :description="entries.length ? 'Change the source or search filter to show more lines.' : 'Start or use the Instance to produce log output. Clearing the view does not stop live tailing.'" />
+      <div v-else class="border border-[var(--color-divider)] px-4 py-8 text-center" data-testid="instance-log-empty">
+        <p class="text-sm font-semibold text-[var(--color-text)]">{{ entries.length ? 'No logs match the current filters' : 'No logs in the current view' }}</p>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">{{ entries.length ? 'Change the source or search filter to show more lines.' : 'Start or use the Instance to produce log output. Clearing the view does not stop live tailing.' }}</p>
+      </div>
 
-      <p class="text-xs text-muted">Showing {{ visibleEntries.length }} of {{ entries.length }} lines kept in this browser view. The manager retains at most its bounded in-memory session ring.</p>
+      <p class="text-xs text-[var(--neutral-700)]">Showing {{ visibleEntries.length }} of {{ entries.length }} lines kept in this browser view. The manager retains at most its bounded in-memory session ring.</p>
     </div>
-  </UCard>
+  </Frame>
 </template>

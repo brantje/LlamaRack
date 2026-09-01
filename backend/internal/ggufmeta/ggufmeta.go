@@ -1,6 +1,7 @@
 package ggufmeta
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -13,12 +14,13 @@ import (
 )
 
 const (
-	maxMetadataCount = uint64(1_000_000)
-	maxArrayCount    = uint64(10_000_000)
-	maxStringBytes   = uint64(16 * 1024 * 1024)
-	maxDisplayBytes  = uint64(4096)
-	maxKeyBytes      = uint64(64 * 1024)
-	maxArrayPreview  = uint64(16)
+	maxMetadataCount       = uint64(1_000_000)
+	maxArrayCount          = uint64(10_000_000)
+	maxStringBytes         = uint64(16 * 1024 * 1024)
+	maxDisplayBytes        = uint64(4096)
+	maxKeyBytes            = uint64(64 * 1024)
+	maxArrayPreview        = uint64(16)
+	metadataReadBufferSize = 8 * 1024
 )
 
 type Entry struct {
@@ -46,6 +48,7 @@ type Inspection struct {
 	MetadataCount uint64   `json:"metadata_count"`
 	Metadata      []Entry  `json:"metadata"`
 	Derived       Derived  `json:"derived"`
+	Features      Features `json:"features"`
 	Warnings      []string `json:"warnings,omitempty"`
 }
 
@@ -55,10 +58,17 @@ func Inspect(path string) (Inspection, error) {
 		return Inspection{}, err
 	}
 	defer f.Close()
-	return inspect(f)
+	return inspect(bufferedReader(f))
 }
 
-func inspect(r io.ReadSeeker) (Inspection, error) {
+func bufferedReader(r io.Reader) *bufio.Reader {
+	if br, ok := r.(*bufio.Reader); ok {
+		return br
+	}
+	return bufio.NewReaderSize(r, metadataReadBufferSize)
+}
+
+func inspect(r io.Reader) (Inspection, error) {
 	var magic [4]byte
 	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return Inspection{}, err
@@ -108,6 +118,14 @@ func inspect(r io.ReadSeeker) (Inspection, error) {
 	}
 	sort.Slice(result.Metadata, func(i, j int) bool { return result.Metadata[i].Key < result.Metadata[j].Key })
 	result.Derived = derive(scalars)
+	result.Features = summaryFeatures(result.Derived, scalars)
+	if result.Features.HasMTP && !result.Features.MTPOnly {
+		hasTrunk, err := tensorPrefixPresentCurrent(r, result.TensorCount, "blk.0.")
+		if err != nil {
+			return Inspection{}, err
+		}
+		result.Features.MTPOnly = !hasTrunk
+	}
 	return result, nil
 }
 
@@ -147,7 +165,7 @@ type valueResult struct {
 	scalar      bool
 }
 
-func readValue(r io.ReadSeeker, typeID uint32) (valueResult, error) {
+func readValue(r io.Reader, typeID uint32) (valueResult, error) {
 	switch typeID {
 	case 0:
 		v, err := readUint(r, 1)
@@ -204,7 +222,7 @@ func readValue(r io.ReadSeeker, typeID uint32) (valueResult, error) {
 	}
 }
 
-func readArray(r io.ReadSeeker) (valueResult, error) {
+func readArray(r io.Reader) (valueResult, error) {
 	elemType, err := readU32(r)
 	if err != nil {
 		return valueResult{}, err
@@ -230,21 +248,20 @@ func readArray(r io.ReadSeeker) (valueResult, error) {
 	}
 	preview := make([]string, 0, previewCount)
 	truncated := count > previewCount
-	for i := uint64(0); i < count; i++ {
-		if i < previewCount {
-			value, err := readValue(r, elemType)
-			if err != nil {
-				return valueResult{}, err
-			}
-			text := value.display
-			if elemType == 8 {
-				text = strconv.Quote(text)
-			}
-			preview = append(preview, text)
-			truncated = truncated || value.truncated
-			continue
+	for i := uint64(0); i < previewCount; i++ {
+		value, err := readValue(r, elemType)
+		if err != nil {
+			return valueResult{}, err
 		}
-		if err := skipValue(r, elemType); err != nil {
+		text := value.display
+		if elemType == 8 {
+			text = strconv.Quote(text)
+		}
+		preview = append(preview, text)
+		truncated = truncated || value.truncated
+	}
+	if remaining := count - previewCount; remaining > 0 {
+		if err := skipArrayRemainder(r, elemType, remaining); err != nil {
 			return valueResult{}, err
 		}
 	}
@@ -259,10 +276,24 @@ func readArray(r io.ReadSeeker) (valueResult, error) {
 	return valueResult{typeName: "array<" + typeName + ">", display: display, truncated: truncated, arrayLength: count}, nil
 }
 
-func skipValue(r io.ReadSeeker, typeID uint32) error {
+func skipArrayRemainder(r io.Reader, elemType uint32, remaining uint64) error {
+	if size, ok := fixedSize(elemType); ok {
+		if remaining > uint64(^uint64(0)>>1)/uint64(size) {
+			return errors.New("GGUF metadata array is too large to seek")
+		}
+		return skipBytes(r, int64(remaining)*size)
+	}
+	for i := uint64(0); i < remaining; i++ {
+		if err := skipValue(r, elemType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func skipValue(r io.Reader, typeID uint32) error {
 	if size, ok := fixedSize(typeID); ok {
-		_, err := r.Seek(size, io.SeekCurrent)
-		return err
+		return skipBytes(r, size)
 	}
 	if typeID == 8 {
 		n, err := readU64(r)
@@ -272,10 +303,42 @@ func skipValue(r io.ReadSeeker, typeID uint32) error {
 		if n > maxStringBytes {
 			return errors.New("GGUF metadata string is unreasonable")
 		}
-		_, err = r.Seek(int64(n), io.SeekCurrent)
-		return err
+		return skipBytes(r, int64(n))
 	}
 	return fmt.Errorf("unsupported array element type %d", typeID)
+}
+
+type byteDiscarder interface {
+	Discard(int) (int, error)
+}
+
+func skipBytes(r io.Reader, n int64) error {
+	if n <= 0 {
+		return nil
+	}
+	if d, ok := r.(byteDiscarder); ok {
+		for n > 0 {
+			chunk := n
+			if chunk > int64(math.MaxInt) {
+				chunk = int64(math.MaxInt)
+			}
+			discarded, err := d.Discard(int(chunk))
+			n -= int64(discarded)
+			if err != nil {
+				return err
+			}
+			if discarded == 0 {
+				return io.EOF
+			}
+		}
+		return nil
+	}
+	if rs, ok := r.(io.Seeker); ok {
+		_, err := rs.Seek(n, io.SeekCurrent)
+		return err
+	}
+	_, err := io.CopyN(io.Discard, r, n)
+	return err
 }
 
 func fixedSize(typeID uint32) (int64, bool) {
@@ -344,7 +407,7 @@ func readInt(r io.Reader, size int) (int64, error) {
 	}
 }
 
-func readKey(r io.ReadSeeker) (string, error) {
+func readKey(r io.Reader) (string, error) {
 	n, err := readU64(r)
 	if err != nil {
 		return "", err
@@ -359,7 +422,7 @@ func readKey(r io.ReadSeeker) (string, error) {
 	return string(buf), nil
 }
 
-func readString(r io.ReadSeeker) (string, bool, error) {
+func readString(r io.Reader) (string, bool, error) {
 	n, err := readU64(r)
 	if err != nil {
 		return "", false, err
@@ -378,7 +441,7 @@ func readString(r io.ReadSeeker) (string, bool, error) {
 		return "", false, err
 	}
 	if n > take {
-		if _, err := r.Seek(int64(n-take), io.SeekCurrent); err != nil {
+		if err := skipBytes(r, int64(n-take)); err != nil {
 			return "", false, err
 		}
 	}
@@ -390,15 +453,30 @@ func readString(r io.ReadSeeker) (string, bool, error) {
 }
 
 func readU32(r io.Reader) (uint32, error) {
-	var v uint32
-	err := binary.Read(r, binary.LittleEndian, &v)
-	return v, err
+	if br, ok := r.(*bufio.Reader); ok {
+		b, err := br.Peek(4)
+		if err != nil {
+			return 0, err
+		}
+		v := binary.LittleEndian.Uint32(b)
+		_, _ = br.Discard(4)
+		return v, nil
+	}
+	v, err := readUint(r, 4)
+	return uint32(v), err
 }
 
 func readU64(r io.Reader) (uint64, error) {
-	var v uint64
-	err := binary.Read(r, binary.LittleEndian, &v)
-	return v, err
+	if br, ok := r.(*bufio.Reader); ok {
+		b, err := br.Peek(8)
+		if err != nil {
+			return 0, err
+		}
+		v := binary.LittleEndian.Uint64(b)
+		_, _ = br.Discard(8)
+		return v, nil
+	}
+	return readUint(r, 8)
 }
 
 func derive(values map[string]string) Derived {

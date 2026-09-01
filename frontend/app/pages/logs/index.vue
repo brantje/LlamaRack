@@ -53,6 +53,7 @@ const error = ref('')
 const traceID = ref(String(route.query.trace_id || '').trim())
 const routeReady = ref(false)
 const liveStreamingEnabled = ref(true)
+const filtersOpen = ref(true)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
@@ -94,6 +95,10 @@ const columns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'session_id', header: 'Session' }, { accessorKey: 'endpoint', header: 'Endpoint' }
 ]
 const displayRequests = computed(() => requests.value)
+const activeFilterCount = computed(() => [
+  filters.window !== '1h', filters.instance_id, filters.endpoint, filters.api_key_id,
+  filters.result, filters.status_code, filters.streaming, filters.search
+].filter(Boolean).length)
 const sortedSessionRequests = computed(() => {
   const rows = [...sessionRequests.value]
   if (sessionSortMode.value === 'start_time') return rows.sort((a, b) => a.started_at - b.started_at)
@@ -122,6 +127,12 @@ const liveState = computed(() => {
   if (!manager.runtimeEventsConnected.value) return { label: 'Disconnected', color: 'neutral' as const }
   if (offset.value > 0) return { label: 'Live paused on older page', color: 'warning' as const }
   return { label: 'Live', color: 'success' as const }
+})
+const liveAction = computed(() => {
+  if (!liveStreamingEnabled.value) return { label: 'Enable live', icon: 'i-lucide-play' }
+  if (!manager.runtimeEventsConnected.value) return { label: 'Reconnect', icon: 'i-lucide-refresh-cw' }
+  if (offset.value > 0) return { label: 'Return to live', icon: 'i-lucide-arrow-up' }
+  return { label: 'Pause live', icon: 'i-lucide-pause' }
 })
 
 function callTypeLabel(value?: string) {
@@ -200,7 +211,7 @@ async function loadSessionRequests(sessionID: string) {
     if (generation === sessionLoadGeneration) sessionLoading.value = false
   }
 }
-async function applyFilters() { offset.value = 0; await loadRequests() }
+async function applyFilters() { offset.value = 0; await loadRequests(); filtersOpen.value = false }
 async function previousPage() { offset.value = Math.max(0, offset.value - pageSize); await loadRequests() }
 async function nextPage() { offset.value += pageSize; await loadRequests() }
 async function clearTrace() {
@@ -213,6 +224,22 @@ async function clearTrace() {
 async function toggleLiveStreaming() {
   liveStreamingEnabled.value = !liveStreamingEnabled.value
   if (liveStreamingEnabled.value && routeReady.value && manager.user.value && offset.value === 0) await loadRequests()
+}
+async function handleLiveAction() {
+  if (!liveStreamingEnabled.value) {
+    await toggleLiveStreaming()
+    return
+  }
+  if (!manager.runtimeEventsConnected.value) {
+    await manager.connectRuntimeEvents()
+    return
+  }
+  if (offset.value > 0) {
+    offset.value = 0
+    await loadRequests()
+    return
+  }
+  await toggleLiveStreaming()
 }
 async function loadRequestDetail(requestID: string): Promise<RequestDetail | null> {
   const generation = ++detailLoadGeneration
@@ -264,6 +291,9 @@ async function showRequest(requestID: string, routeSessionID: string): Promise<R
   }
   if (selectionGeneration !== detailSelectionGeneration) return { current: false, sessionID: '' }
   return { current: true, sessionID: resolvedSessionID }
+}
+function onRequestRowSelect(_event: Event, row: { original: RequestRecord }) {
+  return openRequest(row.original)
 }
 async function openRequest(item: RequestRecord) {
   if (!item.request_id) return
@@ -363,203 +393,236 @@ watch(liveRequestFingerprint, (next, previous) => {
 <template>
   <div class="space-y-5" data-testid="request-logs-page">
     <div class="flex flex-wrap items-start justify-between gap-4">
-      <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent inference request history with LiteLLM-compatible session-aware navigation, correlation and performance metadata." />
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <UBadge data-testid="request-logs-live-state" :color="liveState.color" variant="subtle">{{ liveState.label }}</UBadge>
-        <UButton data-testid="request-logs-live-toggle" color="neutral" variant="soft" :icon="liveStreamingEnabled ? 'i-lucide-pause' : 'i-lucide-play'" @click="toggleLiveStreaming">{{ liveStreamingEnabled ? 'Pause live' : 'Enable live' }}</UButton>
-        <UButton color="neutral" variant="soft" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</UButton>
+      <UPageHeader class="min-w-0 flex-1" headline="OBSERVABILITY" title="Request logs" description="Persistent inference request history with request/session correlation and performance metadata." />
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+        <StatusTag data-testid="request-logs-live-state" :variant="liveState.label === 'Live' ? 'ready' : liveState.label.includes('paused') ? 'pending' : 'neutral'">{{ liveState.label }}</StatusTag>
+        <AppButton data-testid="request-logs-live-toggle" intent="secondary" :icon="liveAction.icon" @click="handleLiveAction">{{ liveAction.label }}</AppButton>
+        <AppButton intent="secondary" :loading="loading" icon="i-lucide-refresh-cw" @click="loadRequests">Refresh</AppButton>
       </div>
     </div>
 
-    <UAlert v-if="traceID" data-testid="trace-filter" color="info" variant="subtle" title="Trace filter active" :description="`Showing requests in chronological order for ${traceID}.`">
-      <template #actions><UButton size="xs" color="neutral" variant="soft" @click="clearTrace">Clear trace</UButton></template>
-    </UAlert>
-    <UAlert v-if="error" color="error" variant="subtle" title="Request history unavailable" :description="error" />
-
-    <UCard data-testid="request-log-filters">
-      <template #header><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">FILTERS</p><p class="mt-1 text-xs text-muted">Filters are applied server-side to retained request history. Each request remains a separate row; shared sessions are grouped only in the request sidepanel.</p></template>
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <UFormField label="Time window"><USelectMenu v-model="filters.window" :items="windowItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Instance"><USelectMenu v-model="filters.instance_id" :items="instanceItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Endpoint"><USelectMenu v-model="filters.endpoint" :items="endpointItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="API key ID"><UInput v-model="filters.api_key_id" class="w-full" placeholder="Key ID" /></UFormField>
-        <UFormField label="Result"><USelectMenu v-model="filters.result" :items="resultItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="HTTP status"><UInput v-model="filters.status_code" type="number" min="100" max="599" class="w-full" placeholder="Any status" /></UFormField>
-        <UFormField label="Streaming"><USelectMenu v-model="filters.streaming" :items="streamingItems" label-key="label" value-key="value" class="w-full" /></UFormField>
-        <UFormField label="Search"><UInput v-model="filters.search" class="w-full" icon="i-lucide-search" placeholder="Request ID, session, trace, model…" @keyup.enter="applyFilters" /></UFormField>
+    <div v-if="traceID" data-testid="trace-filter" class="flex flex-wrap items-center justify-between gap-3 border-y border-[var(--color-divider)] bg-[var(--neutral-100)] px-4 py-3">
+      <div class="min-w-0">
+        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">TRACE FILTER ACTIVE</p>
+        <p class="mt-1 break-all font-mono text-xs text-[var(--color-text)]">{{ traceID }}</p>
+        <p class="mt-1 text-xs text-[var(--neutral-800)]">Showing requests in chronological order for this trace.</p>
       </div>
-      <div class="mt-4 flex justify-end"><UButton data-testid="apply-request-log-filters" :loading="loading" @click="applyFilters">Apply filters</UButton></div>
-    </UCard>
+      <AppButton intent="secondary" size="xs" @click="clearTrace">Clear trace</AppButton>
+    </div>
 
-    <UCard data-testid="request-log-table">
-      <template #header><div class="flex items-center justify-between gap-3"><div><p class="text-xs font-extrabold tracking-[0.18em] text-dimmed">REQUEST HISTORY</p><p class="mt-1 text-xs text-muted">{{ traceID ? 'Oldest first for this trace.' : 'Newest first.' }} Full payloads load only for the selected request.</p></div><UBadge color="neutral" variant="soft">{{ requests.length }} rows</UBadge></div></template>
-      <UEmpty v-if="!loading && !requests.length" variant="naked" title="No matching requests" description="Adjust the filters or send inference traffic through the gateway." />
-      <div v-else class="overflow-x-auto">
-        <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]">
-          <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs">{{ formatTime(row.original.started_at) }}</span></template>
-          <template #result-cell="{ row }"><UBadge :color="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'success' : 'error'" variant="subtle" size="sm">{{ resultLabel(row.original) }}</UBadge></template>
+    <Frame v-if="error" class="p-3" data-testid="request-log-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Request history unavailable</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
+    </Frame>
+
+    <Frame class="p-4" data-testid="request-log-filters">
+      <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">FILTERS</p>
+          <p class="mt-1 text-xs text-[var(--neutral-800)]">Filters are applied server-side to retained request history. Sessions are grouped only in the request inspector.</p>
+        </div>
+        <StatusTag variant="neutral" data-testid="request-log-active-filter-count">{{ activeFilterCount }} active</StatusTag>
+      </div>
+      <UCollapsible v-model:open="filtersOpen" data-testid="request-log-filter-collapsible">
+        <AppButton
+          data-testid="request-log-filters-toggle"
+          intent="secondary"
+          size="sm"
+          :trailing-icon="filtersOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+        >{{ filtersOpen ? 'Hide filters' : 'Edit filters' }}</AppButton>
+        <template #content>
+          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <UFormField label="Time window"><USelectMenu v-model="filters.window" :items="windowItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Instance"><USelectMenu v-model="filters.instance_id" :items="instanceItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Endpoint"><USelectMenu v-model="filters.endpoint" :items="endpointItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="API key ID"><UInput v-model="filters.api_key_id" class="w-full font-mono" placeholder="Key ID" /></UFormField>
+            <UFormField label="Result"><USelectMenu v-model="filters.result" :items="resultItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="HTTP status"><UInput v-model="filters.status_code" type="number" min="100" max="599" class="w-full font-mono tabular-nums" placeholder="Any status" /></UFormField>
+            <UFormField label="Streaming"><USelectMenu v-model="filters.streaming" :items="streamingItems" label-key="label" value-key="value" class="w-full" /></UFormField>
+            <UFormField label="Search"><UInput v-model="filters.search" class="w-full font-mono" icon="i-lucide-search" placeholder="Request ID, session, trace, model…" @keyup.enter="applyFilters" /></UFormField>
+          </div>
+          <div class="mt-4 flex justify-end"><AppButton data-testid="apply-request-log-filters" intent="primary" :loading="loading" @click="applyFilters">Apply filters</AppButton></div>
+        </template>
+      </UCollapsible>
+    </Frame>
+
+    <Frame data-testid="request-log-table">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-divider)] px-4 py-3">
+        <div>
+          <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST HISTORY</p>
+          <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ traceID ? 'Oldest first for this trace.' : 'Newest first.' }} Full payloads load only for the selected request.</p>
+        </div>
+        <StatusTag variant="neutral"><span class="font-mono tabular-nums">{{ requests.length }} rows</span></StatusTag>
+      </div>
+
+      <div v-if="!loading && !requests.length" class="p-8 text-center">
+        <p class="font-heading text-lg font-semibold text-[var(--color-text)]">No matching requests</p>
+        <p class="mt-2 text-sm text-[var(--neutral-800)]">Adjust the filters or send inference traffic through the gateway.</p>
+      </div>
+      <div v-else class="overflow-x-auto" role="region" aria-label="Request history table. Scroll horizontally to view all columns on small screens." tabindex="0">
+        <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]" :ui="{ tbody: '[&>tr]:cursor-pointer' }" @select="onRequestRowSelect">
+          <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatTime(row.original.started_at) }}</span></template>
+          <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>
           <template #model_name-cell="{ row }"><span class="text-xs font-semibold">{{ requestModelName(row.original) }}</span></template>
-          <template #instance_id-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.instance_id || '—' }}</span></template>
-          <template #api_key-cell="{ row }"><span class="text-xs text-muted">{{ requestKeyAlias(row.original) }}</span></template>
-          <template #duration_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs">{{ formatDuration(row.original.duration_ms) }}</span></template>
-          <template #ttft_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs text-muted">{{ formatDuration(row.original.ttft_ms) }}</span></template>
-          <template #total_tokens-cell="{ row }"><span class="font-mono text-xs">{{ row.original.total_tokens || '—' }}</span></template>
-          <template #prompt_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs text-muted">{{ formatRate(row.original.prompt_tokens_per_second) }}</span></template>
-          <template #generation_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs text-muted">{{ formatRate(row.original.generation_tokens_per_second) }}</span></template>
-          <template #call_type-cell="{ row }"><span class="text-xs text-muted">{{ callTypeLabel(row.original.call_type) }}</span></template>
-          <template #request_id-cell="{ row }"><UButton v-if="row.original.request_id" data-testid="request-detail-trigger" color="neutral" variant="link" size="xs" class="font-mono" @click="openRequest(row.original)">{{ shortID(row.original.request_id, 20) }}</UButton><span v-else>—</span></template>
-          <template #session_id-cell="{ row }"><UButton v-if="sessionCount(row.original) > 1" color="neutral" variant="soft" size="xs" @click="openRequest(row.original)">{{ sessionCount(row.original) }} requests</UButton><span v-else-if="row.original.session_id" class="font-mono text-xs text-muted">{{ shortID(row.original.session_id) }}</span><span v-else>—</span></template>
-          <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-muted">{{ row.original.endpoint }}</span></template>
+          <template #instance_id-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.instance_id || '—' }}</span></template>
+          <template #api_key-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ requestKeyAlias(row.original) }}</span></template>
+          <template #duration_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatDuration(row.original.duration_ms) }}</span></template>
+          <template #ttft_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatDuration(row.original.ttft_ms) }}</span></template>
+          <template #total_tokens-cell="{ row }"><span class="font-mono text-xs tabular-nums">{{ row.original.total_tokens || '—' }}</span></template>
+          <template #prompt_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatRate(row.original.prompt_tokens_per_second) }}</span></template>
+          <template #generation_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatRate(row.original.generation_tokens_per_second) }}</span></template>
+          <template #call_type-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ callTypeLabel(row.original.call_type) }}</span></template>
+          <template #request_id-cell="{ row }"><AppButton v-if="row.original.request_id" data-testid="request-detail-trigger" intent="ghost" size="xs" class="font-mono" @click.stop="openRequest(row.original)">{{ shortID(row.original.request_id, 20) }}</AppButton><span v-else>—</span></template>
+          <template #session_id-cell="{ row }"><span v-if="row.original.session_id" class="font-mono text-xs text-[var(--neutral-800)]">{{ shortID(row.original.session_id) }}</span><span v-else>—</span></template>
+          <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.endpoint }}</span></template>
         </UTable>
       </div>
-      <template #footer><div class="flex items-center justify-between"><span class="text-xs text-muted">Rows {{ requests.length ? offset + 1 : 0 }}–{{ offset + requests.length }}</span><div class="flex gap-2"><UButton color="neutral" variant="soft" size="sm" :disabled="offset === 0 || loading" @click="previousPage">Previous</UButton><UButton color="neutral" variant="soft" size="sm" :disabled="!hasMore || loading" @click="nextPage">Next</UButton></div></div></template>
-    </UCard>
 
-    <USlideover v-model:open="detailOpen" side="right" title="Request Details" data-testid="request-detail-slideover" :ui="{ content: 'sm:max-w-[min(92vw,1400px)]' }">
+      <div class="flex items-center justify-between border-t border-[var(--color-divider)] px-4 py-3">
+        <span class="font-mono text-xs tabular-nums text-[var(--neutral-800)]">Rows {{ requests.length ? offset + 1 : 0 }}–{{ offset + requests.length }}</span>
+        <div class="flex gap-2"><AppButton intent="secondary" size="sm" :disabled="offset === 0 || loading" @click="previousPage">Previous</AppButton><AppButton intent="secondary" size="sm" :disabled="!hasMore || loading" @click="nextPage">Next</AppButton></div>
+      </div>
+    </Frame>
+
+    <USlideover v-model:open="detailOpen" side="right" title="Request Details" data-testid="request-detail-slideover" :ui="{ content: 'sm:max-w-[min(92vw,1400px)] rounded-none' }">
       <template #body>
         <div class="flex min-h-[76vh] min-w-0">
-          <aside v-if="(detail || sessionRequests.length) && sessionSidebarOpen" data-testid="request-sidebar" class="w-72 shrink-0 border-r border-default pr-4">
+          <aside v-if="(detail || sessionRequests.length) && sessionSidebarOpen" data-testid="request-sidebar" class="w-72 shrink-0 border-r border-[var(--color-divider)] pr-4">
             <div class="mb-4 flex items-start justify-between gap-2">
               <div class="min-w-0">
-                <p class="text-sm font-semibold">Request</p>
-                <p class="mt-1 text-xs text-muted">{{ sidebarTotalCount }} {{ sidebarTotalCount === 1 ? 'request' : 'requests' }} · {{ formatDuration(sidebarDuration) }}</p>
-                <p v-if="activeSessionID" class="mt-1 truncate font-mono text-[10px] text-dimmed" :title="activeSessionID">Session ID: {{ activeSessionID }}</p>
+                <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SESSION / REQUEST</p>
+                <p class="mt-1 text-sm font-semibold text-[var(--color-text)]">{{ sidebarTotalCount }} {{ sidebarTotalCount === 1 ? 'request' : 'requests' }}</p>
+                <p class="mt-1 font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatDuration(sidebarDuration) }}</p>
+                <p v-if="activeSessionID" class="mt-2 break-all font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]" :title="activeSessionID">{{ activeSessionID }}</p>
               </div>
-              <UButton color="neutral" variant="ghost" size="xs" icon="i-lucide-chevron-right" aria-label="Collapse session sidebar" @click="sessionSidebarOpen = false" />
+              <AppButton intent="ghost" size="xs" icon="i-lucide-chevron-right" aria-label="Collapse session sidebar" @click="sessionSidebarOpen = false" />
             </div>
             <USelectMenu v-if="activeSessionID && sessionRequests.length > 1" v-model="sessionSortMode" :items="sessionSortItems" label-key="label" value-key="value" class="mb-3 w-full" />
-            <UAlert v-if="sessionError" color="error" variant="subtle" title="Session unavailable" :description="sessionError" class="mb-3" />
-            <UAlert v-if="sessionTruncated" color="warning" variant="subtle" title="Session truncated" :description="`Showing ${sessionRequests.length} of ${sessionTotalCount} retained requests.`" class="mb-3" />
+            <div v-if="sessionError" class="mb-3 flex items-start gap-2 border border-[var(--color-divider)] p-3 text-xs" data-testid="request-session-error"><StatusTag variant="failed">Session unavailable</StatusTag><p class="min-w-0 flex-1 leading-5 text-[var(--neutral-800)]">{{ sessionError }}</p></div>
+            <div v-if="sessionTruncated" class="mb-3 flex items-start gap-2 border border-[var(--color-divider)] p-3 text-xs" data-testid="request-session-truncated"><StatusTag variant="pending">Session truncated</StatusTag><p class="min-w-0 flex-1 leading-5 text-[var(--neutral-800)]">Showing {{ sessionRequests.length }} of {{ sessionTotalCount }} retained requests.</p></div>
             <USkeleton v-if="activeSessionID && sessionLoading" class="h-32 w-full" />
             <UScrollArea v-else class="h-[calc(100vh-13rem)] pr-1">
-              <div class="space-y-1">
-                <UButton
+              <div class="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
+                <button
                   v-for="item in sidebarRequests"
                   :key="item.request_id || item.id"
-                  color="neutral"
-                  :variant="detail?.request_id === item.request_id ? 'soft' : 'ghost'"
-                  class="h-auto w-full justify-start px-2 py-2 text-left"
+                  type="button"
+                  class="block w-full px-2 py-3 text-left transition-colors"
+                  :class="detail?.request_id === item.request_id ? 'bg-[var(--accent-100)]' : 'hover:bg-[var(--neutral-100)]'"
                   @click="selectSessionRequest(item)"
                 >
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="truncate text-xs font-medium">{{ item.call_type || 'request' }}</span>
-                      <UBadge :color="isPending(item) ? 'neutral' : item.result === 'success' ? 'success' : 'error'" variant="subtle" size="sm" class="ml-auto">{{ resultLabel(item) }}</UBadge>
-                    </div>
-                    <p class="mt-1 truncate font-mono text-[10px] text-dimmed">{{ shortID(item.request_id, 26) }}</p>
-                    <p class="mt-1 truncate text-[10px] text-muted">{{ requestModelName(item) }}</p>
-                    <p class="mt-1 text-[10px] text-dimmed">{{ formatDuration(item.duration_ms) }} · {{ item.total_tokens || 0 }} tok · {{ formatTime(item.started_at) }}</p>
+                  <div class="flex items-center gap-2">
+                    <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ item.call_type || 'request' }}</span>
+                    <StatusTag :variant="isPending(item) ? 'neutral' : item.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(item) }}</StatusTag>
                   </div>
-                </UButton>
+                  <p class="mt-1 truncate font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ shortID(item.request_id, 26) }}</p>
+                  <p class="mt-1 truncate text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">{{ requestModelName(item) }}</p>
+                  <p class="mt-1 font-mono text-[length:var(--font-size-kicker)] tabular-nums text-[var(--neutral-700)]">{{ formatDuration(item.duration_ms) }} · {{ item.total_tokens || 0 }} tok · {{ formatTime(item.started_at) }}</p>
+                </button>
               </div>
             </UScrollArea>
           </aside>
 
           <div class="min-w-0 flex-1" :class="(detail || sessionRequests.length) && sessionSidebarOpen ? 'pl-6' : ''">
-            <div v-if="(detail || sessionRequests.length) && !sessionSidebarOpen" class="mb-3"><UButton color="neutral" variant="soft" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">{{ activeSessionID ? 'Show session requests' : 'Show requests' }}</UButton></div>
-            <div class="space-y-5">
+            <div v-if="(detail || sessionRequests.length) && !sessionSidebarOpen" class="mb-3"><AppButton intent="secondary" size="xs" icon="i-lucide-chevron-left" @click="sessionSidebarOpen = true">{{ activeSessionID ? 'Show session requests' : 'Show requests' }}</AppButton></div>
+            <div class="space-y-0">
               <USkeleton v-if="detailLoading" class="h-40 w-full" />
-              <UAlert v-else-if="detailError" color="error" variant="subtle" title="Request details unavailable" :description="detailError" />
+              <div v-else-if="detailError" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3" data-testid="request-detail-error"><StatusTag variant="failed">Request details unavailable</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detailError }}</p></div>
               <template v-else-if="detail">
-                <UAlert
-                  v-if="detail.result === 'error'"
-                  data-testid="request-failure-banner"
-                  color="error"
-                  variant="subtle"
-                  title="Request Failed"
-                  :description="detail.error || `HTTP ${detail.status_code || 'error'}`"
-                />
+                <div v-if="detail.result === 'error'" data-testid="request-failure-banner" class="flex flex-wrap items-start gap-2 border-y border-[var(--color-divider)] px-4 py-3">
+                  <StatusTag variant="failed">Request Failed</StatusTag>
+                  <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ detail.error || `HTTP ${detail.status_code || 'error'}` }}</p>
+                </div>
 
-                <UCard data-testid="request-detail-overview" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
-                  <template #header>
-                    <div class="flex items-center justify-between gap-3">
-                      <h3 class="text-sm font-semibold">Request Details</h3>
-                      <UBadge :color="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'success' : 'error'" variant="subtle">{{ resultLabel(detail) }}</UBadge>
-                    </div>
-                    <p v-if="isPending(detail)" class="mt-2 text-xs text-muted">The request is still in progress.</p>
-                  </template>
+                <section data-testid="request-detail-overview" class="border-b border-[var(--color-divider)] py-5">
+                  <div class="mb-4 flex items-center justify-between gap-3">
+                    <div><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request Details</h3></div>
+                    <StatusTag :variant="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(detail) }}</StatusTag>
+                  </div>
+                  <p v-if="isPending(detail)" class="mb-3 text-xs text-[var(--neutral-800)]">The request is still in progress.</p>
                   <div data-testid="request-detail-overview-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Model:</dt><dd class="min-w-0 break-words">{{ requestModelName(detail) }}</dd>
-                      <dt class="text-muted">Call Type:</dt><dd>{{ detail.call_type || '—' }}</dd>
-                      <dt class="text-muted">Endpoint:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.endpoint }}</dd>
-                      <dt class="text-muted">Streaming:</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd>
-                      <dt class="text-muted">Key Alias:</dt><dd>{{ requestKeyAlias(detail) }}</dd>
-                      <dt class="text-muted">Request ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.request_id }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Model</dt><dd class="min-w-0 break-words">{{ requestModelName(detail) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Call Type</dt><dd>{{ detail.call_type || '—' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Endpoint</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.endpoint }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Streaming</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Key Alias</dt><dd>{{ requestKeyAlias(detail) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Request ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.request_id }}</dd>
                     </dl>
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Instance ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.instance_id || 'Unresolved' }}</dd>
-                      <dt class="text-muted">Model ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.model_id || '—' }}</dd>
-                      <dt class="text-muted">Session ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.session_id || '—' }}</dd>
-                      <dt class="text-muted">Trace ID:</dt><dd class="min-w-0 break-all font-mono text-xs text-muted">{{ detail.trace_id || '—' }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Instance ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.instance_id || 'Unresolved' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Model ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.model_id || '—' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Session ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.session_id || '—' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Trace ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.trace_id || '—' }}</dd>
                     </dl>
                   </div>
-                </UCard>
+                </section>
 
-                <UCard data-testid="request-detail-metrics" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
-                  <template #header><h3 class="text-sm font-semibold">Metrics</h3></template>
+                <section data-testid="request-detail-metrics" class="border-b border-[var(--color-divider)] py-5">
+                  <div class="mb-4"><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PERFORMANCE</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Metrics</h3></div>
                   <div data-testid="request-detail-metrics-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Tokens:</dt><dd><span class="font-mono">{{ detail.total_tokens }}</span> <span class="text-muted">({{ detail.prompt_tokens }} prompt + {{ detail.generated_tokens }} completion)</span></dd>
-                      <dt class="text-muted">Duration:</dt><dd class="font-mono">{{ formatDuration(detail.duration_ms) }}</dd>
-                      <dt class="text-muted">Prompt Processing:</dt><dd class="font-mono">{{ formatRate(detail.prompt_tokens_per_second) }}</dd>
-                      <dt class="text-muted">Queue Time:</dt><dd class="font-mono">{{ formatDuration(detail.queue_duration_ms) }}</dd>
-                      <dt class="text-muted">Start Time:</dt><dd>{{ formatTime(detail.started_at) }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Tokens</dt><dd><span class="font-mono tabular-nums">{{ detail.total_tokens }}</span> <span class="text-[var(--neutral-800)]">({{ detail.prompt_tokens }} prompt + {{ detail.generated_tokens }} completion)</span></dd>
+                      <dt class="text-[var(--neutral-700)]">Duration</dt><dd class="font-mono tabular-nums">{{ formatDuration(detail.duration_ms) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Prompt Processing</dt><dd class="font-mono tabular-nums">{{ formatRate(detail.prompt_tokens_per_second) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Queue Time</dt><dd class="font-mono tabular-nums">{{ formatDuration(detail.queue_duration_ms) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Start Time</dt><dd class="font-mono tabular-nums">{{ formatTime(detail.started_at) }}</dd>
                     </dl>
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Time to First Token:</dt><dd class="font-mono">{{ formatDuration(detail.ttft_ms) }}</dd>
-                      <dt class="text-muted">Generation Speed:</dt><dd class="font-mono">{{ formatRate(detail.generation_tokens_per_second) }}</dd>
-                      <dt class="text-muted">Load Time:</dt><dd class="font-mono">{{ formatDuration(detail.load_duration_ms) }}</dd>
-                      <dt class="text-muted">End Time:</dt><dd>{{ formatTime(detail.finished_at) }}</dd>
-                      <dt class="text-muted">Autoloaded:</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Time to First Token</dt><dd class="font-mono tabular-nums">{{ formatDuration(detail.ttft_ms) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Generation Speed</dt><dd class="font-mono tabular-nums">{{ formatRate(detail.generation_tokens_per_second) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Load Time</dt><dd class="font-mono tabular-nums">{{ formatDuration(detail.load_duration_ms) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">End Time</dt><dd class="font-mono tabular-nums">{{ formatTime(detail.finished_at) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Autoloaded</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
                     </dl>
                   </div>
-                </UCard>
+                </section>
 
-                <UCard data-testid="request-detail-content" :ui="{ header: 'p-4 sm:px-4', body: 'p-0' }">
-                  <template #header>
-                    <div class="flex items-center justify-between gap-3">
-                      <h3 class="text-sm font-semibold">Request &amp; Response</h3>
-                      <div v-if="detail.request_body || detail.response_body" class="flex gap-1">
-                        <UButton size="xs" :variant="detailMode === 'pretty' ? 'solid' : 'soft'" @click="detailMode = 'pretty'">Pretty</UButton>
-                        <UButton size="xs" :variant="detailMode === 'json' ? 'solid' : 'soft'" @click="detailMode = 'json'">JSON</UButton>
+                <section data-testid="request-detail-content" class="border-b border-[var(--color-divider)] py-5">
+                  <div class="mb-4 flex items-center justify-between gap-3">
+                    <div><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">PAYLOAD</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request &amp; Response</h3></div>
+                    <div v-if="detail.request_body || detail.response_body" class="flex gap-1">
+                      <AppButton size="xs" :intent="detailMode === 'pretty' ? 'primary' : 'secondary'" @click="detailMode = 'pretty'">Pretty</AppButton>
+                      <AppButton size="xs" :intent="detailMode === 'json' ? 'primary' : 'secondary'" @click="detailMode = 'json'">JSON</AppButton>
+                    </div>
+                  </div>
+                  <div v-if="!detail.request_body && !detail.response_body" class="border-l-2 border-[var(--color-divider)] pl-3 text-sm">
+                    <p class="font-semibold">Content not recorded</p>
+                    <p class="mt-1 text-[var(--neutral-800)]">This request used metadata-only logging, so request and response payloads were not retained.</p>
+                  </div>
+                  <template v-else-if="detailMode === 'pretty'">
+                    <div v-if="requestMessages.length" class="space-y-3">
+                      <div class="flex items-center gap-2"><UIcon name="i-lucide-message-square" class="text-[var(--neutral-700)]" /><p class="text-sm font-semibold">Input</p><span class="font-mono text-xs tabular-nums text-[var(--neutral-800)]">Tokens: {{ detail.prompt_tokens }}</span></div>
+                      <div v-for="(message, index) in requestMessages" :key="index" class="border-t border-[var(--color-divider)] pt-3 first:border-t-0 first:pt-0">
+                        <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-wide text-[var(--neutral-700)]">{{ message.role || 'message' }}</p>
+                        <pre class="mt-1 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2) }}</pre>
                       </div>
                     </div>
+                    <div v-if="requestTools.length" class="mt-4 border-t border-[var(--color-divider)] pt-4"><p class="text-xs font-semibold uppercase text-[var(--neutral-700)]">Tools</p><pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ JSON.stringify(requestTools, null, 2) }}</pre></div>
+                    <div v-if="responseToolCalls.length" class="mt-4 border-t border-[var(--color-divider)] pt-4"><p class="text-xs font-semibold uppercase text-[var(--neutral-700)]">Response tool calls</p><pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ JSON.stringify(responseToolCalls, null, 2) }}</pre></div>
+                    <div v-if="!requestMessages.length" class="space-y-2"><p class="text-sm font-semibold">Input <span class="ml-2 font-mono text-xs font-normal tabular-nums text-[var(--neutral-800)]">Tokens: {{ detail.prompt_tokens }}</span></p><pre class="whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
+                    <div class="mt-4 border-t border-[var(--color-divider)] pt-4"><p class="text-sm font-semibold">Output <span class="ml-2 font-mono text-xs font-normal tabular-nums text-[var(--neutral-800)]">Tokens: {{ detail.generated_tokens }}</span></p><pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
                   </template>
-                  <div class="p-4">
-                    <UAlert v-if="!detail.request_body && !detail.response_body" color="neutral" variant="subtle" title="Content not recorded" description="This request used metadata-only logging, so request and response payloads were not retained." />
-                    <template v-else-if="detailMode === 'pretty'">
-                      <div v-if="requestMessages.length" class="space-y-3">
-                        <div class="flex items-center gap-2"><UIcon name="i-lucide-message-square" class="text-muted" /><p class="text-sm font-semibold">Input</p><span class="text-xs text-muted">Tokens: {{ detail.prompt_tokens }}</span></div>
-                        <div v-for="(message, index) in requestMessages" :key="index" class="border-t border-default pt-3 first:border-t-0 first:pt-0">
-                          <p class="text-[10px] font-semibold uppercase tracking-wide text-dimmed">{{ message.role || 'message' }}</p>
-                          <pre class="mt-1 whitespace-pre-wrap text-xs text-muted">{{ typeof message.content === 'string' ? message.content : JSON.stringify(message.content, null, 2) }}</pre>
-                        </div>
-                      </div>
-                      <div v-if="requestTools.length" class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Tools</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(requestTools, null, 2) }}</pre></div>
-                      <div v-if="responseToolCalls.length" class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Response tool calls</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ JSON.stringify(responseToolCalls, null, 2) }}</pre></div>
-                      <div v-if="!requestMessages.length" class="space-y-2"><p class="text-sm font-semibold">Input <span class="ml-2 text-xs font-normal text-muted">Tokens: {{ detail.prompt_tokens }}</span></p><pre class="whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
-                      <div class="mt-4 border-t border-default pt-4"><p class="text-sm font-semibold">Output <span class="ml-2 text-xs font-normal text-muted">Tokens: {{ detail.generated_tokens }}</span></p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
-                    </template>
-                    <template v-else>
-                      <div><p class="text-xs font-semibold uppercase text-dimmed">Request JSON</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
-                      <div class="mt-4 border-t border-default pt-4"><p class="text-xs font-semibold uppercase text-dimmed">Response JSON</p><pre class="mt-2 whitespace-pre-wrap text-xs text-muted">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
-                    </template>
-                  </div>
-                </UCard>
+                  <template v-else>
+                    <div><p class="text-xs font-semibold uppercase text-[var(--neutral-700)]">Request JSON</p><pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ prettyBody(detail.request_body) || '—' }}</pre></div>
+                    <div class="mt-4 border-t border-[var(--color-divider)] pt-4"><p class="text-xs font-semibold uppercase text-[var(--neutral-700)]">Response JSON</p><pre class="mt-2 whitespace-pre-wrap font-mono text-xs text-[var(--neutral-800)]">{{ prettyBody(detail.response_body) || '—' }}</pre></div>
+                  </template>
+                </section>
 
-                <UCard data-testid="request-detail-client-metadata" :ui="{ header: 'p-4 sm:px-4', body: 'p-4 sm:p-4' }">
-                  <template #header><h3 class="text-sm font-semibold">Client Metadata</h3></template>
+                <section data-testid="request-detail-client-metadata" class="py-5">
+                  <div class="mb-4"><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CLIENT</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Client Metadata</h3></div>
                   <div class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Client IP:</dt><dd class="font-mono text-xs text-muted">{{ detail.client_ip || '—' }}</dd>
-                      <dt class="text-muted">User-Agent:</dt><dd class="min-w-0 break-words text-xs text-muted">{{ detail.user_agent || '—' }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Client IP</dt><dd class="font-mono text-xs">{{ detail.client_ip || '—' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">User-Agent</dt><dd class="min-w-0 break-words text-xs">{{ detail.user_agent || '—' }}</dd>
                     </dl>
-                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-2 gap-y-2.5 text-sm">
-                      <dt class="text-muted">Autoloaded:</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
+                    <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
+                      <dt class="text-[var(--neutral-700)]">Autoloaded</dt><dd>{{ detail.autoloaded ? 'True' : 'False' }}</dd>
                     </dl>
                   </div>
-                </UCard>
+                </section>
               </template>
             </div>
           </div>

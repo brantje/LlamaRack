@@ -10,7 +10,9 @@ type MemoryEstimate = { weights_bytes: number; kv_cache_bytes: number; runtime_o
 type Offload = { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
 type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
 type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
-type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; artifacts: ArtifactAdvice[] }
+type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; assume_idle?: boolean; artifacts: ArtifactAdvice[] }
+
+const ASSUME_IDLE_STORAGE_KEY = 'llamacpp-manager-discover-assume-idle'
 
 const props = defineProps<{ repoId?: string }>()
 const manager = useManager()
@@ -34,11 +36,23 @@ const downloadNotice = ref('')
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 const contextIndex = ref(0)
 const contextExplicit = ref(false)
+const assumeIdle = ref(readAssumeIdlePreference())
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let recommendationTimer: ReturnType<typeof setTimeout> | undefined
 let searchVersion = 0
 let recommendationVersion = 0
 let loadObserver: IntersectionObserver | undefined
+
+function readAssumeIdlePreference(): boolean {
+  if (!import.meta.client) return true
+  try {
+    const raw = localStorage.getItem(ASSUME_IDLE_STORAGE_KEY)
+    if (raw === 'false') return false
+  } catch {
+    return true
+  }
+  return true
+}
 
 const repoID = computed(() => String(props.repoId || '').trim())
 const isDetail = computed(() => Boolean(repoID.value))
@@ -263,6 +277,7 @@ async function loadRecommendations(contextLength?: number) {
   recommendationError.value = ''
   const params = new URLSearchParams({ repo: repoID.value })
   if (contextLength && contextLength > 0) params.set('context_length', String(contextLength))
+  params.set('assume_idle', assumeIdle.value ? 'true' : 'false')
   try {
     const value = await manager.request<DiscoverRecommendations>(`/api/v1/huggingface/recommendations?${params.toString()}`)
     if (version !== recommendationVersion) return
@@ -285,6 +300,20 @@ function selectContext(value: number | number[]) {
     recommendationTimer = undefined
     void loadRecommendations(contextOptions.value[index])
   }, 250)
+}
+function setAssumeIdle(value: boolean | 'indeterminate') {
+  const next = value === true
+  assumeIdle.value = next
+  if (import.meta.client) {
+    try {
+      localStorage.setItem(ASSUME_IDLE_STORAGE_KEY, next ? 'true' : 'false')
+    } catch {
+      // Web Storage can throw in private mode; still refresh recommendations.
+    }
+  }
+  if (!repoID.value) return
+  clearRecommendationDebounce()
+  void loadRecommendations(recommendations.value ? selectedContext.value : undefined)
 }
 
 async function openModel(id: string) {
@@ -356,171 +385,285 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="space-y-5">
-    <UPageHeader headline="HUGGING FACE" title="Discover" description="Search GGUF repositories, compare quantizations in plain language and choose the best fit for this manager." />
+  <div class="space-y-5" data-testid="models-discover">
+    <div v-if="!isDetail" class="flex flex-wrap items-start justify-between gap-4">
+      <UPageHeader
+        class="min-w-0 flex-1"
+        headline="MODEL REGISTRY"
+        title="Discover"
+        description="Search Hugging Face GGUF repositories and choose an artifact that fits this manager's hardware."
+      />
+      <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-list-actions">
+        <AppButton intent="secondary" to="/downloads">View downloads</AppButton>
+        <AppButton intent="secondary" to="/models">Registered models</AppButton>
+      </div>
+    </div>
 
-    <UCard>
-      <UForm :state="{}" class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto]" @submit="search">
-        <UFormField label="Search" name="search"><UInput v-model="query" class="w-full" placeholder="Qwen, Llama, Gemma… or Hugging Face URL" icon="i-lucide-search" /></UFormField>
-        <UFormField label="Author / organization" name="author"><UInput v-model="author" class="w-full" placeholder="Optional" /></UFormField>
-        <UFormField label="Sort" name="sort"><USelect v-model="sort" class="w-full" :items="sortOptions" value-key="value" /></UFormField>
-        <div class="flex items-end"><UButton class="w-full justify-center" type="submit" :loading="loading">Search</UButton></div>
-      </UForm>
-    </UCard>
+    <UForm
+      v-if="!isDetail"
+      :state="{}"
+      class="grid gap-3 border-y border-[var(--color-divider)] py-4 lg:grid-cols-[minmax(0,1fr)_220px_220px]"
+      data-testid="discover-search-row"
+      @submit="search"
+    >
+      <UFormField label="Search" name="search">
+        <UInput v-model="query" class="w-full" placeholder="Qwen, Llama, Gemma… or Hugging Face URL" icon="i-lucide-search" />
+      </UFormField>
+      <UFormField label="Author / organization" name="author">
+        <UInput v-model="author" class="w-full" placeholder="Optional" />
+      </UFormField>
+      <UFormField label="Sort" name="sort">
+        <USelect v-model="sort" class="w-full" :items="sortOptions" value-key="value" />
+      </UFormField>
+      <p class="text-xs leading-5 text-[var(--neutral-700)] lg:col-span-3">Results update automatically as you type. Press Enter to search immediately.</p>
+    </UForm>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="downloadNotice" color="success" variant="subtle" :description="downloadNotice" />
-    <div v-if="loading && !results.length && !isDetail" class="grid gap-3 xl:grid-cols-2"><USkeleton v-for="n in 6" :key="n" class="h-36 w-full rounded-xl" /></div>
-    <UEmpty v-else-if="!isDetail && !results.length" icon="i-lucide-search" title="Search Hugging Face" description="Only repositories tagged for GGUF are returned. Results load automatically and update as you search." />
+    <Frame v-if="error && !(isDetail && !selected)" class="border-[var(--accent-800)] p-4 text-sm text-[var(--accent-900)]" data-testid="discover-error">
+      {{ error }}
+    </Frame>
+    <Frame v-if="downloadNotice" class="p-4 text-sm text-[var(--neutral-900)]" data-testid="discover-download-notice">
+      {{ downloadNotice }}
+    </Frame>
+
+    <div v-if="loading && !results.length && !isDetail" class="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]" data-testid="discover-loading">
+      <div v-for="n in 6" :key="n" class="grid min-h-20 gap-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div class="space-y-2"><USkeleton class="h-4 w-1/3" /><USkeleton class="h-3 w-2/3" /></div>
+        <USkeleton class="h-8 w-28" />
+      </div>
+    </div>
+
+    <Frame v-else-if="!isDetail && !results.length" class="p-8 text-center" data-testid="discover-empty">
+      <p class="font-heading text-lg font-semibold text-[var(--color-text)]">Search Hugging Face</p>
+      <p class="mt-2 text-sm text-[var(--neutral-800)]">Only repositories tagged for GGUF are returned. Results load automatically and update as you search.</p>
+    </Frame>
 
     <template v-else-if="!isDetail">
-      <div class="grid gap-3 xl:grid-cols-2">
-        <UCard v-for="item in results" :key="item.id" class="cursor-pointer transition hover:ring-1 hover:ring-primary" @click="goToModel(item.id)">
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0">
-              <h2 class="truncate text-base font-bold text-highlighted">{{ item.id }}</h2>
-              <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-                <span v-if="item.parameter_count">Model size {{ formatParameters(item.parameter_count) }}</span>
-                <span v-if="formatUpdated(item.last_modified)">{{ formatUpdated(item.last_modified) }}</span>
-                <span>↓ {{ item.downloads.toLocaleString() }}</span>
-                <span>♡ {{ item.likes.toLocaleString() }}</span>
-              </div>
+      <div class="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]" data-testid="discover-results">
+        <div
+          v-for="item in results"
+          :key="item.id"
+          class="grid cursor-pointer gap-4 px-1 py-4 transition-colors hover:bg-[var(--neutral-100)] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+          data-testid="discover-repository-row"
+          @click="goToModel(item.id)"
+        >
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="truncate font-mono text-[length:var(--font-size-h5)] font-semibold text-[var(--color-text)]">{{ item.id }}</span>
+              <StatusTag v-if="item.private" variant="pending">Private</StatusTag>
+              <StatusTag v-if="item.gated" variant="pending">Gated</StatusTag>
+              <StatusTag variant="neutral">GGUF</StatusTag>
             </div>
-            <div class="flex gap-2"><UBadge v-if="item.private" color="warning" variant="subtle">Private</UBadge><UBadge v-if="item.gated" color="warning" variant="subtle">Gated</UBadge><UBadge color="primary" variant="subtle">GGUF</UBadge></div>
+            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">
+              <span v-if="item.author">Author <span class="font-mono text-[var(--neutral-900)]">{{ item.author }}</span></span>
+              <span v-if="item.parameter_count" class="font-mono tabular-nums">{{ formatParameters(item.parameter_count) }}</span>
+              <span class="font-mono tabular-nums">↓ {{ item.downloads.toLocaleString() }}</span>
+              <span class="font-mono tabular-nums">♡ {{ item.likes.toLocaleString() }}</span>
+              <span v-if="formatUpdated(item.last_modified)" class="font-mono tabular-nums">{{ formatUpdated(item.last_modified) }}</span>
+            </div>
           </div>
-          <div class="mt-4 flex flex-wrap gap-1.5"><UBadge v-for="tag in (item.tags || []).slice(0, 5)" :key="tag" color="neutral" variant="soft">{{ tag }}</UBadge></div>
-        </UCard>
+          <AppButton intent="ghost" size="sm" @click.stop="goToModel(item.id)">View artifacts</AppButton>
+        </div>
       </div>
-      <div v-if="nextCursor || loadingMore" ref="loadMoreSentinel" class="flex min-h-14 items-center justify-center py-2 text-sm text-muted" data-testid="discover-load-more-sentinel">
+
+      <div v-if="nextCursor || loadingMore" ref="loadMoreSentinel" class="flex min-h-14 items-center justify-center py-2 text-sm text-[var(--neutral-800)]" data-testid="discover-load-more-sentinel">
         <span v-if="loadingMore" class="flex items-center gap-2"><UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />Loading more models…</span>
       </div>
     </template>
 
-    <div v-if="isDetail && detailLoading" class="space-y-3"><USkeleton class="h-32 w-full rounded-xl" /><USkeleton class="h-64 w-full rounded-xl" /></div>
+    <div v-if="isDetail && detailLoading" class="space-y-3" data-testid="discover-detail-loading">
+      <USkeleton class="h-24 w-full" />
+      <USkeleton class="h-52 w-full" />
+    </div>
+
+    <Frame v-else-if="isDetail && error && !selected" class="border-[var(--accent-800)] p-5" data-testid="discover-detail-error">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <StatusTag variant="failed">Repository unavailable</StatusTag>
+          <p class="mt-3 break-all font-mono text-[length:var(--font-size-h6)] font-semibold text-[var(--color-text)]">{{ repoID }}</p>
+          <p class="mt-2 text-sm leading-6 text-[var(--neutral-800)]">{{ error }}</p>
+        </div>
+        <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+          <AppButton data-testid="discover-detail-back" intent="secondary" icon="i-lucide-arrow-left" @click="backToResults">Back to Discover</AppButton>
+          <AppButton data-testid="discover-detail-retry" intent="primary" :loading="detailLoading" @click="openModel(repoID)">Retry</AppButton>
+        </div>
+      </div>
+    </Frame>
+
     <template v-else-if="isDetail && selected">
-      <UButton color="neutral" variant="soft" icon="i-lucide-arrow-left" @click="backToResults">Back to results</UButton>
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <UPageHeader
+          class="min-w-0 flex-1"
+          headline="HUGGING FACE"
+          :title="selected.id"
+          :description="selected.description || 'GGUF repository metadata, hardware guidance and downloadable artifacts.'"
+        />
+        <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end" data-testid="discover-detail-actions">
+          <AppButton intent="secondary" icon="i-lucide-arrow-left" @click="backToResults">Back to Discover</AppButton>
+          <AppButton intent="secondary" to="/downloads">View downloads</AppButton>
+        </div>
+      </div>
+
       <ModelsDiscoverRepositoryHeader :model="selected" :recommendations="recommendations" />
 
-      <UAlert v-if="selected.gated" color="warning" variant="subtle" title="Access may require approval" description="A configured Hugging Face token is used only for Hugging Face requests. The manager does not accept licenses or request gated access on your behalf." />
-      <UAlert v-if="recommendationError" color="warning" variant="subtle" title="Hardware guidance unavailable" :description="recommendationError" />
-      <UAlert v-else-if="recommendations && !recommendations.hardware_available" color="neutral" variant="subtle" title="Hardware-aware recommendation unavailable" description="Quantization guidance is still shown, but this manager does not currently have enough hardware telemetry to claim which option will fit." />
+      <Frame v-if="selected.gated" class="border-[var(--accent-700)] p-4 text-sm">
+        <p class="font-semibold text-[var(--color-text)]">Access may require approval</p>
+        <p class="mt-1 text-[var(--neutral-800)]">A configured Hugging Face token is used only for Hugging Face requests. The manager does not accept licenses or request gated access on your behalf.</p>
+      </Frame>
 
-      <UCard>
-        <div class="space-y-5">
+      <Frame class="p-5" data-testid="discover-context-section">
+        <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">GGUF ARTIFACTS</p>
-            <h2 class="text-xl font-bold">Choose a quantization</h2>
-            <p class="mt-1 max-w-4xl text-sm text-muted">Start with the Recommended option when available. Quality, memory use, estimated generation speed and runtime placement are shown separately so the raw quantization label does not have to carry the explanation.</p>
-          </div>
-
-          <div v-if="recommendations" class="border-y border-default py-4" data-testid="discover-context-control">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div class="flex items-center gap-2">
-                  <h3 class="font-semibold">Context size</h3>
-                  <UBadge color="neutral" variant="soft">{{ formatContext(selectedContext) }}</UBadge>
-                  <span v-if="recommendationLoading" class="flex items-center gap-1 text-xs text-muted"><UIcon name="i-lucide-loader-circle" class="size-3.5 animate-spin" />Recalculating</span>
-                </div>
-                <p class="mt-1 text-sm text-muted">Larger context uses more KV-cache memory and can change both hardware fit and estimated generation speed.</p>
-              </div>
-              <span v-if="recommendations.context_capability" class="text-xs text-muted">Detected capability: {{ formatContext(recommendations.context_capability) }}</span>
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CONTEXT + RECOMMENDATION</p>
+            <div class="mt-1 flex flex-wrap items-center gap-2">
+              <h2 class="font-heading text-xl font-semibold text-[var(--color-text)]">Hardware guidance</h2>
+              <StatusTag v-if="recommendations" :variant="recommendations.hardware_available ? 'ready' : 'neutral'">{{ recommendations.hardware_available ? 'Hardware aware' : 'Telemetry limited' }}</StatusTag>
+              <StatusTag v-if="recommendationLoading" variant="pending">Recalculating</StatusTag>
             </div>
-            <USlider :model-value="contextIndex" :min="0" :max="Math.max(0, contextOptions.length - 1)" :step="1" class="mt-4" data-testid="discover-context-slider" @update:model-value="selectContext" />
-            <div class="mt-2 flex justify-between text-xs text-dimmed"><span>{{ formatContext(contextOptions[0] || 4096) }}</span><span>{{ formatContext(contextOptions[contextOptions.length - 1] || 4096) }}</span></div>
-            <UAlert v-if="recommendations.context_assumed && !contextExplicit" class="mt-4" color="warning" variant="subtle" title="Temporary context assumption" description="No context size is configured for this Discover choice yet. Hardware recommendations are using a temporary 4K context assumption. Choose a context size above to make the estimate explicit." />
-            <UAlert v-if="recommendations.metadata_warning" class="mt-4" color="warning" variant="subtle" title="Limited GGUF metadata" :description="recommendations.metadata_warning" />
           </div>
-
-          <p class="text-sm text-muted">Matching vision projectors and MTP draft GGUFs are detected automatically and included with the selected model.</p>
+          <div v-if="recommendations" class="text-right">
+            <p class="text-[length:var(--font-size-kicker)] uppercase tracking-[.08em] text-[var(--neutral-700)]">Selected context</p>
+            <p class="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]">{{ formatContext(selectedContext) }}</p>
+          </div>
         </div>
 
-        <div v-if="!selected.artifacts.length" class="flex items-center gap-3 py-8 text-muted"><UIcon name="i-lucide-file-x" class="size-5" /><span>No GGUF model files found</span></div>
-        <div v-else class="mt-5 divide-y divide-default">
-          <div
-            v-for="artifact in orderedArtifacts"
-            :key="artifact.id"
-            :class="[
-              'grid gap-4 py-5 xl:grid-cols-[minmax(0,1fr)_150px] xl:items-start',
-              artifactAdvice(artifact)?.recommended ? '-mx-3 bg-primary/5 px-3 sm:-mx-4 sm:px-4' : ''
-            ]"
-            :data-testid="`artifact-${artifact.id}`"
-            :data-recommended="artifactAdvice(artifact)?.recommended ? 'true' : undefined"
+        <div v-if="recommendations" class="mt-5" data-testid="discover-context-control">
+          <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold text-[var(--color-text)]">Context size</h3>
+              <p class="mt-1 max-w-3xl text-sm text-[var(--neutral-800)]">Larger context uses more KV-cache memory and can change both hardware fit and estimated generation speed.</p>
+            </div>
+            <span v-if="recommendations.context_capability" class="font-mono text-xs tabular-nums text-[var(--neutral-800)]">Capability {{ formatContext(recommendations.context_capability) }}</span>
+          </div>
+          <USlider :model-value="contextIndex" :min="0" :max="Math.max(0, contextOptions.length - 1)" :step="1" class="mt-4" data-testid="discover-context-slider" @update:model-value="selectContext" />
+          <div class="mt-2 flex justify-between font-mono text-xs tabular-nums text-[var(--neutral-700)]"><span>{{ formatContext(contextOptions[0] || 4096) }}</span><span>{{ formatContext(contextOptions[contextOptions.length - 1] || 4096) }}</span></div>
+        </div>
+
+        <div class="mt-5" data-testid="discover-assume-idle-control">
+          <UFormField
+            label="Assume idle VRAM and RAM"
+            description="Fit, recommendation and estimated speed use installed capacity, not currently used memory."
           >
+            <USwitch
+              :model-value="assumeIdle"
+              data-testid="discover-assume-idle"
+              aria-label="Assume idle VRAM and RAM"
+              :disabled="recommendations != null && !recommendations.hardware_available"
+              @update:model-value="setAssumeIdle"
+            />
+          </UFormField>
+        </div>
+
+        <div v-if="recommendations?.context_assumed && !contextExplicit" class="mt-4 border-l-2 border-[var(--color-accent)] pl-3 text-sm">
+          <p class="font-semibold text-[var(--color-text)]">Temporary context assumption</p>
+          <p class="mt-1 text-[var(--neutral-800)]">No context size is configured for this Discover choice yet. Hardware recommendations are using a temporary 4K context assumption. Choose a context size above to make the estimate explicit.</p>
+        </div>
+        <div v-if="recommendationError" class="mt-4 border-l-2 border-[var(--accent-800)] pl-3 text-sm">
+          <p class="font-semibold text-[var(--color-text)]">Hardware guidance unavailable</p>
+          <p class="mt-1 text-[var(--neutral-800)]">{{ recommendationError }}</p>
+        </div>
+        <div v-else-if="recommendations && !recommendations.hardware_available" class="mt-4 border-l-2 border-[var(--color-divider)] pl-3 text-sm">
+          <p class="font-semibold text-[var(--color-text)]">Hardware-aware recommendation unavailable</p>
+          <p class="mt-1 text-[var(--neutral-800)]">Quantization guidance is still shown, but this manager does not currently have enough hardware telemetry to claim which option will fit.</p>
+        </div>
+        <div v-if="recommendations?.metadata_warning" class="mt-4 border-l-2 border-[var(--color-accent)] pl-3 text-sm">
+          <p class="font-semibold text-[var(--color-text)]">Limited GGUF metadata</p>
+          <p class="mt-1 text-[var(--neutral-800)]">{{ recommendations.metadata_warning }}</p>
+        </div>
+      </Frame>
+
+      <div class="space-y-3" data-testid="discover-artifacts">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">GGUF ARTIFACTS</p>
+            <h2 class="mt-1 font-heading text-xl font-semibold text-[var(--color-text)]">Choose a quantization</h2>
+            <p class="mt-1 max-w-4xl text-sm text-[var(--neutral-800)]">Quality, memory use, estimated generation speed and runtime placement stay separate from the raw quantization label.</p>
+          </div>
+          <p class="text-xs text-[var(--neutral-700)]">Vision projectors and MTP draft GGUFs are attached automatically when detected.</p>
+        </div>
+
+        <Frame v-if="!selected.artifacts.length" class="p-6 text-sm text-[var(--neutral-800)]">
+          No GGUF model files found
+        </Frame>
+
+        <Frame
+          v-for="artifact in orderedArtifacts"
+          v-else
+          :key="artifact.id"
+          class="p-5"
+          :class="artifactAdvice(artifact)?.recommended ? 'border-[var(--color-accent)]' : ''"
+          :data-testid="`artifact-${artifact.id}`"
+          :data-recommended="artifactAdvice(artifact)?.recommended ? 'true' : undefined"
+        >
+          <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_160px] xl:items-start">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <UBadge v-if="artifactAdvice(artifact)?.recommended" color="primary" variant="solid" size="lg" class="font-bold" data-testid="recommended-badge">Recommended</UBadge>
-                <span class="text-base font-semibold" :class="artifactAdvice(artifact)?.recommended ? 'text-primary' : ''">{{ artifactAdvice(artifact)?.quantization.tier || 'Quantization details unavailable' }}</span>
-                <UBadge color="neutral" variant="soft" class="font-mono">{{ artifact.quantization || 'Unknown' }}</UBadge>
-                <UBadge v-if="artifact.shard_count > 1" color="neutral" variant="soft">{{ artifact.shard_count }} shards</UBadge>
-                <UBadge v-if="!artifact.complete" color="error" variant="subtle">Incomplete split</UBadge>
+                <StatusTag v-if="artifactAdvice(artifact)?.recommended" variant="ready" data-testid="recommended-badge">Recommended</StatusTag>
+                <span class="text-base font-semibold text-[var(--color-text)]">{{ artifactAdvice(artifact)?.quantization.tier || 'Quantization details unavailable' }}</span>
+                <StatusTag variant="neutral"><span class="font-mono">{{ artifact.quantization || 'Unknown' }}</span></StatusTag>
+                <StatusTag v-if="artifact.shard_count > 1" variant="neutral">{{ artifact.shard_count }} shards</StatusTag>
+                <StatusTag v-if="!artifact.complete" variant="failed">Incomplete split</StatusTag>
               </div>
-              <p class="mt-1 truncate text-sm text-muted">{{ artifact.name }} · {{ formatBytes(artifact.total_bytes) }}</p>
+              <p class="mt-2 truncate font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ artifact.name }} · {{ formatBytes(artifact.total_bytes) }}</p>
 
-              <dl v-if="artifactAdvice(artifact)" class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
-                <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
+              <dl v-if="artifactAdvice(artifact)" class="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Quality</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.quality }}</dd></div>
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Memory</dt><dd class="mt-1 font-semibold">{{ artifactAdvice(artifact)!.quantization.memory }}</dd></div>
                 <div>
-                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Estimated Generation</dt>
-                  <dd class="mt-1 font-semibold">
-                    <UTooltip :text="speedReason(artifactAdvice(artifact))">
-                      <span data-testid="artifact-generation-speed">{{ speedLabel(artifactAdvice(artifact)) }}</span>
-                    </UTooltip>
-                  </dd>
+                  <dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Estimated Generation</dt>
+                  <dd class="mt-1 font-semibold"><UTooltip :text="speedReason(artifactAdvice(artifact))"><span data-testid="artifact-generation-speed">{{ speedLabel(artifactAdvice(artifact)) }}</span></UTooltip></dd>
                 </div>
                 <div>
-                  <dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Hardware</dt>
-                  <dd class="mt-1">
-                    <UTooltip :text="fitReason(artifactAdvice(artifact))">
-                      <UBadge :color="fitColor(artifactAdvice(artifact))" variant="subtle" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</UBadge>
-                    </UTooltip>
-                  </dd>
+                  <dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hardware</dt>
+                  <dd class="mt-1"><UTooltip :text="fitReason(artifactAdvice(artifact))"><StatusTag :variant="artifactAdvice(artifact)!.fit === 'gpu' || artifactAdvice(artifact)!.fit === 'multi_gpu' ? 'ready' : artifactAdvice(artifact)!.fit === 'no_fit' ? 'failed' : artifactAdvice(artifact)!.fit === 'hybrid' ? 'pending' : 'neutral'" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</StatusTag></UTooltip></dd>
                 </div>
+                <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
               </dl>
-              <div v-else class="mt-4"><UBadge color="neutral" variant="subtle" data-testid="artifact-hardware-fit">Fit unknown</UBadge></div>
+              <div v-else class="mt-4"><StatusTag variant="neutral" data-testid="artifact-hardware-fit">Fit unknown</StatusTag></div>
 
-              <p v-if="artifactAdvice(artifact)" class="mt-3 text-sm text-muted">{{ artifactAdvice(artifact)!.quantization.summary }}</p>
-              <div v-if="artifactAdvice(artifact)?.warnings?.length" class="mt-3 space-y-1 text-sm text-warning">
+              <p v-if="artifactAdvice(artifact)" class="mt-3 text-sm text-[var(--neutral-800)]">{{ artifactAdvice(artifact)!.quantization.summary }}</p>
+              <div v-if="artifactAdvice(artifact)?.warnings?.length" class="mt-3 space-y-1 text-sm text-[var(--accent-900)]">
                 <p v-for="warning in artifactAdvice(artifact)!.warnings" :key="warning" class="flex gap-2"><UIcon name="i-lucide-triangle-alert" class="mt-0.5 size-4 shrink-0" /><span>{{ warning }}</span></p>
               </div>
 
-              <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-3 space-y-1">
-                <div v-for="dependency in artifact.dependencies" :key="`${dependency.kind}-${dependency.name}`" class="flex flex-wrap items-center gap-2 text-xs text-muted">
-                  <UBadge color="success" variant="subtle">{{ dependencyLabel(dependency.kind) }}</UBadge>
-                  <span class="font-mono">{{ dependency.name }}</span>
-                  <UBadge v-if="dependency.quantization" color="neutral" variant="soft">{{ dependency.quantization }}</UBadge>
-                  <span>{{ formatBytes(dependency.total_bytes) }}</span>
+              <div v-if="artifact.dependencies?.length" data-testid="artifact-dependencies" class="mt-4 border-l border-[var(--color-divider)] pl-4">
+                <p class="mb-2 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Companion files</p>
+                <div v-for="dependency in artifact.dependencies" :key="`${dependency.kind}-${dependency.name}`" class="grid gap-1 border-t border-[var(--color-divider)] py-2 text-xs first:border-t-0 sm:grid-cols-[160px_minmax(0,1fr)_auto_auto] sm:items-center">
+                  <StatusTag variant="neutral">{{ dependencyLabel(dependency.kind) }}</StatusTag>
+                  <span class="min-w-0 truncate font-mono text-[var(--neutral-900)]">{{ dependency.name }}</span>
+                  <span v-if="dependency.quantization" class="font-mono text-[var(--neutral-800)]">{{ dependency.quantization }}</span>
+                  <span class="font-mono tabular-nums text-[var(--neutral-800)]">{{ formatBytes(dependency.total_bytes) }}</span>
                 </div>
               </div>
 
-              <UCollapsible v-if="artifactAdvice(artifact)" class="mt-3">
-                <UButton color="neutral" variant="link" size="xs" trailing-icon="i-lucide-chevron-down" class="px-0">Advanced details</UButton>
+              <UCollapsible v-if="artifactAdvice(artifact)" class="mt-4">
+                <AppButton intent="ghost" size="xs" trailing-icon="i-lucide-chevron-down" class="px-0">Advanced details</AppButton>
                 <template #content>
-                  <dl class="mt-2 grid gap-x-6 gap-y-2 border-l border-default pl-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                    <div><dt class="text-dimmed">Raw quantization</dt><dd class="mt-0.5 font-mono">{{ artifact.quantization || 'Unknown' }}</dd></div>
-                    <div><dt class="text-dimmed">Context used</dt><dd class="mt-0.5">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
-                    <div><dt class="text-dimmed">Confidence</dt><dd class="mt-0.5 capitalize">{{ artifactAdvice(artifact)!.confidence }}</dd></div>
-                    <div><dt class="text-dimmed">Placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.mode || 'Unknown' }}</dd></div>
-                    <div><dt class="text-dimmed">GPU layers</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.gpu_layers || '—' }}</dd></div>
-                    <div><dt class="text-dimmed">KV placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.kv_on_gpu ? 'GPU' : artifactAdvice(artifact)!.offload.mode ? 'System RAM' : 'Unknown' }}</dd></div>
-                    <div v-if="artifactAdvice(artifact)!.offload.devices?.length"><dt class="text-dimmed">Devices</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.devices!.join(', ') }}</dd></div>
-                    <div v-if="artifactAdvice(artifact)!.offload.tensor_split"><dt class="text-dimmed">Tensor split</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.tensor_split }}</dd></div>
-                    <div><dt class="text-dimmed">Estimated weights</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.weights_bytes) }}</dd></div>
-                    <div><dt class="text-dimmed">Estimated KV cache</dt><dd class="mt-0.5">{{ formatBytes(artifactAdvice(artifact)!.memory.kv_cache_bytes) }}</dd></div>
-                    <div><dt class="text-dimmed">Estimated Generation</dt><dd class="mt-0.5">{{ speedLabel(artifactAdvice(artifact)) }}</dd></div>
-                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Generation estimate basis</dt><dd class="mt-0.5">{{ speedReason(artifactAdvice(artifact)) }}</dd></div>
-                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-dimmed">Technical reason</dt><dd class="mt-0.5">{{ fitReason(artifactAdvice(artifact)) }}</dd></div>
+                  <dl class="mt-3 grid gap-x-6 gap-y-3 border-l border-[var(--color-divider)] pl-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                    <div><dt class="text-[var(--neutral-700)]">Raw quantization</dt><dd class="mt-0.5 font-mono">{{ artifact.quantization || 'Unknown' }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Context used</dt><dd class="mt-0.5 font-mono tabular-nums">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Confidence</dt><dd class="mt-0.5 capitalize">{{ artifactAdvice(artifact)!.confidence }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.mode || 'Unknown' }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">GPU layers</dt><dd class="mt-0.5 font-mono tabular-nums">{{ artifactAdvice(artifact)!.offload.gpu_layers || '—' }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">KV placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.kv_on_gpu ? 'GPU' : artifactAdvice(artifact)!.offload.mode ? 'System RAM' : 'Unknown' }}</dd></div>
+                    <div v-if="artifactAdvice(artifact)!.offload.devices?.length"><dt class="text-[var(--neutral-700)]">Devices</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.devices!.join(', ') }}</dd></div>
+                    <div v-if="artifactAdvice(artifact)!.offload.tensor_split"><dt class="text-[var(--neutral-700)]">Tensor split</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.tensor_split }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Estimated weights</dt><dd class="mt-0.5 font-mono tabular-nums">{{ formatBytes(artifactAdvice(artifact)!.memory.weights_bytes) }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Estimated KV cache</dt><dd class="mt-0.5 font-mono tabular-nums">{{ formatBytes(artifactAdvice(artifact)!.memory.kv_cache_bytes) }}</dd></div>
+                    <div><dt class="text-[var(--neutral-700)]">Estimated Generation</dt><dd class="mt-0.5">{{ speedLabel(artifactAdvice(artifact)) }}</dd></div>
+                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-[var(--neutral-700)]">Generation estimate basis</dt><dd class="mt-0.5">{{ speedReason(artifactAdvice(artifact)) }}</dd></div>
+                    <div class="sm:col-span-2 lg:col-span-3"><dt class="text-[var(--neutral-700)]">Technical reason</dt><dd class="mt-0.5">{{ fitReason(artifactAdvice(artifact)) }}</dd></div>
                   </dl>
                 </template>
               </UCollapsible>
             </div>
 
             <div class="flex min-w-32 flex-col gap-2">
-              <UButton :to="launchTo(artifact)" :disabled="!artifact.complete" icon="i-lucide-play">Launch</UButton>
-              <UButton color="neutral" variant="soft" :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</UButton>
+              <AppButton intent="primary" :to="launchTo(artifact)" :disabled="!artifact.complete" icon="i-lucide-play">Launch</AppButton>
+              <AppButton intent="secondary" :disabled="!artifact.complete || isDownloading(artifact.id)" :loading="isDownloading(artifact.id)" @click="download(artifact)">Download</AppButton>
             </div>
           </div>
-        </div>
-      </UCard>
+        </Frame>
+      </div>
     </template>
   </div>
 </template>

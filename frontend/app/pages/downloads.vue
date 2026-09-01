@@ -40,6 +40,7 @@ const showCompleted = ref(false)
 let fallbackTimer: ReturnType<typeof setInterval> | undefined
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let downloadSocket: WebSocket | null = null
+let downloadConnecting = false
 let disposed = false
 
 const activeStates = new Set(['QUEUED', 'RESOLVING', 'DOWNLOADING', 'VERIFYING'])
@@ -60,7 +61,7 @@ function formatBytes(value: number) {
 
 function progress(job: DownloadJob) {
   if (!job.total_bytes) return 0
-  return Math.min(100, Math.round(job.downloaded_bytes / job.total_bytes * 100))
+  return Math.min(100, Math.max(0, Math.round(job.downloaded_bytes / job.total_bytes * 100)))
 }
 
 function eta(job: DownloadJob) {
@@ -71,12 +72,11 @@ function eta(job: DownloadJob) {
   return `${(seconds / 3600).toFixed(1)}h remaining`
 }
 
-function stateColor(state: string) {
-  if (state === 'COMPLETED') return 'success'
-  if (state === 'FAILED') return 'error'
-  if (state === 'CANCELLED') return 'neutral'
-  if (state === 'VERIFYING') return 'warning'
-  return 'primary'
+function stateVariant(state: string): 'ready' | 'pending' | 'neutral' | 'failed' {
+  if (state === 'COMPLETED') return 'ready'
+  if (state === 'FAILED') return 'failed'
+  if (activeStates.has(state)) return 'pending'
+  return 'neutral'
 }
 
 function applyJob(job: DownloadJob) {
@@ -101,15 +101,45 @@ async function refresh(silent = false) {
   }
 }
 
-function connectDownloadEvents() {
-  if (!import.meta.client || disposed || downloadSocket || typeof WebSocket === 'undefined') return
+function scheduleDownloadReconnect() {
+  if (disposed || reconnectTimer) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined
+    void connectDownloadEvents()
+  }, 1000)
+}
+
+async function connectDownloadEvents() {
+  if (!import.meta.client || disposed || downloadSocket || downloadConnecting || typeof WebSocket === 'undefined') return
+  downloadConnecting = true
+  let ticket = ''
+  try {
+    const result = await manager.request<{ ticket: string }>('/api/v1/auth/ws-ticket', { method: 'POST' })
+    ticket = String(result?.ticket || '')
+  } catch {
+    downloadConnecting = false
+    scheduleDownloadReconnect()
+    return
+  }
+  if (disposed) {
+    downloadConnecting = false
+    return
+  }
+  if (!ticket) {
+    downloadConnecting = false
+    scheduleDownloadReconnect()
+    return
+  }
   let socket: WebSocket
   try {
-    socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws`)
+    socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws?ticket=${encodeURIComponent(ticket)}`)
   } catch {
+    downloadConnecting = false
+    scheduleDownloadReconnect()
     return
   }
   downloadSocket = socket
+  downloadConnecting = false
   socket.onopen = () => {
     if (downloadSocket === socket) liveUpdates.value = true
   }
@@ -133,10 +163,7 @@ function connectDownloadEvents() {
     downloadSocket = null
     liveUpdates.value = false
     if (disposed) return
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = undefined
-      connectDownloadEvents()
-    }, 1000)
+    scheduleDownloadReconnect()
   }
 }
 
@@ -181,7 +208,7 @@ async function remove(job: DownloadJob) {
 
 onMounted(() => {
   void refresh()
-  connectDownloadEvents()
+  void connectDownloadEvents()
   fallbackTimer = setInterval(() => {
     if (!liveUpdates.value && jobs.value.some(job => activeStates.has(job.state))) void refresh(true)
   }, 1500)
@@ -198,78 +225,105 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="space-y-5">
-    <div class="flex items-start justify-between gap-6">
-      <UPageHeader class="min-w-0 flex-1" headline="MODEL STORAGE" title="Downloads" description="Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts." />
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <UBadge :color="liveUpdates ? 'success' : 'neutral'" variant="subtle">{{ liveUpdates ? 'Live updates' : 'Reconnecting' }}</UBadge>
-        <UButton
+  <div class="space-y-6">
+    <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between" data-testid="downloads-header">
+      <div class="w-full min-w-0 sm:flex-1">
+        <div class="mb-1 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL STORAGE</div>
+        <h1 class="font-heading text-[length:var(--font-size-screen-title)] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Downloads</h1>
+        <p class="mt-2 max-w-3xl text-[length:var(--font-size-body)] leading-[1.55] text-[var(--neutral-800)]">
+          Track Hugging Face GGUF transfers, resume interrupted jobs and keep partial files separate from loadable artifacts.
+        </p>
+      </div>
+      <div class="flex w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+        <StatusTag :variant="liveUpdates ? 'ready' : 'pending'">{{ liveUpdates ? 'Live updates' : 'Reconnecting' }}</StatusTag>
+        <AppButton
           data-testid="toggle-completed-downloads"
-          color="neutral"
-          variant="soft"
+          intent="secondary"
           :disabled="completedCount === 0"
           @click="showCompleted = !showCompleted"
         >
           {{ showCompleted ? `Hide completed (${completedCount})` : `Show completed (${completedCount})` }}
-        </UButton>
-        <UButton color="neutral" variant="soft" :loading="loading" @click="refresh()">Refresh</UButton>
+        </AppButton>
+        <AppButton intent="secondary" :loading="loading" @click="refresh()">Refresh</AppButton>
       </div>
     </div>
 
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
+    <Frame v-if="error" class="p-3" data-testid="downloads-error">
+      <div class="flex flex-wrap items-start gap-2">
+        <StatusTag variant="failed">Download error</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
+    </Frame>
 
-    <div v-if="loading && !jobs.length" class="space-y-3">
-      <USkeleton v-for="n in 4" :key="n" class="h-40 w-full rounded-xl" />
+    <div v-if="loading && !jobs.length" class="space-y-3" data-testid="downloads-loading">
+      <USkeleton v-for="n in 4" :key="n" class="h-40 w-full" />
     </div>
 
     <UEmpty v-else-if="!jobs.length" icon="i-lucide-download" title="No downloads yet" description="Choose a GGUF artifact from Discover to start a download.">
-      <template #actions><UButton to="/models/discover">Open Discover</UButton></template>
+      <template #actions>
+        <AppButton to="/models/discover" intent="primary">Open Discover</AppButton>
+      </template>
     </UEmpty>
 
     <UEmpty v-else-if="!visibleJobs.length" icon="i-lucide-circle-check" title="No active downloads" description="Completed downloads are hidden by default.">
-      <template #actions><UButton color="neutral" variant="soft" @click="showCompleted = true">Show completed ({{ completedCount }})</UButton></template>
+      <template #actions>
+        <AppButton intent="secondary" @click="showCompleted = true">Show completed ({{ completedCount }})</AppButton>
+      </template>
     </UEmpty>
 
-    <div v-else class="space-y-3">
-      <UCard v-for="job in visibleJobs" :key="job.id">
+    <div v-else class="space-y-3" data-testid="download-queue">
+      <Frame v-for="job in visibleJobs" :key="job.id" class="p-5" data-testid="download-job">
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="truncate text-base font-bold">{{ job.name }}</h2>
-              <UBadge :color="stateColor(job.state)" variant="subtle">{{ job.state }}</UBadge>
-              <UBadge v-if="job.quantization" color="neutral" variant="soft">{{ job.quantization }}</UBadge>
+              <h2 class="min-w-0 truncate font-heading text-xl font-semibold tracking-[-.015em] text-[var(--color-text)]">{{ job.name }}</h2>
+              <StatusTag :variant="stateVariant(job.state)">{{ job.state }}</StatusTag>
+              <StatusTag v-if="job.quantization" variant="neutral">{{ job.quantization }}</StatusTag>
             </div>
-            <p class="mt-1 truncate text-sm text-muted">{{ job.repo_id }}</p>
+            <p class="mt-1 truncate font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">{{ job.repo_id }}</p>
           </div>
-          <div class="flex gap-2">
-            <UButton v-if="activeStates.has(job.state)" color="error" variant="soft" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</UButton>
-            <UButton v-if="job.state === 'FAILED' || job.state === 'CANCELLED'" color="primary" variant="soft" size="sm" :loading="actionID === job.id" @click="retry(job)">Retry</UButton>
-            <UButton v-if="job.state === 'CANCELLED'" color="neutral" variant="soft" size="sm" :loading="actionID === job.id" @click="remove(job)">Remove</UButton>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <AppButton v-if="activeStates.has(job.state)" intent="secondary" tone="destructive" size="sm" :loading="actionID === job.id" @click="cancel(job)">Cancel</AppButton>
+            <AppButton v-if="job.state === 'FAILED' || job.state === 'CANCELLED'" intent="secondary" size="sm" :loading="actionID === job.id" @click="retry(job)">Retry</AppButton>
+            <AppButton v-if="job.state === 'CANCELLED'" intent="ghost" size="sm" :loading="actionID === job.id" @click="remove(job)">Remove</AppButton>
           </div>
         </div>
 
         <div class="mt-5 space-y-2">
-          <UProgress :model-value="progress(job)" />
-          <div class="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted">
+          <div class="h-2 w-full overflow-hidden bg-[var(--neutral-400)]" data-testid="download-progress-track">
+            <div
+              class="h-full bg-[var(--color-accent)] transition-[width] duration-200"
+              data-testid="download-progress-fill"
+              :style="{ width: `${progress(job)}%` }"
+            />
+          </div>
+          <div class="flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">
             <span>{{ formatBytes(job.downloaded_bytes) }} / {{ formatBytes(job.total_bytes) }} · {{ progress(job) }}%</span>
             <span v-if="job.speed_bps">{{ formatBytes(job.speed_bps) }}/s<span v-if="eta(job)"> · {{ eta(job) }}</span></span>
           </div>
         </div>
 
-        <UAlert v-if="job.error" class="mt-4" color="error" variant="subtle" title="Download failed" :description="job.error" />
+        <div v-if="job.error" class="mt-4 flex flex-wrap items-start gap-2 border border-[var(--color-divider)] p-3" data-testid="download-failure-note">
+          <StatusTag variant="failed">Download failed</StatusTag>
+          <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ job.error }}</p>
+        </div>
 
-        <UAccordion v-if="job.files?.length" class="mt-3" :items="[{ label: `${job.files.length} file${job.files.length === 1 ? '' : 's'}`, slot: 'files' }]">
+        <UAccordion
+          v-if="job.files?.length"
+          class="mt-4 border-t border-[var(--color-divider)] pt-1"
+          :items="[{ label: `${job.files.length} file${job.files.length === 1 ? '' : 's'}`, slot: 'files' }]"
+        >
           <template #files>
-            <div class="divide-y divide-default text-sm">
-              <div v-for="file in job.files" :key="file.path" class="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_120px_100px]">
-                <code class="truncate font-mono text-xs">{{ file.local_path || file.path }}</code>
-                <span class="text-muted">{{ formatBytes(file.downloaded_bytes) }} / {{ formatBytes(file.size) }}</span>
-                <span class="text-right text-muted">{{ file.state }}</span>
+            <div class="divide-y divide-[var(--color-divider)] text-sm" data-testid="download-files">
+              <div v-for="file in job.files" :key="file.path" class="grid items-center gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_150px_auto]">
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--color-text)]">{{ file.local_path || file.path }}</code>
+                <span class="font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]">{{ formatBytes(file.downloaded_bytes) }} / {{ formatBytes(file.size) }}</span>
+                <div class="sm:text-right"><StatusTag :variant="stateVariant(file.state)">{{ file.state }}</StatusTag></div>
               </div>
             </div>
           </template>
         </UAccordion>
-      </UCard>
+      </Frame>
     </div>
   </div>
 </template>

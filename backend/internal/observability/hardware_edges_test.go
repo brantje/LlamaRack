@@ -50,11 +50,11 @@ func TestHardwareEdgePathsAndCompleteLifecycleSummary(t *testing.T) {
 			t.Fatalf("record %s: %v", event, err)
 		}
 	}
-	summary, err := s.LifecycleSummary(ctx)
+	summary, err := s.LifecycleSummary(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.Autoloads != 1 || summary.Loads != 1 || summary.FailedStarts != 1 || summary.Evictions != 1 || summary.IdleUnloads != 1 || summary.LoadMS != 250 {
+	if summary.Autoloads != 0 || summary.FailedStarts != 0 || summary.LoadMS != 0 || summary.Loads != 1 || summary.Evictions != 1 || summary.IdleUnloads != 1 {
 		t.Fatalf("summary=%+v", summary)
 	}
 

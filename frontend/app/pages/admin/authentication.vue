@@ -48,6 +48,7 @@ const providerTestMessage = ref('')
 const providerTestError = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
+const settings = ref<AuthSettings | null>(null)
 const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, external_url: '', frontend_url: '' })
 const providers = ref<Provider[]>([])
 const providerModalOpen = ref(false)
@@ -57,6 +58,10 @@ const confirmation = ref<InstanceType<typeof AppConfirmationModal> | null>(null)
 
 function emptyProvider(): ProviderForm {
   return { name: '', enabled: true, issuer: '', discovery_url: '', client_id: '', client_secret: '', scopes: 'openid profile email', username_claim: 'preferred_username', authorization_endpoint: '', token_endpoint: '', jwks_url: '' }
+}
+
+function sourceClass(source?: string) {
+  return source === 'environment' ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-700)]'
 }
 
 function setProviderForm(provider?: Provider) {
@@ -87,6 +92,7 @@ async function load() {
       manager.request<AuthSettings>('/api/v1/admin/auth/settings'),
       manager.request<Provider[]>('/api/v1/admin/auth/providers')
     ])
+    settings.value = authSettings
     settingsForm.local_login_enabled = authSettings.local_login_enabled.value
     settingsForm.oidc_jit_provisioning_enabled = authSettings.oidc_jit_provisioning_enabled.value
     settingsForm.oidc_auto_link_enabled = authSettings.oidc_auto_link_enabled.value
@@ -192,7 +198,7 @@ async function deleteProvider(provider: Provider) {
     title: `Delete ${provider.name}?`,
     description: 'External identities linked to this provider will also be removed. This action can affect sign-in availability.',
     confirmLabel: 'Delete provider',
-    color: 'error'
+    confirmTone: 'destructive'
   })
   if (!confirmed) return
   providerBusy.value = provider.id
@@ -217,62 +223,108 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
 </script>
 
 <template>
-  <div class="space-y-8">
-    <UPageHeader title="Authentication" description="Configure local management login and OpenID Connect providers." />
-    <UAlert v-if="errorMessage" color="error" variant="subtle" :description="errorMessage" />
-    <UAlert v-if="successMessage" color="success" variant="subtle" :description="successMessage" />
-
-    <USkeleton v-if="loading" class="h-64 w-full" />
-    <template v-else>
-      <UCard>
-        <template #header><h2 class="text-lg font-semibold">Login policy</h2></template>
-        <div class="space-y-5">
-          <UFormField label="External URL" description="Public backend URL used to generate stable OIDC callback URIs.">
-            <UInput v-model="settingsForm.external_url" class="w-full" placeholder="https://manager.example.com" />
-          </UFormField>
-          <UFormField label="Frontend URL" description="Optional browser destination after OIDC sign-in. Leave empty to use External URL.">
-            <UInput v-model="settingsForm.frontend_url" class="w-full" placeholder="https://manager.example.com" />
-          </UFormField>
-          <USeparator />
-          <USwitch v-model="settingsForm.local_login_enabled" label="Allow local username/password login" />
-          <USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" label="Provision unknown OIDC users automatically" />
-          <USwitch v-model="settingsForm.oidc_auto_link_enabled" label="Automatically link an exact matching username" />
-          <UAlert color="warning" variant="subtle" description="Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking." />
-        </div>
-        <template #footer><UButton :loading="savingSettings" @click="saveSettings">Save authentication settings</UButton></template>
-      </UCard>
-
-      <div class="flex flex-wrap items-end justify-between gap-4">
-        <div><h2 class="text-xl font-semibold">OIDC providers</h2><p class="mt-1 text-sm text-muted">Multiple providers can be enabled at the same time.</p></div>
-        <UButton icon="i-lucide-plus" @click="setProviderForm()">Add provider</UButton>
-      </div>
-
-      <UEmpty v-if="providers.length === 0" variant="naked" icon="i-lucide-shield" title="No OIDC providers" description="Add a provider to offer external login." />
-      <div v-else class="divide-y divide-default rounded-lg border border-default">
-        <div v-for="provider in providers" :key="provider.id" class="grid gap-4 p-5 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div class="min-w-0 space-y-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <h3 class="font-semibold">{{ provider.name }}</h3>
-              <UBadge :color="provider.enabled ? 'success' : 'neutral'" variant="subtle">{{ provider.enabled ? 'Enabled' : 'Disabled' }}</UBadge>
-              <UBadge :color="provider.last_test_succeeded ? 'success' : 'warning'" variant="subtle">{{ provider.last_test_succeeded ? 'Tested' : 'Needs test' }}</UBadge>
-            </div>
-            <p class="break-all text-sm text-muted">{{ provider.issuer }}</p>
-            <p class="break-all font-mono text-xs text-dimmed">Callback: {{ callbackURL(provider) }}</p>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <UButton color="neutral" variant="soft" :loading="providerBusy === provider.id" @click="testProvider(provider)">Test</UButton>
-            <UButton color="neutral" variant="soft" @click="setProviderForm(provider)">Edit</UButton>
-            <UButton color="error" variant="soft" @click="deleteProvider(provider)">Delete</UButton>
-          </div>
-        </div>
-      </div>
+  <AdminShell title="Authentication" description="Configure local management login and OpenID Connect providers.">
+    <template #actions>
+      <AppButton intent="primary" :loading="savingSettings" :disabled="!settings" @click="saveSettings">Save settings</AppButton>
     </template>
+
+    <div class="space-y-5">
+      <Frame v-if="errorMessage" class="px-4 py-3" data-testid="authentication-error">
+        <div class="flex flex-wrap items-start gap-2"><StatusTag variant="failed">Authentication error</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ errorMessage }}</p></div>
+      </Frame>
+      <Frame v-if="successMessage" class="px-4 py-3" data-testid="authentication-success">
+        <div class="flex flex-wrap items-start gap-2"><StatusTag variant="ready">Updated</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ successMessage }}</p></div>
+      </Frame>
+
+      <div v-if="loading" class="space-y-3">
+        <USkeleton class="h-44 w-full" />
+        <USkeleton class="h-36 w-full" />
+      </div>
+
+      <template v-else>
+        <Frame class="p-5" data-testid="authentication-sign-in-policy">
+          <div class="mb-5">
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">SIGN-IN POLICY</p>
+            <h2 class="mt-1 text-xl font-semibold">Management login</h2>
+            <p class="mt-1 text-sm text-[var(--neutral-800)]">Configure browser destinations and which local or external sign-in paths are available.</p>
+          </div>
+
+          <div class="grid gap-5 lg:grid-cols-2">
+            <UFormField description="Public backend URL used to generate stable OIDC callback URIs.">
+              <template #label>
+                <div class="flex w-full items-center justify-between gap-3"><span>External URL</span><span :class="sourceClass(settings?.external_url.source)" class="text-[length:var(--font-size-kicker)] font-mono uppercase">{{ settings?.external_url.source }}</span></div>
+              </template>
+              <UInput v-model="settingsForm.external_url" class="w-full" :disabled="settings?.external_url.editable === false" placeholder="https://manager.example.com" />
+            </UFormField>
+            <UFormField description="Optional browser destination after OIDC sign-in. Leave empty to use External URL.">
+              <template #label>
+                <div class="flex w-full items-center justify-between gap-3"><span>Frontend URL</span><span :class="sourceClass(settings?.frontend_url?.source)" class="text-[length:var(--font-size-kicker)] font-mono uppercase">{{ settings?.frontend_url?.source || 'default' }}</span></div>
+              </template>
+              <UInput v-model="settingsForm.frontend_url" class="w-full" :disabled="settings?.frontend_url?.editable === false" placeholder="https://manager.example.com" />
+            </UFormField>
+          </div>
+
+          <div class="mt-5 border-t border-[var(--color-divider)] pt-5 space-y-4">
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.local_login_enabled" :disabled="settings?.local_login_enabled.editable === false" label="Allow local username/password login" /><span :class="sourceClass(settings?.local_login_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.local_login_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_jit_provisioning_enabled" :disabled="settings?.oidc_jit_provisioning_enabled.editable === false" label="Provision unknown OIDC users automatically" /><span :class="sourceClass(settings?.oidc_jit_provisioning_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_jit_provisioning_enabled.source }}</span></div>
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_auto_link_enabled" :disabled="settings?.oidc_auto_link_enabled.editable === false" label="Automatically link an exact matching username" /><span :class="sourceClass(settings?.oidc_auto_link_enabled.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_auto_link_enabled.source }}</span></div>
+          </div>
+
+          <div class="mt-5 flex flex-col items-start gap-2 border border-[var(--color-divider)] px-4 py-3 sm:flex-row" data-testid="authentication-auto-link-note">
+            <StatusTag variant="pending">Explicit linking required</StatusTag>
+            <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking.</p>
+          </div>
+        </Frame>
+
+        <section data-testid="authentication-providers">
+          <div class="mb-3 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">OIDC PROVIDERS</p>
+              <h2 class="mt-1 text-xl font-semibold">External login providers</h2>
+              <p class="mt-1 text-sm text-[var(--neutral-800)]">Multiple providers can be enabled at the same time.</p>
+            </div>
+            <AppButton intent="secondary" icon="i-lucide-plus" @click="setProviderForm()">Add provider</AppButton>
+          </div>
+
+          <Frame v-if="providers.length === 0" class="p-8 text-center">
+            <h3 class="text-base font-semibold">No OIDC providers</h3>
+            <p class="mt-1 text-sm text-[var(--neutral-800)]">Add a provider to offer external login.</p>
+            <AppButton class="mt-4" intent="primary" @click="setProviderForm()">Add provider</AppButton>
+          </Frame>
+
+          <Frame v-else class="overflow-x-auto" role="region" tabindex="0" aria-label="OIDC providers. Scroll horizontally for issuer, callback and actions.">
+            <p class="border-b border-[var(--color-divider)] px-4 py-2 text-xs text-[var(--neutral-700)] sm:hidden">Scroll horizontally for issuer, callback and actions.</p>
+            <div class="min-w-[760px]">
+              <div class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] gap-4 border-b border-[var(--color-divider)] px-4 py-2 text-[length:var(--font-size-table-header)] uppercase tracking-[.08em] text-[var(--neutral-700)]">
+                <span>Provider</span><span>Issuer</span><span>Callback</span><span class="text-right">Actions</span>
+              </div>
+              <div v-for="provider in providers" :key="provider.id" class="grid grid-cols-[minmax(180px,1fr)_minmax(220px,1.3fr)_180px_220px] items-center gap-4 border-b border-[var(--color-divider)] px-4 py-3 last:border-b-0">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2"><span class="font-semibold">{{ provider.name }}</span><StatusTag :variant="provider.enabled ? 'ready' : 'neutral'">{{ provider.enabled ? 'Enabled' : 'Disabled' }}</StatusTag><StatusTag :variant="provider.last_test_succeeded ? 'ready' : 'pending'">{{ provider.last_test_succeeded ? 'Tested' : 'Needs test' }}</StatusTag></div>
+                </div>
+                <p class="break-all text-sm text-[var(--neutral-800)]">{{ provider.issuer }}</p>
+                <p class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ callbackURL(provider) }}</p>
+                <div class="flex justify-end gap-1">
+                  <AppButton intent="ghost" :loading="providerBusy === provider.id" @click="testProvider(provider)">Test</AppButton>
+                  <AppButton intent="ghost" @click="setProviderForm(provider)">Edit</AppButton>
+                  <AppButton intent="secondary" tone="destructive" @click="deleteProvider(provider)">Delete</AppButton>
+                </div>
+              </div>
+            </div>
+          </Frame>
+        </section>
+      </template>
+    </div>
 
     <UModal v-model:open="providerModalOpen" :title="editingProvider ? 'Edit OIDC provider' : 'Add OIDC provider'">
       <template #body>
         <div class="space-y-4">
-          <UAlert v-if="providerTestError" color="error" variant="subtle" :description="providerTestError" />
-          <UAlert v-else-if="providerTestMessage" color="success" variant="subtle" :description="providerTestMessage" />
+          <Frame v-if="providerTestError" class="px-4 py-3" data-testid="provider-test-error">
+            <div class="flex flex-wrap items-start gap-2"><StatusTag variant="failed">Test failed</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ providerTestError }}</p></div>
+          </Frame>
+          <Frame v-else-if="providerTestMessage" class="px-4 py-3" data-testid="provider-test-success">
+            <div class="flex flex-wrap items-start gap-2"><StatusTag variant="ready">Test passed</StatusTag><p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ providerTestMessage }}</p></div>
+          </Frame>
           <UFormField label="Display name"><UInput v-model="providerForm.name" class="w-full" /></UFormField>
           <USwitch v-model="providerForm.enabled" label="Enabled" />
           <UFormField label="Issuer URL"><UInput v-model="providerForm.issuer" class="w-full" placeholder="https://id.example.com/application/o/manager/" /></UFormField>
@@ -281,20 +333,24 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           <UFormField :label="editingProvider?.secret_configured ? 'Replace client secret' : 'Client secret'"><UInput v-model="providerForm.client_secret" class="w-full" type="password" autocomplete="new-password" /></UFormField>
           <UFormField label="Scopes"><UInput v-model="providerForm.scopes" class="w-full" /></UFormField>
           <UFormField label="Username claim"><UInput v-model="providerForm.username_claim" class="w-full" /></UFormField>
-          <USeparator label="Manual endpoints (optional)" />
-          <UFormField label="Authorization endpoint"><UInput v-model="providerForm.authorization_endpoint" class="w-full" /></UFormField>
-          <UFormField label="Token endpoint"><UInput v-model="providerForm.token_endpoint" class="w-full" /></UFormField>
-          <UFormField label="JWKS endpoint"><UInput v-model="providerForm.jwks_url" class="w-full" /></UFormField>
+          <div class="border-t border-[var(--color-divider)] pt-4">
+            <p class="mb-3 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">MANUAL ENDPOINTS · OPTIONAL</p>
+            <div class="space-y-4">
+              <UFormField label="Authorization endpoint"><UInput v-model="providerForm.authorization_endpoint" class="w-full" /></UFormField>
+              <UFormField label="Token endpoint"><UInput v-model="providerForm.token_endpoint" class="w-full" /></UFormField>
+              <UFormField label="JWKS endpoint"><UInput v-model="providerForm.jwks_url" class="w-full" /></UFormField>
+            </div>
+          </div>
         </div>
       </template>
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton color="neutral" variant="soft" @click="providerModalOpen = false">Cancel</UButton>
-          <UButton color="neutral" variant="soft" :loading="providerBusy === 'draft-test'" @click="testProviderForm">Test configuration</UButton>
-          <UButton :loading="providerBusy === (editingProvider?.id || 'new')" @click="saveProvider">Save provider</UButton>
+          <AppButton intent="secondary" @click="providerModalOpen = false">Cancel</AppButton>
+          <AppButton intent="secondary" :loading="providerBusy === 'draft-test'" @click="testProviderForm">Test configuration</AppButton>
+          <AppButton intent="primary" :loading="providerBusy === (editingProvider?.id || 'new')" @click="saveProvider">Save provider</AppButton>
         </div>
       </template>
     </UModal>
     <AppConfirmationModal ref="confirmation" />
-  </div>
+  </AdminShell>
 </template>

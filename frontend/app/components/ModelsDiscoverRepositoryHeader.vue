@@ -11,6 +11,7 @@ type Model = {
   id: string
   author?: string
   description?: string
+  revision?: string
   downloads: number
   likes: number
   last_modified?: string
@@ -82,48 +83,49 @@ function formatUpdated(value?: string) {
 </script>
 
 <template>
-  <UCard data-testid="discover-repository-header">
+  <Frame class="p-5" data-testid="discover-repository-header">
     <div class="space-y-4">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0">
-          <p class="mb-1 text-xs font-extrabold tracking-[0.18em] text-dimmed">REPOSITORY</p>
-          <h2 class="break-words text-2xl font-bold">{{ model.id }}</h2>
-          <p v-if="model.author" class="mt-1 text-sm text-muted">Published by {{ model.author }}</p>
+          <p class="mb-1 text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REPOSITORY SUMMARY</p>
+          <h2 class="break-words font-mono text-xl font-semibold text-[var(--color-text)]">{{ model.id }}</h2>
+          <p v-if="model.author" class="mt-1 text-sm text-[var(--neutral-800)]">Published by {{ model.author }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <UBadge v-if="model.private" color="warning">Private</UBadge>
-          <UBadge v-if="model.gated" color="warning">Gated</UBadge>
-          <UBadge color="neutral" variant="soft">GGUF</UBadge>
+          <StatusTag v-if="model.private" variant="pending">Private</StatusTag>
+          <StatusTag v-if="model.gated" variant="pending">Gated</StatusTag>
+          <StatusTag variant="neutral">GGUF</StatusTag>
         </div>
       </div>
 
-      <dl class="grid gap-x-8 gap-y-3 border-y border-default py-4 text-sm sm:grid-cols-2 lg:grid-cols-4" data-testid="repository-metadata">
-        <div v-if="model.parameter_count"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Model size</dt><dd class="mt-1 font-semibold">{{ formatParameters(model.parameter_count) }}</dd></div>
-        <div v-if="architecture"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Architecture</dt><dd class="mt-1 font-semibold">{{ architecture }}</dd></div>
-        <div v-if="contextCapability"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Context capability</dt><dd class="mt-1 font-semibold">{{ formatContext(contextCapability) }}</dd></div>
-        <div v-if="model.card_metadata?.pipeline_tag"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Task</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.pipeline_tag }}</dd></div>
-        <div v-if="model.card_metadata?.license"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">License</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.license }}</dd></div>
-        <div v-if="model.card_metadata?.library_name"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Library</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.library_name }}</dd></div>
-        <div v-if="formatUpdated(model.last_modified)"><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Updated</dt><dd class="mt-1 font-semibold">{{ formatUpdated(model.last_modified) }}</dd></div>
-        <div><dt class="text-xs font-medium uppercase tracking-wide text-dimmed">Hugging Face</dt><dd class="mt-1 font-semibold">↓ {{ model.downloads.toLocaleString() }} · ♡ {{ model.likes.toLocaleString() }}</dd></div>
+      <dl class="grid gap-x-8 gap-y-3 border-y border-[var(--color-divider)] py-4 text-sm sm:grid-cols-2 lg:grid-cols-4" data-testid="repository-metadata">
+        <div v-if="model.parameter_count"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Model size</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatParameters(model.parameter_count) }}</dd></div>
+        <div v-if="architecture"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Architecture</dt><dd class="mt-1 font-mono font-semibold">{{ architecture }}</dd></div>
+        <div v-if="contextCapability"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context capability</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(contextCapability) }}</dd></div>
+        <div v-if="model.revision"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Revision</dt><dd class="mt-1 font-mono font-semibold">{{ model.revision }}</dd></div>
+        <div v-if="model.card_metadata?.pipeline_tag"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Task</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.pipeline_tag }}</dd></div>
+        <div v-if="model.card_metadata?.license"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">License</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.license }}</dd></div>
+        <div v-if="model.card_metadata?.library_name"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Library</dt><dd class="mt-1 font-semibold">{{ model.card_metadata.library_name }}</dd></div>
+        <div v-if="formatUpdated(model.last_modified)"><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Updated</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatUpdated(model.last_modified) }}</dd></div>
+        <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hugging Face</dt><dd class="mt-1 font-mono font-semibold tabular-nums">↓ {{ model.downloads.toLocaleString() }} · ♡ {{ model.likes.toLocaleString() }}</dd></div>
       </dl>
 
       <div v-if="model.card_metadata?.base_models?.length || model.card_metadata?.languages?.length || usefulTags.length" class="flex flex-wrap items-center gap-2 text-sm" data-testid="repository-tags">
-        <span v-if="model.card_metadata?.base_models?.length" class="mr-1 text-muted">Base model</span>
-        <UBadge v-for="baseModel in model.card_metadata?.base_models || []" :key="`base-${baseModel}`" color="primary" variant="soft">{{ baseModel }}</UBadge>
-        <UBadge v-for="language in model.card_metadata?.languages || []" :key="`language-${language}`" color="neutral" variant="soft">{{ language.toUpperCase() }}</UBadge>
-        <UBadge v-for="tag in usefulTags" :key="tag" color="neutral" variant="soft">{{ tag }}</UBadge>
+        <span v-if="model.card_metadata?.base_models?.length" class="mr-1 text-[var(--neutral-800)]">Base model</span>
+        <StatusTag v-for="baseModel in model.card_metadata?.base_models || []" :key="`base-${baseModel}`" variant="pending">{{ baseModel }}</StatusTag>
+        <StatusTag v-for="language in model.card_metadata?.languages || []" :key="`language-${language}`" variant="neutral">{{ language.toUpperCase() }}</StatusTag>
+        <StatusTag v-for="tag in usefulTags" :key="tag" variant="neutral">{{ tag }}</StatusTag>
       </div>
 
-      <div v-if="description" class="border-t border-default pt-4" data-testid="repository-description">
-        <p class="text-sm leading-6 text-muted">{{ descriptionPreview }}</p>
+      <div v-if="description" class="border-t border-[var(--color-divider)] pt-4" data-testid="repository-description">
+        <p class="text-sm leading-6 text-[var(--neutral-800)]">{{ descriptionPreview }}</p>
         <UCollapsible v-if="hasLongDescription" class="mt-2">
-          <UButton color="neutral" variant="link" size="xs" trailing-icon="i-lucide-chevron-down" class="px-0">Read full description</UButton>
+          <AppButton intent="ghost" size="xs" trailing-icon="i-lucide-chevron-down" class="px-0">Read full description</AppButton>
           <template #content>
-            <p class="mt-2 max-w-5xl whitespace-pre-line text-sm leading-6 text-muted" data-testid="repository-description-full">{{ description }}</p>
+            <p class="mt-2 max-w-5xl whitespace-pre-line text-sm leading-6 text-[var(--neutral-800)]" data-testid="repository-description-full">{{ description }}</p>
           </template>
         </UCollapsible>
       </div>
     </div>
-  </UCard>
+  </Frame>
 </template>

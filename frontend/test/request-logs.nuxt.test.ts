@@ -86,6 +86,40 @@ describe('Request logs', () => {
     expect(mocks.request.mock.calls.some(call => String(call[0]).includes('search=coder'))).toBe(true)
   })
 
+  it('opens request details when a history row is clicked', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: [request], limit: 25, offset: 0, has_more: false }
+      if (path === '/api/v1/observability/requests/lcm_abc123') return request
+      return {}
+    })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+
+    const row = wrapper.get('[data-testid="request-log-table"] tbody tr[data-selectable="true"]')
+    expect(row.attributes('role')).toBe('button')
+    await (wrapper.vm as any).onRequestRowSelect(new MouseEvent('click'), { original: request })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-testid="request-detail-overview"]')).not.toBeNull()
+    expect(document.body.textContent).toContain('198.51.100.10')
+    expect(mocks.request.mock.calls.some(call => String(call[0]).includes('/api/v1/observability/requests/lcm_abc123'))).toBe(true)
+  })
+
+  it('opens request details once when the Request ID is clicked', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: [request], limit: 25, offset: 0, has_more: false }
+      if (path === '/api/v1/observability/requests/lcm_abc123') return request
+      return {}
+    })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
+    await flushPromises()
+    const detailCalls = mocks.request.mock.calls.filter(call => String(call[0]) === '/api/v1/observability/requests/lcm_abc123')
+    expect(detailCalls).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('uses the trace query as a server filter and supports clearing it', async () => {
     mocks.request.mockResolvedValue({ items: [request], limit: 25, offset: 0, has_more: false })
     const wrapper = await mountSuspended(LogsPage, { route: `/logs?trace_id=${traceID}` })
@@ -117,12 +151,13 @@ describe('Request logs', () => {
     await flushPromises()
     const table = wrapper.get('[data-testid="request-log-table"]')
     expect(table.text()).toContain('1 rows')
-    expect(table.text()).toContain('2 requests')
+    expect(table.text()).toContain(sessionID)
 
     await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
     await flushPromises()
     const body = document.body.textContent || ''
     expect(body).toContain(sessionID)
+    expect(body).toContain('2 requests')
     expect(body).toContain('lcm_session_1')
     expect(body).toContain('lcm_session_2')
     expect(body).toContain('Qwen Coder 7B')

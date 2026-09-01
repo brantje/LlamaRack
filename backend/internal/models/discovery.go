@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
 )
@@ -16,6 +17,7 @@ type GGUFFile struct {
 	Path             string            `json:"path"`
 	Name             string            `json:"name"`
 	TotalBytes       int64             `json:"total_bytes"`
+	ModifiedAt       string            `json:"modified_at,omitempty"`
 	Quantization     string            `json:"quantization,omitempty"`
 	Architecture     string            `json:"architecture,omitempty"`
 	ContextLength    int64             `json:"context_length,omitempty"`
@@ -38,6 +40,20 @@ type splitGroup struct {
 }
 
 var localSplitPattern = regexp.MustCompile(`(?i)^(.*)-(\d{5})-of-(\d{5})\.gguf$`)
+
+func sameLocalSplitSet(a, b string) bool {
+	a = filepath.ToSlash(filepath.Clean(a))
+	b = filepath.ToSlash(filepath.Clean(b))
+	if filepath.Dir(a) != filepath.Dir(b) {
+		return false
+	}
+	left := localSplitPattern.FindStringSubmatch(filepath.Base(a))
+	right := localSplitPattern.FindStringSubmatch(filepath.Base(b))
+	if left == nil || right == nil {
+		return false
+	}
+	return strings.EqualFold(left[1], right[1]) && left[3] == right[3]
+}
 
 func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 	root, err := filepath.Abs(s.modelsDir)
@@ -157,6 +173,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 			continue
 		}
 		var total int64
+		latestModified := first.mtimeNS
 		complete := true
 		for part := 1; part <= group.expected; part++ {
 			file, exists := group.files[part]
@@ -165,6 +182,9 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 				break
 			}
 			total += file.size
+			if file.mtimeNS > latestModified {
+				latestModified = file.mtimeNS
+			}
 		}
 		if !complete {
 			continue
@@ -182,6 +202,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		if err != nil {
 			return nil, err
 		}
+		first.mtimeNS = latestModified
 		files = append(files, discoveredGGUFFile(first, total, summary, warning, suggested))
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -189,10 +210,15 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 }
 
 func discoveredGGUFFile(file discoveredGGUF, total int64, summary ggufmeta.Summary, warning string, suggested map[string]string) GGUFFile {
+	modifiedAt := ""
+	if file.mtimeNS > 0 {
+		modifiedAt = time.Unix(0, file.mtimeNS).UTC().Format(time.RFC3339Nano)
+	}
 	return GGUFFile{
 		Path:             filepath.ToSlash(file.path),
 		Name:             file.name,
 		TotalBytes:       total,
+		ModifiedAt:       modifiedAt,
 		Quantization:     quantFromName(file.name),
 		Architecture:     summary.Derived.Architecture,
 		ContextLength:    summary.Derived.ContextLength,
@@ -256,7 +282,20 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		applyMTPDefaults(options)
 	}
 
-	for _, localPath := range sidecarsByMain[mainPath] {
+	// Match InspectGGUFArtifact scope: prefer completed download-job paths when
+	// present; otherwise scan sibling GGUFs in the same directory so manually
+	// placed helpers (e.g. gemma4-assistant MTP + clip projector) still surface
+	// as MTP/Vision tags on the available-files list.
+	candidates := sidecarsByMain[mainPath]
+	if len(candidates) == 0 {
+		var err error
+		candidates, err = directorySiblingGGUFs(root, mainPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, localPath := range candidates {
 		absolute, ok := sidecarAbsolutePath(root, localPath)
 		if !ok {
 			continue
@@ -267,6 +306,9 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		}
 		rel, err := filepath.Rel(root, absolute)
 		if err != nil {
+			continue
+		}
+		if sameLocalSplitSet(mainPath, rel) {
 			continue
 		}
 		summary, warning, err := s.cachedGGUFSummary(ctx, root, rel, info.Size(), info.ModTime().UnixNano(), index)
@@ -292,6 +334,22 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 		return nil, nil
 	}
 	return options, nil
+}
+
+func directorySiblingGGUFs(root, mainRel string) ([]string, error) {
+	dir := filepath.Dir(filepath.FromSlash(mainRel))
+	entries, err := os.ReadDir(filepath.Join(root, dir))
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.EqualFold(filepath.Ext(entry.Name()), ".gguf") {
+			continue
+		}
+		paths = append(paths, filepath.ToSlash(filepath.Join(dir, entry.Name())))
+	}
+	return paths, nil
 }
 
 func applyMTPDefaults(options map[string]string) {

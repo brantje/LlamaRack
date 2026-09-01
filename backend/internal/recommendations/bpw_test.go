@@ -33,7 +33,7 @@ func TestBPWArtifactCanBeRecommended(t *testing.T) {
 	}
 	result := AnalyzeDiscover([]ArtifactInput{{
 		ID: "ridge", Quantization: "3.7BPW", WeightsBytes: 12_599_187_008, Complete: true,
-	}}, metadata, nil, snapshot, 4096, nil, true)
+	}}, metadata, nil, snapshot, 4096, nil, true, true)
 
 	if len(result.Artifacts) != 1 {
 		t.Fatalf("artifacts=%+v", result.Artifacts)

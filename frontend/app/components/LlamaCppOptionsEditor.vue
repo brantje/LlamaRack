@@ -20,6 +20,7 @@ type ConfigResponse = {
   effective?: EffectiveConfig
   unsupported?: string[]
 }
+type StatusVariant = 'ready' | 'pending' | 'neutral' | 'failed'
 
 const props = withDefaults(defineProps<{
   modelValue: Record<string, string>
@@ -27,7 +28,8 @@ const props = withDefaults(defineProps<{
   modelId?: string
   instanceId?: string
   defaultOpen?: boolean
-}>(), { modelId: '', instanceId: '', defaultOpen: true })
+  excludeKeys?: string[]
+}>(), { modelId: '', instanceId: '', defaultOpen: true, excludeKeys: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, string>] }>()
 
 const manager = useManager()
@@ -49,8 +51,9 @@ const basicKeys = new Set([
 ])
 
 const scopeLabel = computed(() => props.scope === 'global' ? 'Global' : props.scope === 'model' ? 'Model' : 'Instance')
+const excluded = computed(() => new Set(props.excludeKeys || []))
 const overrides = computed(() => props.modelValue || {})
-const overrideCount = computed(() => Object.keys(overrides.value).length)
+const overrideCount = computed(() => Object.keys(overrides.value).filter(key => !excluded.value.has(key)).length)
 const editorTitle = computed(() => `${scopeLabel.value} llama.cpp configuration`)
 const editorSummary = computed(() => {
   const count = overrideCount.value
@@ -92,6 +95,7 @@ const allOptions = computed<OptionDefinition[]>(() => {
 const visibleOptions = computed(() => {
   const term = search.value.trim().toLowerCase()
   return allOptions.value.filter((option) => {
+    if (excluded.value.has(option.key)) return false
     if (mode.value === 'basic' && (!basicKeys.has(option.key) || isProtected(option))) return false
     if (!term) return true
     return option.key.toLowerCase().includes(term) || (option.description || '').toLowerCase().includes(term)
@@ -165,16 +169,16 @@ function removeOverride(key: string) {
   delete next[key]
   emit('update:modelValue', next)
 }
-function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutral' {
-  if (source === 'instance') return 'primary'
-  if (source === 'model') return 'success'
-  if (source === 'global') return 'warning'
+function sourceVariant(source: string): StatusVariant {
+  if (source === 'instance') return 'ready'
+  if (source === 'model') return 'pending'
+  if (source === 'global') return 'pending'
   return 'neutral'
 }
 </script>
 
 <template>
-  <UCollapsible :default-open="defaultOpen" class="space-y-4">
+  <UCollapsible :default-open="defaultOpen" class="space-y-4" data-testid="llamacpp-options-editor">
     <template #default="{ open }">
       <UButton type="button" color="neutral" variant="soft" class="w-full">
         <span class="flex w-full items-center justify-between gap-3 text-left">
@@ -183,7 +187,7 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
             <span class="block text-xs font-normal text-muted">{{ editorSummary }}</span>
           </span>
           <span class="flex shrink-0 items-center gap-2">
-            <UBadge size="sm" color="neutral" variant="subtle">{{ overrideCount }}</UBadge>
+            <StatusTag variant="neutral">{{ overrideCount }}</StatusTag>
             <UIcon :name="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-4" />
           </span>
         </span>
@@ -194,25 +198,27 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
       <div class="space-y-4 pt-1">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-xs text-muted">Only overrides are stored at this layer; remove an override to inherit again.</p>
-          <div class="flex items-center gap-2">
-            <UButton type="button" :variant="mode === 'basic' ? 'solid' : 'soft'" size="sm" @click="mode = 'basic'">Basic</UButton>
-            <UButton type="button" :variant="mode === 'advanced' ? 'solid' : 'soft'" size="sm" @click="mode = 'advanced'">Advanced</UButton>
+          <div class="inline-flex border border-[var(--color-divider)]" data-testid="llamacpp-mode">
+            <UButton type="button" size="sm" :color="mode === 'basic' ? 'primary' : 'neutral'" :variant="mode === 'basic' ? 'solid' : 'ghost'" class="border-r border-[var(--color-divider)]" :aria-pressed="mode === 'basic'" data-testid="llamacpp-mode-basic" @click="mode = 'basic'">Basic</UButton>
+            <UButton type="button" size="sm" :color="mode === 'advanced' ? 'primary' : 'neutral'" :variant="mode === 'advanced' ? 'solid' : 'ghost'" :aria-pressed="mode === 'advanced'" data-testid="llamacpp-mode-advanced" @click="mode = 'advanced'">Advanced</UButton>
           </div>
         </div>
 
-        <UAlert v-if="loadError" color="warning" variant="subtle" :description="loadError" />
+        <Frame v-if="loadError" class="p-3">
+          <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ loadError }}</p></div>
+        </Frame>
         <UInput v-if="mode === 'advanced'" v-model="search" class="w-full" icon="i-lucide-search" placeholder="Search all detected llama-server options" />
         <div v-if="loading" class="space-y-2"><USkeleton v-for="n in 4" :key="n" class="h-20 w-full" /></div>
 
         <div v-else class="space-y-2">
-          <UCard v-for="option in visibleOptions" :key="option.key" :ui="{ body: 'p-4 sm:p-4' }">
+          <div v-for="option in visibleOptions" :key="option.key" class="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
-                  <UBadge size="sm" variant="subtle" :color="badgeColor(effectiveSource(option))">{{ effectiveSource(option) }}</UBadge>
-                  <UBadge v-if="isProtected(option)" size="sm" color="neutral" variant="outline">Manager controlled</UBadge>
-                  <UBadge v-if="option.unsupported" size="sm" color="warning" variant="outline">Unsupported · retained</UBadge>
+                  <StatusTag :variant="sourceVariant(effectiveSource(option))">{{ effectiveSource(option) }}</StatusTag>
+                  <StatusTag v-if="isProtected(option)" variant="neutral">Manager controlled</StatusTag>
+                  <StatusTag v-if="option.unsupported" variant="failed">Unsupported · retained</StatusTag>
                 </div>
                 <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
                 <p v-if="!isOverridden(option.key) && effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>
@@ -247,8 +253,10 @@ function badgeColor(source: string): 'primary' | 'success' | 'warning' | 'neutra
                 <UButton v-else-if="!isProtected(option)" type="button" size="xs" color="neutral" variant="soft" @click="enableOverride(option)">Override here</UButton>
               </div>
             </div>
-          </UCard>
-          <UAlert v-if="!visibleOptions.length" color="neutral" variant="subtle" description="No options match this view. Switch to Advanced to see every detected option." />
+          </div>
+          <Frame v-if="!visibleOptions.length" class="p-3">
+            <div class="flex items-start gap-2"><StatusTag variant="neutral">No options</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">No options match this view. Switch to Advanced to see every detected option.</p></div>
+          </Frame>
         </div>
       </div>
     </template>

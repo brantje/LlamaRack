@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
+	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 )
 
 const (
@@ -22,13 +24,40 @@ type managementAuthContext struct {
 
 type managementAuthContextKey struct{}
 
+type managementStatusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *managementStatusRecorder) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *managementStatusRecorder) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
+}
+func (w *managementStatusRecorder) StatusCode() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
+
 func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimSuffix(r.URL.Path, "/")
 		if path == "" {
 			path = "/"
 		}
-		if isStateChanging(r.Method) {
+		// The Playground bridge re-enters the inference gateway, which enforces
+		// its own 32 MiB request limit. Keep the generic 1 MiB management mutation
+		// cap for every other state-changing endpoint.
+		if isStateChanging(r.Method) && path != "/api/v1/playground/chat/completions" {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		}
 		if publicManagementRequest(path, r.Method) {
@@ -49,10 +78,11 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 		switch {
 		case token != "":
 			user, session, err = a.AuthenticateBearer(r.Context(), token)
-		case path == "/api/v1/logs/stream" && r.Method == http.MethodGet:
-			// Native EventSource cannot attach an Authorization header. Reuse the
-			// same short-lived, one-time ticket mechanism as the runtime WebSocket
-			// so bearer credentials never have to be placed in the stream URL.
+		case browserStreamTicketRequest(path, r.Method):
+			// Native EventSource and WebSocket cannot attach an Authorization
+			// header. Reuse the same short-lived, one-time ticket mechanism as
+			// the runtime WebSocket so bearer credentials never have to be
+			// placed in the stream URL.
 			user, session, err = a.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"))
 		default:
 			err = auth.ErrSessionInvalid
@@ -62,8 +92,47 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 			return
 		}
 		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, managementAuthContext{User: user, Session: session})
-		next.ServeHTTP(w, r.WithContext(ctx))
+		request := r.WithContext(ctx)
+		if instanceID, action, ok := lifecycleAction(path, r.Method); ok {
+			recorder := &managementStatusRecorder{ResponseWriter: w}
+			next.ServeHTTP(recorder, request)
+			if recorder.StatusCode() < http.StatusBadRequest {
+				systemlog.Log(systemlog.Info, "manager", fmt.Sprintf("user %s %s %s", user.Username, action, instanceID))
+			}
+			return
+		}
+		next.ServeHTTP(w, request)
 	})
+}
+
+func lifecycleAction(path, method string) (instanceID, action string, ok bool) {
+	if method != http.MethodPost || !strings.HasPrefix(path, "/api/v1/instances/") {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/api/v1/instances/"), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+		return "", "", false
+	}
+	switch parts[1] {
+	case "start":
+		action = "started"
+	case "stop":
+		action = "stopped"
+	case "restart":
+		action = "restarted"
+	case "kill":
+		action = "killed"
+	default:
+		return "", "", false
+	}
+	return parts[0], action, true
+}
+
+func browserStreamTicketRequest(path, method string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	return path == "/api/v1/logs/stream" || path == "/api/v1/downloads/ws"
 }
 
 func publicManagementRequest(path, method string) bool {

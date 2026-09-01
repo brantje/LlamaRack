@@ -317,14 +317,22 @@ describe('Phase 7 global llama.cpp administration', () => {
     const wrapper = await mountSuspended(AdminLlamaCppPage, { route: false })
     await flushPromises()
     expect(wrapper.text()).toContain('unknown')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).exists()).toBe(true)
+    expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').attributes('aria-pressed')).toBe('true')
 
     const save = () => wrapper.findAll('button').find(button => button.text().includes('Save defaults'))!
+    expect((save().element as HTMLButtonElement).disabled).toBe(true)
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '8192' })
+    await flushPromises()
+    expect((save().element as HTMLButtonElement).disabled).toBe(false)
     await save().trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Global llama.cpp defaults saved')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config', { method: 'PUT', body: { options: { 'ctx-size': '4096' } } })
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config', { method: 'PUT', body: { options: { 'ctx-size': '8192' } } })
 
     saveMode = 'data'
+    wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '16384' })
+    await flushPromises()
     await save().trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('save denied')

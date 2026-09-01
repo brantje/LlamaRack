@@ -39,7 +39,7 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		lifecycle, err := h.service.LifecycleSummary(r.Context())
+		lifecycle, err := h.service.LifecycleSummary(r.Context(), since)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -95,8 +95,9 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		metric := strings.TrimSpace(r.URL.Query().Get("metric"))
+		instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
 		if isHardwareMetric(metric) {
-			items, err := h.service.HardwareTimeseries(r.Context(), metric, since, bucket, strings.TrimSpace(r.URL.Query().Get("device_id")), strings.TrimSpace(r.URL.Query().Get("instance_id")))
+			items, err := h.service.HardwareTimeseries(r.Context(), metric, since, bucket, strings.TrimSpace(r.URL.Query().Get("device_id")), instanceID)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -104,7 +105,7 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"metric": metric, "bucket_seconds": bucket, "items": items})
 			return
 		}
-		items, err := h.service.Timeseries(r.Context(), metric, since, bucket)
+		items, err := h.service.RequestTimeseries(r.Context(), metric, since, bucket, instanceID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

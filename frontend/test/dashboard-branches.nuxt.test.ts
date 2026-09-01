@@ -48,14 +48,10 @@ beforeEach(() => {
   resetManager()
 })
 
-describe('Phase 11 Dashboard edge branches', () => {
+describe('Dashboard edge branches', () => {
   it('covers runtime, memory, attribution and attention fallbacks', async () => {
     const manager = resetManager()
-    manager.instances.value = [
-      instance('starting'),
-      instance('loading'),
-      instance('always-idle', { always_on: true, idle_unload_seconds: 30 })
-    ]
+    manager.instances.value = [instance('starting'), instance('loading'), instance('always-idle', { always_on: true, idle_unload_seconds: 30 })]
     manager.runtimes.value = {
       m1: [
         { instance_id: 'starting', model_id: 'm1', state: 'STARTING' },
@@ -114,11 +110,11 @@ describe('Phase 11 Dashboard edge branches', () => {
     const wrapper = await mountSuspended(DashboardPage, { route: '/' })
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('2 starting')
-    expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('1 error')
+    expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('2 loading')
+    expect(wrapper.get('[data-testid="dashboard-running"]').text()).toContain('1 failed')
     expect(wrapper.get('[data-testid="dashboard-idle"]').text()).toContain('1 h')
     expect(wrapper.get('[data-testid="dashboard-idle"]').text()).toContain('1 Instance override')
-    expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('1 active API key')
+    expect(wrapper.get('[data-testid="dashboard-gateway"]').text()).toContain('1 key active')
     expect(wrapper.get('[data-testid="dashboard-vram"]').text()).toContain('28 GiB')
 
     const allocation = wrapper.get('[data-testid="dashboard-vram-allocation"]')
@@ -130,22 +126,22 @@ describe('Phase 11 Dashboard edge branches', () => {
     expect(wrapper.get('[data-testid="gpu-progress-CUDA4"]').text()).toContain('Free')
 
     const traffic = wrapper.get('[data-testid="dashboard-gateway-traffic"]').text()
-    expect(traffic).toContain('API key')
+    expect(traffic).toContain('—')
     expect(traffic).toContain('500 ms')
     expect(traffic).toContain('10.0 s')
-    expect(traffic).toContain('—')
 
     const attention = wrapper.get('[data-testid="dashboard-attention"]').text()
     expect(attention).toContain('failed failed to start')
     expect(attention).toContain('managed llama-server process is in FAILED state')
     expect(attention).toContain('starting returned an error')
-    expect(attention).toContain('/v1/chat/completions failed during the last 15 minutes')
+    expect(attention).toContain('/v1/chat/completions failed during the last 15 min')
+    expect(attention).not.toContain('loading returned 500')
     expect(attention).toContain('always-idle is Always-On but unloaded')
     expect(attention).toContain('CUDA0 is at 100% VRAM')
     expect(attention).toContain('Host RAM is at 95%')
   })
 
-  it('covers seconds formatting, API-key prefix fallback and missing request items', async () => {
+  it('covers seconds formatting, missing request items and zero-memory fallbacks', async () => {
     const manager = resetManager()
     manager.instances.value = [instance('one')]
     manager.runtimes.value = { m1: [{ instance_id: 'one', model_id: 'm1', state: 'READY' }] }
@@ -155,10 +151,7 @@ describe('Phase 11 Dashboard edge branches', () => {
           requests: 1,
           active_api_keys: 0,
           lifecycle: { autoloads: 0, failed_starts: 0, load_duration_ms_total: 0 },
-          hardware: {
-            hardware: { ram_total_bytes: 0, ram_available_bytes: 1, collected_at: '', processes: [], gpus: [] },
-            telemetry: []
-          }
+          hardware: { hardware: { ram_total_bytes: 0, ram_available_bytes: 1, collected_at: '', processes: [], gpus: [] }, telemetry: [] }
         }
       }
       if (path.startsWith('/api/v1/observability/requests')) return {}

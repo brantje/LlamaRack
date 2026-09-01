@@ -10,10 +10,7 @@ const saved = ref(false)
 
 function normalizeTokenStatus(value: any): TokenStatus {
   if (!value || typeof value.configured !== 'boolean') return { configured: false }
-  return {
-    configured: value.configured,
-    prefix: typeof value.prefix === 'string' ? value.prefix : undefined
-  }
+  return { configured: value.configured, prefix: typeof value.prefix === 'string' ? value.prefix : undefined }
 }
 
 async function load() {
@@ -28,35 +25,64 @@ async function load() {
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
-  busy.value = true; error.value = ''; saved.value = false
+  if (!tokenInput.value.trim()) return
+  busy.value = true
+  error.value = ''
+  saved.value = false
   try {
     tokenStatus.value = normalizeTokenStatus(await manager.request('/api/v1/huggingface/token', { method: 'PUT', body: { token: tokenInput.value } }))
-    tokenInput.value = ''; saved.value = true
-  } catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to save Hugging Face token' } finally { busy.value = false }
+    tokenInput.value = ''
+    saved.value = true
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to save Hugging Face token'
+  } finally {
+    busy.value = false
+  }
 }
 
 async function remove() {
-  busy.value = true; error.value = ''; saved.value = false
-  try { await manager.request('/api/v1/huggingface/token', { method: 'DELETE' }); tokenStatus.value = { configured: false }; tokenInput.value = '' }
-  catch (value: any) { error.value = value?.data?.error || value?.message || 'Unable to remove Hugging Face token' } finally { busy.value = false }
+  busy.value = true
+  error.value = ''
+  saved.value = false
+  try {
+    await manager.request('/api/v1/huggingface/token', { method: 'DELETE' })
+    tokenStatus.value = { configured: false }
+    tokenInput.value = ''
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to remove Hugging Face token'
+  } finally {
+    busy.value = false
+  }
 }
 </script>
 
 <template>
-  <div class="space-y-5">
-    <UPageHeader headline="ADMINISTRATION" title="Hugging Face" description="Manage the global provider credential used for private and gated repositories." />
-    <UCard class="max-w-3xl">
-      <template #header><div><h2 class="text-xl font-bold">Provider authentication</h2><p class="text-sm text-muted">The stored token is encrypted at rest and is never returned by the API.</p></div></template>
-      <UAlert v-if="error" class="mb-4" color="error" variant="subtle" :description="error" />
-      <UAlert v-if="saved" class="mb-4" color="success" variant="subtle" description="Hugging Face token saved." />
-      <div class="flex flex-wrap items-end gap-3">
+  <AdminShell title="Hugging Face" description="Manage the global provider credential used for private and gated repositories.">
+    <Frame class="max-w-[720px] p-5" data-testid="admin-huggingface-card">
+      <div>
+        <h2 class="text-base font-semibold">Provider credential</h2>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">The stored token is encrypted at rest and is never returned by the API.</p>
+      </div>
+
+      <div v-if="error" class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
+        <StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
+      <div v-if="saved" class="mt-4 flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
+        <StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Hugging Face token saved.</p>
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-end gap-2">
         <UFormField class="min-w-0 flex-1" :label="tokenStatus.configured ? `Replace token (${tokenStatus.prefix || 'configured'}…)` : 'Access token'">
           <UInput v-model="tokenInput" class="w-full" type="password" autocomplete="off" placeholder="hf_…" />
         </UFormField>
-        <UButton :loading="busy" :disabled="!tokenInput.trim()" @click="save">{{ tokenStatus.configured ? 'Replace' : 'Save token' }}</UButton>
-        <UButton v-if="tokenStatus.configured" color="error" variant="soft" :disabled="busy" @click="remove">Remove</UButton>
+        <AppButton intent="primary" :loading="busy" :disabled="!tokenInput.trim()" @click="save">{{ tokenStatus.configured ? 'Replace' : 'Save token' }}</AppButton>
+        <AppButton v-if="tokenStatus.configured" intent="secondary" :disabled="busy" @click="remove">Remove</AppButton>
       </div>
-      <div class="mt-4 flex items-center gap-2 text-sm text-muted"><UBadge :color="tokenStatus.configured ? 'success' : 'neutral'" variant="subtle">{{ tokenStatus.configured ? 'Configured' : 'Not configured' }}</UBadge><span>Credentials are sent only to the configured Hugging Face host.</span></div>
-    </UCard>
-  </div>
+
+      <div class="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4 text-sm text-[var(--neutral-700)]">
+        <StatusTag :variant="tokenStatus.configured ? 'ready' : 'neutral'">{{ tokenStatus.configured ? 'Configured' : 'Not configured' }}</StatusTag>
+        <span>Credentials are sent only to the configured Hugging Face host.</span>
+      </div>
+    </Frame>
+  </AdminShell>
 </template>

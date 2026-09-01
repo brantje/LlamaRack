@@ -13,10 +13,15 @@ describe('Instance logs layout', () => {
     expect(pageSource).not.toContain('instance-logs-output')
   })
 
-  it('removes card chrome only for embedded viewers', () => {
+  it('uses shared flat primitives and the Administration diagnostics route', () => {
     expect(viewerSource).toContain('embedded?: boolean')
-    expect(viewerSource).toContain("root: 'rounded-none bg-transparent shadow-none ring-0 divide-y-0'")
-    expect(viewerSource).toContain("header: 'px-0 pt-0 pb-4 sm:px-0'")
-    expect(viewerSource).toContain("body: 'p-0 sm:p-0'")
+    expect(viewerSource).toContain("path: '/admin/system-logs'")
+    expect(viewerSource).toContain('<Frame')
+    expect(viewerSource).toContain('<StatusTag')
+    expect(viewerSource).toContain("props.embedded ? '!border-0 !bg-transparent !p-0' : 'p-4'")
+    expect(viewerSource).not.toContain('<UCard')
+    expect(viewerSource).not.toContain('<UBadge')
+    expect(viewerSource).not.toContain('<UAlert')
+    expect(viewerSource).not.toMatch(/rounded-(?:sm|md|lg|xl|2xl|3xl|full)/)
   })
 })

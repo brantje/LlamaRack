@@ -28,8 +28,11 @@ function resetManager() {
   return manager
 }
 
-function selectMenu(wrapper: any) {
-  return wrapper.findAllComponents({ name: 'SelectMenu' })[0] || wrapper.findAllComponents({ name: 'USelectMenu' })[0]
+async function selectGGUF(wrapper: any, path: string) {
+  const input = wrapper.findAll('input[type="radio"][name="gguf_path"]').find((item: any) => item.attributes('value') === path)
+  if (!input) throw new Error(`Missing GGUF option ${path}`)
+  await input.setValue()
+  await flushPromises()
 }
 
 beforeEach(() => {
@@ -79,7 +82,7 @@ describe('Phase 8 GGUF helper integration', () => {
     expect(wrapper.text()).toContain('2 detected helper artifacts were added to Downloads')
   })
 
-  it('preconfigures downloaded helpers and labels dropdown capabilities', async () => {
+  it('preconfigures downloaded helpers and derives radio capabilities from suggested options', async () => {
     const available = [{
       path: 'huggingface/acme/vision/vision-Q4_K_M.gguf', name: 'vision-Q4_K_M.gguf', total_bytes: 1024, quantization: 'Q4_K_M',
       suggested_options: {
@@ -126,14 +129,19 @@ describe('Phase 8 GGUF helper integration', () => {
 
     const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
     await flushPromises()
-    expect(selectMenu(wrapper).props('items')).toEqual([
-      { label: `${available[0].path} · Q4_K_M · MTP · Vision`, value: available[0].path },
-      { label: `${available[1].path} · Q5_K_M · MTP`, value: available[1].path },
-      { label: `${available[2].path} · Q8_0 · Vision`, value: available[2].path }
-    ])
+    const rows = wrapper.get('[data-testid="gguf-select"]').findAll('[data-testid="gguf-option"]')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]!.text()).toContain(available[0].path)
+    expect(rows[0]!.text()).toContain('MTP')
+    expect(rows[0]!.text()).toContain('Vision')
+    expect(rows[1]!.text()).toContain(available[1].path)
+    expect(rows[1]!.text()).toContain('MTP')
+    expect(rows[1]!.text()).not.toContain('Vision')
+    expect(rows[2]!.text()).toContain(available[2].path)
+    expect(rows[2]!.text()).toContain('Vision')
+    expect(rows[2]!.text()).not.toContain('MTP')
 
-    selectMenu(wrapper).vm.$emit('update:modelValue', available[0].path)
-    await flushPromises()
+    await selectGGUF(wrapper, available[0].path)
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('Vision projector: mmproj-F16.gguf')
     expect(wrapper.get('[data-testid="detected-gguf-helpers"]').text()).toContain('MTP draft model: mtp-vision-Q4_0.gguf')
 

@@ -40,6 +40,7 @@ const allowHybridDiscoverRecommendations = ref(true)
 const error = ref('')
 const saved = ref(false)
 const busy = ref(false)
+const baseline = ref('')
 const legacySettingKeys = [
   'session_lifetime_seconds', 'login_protection_enabled', 'login_failure_threshold', 'login_lockout_seconds',
   'trusted_proxies', 'allowed_origins', 'external_url', 'startup_timeout_seconds', 'idle_unload_seconds', 'always_on_reconcile_seconds'
@@ -61,6 +62,19 @@ function defaultDiscoverSettings(): DiscoverSettings {
 function normalizeDiscoverSettings(value: unknown): DiscoverSettings {
   return isDiscoverSettings(value) ? value : defaultDiscoverSettings()
 }
+function formSnapshot() {
+  return JSON.stringify({ ...form, allowHybridDiscoverRecommendations: allowHybridDiscoverRecommendations.value })
+}
+function updateBaseline() {
+  baseline.value = formSnapshot()
+}
+const hasChanges = computed(() => Boolean(settings.value && discoverSettings.value && baseline.value && formSnapshot() !== baseline.value))
+const saveDisabledReason = computed(() => {
+  if (!settings.value || !discoverSettings.value) return 'Settings are still loading.'
+  if (!hasChanges.value) return 'No changes to save.'
+  return ''
+})
+const canSave = computed(() => !busy.value && !saveDisabledReason.value)
 function syncForm(value: GeneralSettings) {
   for (const key of Object.keys(form) as Array<keyof typeof form>) {
     const setting = value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
@@ -84,17 +98,19 @@ async function load() {
     network.value = system.network
     allowHybridDiscoverRecommendations.value = discover.hybrid_recommendations_enabled.value
     syncForm(value)
+    updateBaseline()
   } catch (value: any) {
     settings.value = null
     discoverSettings.value = null
     network.value = null
+    baseline.value = ''
     error.value = value?.data?.error || value?.message || 'Unable to load manager settings'
   }
 }
 watch(manager.user, user => { if (user) void load() }, { immediate: true })
 
 async function save() {
-  if (!settings.value || !discoverSettings.value) return
+  if (!settings.value || !discoverSettings.value || !hasChanges.value) return
   busy.value = true
   error.value = ''
   saved.value = false
@@ -114,6 +130,7 @@ async function save() {
     discoverSettings.value = discover
     allowHybridDiscoverRecommendations.value = discover.hybrid_recommendations_enabled.value
     syncForm(value)
+    updateBaseline()
     const system = await manager.request<SystemNetwork>('/api/v1/system')
     network.value = system?.network || null
     saved.value = true
@@ -135,78 +152,84 @@ function editable(key: keyof typeof form) {
 </script>
 
 <template>
-  <div class="space-y-5">
-    <div class="flex items-start justify-between gap-4"><UPageHeader class="min-w-0 flex-1" headline="ADMINISTRATION" title="General" description="Manager security, network, lifecycle, recommendation and observability defaults. Environment values normally override database values; Allowed Origins and the Prometheus token are explicitly overrideable from this page." /><UButton :loading="busy" :disabled="!settings || !discoverSettings" @click="save">Save changes</UButton></div>
-    <UAlert v-if="error" color="error" variant="subtle" :description="error" />
-    <UAlert v-if="saved" color="success" variant="subtle" description="Manager settings saved." />
+  <AdminShell title="General" description="Manager security, network and lifecycle defaults.">
+    <template #actions>
+      <div class="flex w-full flex-col items-start gap-1 sm:w-auto sm:items-end">
+        <AppButton data-testid="admin-general-save-top" intent="primary" :loading="busy" :disabled="!canSave" @click="save">Save changes</AppButton>
+        <p v-if="saveDisabledReason" class="text-xs text-[var(--neutral-800)]" data-testid="admin-general-save-reason">{{ saveDisabledReason }}</p>
+      </div>
+    </template>
 
-    <template v-if="settings && discoverSettings">
-      <UCard>
-        <template #header><div><h2 class="text-xl font-bold">Authentication</h2><p class="text-sm text-muted">Hard session lifetime and bounded login protection. Sessions do not use idle or sliding expiration.</p></div></template>
-        <div class="grid gap-5 md:grid-cols-2">
-          <UFormField label="Session lifetime (seconds)" :hint="source('session_lifetime_seconds')"><UInputNumber v-model="form.session_lifetime_seconds" class="w-full" :min="60" :disabled="!editable('session_lifetime_seconds')" /></UFormField>
-          <UFormField label="Login failure threshold" :hint="source('login_failure_threshold')"><UInputNumber v-model="form.login_failure_threshold" class="w-full" :min="2" :disabled="!editable('login_failure_threshold')" /></UFormField>
-          <UFormField label="Lockout duration (seconds)" :hint="source('login_lockout_seconds')"><UInputNumber v-model="form.login_lockout_seconds" class="w-full" :min="1" :disabled="!editable('login_lockout_seconds')" /></UFormField>
-          <UFormField label="Login protection" :hint="source('login_protection_enabled')"><USwitch v-model="form.login_protection_enabled" :disabled="!editable('login_protection_enabled')" label="Enable escalating login protection" /></UFormField>
+    <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
+    <Frame v-if="saved" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Manager settings saved.</p></div></Frame>
+
+    <div v-if="settings && discoverSettings" class="space-y-5">
+      <Frame class="p-5" data-testid="admin-general-authentication">
+        <h2 class="text-base font-semibold">Authentication</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Hard session lifetime and bounded login protection. Sessions do not use idle or sliding expiration.</p>
+        <div class="mt-5 grid gap-5 md:grid-cols-2">
+          <AdminSettingField label="Session lifetime (seconds)" :source="source('session_lifetime_seconds')"><UInputNumber v-model="form.session_lifetime_seconds" class="w-full" :min="60" :disabled="!editable('session_lifetime_seconds')" /></AdminSettingField>
+          <AdminSettingField label="Login failure threshold" :source="source('login_failure_threshold')"><UInputNumber v-model="form.login_failure_threshold" class="w-full" :min="2" :disabled="!editable('login_failure_threshold')" /></AdminSettingField>
+          <AdminSettingField label="Lockout duration (seconds)" :source="source('login_lockout_seconds')"><UInputNumber v-model="form.login_lockout_seconds" class="w-full" :min="1" :disabled="!editable('login_lockout_seconds')" /></AdminSettingField>
+          <AdminSettingField label="Login protection" :source="source('login_protection_enabled')"><USwitch v-model="form.login_protection_enabled" :disabled="!editable('login_protection_enabled')" label="Enable escalating login protection" /></AdminSettingField>
         </div>
-      </UCard>
+      </Frame>
 
-      <UCard>
-        <template #header><div><h2 class="text-xl font-bold">Network and reverse proxy</h2><p class="text-sm text-muted">Forwarded headers are trusted only when the direct peer matches an explicitly configured proxy address or CIDR.</p></div></template>
-        <div class="grid gap-5 md:grid-cols-2">
-          <UFormField label="Trusted proxies" :hint="source('trusted_proxies')"><UInput v-model="form.trusted_proxies" class="w-full" :disabled="!editable('trusted_proxies')" placeholder="10.0.0.10, 172.16.0.0/12" /></UFormField>
-          <UFormField label="Allowed origins" :hint="source('allowed_origins')">
+      <Frame class="p-5" data-testid="admin-general-network">
+        <h2 class="text-base font-semibold">Network and reverse proxy</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Forwarded headers are trusted only when the direct peer matches an explicitly configured proxy address or CIDR.</p>
+        <div class="mt-5 grid gap-5 md:grid-cols-2">
+          <AdminSettingField label="Trusted proxies" :source="source('trusted_proxies')"><UInput v-model="form.trusted_proxies" class="w-full" :disabled="!editable('trusted_proxies')" placeholder="10.0.0.10, 172.16.0.0/12" /></AdminSettingField>
+          <AdminSettingField label="Allowed origins" :source="source('allowed_origins')">
             <UInput v-model="form.allowed_origins" class="w-full" :disabled="!editable('allowed_origins')" placeholder="https://manager.example.com" />
             <template #help>A saved value here takes precedence over LCM_ALLOWED_ORIGIN.</template>
-          </UFormField>
-          <UFormField label="External/public URL" :hint="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></UFormField>
+          </AdminSettingField>
+          <AdminSettingField label="External/public URL" :source="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></AdminSettingField>
         </div>
-        <USeparator class="my-5" />
-        <dl class="grid gap-4 text-sm sm:grid-cols-2">
-          <div><dt class="text-muted">Effective external scheme</dt><dd class="mt-1 font-semibold">{{ network?.effective_scheme || 'unknown' }}</dd></div>
-          <div><dt class="text-muted">Secure session cookies</dt><dd class="mt-1"><UBadge :color="network?.secure_cookie ? 'success' : 'warning'" variant="subtle">{{ network?.secure_cookie ? 'Enabled' : 'Disabled' }}</UBadge></dd></div>
-        </dl>
-      </UCard>
+        <div class="mt-5 grid gap-4 border-t border-[var(--color-divider)] pt-4 text-sm sm:grid-cols-2">
+          <div><p class="text-xs text-[var(--neutral-700)]">Effective external scheme</p><code class="mt-1 block font-mono text-[length:var(--font-size-h6)]">{{ network?.effective_scheme || 'unknown' }}</code></div>
+          <div><p class="text-xs text-[var(--neutral-700)]">Secure session cookies</p><StatusTag class="mt-1" :variant="network?.secure_cookie ? 'ready' : 'neutral'">{{ network?.secure_cookie ? 'Enabled' : 'Disabled' }}</StatusTag></div>
+        </div>
+      </Frame>
 
-      <UCard>
-        <template #header><div><h2 class="text-xl font-bold">Resource defaults</h2><p class="text-sm text-muted">Persisted lifecycle and Discover recommendation defaults are applied by the manager.</p></div></template>
-        <div class="grid gap-5 md:grid-cols-3">
-          <UFormField label="Worker startup timeout (seconds)" :hint="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></UFormField>
-          <UFormField label="Global idle unload (seconds)" :hint="source('idle_unload_seconds')">
+      <Frame class="p-5" data-testid="admin-general-resources">
+        <h2 class="text-base font-semibold">Resource defaults</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-700)]">Global idle unload defaults to 300 seconds; set it to 0 to disable the global idle timeout. Streaming responses keep an Instance active until the proxied response completes.</p>
+        <div class="mt-5 grid gap-5 md:grid-cols-3">
+          <AdminSettingField label="Worker startup timeout (seconds)" :source="source('startup_timeout_seconds')"><UInputNumber v-model="form.startup_timeout_seconds" class="w-full" :min="1" :disabled="!editable('startup_timeout_seconds')" /></AdminSettingField>
+          <AdminSettingField label="Global idle unload (seconds)" :source="source('idle_unload_seconds')">
             <UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" :disabled="!editable('idle_unload_seconds')" />
             <template #help>Defaults to 300 seconds (5 minutes). Set to 0 to disable the global idle timeout.</template>
-          </UFormField>
-          <UFormField label="Always-on reconcile (seconds)" :hint="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></UFormField>
+          </AdminSettingField>
+          <AdminSettingField label="Always-on reconcile (seconds)" :source="source('always_on_reconcile_seconds')"><UInputNumber v-model="form.always_on_reconcile_seconds" class="w-full" :min="0" :disabled="!editable('always_on_reconcile_seconds')" /></AdminSettingField>
         </div>
-        <USeparator class="my-5" />
-        <UFormField label="Discover recommendations" :hint="discoverSettings.hybrid_recommendations_enabled.source" data-testid="discover-hybrid-policy">
-          <USwitch v-model="allowHybridDiscoverRecommendations" label="Allow GPU + CPU / CPU-only choices to outrank a GPU-fit quantization" />
-          <template #help>Enabled by default. Disable this when the primary Discover recommendation should prefer the highest-quality option that fits fully on GPU whenever one is available. Fallback choices remain visible and selectable.</template>
-        </UFormField>
-      </UCard>
 
-      <UCard data-testid="observability-settings">
-        <template #header><div><h2 class="text-xl font-bold">Observability</h2><p class="text-sm text-muted">Control retained operational history and optional Prometheus scrape authentication.</p></div></template>
-        <div class="grid gap-5 md:grid-cols-2">
-          <UFormField label="History retention (days)" :hint="source('observability_retention_days')">
+        <div class="mt-5 grid gap-5 border-t border-[var(--color-divider)] pt-5 md:grid-cols-2">
+          <AdminSettingField label="Discover recommendations" :source="discoverSettings.hybrid_recommendations_enabled.source" data-testid="discover-hybrid-policy">
+            <USwitch v-model="allowHybridDiscoverRecommendations" :disabled="!discoverSettings.hybrid_recommendations_enabled.editable" label="Allow hybrid recommendations to outrank GPU-fit choices" />
+          </AdminSettingField>
+          <AdminSettingField v-if="settings.observability_retention_days" label="History retention (days)" :source="source('observability_retention_days')" data-testid="observability-settings">
             <UInputNumber v-model="form.observability_retention_days" class="w-full" :min="1" :max="3650" :disabled="!editable('observability_retention_days')" />
-            <template #help>Applies to individual inference requests and persisted hardware history. Default: 30 days.</template>
-          </UFormField>
-          <UFormField label="Prometheus Bearer token" :hint="source('prometheus_auth_token')">
+          </AdminSettingField>
+          <AdminSettingField v-if="settings.prometheus_auth_token" label="Prometheus Bearer token" :source="source('prometheus_auth_token')">
             <UInput v-model="form.prometheus_auth_token" type="password" autocomplete="off" class="w-full" :disabled="!editable('prometheus_auth_token')" placeholder="Leave empty for unauthenticated /metrics" />
-            <template #help>An empty token keeps /metrics unauthenticated. Set a token to require Authorization: Bearer &lt;token&gt;.</template>
-          </UFormField>
+          </AdminSettingField>
         </div>
-      </UCard>
+      </Frame>
 
-      <UCard>
-        <template #header><h2 class="text-xl font-bold">Manager runtime</h2></template>
-        <dl class="divide-y divide-default text-sm">
-          <div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono">{{ value }}</code></dd></div>
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">Management API URL</dt><dd><code class="break-all font-mono">{{ manager.apiBase.value }}/api/v1</code></dd></div>
-          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-muted">OpenAI API URL</dt><dd><code class="break-all font-mono">{{ manager.apiBase.value }}/v1</code></dd></div>
+      <Frame class="p-5" data-testid="admin-general-runtime">
+        <h2 class="text-base font-semibold">Manager runtime</h2>
+        <dl class="mt-4 text-sm">
+          <div v-for="(value, key) in settings.runtime" :key="key" class="grid gap-1 border-t border-[var(--color-divider)] py-3 first:border-t-0 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">{{ String(key).replaceAll('_', ' ') }}</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ value }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Management API URL</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ manager.apiBase.value }}/api/v1</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">OpenAI API URL</dt><dd><code class="break-all font-mono text-[length:var(--font-size-h6)]">{{ manager.apiBase.value }}/v1</code></dd></div>
         </dl>
-      </UCard>
-    </template>
-  </div>
+      </Frame>
+
+      <div class="flex flex-col items-start gap-3 border-t border-[var(--color-divider)] pt-4 sm:hidden" data-testid="admin-general-mobile-actions">
+        <p class="text-xs text-[var(--neutral-800)]">{{ saveDisabledReason || 'Unsaved changes' }}</p>
+        <AppButton data-testid="admin-general-save-bottom" intent="primary" :loading="busy" :disabled="!canSave" @click="save">Save changes</AppButton>
+      </div>
+    </div>
+  </AdminShell>
 </template>

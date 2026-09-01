@@ -55,6 +55,15 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 		}
 		contextLength = value
 	}
+	assumeIdle := true
+	if raw := strings.TrimSpace(r.URL.Query().Get("assume_idle")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "assume_idle must be a boolean"})
+			return
+		}
+		assumeIdle = value
+	}
 
 	detail, err := h.hf.Detail(r.Context(), repoID)
 	if err != nil {
@@ -75,7 +84,7 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 			ID: artifact.ID, Quantization: artifact.ProfileQuantization(), WeightsBytes: artifact.ModelBytes, Complete: artifact.Complete,
 		})
 	}
-	result := recommendations.AnalyzeDiscover(inputs, recommendationMetadata(derived), metadataErr, snapshot, contextLength, hardwareErr, allowHybrid)
+	result := recommendations.AnalyzeDiscover(inputs, recommendationMetadata(derived), metadataErr, snapshot, contextLength, hardwareErr, allowHybrid, assumeIdle)
 	writeJSON(w, http.StatusOK, result)
 }
 

@@ -162,4 +162,27 @@ describe('download branch coverage', () => {
     expect(calls).toBe(2)
     wrapper.unmount()
   })
+
+  it('reconnects after the WebSocket constructor throws', async () => {
+    let attempts = 0
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/downloads') return []
+      if (path === '/api/v1/auth/ws-ticket') return { ticket: 'ticket-1' }
+      return []
+    })
+    vi.stubGlobal('WebSocket', function FakeSocket() {
+      attempts += 1
+      if (attempts === 1) throw new Error('constructor failed')
+      return { close() {} }
+    })
+
+    const wrapper = await mountSuspended(DownloadsPage, { route: false })
+    await flushPromises()
+    expect(attempts).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(attempts).toBe(2)
+    wrapper.unmount()
+  })
 })

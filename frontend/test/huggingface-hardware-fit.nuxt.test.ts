@@ -84,6 +84,7 @@ function seedManager() {
 
 beforeEach(() => {
   mocks.request.mockReset()
+  localStorage.clear()
   seedManager()
 })
 
@@ -99,11 +100,15 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     const list = await mountDiscover()
     await list.find('form').trigger('submit')
     await flushPromises()
-    expect(list.text()).toContain('Model size 27B params')
+    expect(list.text()).toContain('27B params')
     list.unmount()
 
     const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
     await flushPromises()
+
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+    expect(wrapper.get('[data-testid="discover-assume-idle"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Assume idle VRAM and RAM')
 
     const repositoryMetadata = wrapper.get('[data-testid="repository-metadata"]')
     expect(repositoryMetadata.text()).toContain('Model size')
@@ -123,7 +128,7 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     expect(wrapper.text()).toContain('GPU + CPU')
     expect(wrapper.text()).toContain('Fit unknown')
     expect(wrapper.text()).toContain('Temporary context assumption')
-    expect(wrapper.text()).toContain('Detected capability: 128K')
+    expect(wrapper.text()).toContain('Capability 128K')
     expect(wrapper.text()).toContain('Q8 usually offers a small quality gain')
     expect(wrapper.findAll('[data-testid="artifact-hardware-fit"]')).toHaveLength(4)
     expect(wrapper.findAll('[data-testid^="artifact-"]').filter(node => node.text().includes('Recommended'))).toHaveLength(1)
@@ -132,9 +137,51 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     expect(recommendedArtifact.attributes('data-recommended')).toBe('true')
     expect(recommendedArtifact.classes()).not.toContain('border-primary')
     expect(recommendedArtifact.classes()).not.toContain('border-l-2')
-    expect(recommendedArtifact.classes()).toContain('bg-primary/5')
+    expect(recommendedArtifact.classes()).toContain('border-[var(--color-accent)]')
+    expect(recommendedArtifact.classes()).not.toContain('bg-primary/5')
     expect(wrapper.get('[data-testid="recommended-badge"]').text()).toBe('Recommended')
     expect(wrapper.get('[data-testid="artifact-multi"]').attributes('data-recommended')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('persists assume-idle preference and refetches recommendations when toggled', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
+      if (path.startsWith('/api/v1/huggingface/recommendations?')) return recommendationResponse()
+      return []
+    })
+
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    expect(toggle).toBeTruthy()
+    toggle!.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(localStorage.getItem('llamacpp-manager-discover-assume-idle')).toBe('false')
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=false'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the default assume-idle value when Web Storage is unavailable', async () => {
+    const storage = window.localStorage
+    vi.spyOn(storage, 'getItem').mockImplementation(() => { throw new DOMException('denied') })
+    vi.spyOn(storage, 'setItem').mockImplementation(() => { throw new DOMException('denied') })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/huggingface/model?repo=')) return { id: 'acme/demo', downloads: 1, likes: 2, private: false, gated: false, revision: 'r1', artifacts: [artifacts[0]] }
+      if (path.startsWith('/api/v1/huggingface/recommendations?')) return recommendationResponse()
+      return []
+    })
+
+    const wrapper = await mountDiscover({ props: { repoId: 'acme/demo' } })
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=true'))).toBe(true)
+
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    toggle!.vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(mocks.request.mock.calls.some(([path]) => String(path).includes('assume_idle=false'))).toBe(true)
     wrapper.unmount()
   })
 
@@ -151,6 +198,9 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Hardware-aware recommendation unavailable')
     expect(wrapper.get('[data-testid="artifact-hardware-fit"]').text()).toContain('Fit unknown')
+    const toggle = component(wrapper, ['Switch', 'USwitch'])
+    expect(toggle).toBeTruthy()
+    expect(toggle!.props('disabled')).toBe(true)
     wrapper.unmount()
   })
 
@@ -204,7 +254,7 @@ describe('Hugging Face GGUF hardware recommendations', () => {
     expect(wrapper.text()).toContain('Access may require approval')
     expect(wrapper.text()).toContain('Edge-state repository')
     expect(wrapper.text()).toContain('Some optional GGUF metadata is unavailable.')
-    expect(wrapper.text()).toContain('Detected capability: 98K')
+    expect(wrapper.text()).toContain('Capability 98K')
     expect(wrapper.text()).toContain('2 shards')
     expect(wrapper.text()).toContain('Incomplete split')
     expect(wrapper.text()).toContain('Quantization details unavailable')

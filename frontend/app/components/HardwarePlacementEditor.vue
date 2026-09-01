@@ -40,10 +40,11 @@ type Recommendation = {
 type ConfigResponse = {
   effective?: { values?: Record<string, string> }
 }
+type StatusVariant = 'ready' | 'pending' | 'neutral' | 'failed'
 type ExecutionFit = {
   title: string
   description: string
-  color: 'success' | 'warning' | 'neutral'
+  variant: StatusVariant
 }
 
 const props = defineProps<{
@@ -52,6 +53,7 @@ const props = defineProps<{
   tensorSplit: string
   modelId?: string
   llamaOptions?: Record<string, string>
+  hidePlacementControls?: boolean
 }>()
 const emit = defineEmits<{
   'update:gpuMode': [value: string]
@@ -80,7 +82,7 @@ const deviceItems = computed(() => gpus.value.map(gpu => ({
 })))
 const contextCapability = computed(() => Math.max(0, recommendation.value?.context_capability || recommendation.value?.metadata?.context_length || 0))
 const contextMaximum = computed(() => Math.max(contextSize.value, contextCapability.value || 32768, defaultContext))
-const recommendationTone = computed<'success' | 'warning' | 'neutral'>(() => recommendation.value?.current_fit ? 'success' : recommendation.value?.total_hardware_fit ? 'warning' : 'neutral')
+const recommendationVariant = computed<StatusVariant>(() => recommendation.value?.current_fit ? 'ready' : recommendation.value?.total_hardware_fit ? 'pending' : 'neutral')
 const recommendationTitle = computed(() => {
   const item = recommendation.value
   if (!item) return ''
@@ -99,25 +101,25 @@ const executionFit = computed<ExecutionFit | null>(() => {
       return {
         title: 'GPU only',
         description: `At ${item.context_length.toLocaleString()} tokens, model weights, KV cache and runtime headroom fit entirely in VRAM on ${deviceText}. No CPU model split is needed.`,
-        color: 'success'
+        variant: 'ready'
       }
     case 'multi_gpu':
       return {
         title: 'GPU only · multi-GPU',
         description: `The complete estimate fits in VRAM across ${devices.length || 2} GPUs. CPU model offload is not required.`,
-        color: 'success'
+        variant: 'ready'
       }
     case 'partial':
       return {
         title: 'GPU + CPU split needed',
         description: `Use ${deviceText} for ${item.offload.gpu_layers || 'some'} model layers and keep the remaining weights in system RAM. The KV cache can remain on GPU.`,
-        color: 'warning'
+        variant: 'pending'
       }
     case 'hybrid':
       return {
         title: 'GPU + CPU split needed',
         description: `Use ${deviceText} for ${item.offload.gpu_layers || 'some'} model layers while the KV cache and remaining model data use system RAM.`,
-        color: 'warning'
+        variant: 'pending'
       }
     default:
       return {
@@ -125,7 +127,7 @@ const executionFit = computed<ExecutionFit | null>(() => {
         description: item.current_fit
           ? 'A useful GPU offload plan is not available for the selected context, but CPU-only loading fits current system RAM.'
           : 'Current RAM/VRAM is below the conservative estimate for the selected context.',
-        color: 'neutral'
+        variant: 'neutral'
       }
   }
 })
@@ -278,8 +280,12 @@ onBeforeUnmount(() => {
       <UButton size="xs" color="neutral" variant="soft" :loading="loading || recommendationLoading" @click="refresh">Refresh hardware</UButton>
     </div>
 
-    <UAlert v-if="error" color="warning" variant="subtle" :description="error" />
-    <UAlert v-if="recommendationError" color="warning" variant="subtle" :description="recommendationError" />
+    <div v-if="error" class="border border-[var(--color-divider)] p-3">
+      <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div>
+    </div>
+    <div v-if="recommendationError" class="border border-[var(--color-divider)] p-3">
+      <div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendationError }}</p></div>
+    </div>
 
     <UFormField
       v-if="modelId"
@@ -312,26 +318,24 @@ onBeforeUnmount(() => {
       </div>
     </UFormField>
 
-    <UAlert
-      v-if="executionFit"
-      data-testid="execution-fit"
-      :color="executionFit.color"
-      variant="subtle"
-      :title="executionFit.title"
-      :description="executionFit.description"
-    />
+    <div v-if="executionFit" data-testid="execution-fit" class="border border-[var(--color-divider)] p-3">
+      <div class="flex items-start gap-2">
+        <StatusTag :variant="executionFit.variant">{{ executionFit.title }}</StatusTag>
+        <p class="text-xs leading-5 text-[var(--neutral-800)]">{{ executionFit.description }}</p>
+      </div>
+    </div>
 
     <div v-if="recommendation" data-testid="hardware-recommendation" class="space-y-3 border-t border-default pt-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div class="flex flex-wrap items-center gap-2">
             <p class="font-semibold">{{ recommendationTitle }}</p>
-            <UBadge :color="recommendationTone" variant="subtle">{{ recommendation.confidence }} confidence</UBadge>
-            <UBadge v-if="recommendation.quantization.name" color="neutral" variant="soft">{{ recommendation.quantization.name }}</UBadge>
+            <StatusTag :variant="recommendationVariant">{{ recommendation.confidence }} confidence</StatusTag>
+            <StatusTag v-if="recommendation.quantization.name" variant="neutral">{{ recommendation.quantization.name }}</StatusTag>
           </div>
           <p class="mt-1 text-xs text-muted">{{ recommendation.offload.reason }}</p>
         </div>
-        <UBadge color="primary" variant="subtle">{{ recommendation.offload.mode.replaceAll('_', ' ') }}</UBadge>
+        <StatusTag variant="pending">{{ recommendation.offload.mode.replaceAll('_', ' ') }}</StatusTag>
       </div>
       <dl class="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
         <div><dt class="text-dimmed">Full-offload VRAM</dt><dd class="font-semibold">{{ formatBytes(recommendation.memory.full_offload_vram_bytes) }}</dd></div>
@@ -340,27 +344,29 @@ onBeforeUnmount(() => {
         <div><dt class="text-dimmed">Selected context</dt><dd class="font-semibold">{{ recommendation.context_length.toLocaleString() }} tokens</dd></div>
       </dl>
       <div class="flex flex-wrap gap-2 text-xs">
-        <UBadge v-for="device in recommendation.offload.devices" :key="device" color="neutral" variant="soft">{{ device }}</UBadge>
+        <StatusTag v-for="device in recommendation.offload.devices" :key="device" variant="neutral">{{ device }}</StatusTag>
         <span v-if="recommendation.offload.gpu_layers" class="text-muted">Recommended GPU layers: <strong>{{ recommendation.offload.gpu_layers }}</strong></span>
         <span v-if="recommendation.offload.tensor_split" class="text-muted">Tensor split: <strong class="font-mono">{{ recommendation.offload.tensor_split }}</strong></span>
         <span v-if="recommendation.offload.mode !== 'cpu'" class="text-muted">KV cache: <strong>{{ recommendation.offload.kv_on_gpu === false ? 'system RAM' : 'GPU' }}</strong></span>
       </div>
       <p class="text-xs text-muted"><strong>{{ recommendation.quantization.summary }}</strong> {{ recommendation.quantization.tradeoff }}</p>
-      <UAlert v-if="recommendation.metadata_warning" color="neutral" variant="subtle" title="Metadata estimate fallback" :description="recommendation.metadata_warning" />
-      <UAlert v-if="recommendation.hardware_warning" color="warning" variant="subtle" title="Hardware probe warning" :description="recommendation.hardware_warning" />
+      <div v-if="recommendation.metadata_warning" class="border border-[var(--color-divider)] p-3">
+        <div class="flex items-start gap-2"><StatusTag variant="neutral">Metadata estimate fallback</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.metadata_warning }}</p></div>
+      </div>
+      <div v-if="recommendation.hardware_warning" class="border border-[var(--color-divider)] p-3">
+        <div class="flex items-start gap-2"><StatusTag variant="pending">Hardware probe warning</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.hardware_warning }}</p></div>
+      </div>
     </div>
 
     <div v-if="snapshot" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <UCard
+      <button
         v-for="gpu in gpus"
         :key="gpu.id"
+        type="button"
         :data-testid="`gpu-card-${gpu.id}`"
         :aria-pressed="isSelected(gpu.id)"
-        role="button"
-        tabindex="0"
-        class="cursor-pointer transition-shadow hover:ring-1 hover:ring-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        :class="isSelected(gpu.id) ? 'ring-2 ring-primary' : ''"
-        :ui="{ body: 'p-4 sm:p-4' }"
+        class="border border-[var(--color-divider)] bg-[var(--color-surface)] p-4 text-left transition-colors hover:bg-[var(--neutral-100)] focus-visible:outline-none"
+        :class="isSelected(gpu.id) ? 'border-[var(--color-accent)] bg-[var(--accent-100)]' : ''"
         @click="selectGpu(gpu.id)"
         @keydown.enter.prevent="selectGpu(gpu.id)"
         @keydown.space.prevent="selectGpu(gpu.id)"
@@ -368,8 +374,8 @@ onBeforeUnmount(() => {
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0"><p class="font-mono text-sm font-bold">{{ gpu.id }}</p><p class="truncate text-xs text-muted">{{ gpu.name }}</p></div>
           <div class="flex items-center gap-1">
-            <UBadge v-if="isSelected(gpu.id)" size="sm" color="primary" variant="subtle">Selected</UBadge>
-            <UBadge size="sm" color="neutral" variant="subtle">{{ gpu.backend.toUpperCase() }}</UBadge>
+            <StatusTag v-if="isSelected(gpu.id)" variant="ready">Selected</StatusTag>
+            <StatusTag variant="neutral">{{ gpu.backend.toUpperCase() }}</StatusTag>
           </div>
         </div>
         <dl class="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -378,21 +384,27 @@ onBeforeUnmount(() => {
           <div><dt class="text-dimmed">Utilization</dt><dd class="font-semibold">{{ gpu.utilization_pct.toFixed(0) }}%</dd></div>
           <div><dt class="text-dimmed">VRAM used</dt><dd class="font-semibold">{{ formatBytes(gpu.used_bytes) }}</dd></div>
         </dl>
-      </UCard>
-      <UAlert v-if="!gpus.length" class="sm:col-span-2" color="neutral" variant="subtle" description="No NVIDIA or ROCm GPUs were detected. Automatic mode will leave device placement to CPU/other available llama.cpp backends." />
+      </button>
+      <div v-if="!gpus.length" class="border border-[var(--color-divider)] p-3 sm:col-span-2">
+        <div class="flex items-start gap-2"><StatusTag variant="neutral">No GPU</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">No NVIDIA or ROCm GPUs were detected. Automatic mode will leave device placement to CPU/other available llama.cpp backends.</p></div>
+      </div>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2">
-      <UFormField label="Placement mode" name="gpu_mode">
-        <USelectMenu :model-value="gpuMode" class="w-full" :items="modeItems" label-key="label" value-key="value" @update:model-value="emit('update:gpuMode', String($event || 'auto'))" />
-      </UFormField>
-      <UFormField v-if="gpuMode === 'manual'" label="GPU devices" name="gpu_devices" description="Choose the exact llama.cpp device set. Manual selection is never expanded automatically.">
-        <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="updateDevices" />
-      </UFormField>
-      <UFormField v-if="gpuMode === 'manual' && gpuDevices.length > 1" label="Tensor split" name="tensor_split" description="Optional comma-separated proportions. Leave empty to let llama.cpp choose across the selected devices.">
-        <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
-      </UFormField>
-    </div>
-    <UAlert v-if="gpuMode === 'auto'" color="primary" variant="subtle" title="Single-GPU first" description="At launch the manager reads fresh VRAM state, binds one adequate GPU when possible, and only then considers multi-GPU placement and eligible resource-pressure eviction." />
+    <template v-if="!hidePlacementControls">
+      <div class="grid gap-4 md:grid-cols-2">
+        <UFormField label="Placement mode" name="gpu_mode">
+          <USelectMenu :model-value="gpuMode" class="w-full" :items="modeItems" label-key="label" value-key="value" @update:model-value="emit('update:gpuMode', String($event || 'auto'))" />
+        </UFormField>
+        <UFormField v-if="gpuMode === 'manual'" label="GPU devices" name="gpu_devices" description="Choose the exact llama.cpp device set. Manual selection is never expanded automatically.">
+          <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="updateDevices" />
+        </UFormField>
+        <UFormField v-if="gpuMode === 'manual' && gpuDevices.length > 1" label="Tensor split" name="tensor_split" description="Optional comma-separated proportions. Leave empty to let llama.cpp choose across the selected devices.">
+          <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
+        </UFormField>
+      </div>
+      <div v-if="gpuMode === 'auto'" class="border border-[var(--color-divider)] p-3">
+        <div class="flex items-start gap-2"><StatusTag variant="pending">Single-GPU first</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">At launch the manager reads fresh VRAM state, binds one adequate GPU when possible, and only then considers multi-GPU placement and eligible resource-pressure eviction.</p></div>
+      </div>
+    </template>
   </div>
 </template>

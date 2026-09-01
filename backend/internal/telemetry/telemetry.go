@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
 	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
 )
 
 type GPUUsage struct {
@@ -104,6 +106,18 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 	nvidiaUtil := c.nvidiaProcessUtilization(ctx)
 	amdProcesses := c.amdProcesses(ctx, collectedAt)
 	resolveReportedPID := c.runtimePIDResolver(activePIDs)
+	mappedDiagnostics := map[string]struct{}{}
+	logPIDMapping := func(reportedPID, resolvedPID int, deviceID string) {
+		if reportedPID <= 0 || resolvedPID <= 0 || reportedPID == resolvedPID || strings.TrimSpace(deviceID) == "" {
+			return
+		}
+		key := fmt.Sprintf("%d:%d:%s", reportedPID, resolvedPID, deviceID)
+		if _, exists := mappedDiagnostics[key]; exists {
+			return
+		}
+		mappedDiagnostics[key] = struct{}{}
+		systemlog.Log(systemlog.Debug, "telemetry", fmt.Sprintf("NSpid map: host %d -> container %d (%s)", reportedPID, resolvedPID, deviceID))
+	}
 
 	samples := make([]Sample, 0, len(active))
 	for _, item := range active {
@@ -121,21 +135,33 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 		}
 
 		for _, process := range snapshot.Processes {
-			if resolveReportedPID(process.PID) != item.PID || process.DeviceID == "" {
+			resolvedPID := resolveReportedPID(process.PID)
+			if resolvedPID == item.PID {
+				logPIDMapping(process.PID, resolvedPID, process.DeviceID)
+			}
+			if resolvedPID != item.PID || process.DeviceID == "" {
 				continue
 			}
 			used := process.UsedBytes
 			ensureGPU(process.DeviceID).VRAMUsedBytes = &used
 		}
 		for key, utilization := range nvidiaUtil {
-			if resolveReportedPID(key.pid) != item.PID {
+			resolvedPID := resolveReportedPID(key.pid)
+			if resolvedPID == item.PID {
+				logPIDMapping(key.pid, resolvedPID, key.deviceID)
+			}
+			if resolvedPID != item.PID {
 				continue
 			}
 			value := utilization
 			ensureGPU(key.deviceID).UtilizationPct = &value
 		}
 		for _, process := range amdProcesses {
-			if resolveReportedPID(process.pid) != item.PID {
+			resolvedPID := resolveReportedPID(process.pid)
+			if resolvedPID == item.PID {
+				logPIDMapping(process.pid, resolvedPID, process.deviceID)
+			}
+			if resolvedPID != item.PID {
 				continue
 			}
 			usage := ensureGPU(process.deviceID)
@@ -239,13 +265,16 @@ func (c *Collector) nvidiaProcessUtilization(ctx context.Context) map[gpuProcess
 		{"pmon", "-c", "1", "-s", "u"},
 		{"pmon", "-c", "1"},
 	}
-	for _, args := range attempts {
+	for index, args := range attempts {
 		out, err := c.run(ctx, "nvidia-smi", args...)
 		if err != nil {
 			continue
 		}
 		if result := parseNVIDIAPMon(out); len(result) > 0 {
 			return result
+		}
+		if index == 0 {
+			systemlog.Log(systemlog.Debug, "telemetry", "nvidia-smi pmon -s u returned no process rows, retrying plain pmon")
 		}
 	}
 	return nil

@@ -5,7 +5,7 @@ import AdminIndexPage from '~/pages/admin/index.vue'
 import AdminHuggingFacePage from '~/pages/admin/huggingface.vue'
 import AdminSystemPage from '~/pages/admin/system.vue'
 import AdminGeneralPage from '~/pages/admin/general.vue'
-import ProfilePage from '~/pages/profile.vue'
+import ProfileSessionsPage from '~/pages/profile/sessions.vue'
 import AdminUsersPage from '~/pages/admin/users.vue'
 import { useManager } from '~/composables/useManager'
 import { storeManagementToken } from '~/composables/useManagerApi'
@@ -64,6 +64,16 @@ async function confirm(kind: 'confirm' | 'cancel') {
   target.click()
   await flushPromises()
 }
+function modalInput(autocomplete: string, index = 0) {
+  const matches = [...document.body.querySelectorAll<HTMLInputElement>(`input[autocomplete="${autocomplete}"]`)]
+  const target = matches[index]
+  if (!target) throw new Error(`Missing modal input ${autocomplete}[${index}]`)
+  return target
+}
+function setNativeInput(input: HTMLInputElement, value: string) {
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
 
 function settingsResponse(overrides: Record<string, any> = {}) {
   const setting = (value: any, source = 'default', editable = true) => ({ value, source, editable })
@@ -88,9 +98,11 @@ describe('Phase 10 branch coverage', () => {
     mocks.request.mockImplementation(async (path: string) => path === '/api/v1/admin/summary' ? response : [])
     const wrapper = await mountSuspended(AdminIndexPage, { route: false })
     await flushPromises()
-    expect(wrapper.text()).toContain('0 enabled / 1 total')
+    expect(wrapper.text()).toContain('0 enabled')
+    expect(wrapper.text()).toContain('1 total')
     expect(wrapper.text()).toContain('Not configured')
     expect(wrapper.text()).toContain('Available')
+    expect(wrapper.find('[data-testid="admin-summary-cards"]').exists()).toBe(true)
 
     response = { users: { total: 2, enabled: 2 }, huggingface: { configured: true }, llamacpp: { available: true, version: 'b9999' } }
     await button(wrapper, 'Refresh').trigger('click')
@@ -101,7 +113,7 @@ describe('Phase 10 branch coverage', () => {
       response = malformed
       await button(wrapper, 'Refresh').trigger('click')
       await flushPromises()
-      expect(wrapper.text()).not.toContain('enabled /')
+      expect(wrapper.find('[data-testid="admin-summary-cards"]').exists()).toBe(false)
     }
     wrapper.unmount()
 
@@ -216,10 +228,16 @@ describe('Phase 10 branch coverage', () => {
     expect(wrapper.text()).toContain('default')
 
     settings = { ...settingsResponse(), allowed_origins: { value: 'https://locked', source: 'environment', editable: false } }
+    const sessionLifetime = components(wrapper, ['InputNumber', 'UInputNumber']).find(component => component.props('modelValue') === 3600)
+    expect(sessionLifetime).toBeTruthy()
+    sessionLifetime!.vm.$emit('update:modelValue', 3601)
+    await flushPromises()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
 
     settings = []
+    sessionLifetime!.vm.$emit('update:modelValue', 3602)
+    await flushPromises()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Invalid manager settings response')
@@ -255,20 +273,19 @@ describe('Phase 10 branch coverage', () => {
       if (path === '/api/v1/auth/logout' && options?.method === 'POST') return {}
       return {}
     })
-    const wrapper = await mountSuspended(ProfilePage, { route: false })
+    const wrapper = await mountSuspended(ProfileSessionsPage, { route: '/profile/sessions' })
     await flushPromises()
     expect(wrapper.text()).toContain('Chrome on Windows')
     expect(wrapper.text()).toContain('Edge on macOS')
     expect(wrapper.text()).toContain('Safari on Linux')
     expect(wrapper.text()).toContain('Unknown client')
-    expect(wrapper.text()).toContain('Never')
 
     const revokeButtons = wrapper.findAll('button').filter((candidate: any) => candidate.text().trim() === 'Revoke')
     await revokeButtons[0]!.trigger('click')
     await confirm('cancel')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/sessions/chrome', { method: 'DELETE' })
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/me/sessions/chrome', { method: 'DELETE' })
 
-    failPath = '/api/v1/sessions/chrome'
+    failPath = '/api/v1/me/sessions/chrome'
     failMode = 'fallback'
     await revokeButtons[0]!.trigger('click')
     await confirm('confirm')
@@ -282,21 +299,15 @@ describe('Phase 10 branch coverage', () => {
     wrapper.unmount()
   })
 
-  it('covers users validation, client labels, cancelled mutations and error variants', async () => {
+  it('covers redesigned Users create, cancelled toggle and mutation error branches', async () => {
     const users = [
-      { id: 1, username: 'admin', enabled: true, created_at: 1, last_login_at: 0, active_sessions: 1 },
-      { id: 2, username: 'disabled', enabled: false, created_at: 1, active_sessions: 0 }
+      { id: 1, username: 'admin', enabled: true, created_at: 1, last_login_at: 0 },
+      { id: 2, username: 'disabled', enabled: false, created_at: 1 }
     ]
     let fail = ''
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       if (path === '/api/v1/users' && options?.method === 'POST') throw {}
       if (path === '/api/v1/users') return users
-      if (path === '/api/v1/users/2/sessions') return [
-        { id: 'a', user_id: 2, created_at: 1, expires_at: 2, remote_address: '', user_agent: 'Firefox/1 Windows' },
-        { id: 'b', user_id: 2, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Edg/1 Mac OS X' },
-        { id: 'c', user_id: 2, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: 'Safari/1 Linux' },
-        { id: 'd', user_id: 2, created_at: 1, expires_at: 2, remote_address: 'x', user_agent: '' }
-      ]
       if (path === fail) throw new Error('mutation exploded')
       return {}
     })
@@ -305,46 +316,46 @@ describe('Phase 10 branch coverage', () => {
     expect(wrapper.text()).toContain('Disabled')
     expect(wrapper.text()).toContain('Never')
 
-    const allInputs = inputs(wrapper)
-    const username = allInputs.find(component => component.props('autocomplete') === 'off')!
-    const passwords = allInputs.filter(component => component.props('autocomplete') === 'new-password')
-    username.vm.$emit('update:modelValue', 'x')
-    passwords[0].vm.$emit('update:modelValue', '1234567890')
-    passwords[1].vm.$emit('update:modelValue', 'different0')
+    await button(wrapper, 'Add user').trigger('click')
     await flushPromises()
-    await wrapper.find('form').trigger('submit')
+    setNativeInput(modalInput('off'), 'valid-user')
+    setNativeInput(modalInput('new-password', 0), '1234567890')
+    setNativeInput(modalInput('new-password', 1), '1234567890')
     await flushPromises()
-    expect(wrapper.text()).toContain('Password confirmation does not match')
-
-    username.vm.$emit('update:modelValue', 'valid-user')
-    passwords[0].vm.$emit('update:modelValue', '1234567890')
-    passwords[1].vm.$emit('update:modelValue', '1234567890')
-    await flushPromises()
-    await wrapper.find('form').trigger('submit')
+    const add = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === 'Add user' && !candidate.disabled)
+    add?.click()
     await flushPromises()
     expect(wrapper.text()).toContain('Unable to create user')
 
+    const createCancel = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === 'Cancel')
+    expect(createCancel).toBeTruthy()
+    createCancel?.click()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Confirm password')
+
     let disabledRow = row(wrapper, 'disabled')
+    expect(disabledRow.text()).not.toContain('Delete')
+    expect(disabledRow.text()).not.toContain('Sessions')
     await rowButton(disabledRow, 'Enable').trigger('click')
     await confirm('cancel')
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/users/2', expect.objectContaining({ method: 'PATCH' }))
-
-    await rowButton(disabledRow, 'Delete').trigger('click')
-    await confirm('cancel')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/users/2', { method: 'DELETE' })
-
-    await rowButton(disabledRow, 'Sessions').trigger('click')
-    await flushPromises()
-    expect(document.body.textContent).toContain('Firefox on Windows')
-    expect(document.body.textContent).toContain('Edge on macOS')
-    expect(document.body.textContent).toContain('Safari on Linux')
-    expect(document.body.textContent).toContain('Unknown client')
-    expect(document.body.textContent).toContain('Unknown address')
 
     fail = '/api/v1/users/2'
     disabledRow = row(wrapper, 'disabled')
     await rowButton(disabledRow, 'Enable').trigger('click')
     await confirm('confirm')
+    expect(wrapper.text()).toContain('mutation exploded')
+
+    fail = '/api/v1/users/2/password'
+    disabledRow = row(wrapper, 'disabled')
+    await rowButton(disabledRow, 'Reset password').trigger('click')
+    await flushPromises()
+    const reset = [...document.body.querySelectorAll<HTMLInputElement>('input[type="password"]')].at(-1)!
+    setNativeInput(reset, 'replacement-password')
+    await flushPromises()
+    const resetButton = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(candidate => candidate.textContent?.trim() === 'Reset password' && !candidate.disabled)
+    resetButton?.click()
+    await flushPromises()
     expect(wrapper.text()).toContain('mutation exploded')
     wrapper.unmount()
   })
