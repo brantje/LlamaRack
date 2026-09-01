@@ -6,7 +6,7 @@ Related issue: #1
 
 ## 1. Purpose
 
-This document defines the durable domain model for `llamacpp-manager`.
+This document defines the durable domain model for LlamaRack.
 
 The core separation is:
 

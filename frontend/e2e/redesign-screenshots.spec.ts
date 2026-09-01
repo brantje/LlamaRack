@@ -146,7 +146,7 @@ const profileSessions = [
   { id: 'session-current', user_id: 1, created_at: nowSeconds - 7200, expires_at: nowSeconds + 43200, remote_address: '192.0.2.24', user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36', current: true },
   { id: 'session-other', user_id: 1, created_at: nowSeconds - 86400, expires_at: nowSeconds + 21600, remote_address: '198.51.100.18', user_agent: 'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/142.0' }
 ]
-const profileIdentities = [{ id: 'identity-authentik', provider_id: 'authentik', issuer: 'https://auth.example.test/application/o/llamacpp-manager/', subject: 'admin-subject', user_id: 1, created_at: nowSeconds - 86400 * 30 }]
+const profileIdentities = [{ id: 'identity-authentik', provider_id: 'authentik', issuer: 'https://auth.example.test/application/o/llamarack/', subject: 'admin-subject', user_id: 1, created_at: nowSeconds - 86400 * 30 }]
 const systemLogs = [
   { timestamp: new Date(now - 90000).toISOString(), level: 'INFO', source: 'manager', message: 'reconcile: 2 Always On Instances satisfied' },
   { timestamp: new Date(now - 60000).toISOString(), level: 'WARN', source: 'gateway', message: 'request queue depth reached 4 while qwen3-primary was loading' },
@@ -173,9 +173,9 @@ const generalSettings = {
   observability_retention_days: setting(30),
   prometheus_auth_token: setting(''),
   runtime: {
-    data_dir: '/var/lib/llamacpp-manager',
+    data_dir: '/config',
     models_dir: '/models',
-    database_path: '/var/lib/llamacpp-manager/manager.db',
+    database_path: '/config/manager.db',
     listen_addr: ':8888',
     llama_server_path: '/usr/local/bin/llama-server'
   }
@@ -189,8 +189,8 @@ const authSettings = {
 }
 const adminAuthProviders = [
   {
-    id: 'authentik', name: 'Authentik', enabled: true, issuer: 'https://auth.example.test/application/o/llamacpp-manager/',
-    client_id: 'llamacpp-manager', scopes: ['openid', 'profile', 'email'], username_claim: 'preferred_username',
+    id: 'authentik', name: 'Authentik', enabled: true, issuer: 'https://auth.example.test/application/o/llamarack/',
+    client_id: 'llamarack', scopes: ['openid', 'profile', 'email'], username_claim: 'preferred_username',
     secret_configured: true, last_tested_at: nowSeconds - 3600, last_test_succeeded: true
   }
 ]
@@ -336,8 +336,8 @@ function responseFor(pathname: string, method: string): unknown {
 
 async function installApiFixture(page: Page) {
   await page.addInitScript(() => {
-    window.sessionStorage.setItem('lcm_management_token', 'ux-review-token')
-    window.localStorage.setItem('llamacpp-manager-theme', 'dark')
+    window.sessionStorage.setItem('llamarack_management_token', 'ux-review-token')
+    window.localStorage.setItem('llamarack-theme', 'dark')
   })
 
   await page.route('http://127.0.0.1:8888/**', async (route: Route) => {
@@ -449,7 +449,7 @@ async function installApiFixture(page: Page) {
       if (payload.includes('UX_HOLD')) await new Promise<void>(resolve => playgroundHoldRelease.set(page, resolve))
       await route.fulfill({
         status: 200,
-        headers: { ...corsHeaders, 'access-control-expose-headers': 'x-llamacpp-manager-request-id', 'content-type': 'text/event-stream', 'x-llamacpp-manager-request-id': 'req_playground_fixture' },
+        headers: { ...corsHeaders, 'access-control-expose-headers': 'x-llamarack-request-id', 'content-type': 'text/event-stream', 'x-llamarack-request-id': 'req_playground_fixture' },
         body: ['data: {"choices":[{"delta":{"content":"KV cache reuse "}}]}', 'data: {"choices":[{"delta":{"content":"avoids repeated prompt evaluation."}}]}', 'data: [DONE]'].join('\n\n') + '\n\n'
       })
       return
@@ -466,7 +466,7 @@ async function waitForManagerPanel(page: Page) {
   const panel = page.locator('#dashboard-panel-manager-main')
   await expect(panel).toBeVisible({ timeout: 15_000 })
   await expect(panel).not.toBeEmpty()
-  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'LlamaRack connection failed' })).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeHidden()
 }
 
@@ -493,7 +493,7 @@ async function openAuthenticated(page: Page, path: string) {
 }
 
 async function withoutSession(page: Page) {
-  await page.addInitScript(() => { window.sessionStorage.removeItem('lcm_management_token') })
+  await page.addInitScript(() => { window.sessionStorage.removeItem('llamarack_management_token') })
 }
 
 function authenticatedShot(name: string, path: string, after?: (page: Page) => Promise<void>) {
@@ -517,7 +517,7 @@ test('create-account screenshot', async ({ page }, testInfo) => {
   await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible()
   await expect(page.getByText('Create the first local management account.')).toBeVisible()
-  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await expect(page.getByText('Connecting to LlamaRack…')).toBeHidden()
   await captureScreenshot(page, testInfo, 'create-account')
 })
 
@@ -527,7 +527,7 @@ test('login screenshot', async ({ page }, testInfo) => {
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Continue with Authentik' })).toBeVisible()
-  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await expect(page.getByText('Connecting to LlamaRack…')).toBeHidden()
   await captureScreenshot(page, testInfo, 'login')
 })
 
@@ -547,8 +547,8 @@ test('backend-unavailable screenshot', async ({ page }, testInfo) => {
   backendUnavailablePages.add(page)
   await withoutSession(page)
   await page.goto('/', { waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('heading', { name: 'Manager connection failed' })).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('Connecting to manager…')).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'LlamaRack connection failed' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Connecting to LlamaRack…')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
   await captureScreenshot(page, testInfo, 'backend-unavailable')
 })
@@ -831,7 +831,7 @@ test('admin oidc provider add screenshot', async ({ page }, testInfo) => {
   await expect(dialog).toBeVisible()
   await dialog.getByLabel('Display name').fill('Keycloak')
   await dialog.getByLabel('Issuer URL').fill('https://id.example.test/realms/llamacpp')
-  await dialog.getByLabel('Client ID').fill('llamacpp-manager')
+  await dialog.getByLabel('Client ID').fill('llamarack')
   await captureScreenshot(page, testInfo, 'admin-oidc-provider-add')
 })
 

@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 // SubscribeRuntimes exposes an atomic supervisor snapshot plus live observed

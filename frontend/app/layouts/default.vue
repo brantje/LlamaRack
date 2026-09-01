@@ -43,7 +43,7 @@ async function submitAuth() {
   <UMain v-show="!initialized" class="fixed inset-0 z-50 grid min-h-screen place-items-center bg-default px-6 py-10">
     <div class="grid justify-items-center gap-4 text-muted">
       <USkeleton class="size-8 rounded-none" />
-      <p>Connecting to manager…</p>
+      <p>Connecting to LlamaRack…</p>
     </div>
   </UMain>
 
@@ -53,7 +53,7 @@ async function submitAuth() {
         <div class="text-4xl font-black text-primary">λ</div>
         <div>
           <p class="mb-2 text-xs font-extrabold tracking-[0.18em] text-dimmed">BACKEND UNAVAILABLE</p>
-          <h1 class="text-3xl font-bold">Manager connection failed</h1>
+          <h1 class="text-3xl font-bold">LlamaRack connection failed</h1>
         </div>
         <div class="flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
           <StatusTag variant="failed">Error</StatusTag>
@@ -106,7 +106,7 @@ async function submitAuth() {
 
     <UDashboardPanel id="manager-main" class="min-w-0" :ui="{ body: 'overflow-y-visible' }">
       <template #header>
-        <UDashboardNavbar title="llama.cpp" class="lg:hidden min-w-0" />
+        <UDashboardNavbar title="LlamaRack" class="lg:hidden min-w-0" />
       </template>
       <template #body>
         <div class="min-w-0 w-full p-4 sm:p-6 lg:p-10"><slot /></div>

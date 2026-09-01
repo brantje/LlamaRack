@@ -6,7 +6,7 @@ Related issue: #1
 
 ## 1. Purpose
 
-`llamacpp-manager` is a single-host web application that manages `llama-server` processes and exposes one stable OpenAI-compatible API.
+`llamarack` is a single-host web application that manages `llama-server` processes and exposes one stable OpenAI-compatible API.
 
 The architecture separates **registered Models** from **runtime Instances**:
 
@@ -66,7 +66,7 @@ OpenAI clients / LiteLLM / applications
              HTTP /v1/*
                   |
         +---------------------+
-        | llamacpp-manager    |
+        | LlamaRack           |
         |                     |
         | OpenAI Gateway      |
         | Instance Resolver   |

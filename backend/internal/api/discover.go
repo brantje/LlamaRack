@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/recommendations"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/recommendations"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type discoverRecommendationHandler struct {
@@ -90,14 +90,14 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 
 func recommendationMetadata(value ggufmeta.Derived) recommendations.Metadata {
 	return recommendations.Metadata{
-		Architecture: value.Architecture,
+		Architecture:  value.Architecture,
 		ContextLength: value.ContextLength,
-		BlockCount: value.BlockCount,
-		Embedding: value.Embedding,
-		HeadCount: value.HeadCount,
-		KVHeadCount: value.KVHeadCount,
-		KeyLength: value.KeyLength,
-		ValueLength: value.ValueLength,
+		BlockCount:    value.BlockCount,
+		Embedding:     value.Embedding,
+		HeadCount:     value.HeadCount,
+		KVHeadCount:   value.KVHeadCount,
+		KeyLength:     value.KeyLength,
+		ValueLength:   value.ValueLength,
 	}
 }
 

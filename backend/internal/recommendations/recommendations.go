@@ -4,10 +4,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/scheduler"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
 
 const (

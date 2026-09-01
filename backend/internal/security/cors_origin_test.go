@@ -28,8 +28,8 @@ func TestOriginAllowedAcceptsSameHostManagerFrontendPort(t *testing.T) {
 
 func TestRequestHostnameHandlesIPv6AndPorts(t *testing.T) {
 	cases := map[string]string{
-		"192.168.60.5:8888": "192.168.60.5",
-		"manager.local":       "manager.local",
+		"192.168.60.5:8888":  "192.168.60.5",
+		"manager.local":      "manager.local",
 		"[2001:db8::1]:8888": "2001:db8::1",
 		"[2001:db8::1]":      "2001:db8::1",
 	}

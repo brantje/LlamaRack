@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 func TestClassifyQuantizationForNoviceGuidance(t *testing.T) {
@@ -62,7 +62,9 @@ func TestAnalyzeDiscoverContextAndHybridPolicy(t *testing.T) {
 	largeContext := AnalyzeDiscover(inputs, metadata, nil, snapshot, 65536, nil, false, true)
 	var q6 DiscoverArtifact
 	for _, artifact := range largeContext.Artifacts {
-		if artifact.ArtifactID == "q6" { q6 = artifact }
+		if artifact.ArtifactID == "q6" {
+			q6 = artifact
+		}
 	}
 	if q6.Memory.KVCacheBytes <= allowed.Artifacts[1].Memory.KVCacheBytes || q6.Fit == FitGPU {
 		t.Fatalf("large-context q6=%+v", q6)
@@ -75,22 +77,34 @@ func TestAnalyzeDiscoverFitStatesAndUnknowns(t *testing.T) {
 	input := []ArtifactInput{{ID: "q4", Quantization: "Q4_K_M", WeightsBytes: 4 * gib, Complete: true}}
 
 	multi := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 3 * gib}, {ID: "CUDA1", FreeBytes: 3 * gib}}}, 4096, nil, true, true)
-	if multi.Artifacts[0].Fit != FitMultiGPU { t.Fatalf("multi=%+v", multi.Artifacts[0]) }
+	if multi.Artifacts[0].Fit != FitMultiGPU {
+		t.Fatalf("multi=%+v", multi.Artifacts[0])
+	}
 
 	cpu := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib, RAMTotalBytes: 32 * gib}, 4096, nil, true, true)
-	if cpu.Artifacts[0].Fit != FitCPU || !cpu.Artifacts[0].Runnable { t.Fatalf("cpu=%+v", cpu.Artifacts[0]) }
+	if cpu.Artifacts[0].Fit != FitCPU || !cpu.Artifacts[0].Runnable {
+		t.Fatalf("cpu=%+v", cpu.Artifacts[0])
+	}
 
 	noFit := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 2 * gib, RAMTotalBytes: 2 * gib}, 4096, nil, true, true)
-	if noFit.Artifacts[0].Fit != FitNo || noFit.Artifacts[0].Runnable { t.Fatalf("no-fit=%+v", noFit.Artifacts[0]) }
+	if noFit.Artifacts[0].Fit != FitNo || noFit.Artifacts[0].Runnable {
+		t.Fatalf("no-fit=%+v", noFit.Artifacts[0])
+	}
 
 	noHardware := AnalyzeDiscover(input, metadata, nil, hardware.Snapshot{}, 4096, errors.New("telemetry failed"), true, true)
-	if noHardware.HardwareAvailable || noHardware.Artifacts[0].Fit != FitUnknown { t.Fatalf("no-hardware=%+v", noHardware) }
+	if noHardware.HardwareAvailable || noHardware.Artifacts[0].Fit != FitUnknown {
+		t.Fatalf("no-hardware=%+v", noHardware)
+	}
 
 	missingMetadata := AnalyzeDiscover(input, Metadata{}, errors.New("metadata unavailable"), hardware.Snapshot{RAMAvailableBytes: 16 * gib}, 0, nil, true, true)
-	if !missingMetadata.ContextAssumed || missingMetadata.Artifacts[0].Fit != FitUnknown || missingMetadata.Artifacts[0].Recommended { t.Fatalf("missing-metadata=%+v", missingMetadata) }
+	if !missingMetadata.ContextAssumed || missingMetadata.Artifacts[0].Fit != FitUnknown || missingMetadata.Artifacts[0].Recommended {
+		t.Fatalf("missing-metadata=%+v", missingMetadata)
+	}
 
 	incomplete := AnalyzeDiscover([]ArtifactInput{{ID: "split", Quantization: "Q6_K", WeightsBytes: 4 * gib, Complete: false}}, metadata, nil, hardware.Snapshot{RAMAvailableBytes: 16 * gib}, 4096, nil, true, true)
-	if incomplete.Artifacts[0].Fit != FitUnknown || incomplete.Artifacts[0].Runnable { t.Fatalf("incomplete=%+v", incomplete.Artifacts[0]) }
+	if incomplete.Artifacts[0].Fit != FitUnknown || incomplete.Artifacts[0].Runnable {
+		t.Fatalf("incomplete=%+v", incomplete.Artifacts[0])
+	}
 }
 
 func TestAnalyzeDiscoverEdgeOrderingAndBounds(t *testing.T) {
@@ -110,8 +124,10 @@ func TestAnalyzeDiscoverEdgeOrderingAndBounds(t *testing.T) {
 	var zero, unknown DiscoverArtifact
 	for _, artifact := range result.Artifacts {
 		switch artifact.ArtifactID {
-		case "zero-size": zero = artifact
-		case "unknown": unknown = artifact
+		case "zero-size":
+			zero = artifact
+		case "unknown":
+			unknown = artifact
 		}
 	}
 	if zero.Fit != FitUnknown || zero.Runnable || !strings.Contains(zero.Reason, "size is unavailable") {

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 const DefaultContextSize = "4096"

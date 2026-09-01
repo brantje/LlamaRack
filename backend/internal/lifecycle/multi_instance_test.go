@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func TestSharedStartupSurvivesFirstWaiterCancellation(t *testing.T) {

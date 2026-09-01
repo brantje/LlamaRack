@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestPrepareAdditionalValidationBranches(t *testing.T) {
@@ -19,7 +19,7 @@ func TestPrepareAdditionalValidationBranches(t *testing.T) {
 		Files: []huggingface.File{{Path: "model.gguf", Size: 1}},
 	}
 	base := PrepareInput{
-		Name: "Demo",
+		Name:          "Demo",
 		FirstInstance: FirstInstanceInput{Name: "Demo", Slug: "demo"},
 	}
 	tests := []struct {

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Managed workers are configured by LlamaCPP Manager's resolved CLI arguments.
+// Managed workers are configured by LlamaRack's resolved CLI arguments.
 // Remove inherited llama.cpp argument environment variables so an external
 // LLAMA_ARG_* value cannot silently change worker behavior behind the manager's
 // effective configuration.

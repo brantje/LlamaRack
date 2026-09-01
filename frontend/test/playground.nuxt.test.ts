@@ -67,7 +67,7 @@ beforeEach(() => {
   mocks.runtime.port = 9101
   sessionStorage.clear()
   localStorage.clear()
-  sessionStorage.setItem('lcm_management_token', 'management-playground')
+  sessionStorage.setItem('llamarack_management_token', 'management-playground')
   vi.unstubAllGlobals()
 })
 
@@ -80,10 +80,10 @@ describe('Playground', () => {
         status: 200,
         headers: {
           'Content-Type': 'text/event-stream',
-          'X-LlamaCPP-Manager-Request-ID': 'req-1',
-          'X-LlamaCPP-Manager-Instance': 'coder',
-          'X-LlamaCPP-Manager-Autoloaded': 'true',
-          'X-LlamaCPP-Manager-Upstream-Port': '9101'
+          'X-LlamaRack-Request-ID': 'req-1',
+          'X-LlamaRack-Instance': 'coder',
+          'X-LlamaRack-Autoloaded': 'true',
+          'X-LlamaRack-Upstream-Port': '9101'
         }
       }
     ))
@@ -124,7 +124,7 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('victim-a')
     expect(wrapper.text()).toContain('36 / 32768')
     expect(wrapper.text()).toContain('CUDA0 8.00 GiB')
-    expect(wrapper.text()).toContain('x-llamacpp-manager-upstream-port: 9101')
+    expect(wrapper.text()).toContain('x-llamarack-upstream-port: 9101')
     expect(sessionStorage.getItem('lcm-playground-api-key')).toBeNull()
     wrapper.unmount()
   })
@@ -134,7 +134,7 @@ describe('Playground', () => {
     mocks.request.mockResolvedValue({ ...diagnostic(), state_trace: ['READY'], evictions_triggered: [] })
     const publicFetch = vi.fn(async () => new Response(
       JSON.stringify({ choices: [{ message: { content: 'raw reply' } }] }),
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-1' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-1' } }
     ))
     vi.stubGlobal('fetch', publicFetch)
 
@@ -189,7 +189,7 @@ describe('Playground', () => {
   it('rejects a missing management session and invalid raw JSON without bypassing the bridge', async () => {
     const publicFetch = vi.fn()
     vi.stubGlobal('fetch', publicFetch)
-    sessionStorage.removeItem('lcm_management_token')
+    sessionStorage.removeItem('llamarack_management_token')
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
     await flushPromises()
 
@@ -198,7 +198,7 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('Management session is unavailable. Sign in again.')
     expect(publicFetch).not.toHaveBeenCalled()
 
-    sessionStorage.setItem('lcm_management_token', 'management-playground')
+    sessionStorage.setItem('llamarack_management_token', 'management-playground')
     await activateTab(wrapper, 'Request')
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue('{bad json')
     await sendPlayground(wrapper)
@@ -212,7 +212,7 @@ describe('Playground', () => {
     mocks.request.mockResolvedValue(diagnostic())
     const publicFetch = vi.fn(async (_url: string, init: RequestInit) => new Response(
       'data: {"choices":[{"delta":{"content":"I see an image"}}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-image' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-image' } }
     ))
     vi.stubGlobal('fetch', publicFetch)
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:diagram-preview')
@@ -294,7 +294,7 @@ describe('Playground', () => {
     mocks.request.mockResolvedValue({ ...diagnostic(), state_trace: ['READY'], evictions_triggered: [] })
     const publicFetch = vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaCPP-Manager-Request-ID': 'req-session' } }
+      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-session' } }
     ))
     vi.stubGlobal('fetch', publicFetch)
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 func TestSystemLogFiltersCompose(t *testing.T) {

@@ -68,7 +68,7 @@ export function parseLlamaCppOptions(text: string, profile: Profile | null) {
     if (key in parsed) throw new Error(`Duplicate llama.cpp option “${key}”`)
     const option = available.get(key)
     if (legacyManagerOwnedOptions.has(key) || option?.manager_owned) {
-      throw new Error(`llama.cpp option “${key}” is managed by LlamaCPP Manager and cannot be overridden here`)
+      throw new Error(`llama.cpp option “${key}” is managed by LlamaRack and cannot be overridden here`)
     }
     if (!profile) throw new Error('Cannot validate llama.cpp overrides because the llama-server option schema is unavailable')
     if (!option) throw new Error(`Unsupported llama.cpp option “${key}” for ${profile.version || profile.path}`)

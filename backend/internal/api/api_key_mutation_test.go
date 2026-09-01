@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 func apiKeyHandler(t *testing.T, f *apiFixture) http.Handler {

@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
-const oidcStateCookie = "lcm_oidc_state"
+const oidcStateCookie = "llamarack_oidc_state"
 
 type oidcHandler struct {
 	oidc     *auth.OIDCManager
@@ -232,9 +232,9 @@ func (h *oidcHandler) oidcFlow(w http.ResponseWriter, r *http.Request, rest stri
 			return
 		}
 		state := r.URL.Query().Get("state")
-		stateCookie, cookieErr := r.Cookie(oidcStateCookie)
-		http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: "", Path: "/api/v1/auth/oidc/", HttpOnly: true, Secure: h.network.IsSecure(r), SameSite: http.SameSiteLaxMode, MaxAge: -1})
-		if cookieErr != nil || state == "" || subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(state)) != 1 {
+		stateValue := oidcStateCookieValue(r)
+		clearOIDCStateCookies(w, h.network.IsSecure(r))
+		if stateValue == "" || state == "" || subtle.ConstantTimeCompare([]byte(stateValue), []byte(state)) != 1 {
 			slog.Warn("security event", "event", "auth.oidc_failure", "provider_id", providerID, "error", "browser state mismatch")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "OIDC authentication failed"})
 			return
@@ -470,4 +470,15 @@ func writeOIDCNotFound(w http.ResponseWriter, err error, message string) {
 		return
 	}
 	writeErr(w, http.StatusBadRequest, err)
+}
+
+func oidcStateCookieValue(r *http.Request) string {
+	if cookie, err := r.Cookie(oidcStateCookie); err == nil {
+		return cookie.Value
+	}
+	return ""
+}
+
+func clearOIDCStateCookies(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: "", Path: "/api/v1/auth/oidc/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 }

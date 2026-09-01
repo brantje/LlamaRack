@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 const (
-	sessionCookie = "lcm_session"
-	csrfCookie    = "lcm_csrf"
+	sessionCookie = "llamarack_session"
+	csrfCookie    = "llamarack_csrf"
 )
 
 type managementAuthContext struct {
@@ -162,6 +162,13 @@ func bearerToken(value string) string {
 func managementAuthFromRequest(r *http.Request) (auth.User, auth.Session, bool) {
 	value, ok := r.Context().Value(managementAuthContextKey{}).(managementAuthContext)
 	return value.User, value.Session, ok
+}
+
+func sessionCookieValue(r *http.Request) string {
+	if cookie, err := r.Cookie(sessionCookie); err == nil {
+		return cookie.Value
+	}
+	return ""
 }
 
 func isStateChanging(method string) bool {

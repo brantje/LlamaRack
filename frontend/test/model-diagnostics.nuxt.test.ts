@@ -48,7 +48,7 @@ async function selectOverflow(root: any, label: string) {
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.writeText.mockReset().mockResolvedValue(undefined)
-  sessionStorage.setItem('llamacpp-manager.instances.view', 'cards')
+  sessionStorage.setItem('llamarack.instances.view', 'cards')
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.writeText } })
   seed()
 })

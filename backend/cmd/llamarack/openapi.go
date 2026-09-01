@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	manageropenapi "github.com/brantje/llamacpp-manager/backend/internal/openapi"
+	manageropenapi "github.com/brantje/llamarack/backend/internal/openapi"
 )
 
 type documentedRoute struct {
@@ -131,7 +131,7 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 			Responses:   responses,
 		}
 		if route.security {
-			op.Security = []map[string][]string{{"managerSession": {}}}
+			op.Security = []map[string][]string{{"managementBearer": {}}}
 			responses["401"] = manageropenapi.ErrorResponse("Authentication required")
 		}
 		if route.requestBody {
@@ -141,7 +141,7 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 			op.Parameters = append(op.Parameters, pathParameter("id", "Resource identifier"))
 		}
 		if containsPathParameter(route.path, "request_id") {
-			op.Parameters = append(op.Parameters, pathParameter("request_id", "Stable x-llamacpp-manager-request-id correlation identifier"))
+			op.Parameters = append(op.Parameters, pathParameter("request_id", "Stable X-LlamaRack-Request-ID correlation identifier"))
 		}
 		if route.path == "/api/v1/instances/{id}/logs/stream" {
 			op.Description = "Server-sent event stream. OpenAPI describes the handshake; the response remains streaming and is flushed incrementally."
@@ -178,7 +178,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		doc.MustRegister(http.MethodPost, endpoint.path, manageropenapi.Operation{
 			OperationID: endpoint.id,
 			Summary:     endpoint.summary,
-			Description: "The JSON/SSE body remains OpenAI-compatible. LlamaCPP Manager observability is exposed only through x-llamacpp-manager-* response headers. For streaming responses only metrics known before headers are committed are returned; final metrics remain queryable through /api/v1/observability/requests/{request_id}.",
+			Description: "The JSON/SSE body remains OpenAI-compatible. LlamaRack observability is exposed only through X-LlamaRack-* response headers. For streaming responses only metrics known before headers are committed are returned; final metrics remain queryable through /api/v1/observability/requests/{request_id}.",
 			Tags:        []string{"OpenAI Compatible"},
 			Security:    []map[string][]string{{"bearerAPIKey": {}}},
 			RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
@@ -197,25 +197,25 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 
 func managerMetricHeaders(embeddings bool) map[string]manageropenapi.Header {
 	headers := preResponseMetricHeaders()
-	headers["x-llamacpp-manager-ttft-ms"] = numberHeader("Milliseconds from manager request start until the first upstream response byte. Omitted when not known before headers are committed.")
-	headers["x-llamacpp-manager-prompt-tokens-per-second"] = numberHeader("Prompt-processing throughput reported or derived from llama.cpp timings, in tokens per second.")
-	headers["x-llamacpp-manager-prompt-tokens"] = integerHeader("Final prompt token count when known.")
-	headers["x-llamacpp-manager-total-tokens"] = integerHeader("Final total token count when known.")
+	headers["x-llamarack-ttft-ms"] = numberHeader("Milliseconds from manager request start until the first upstream response byte. Omitted when not known before headers are committed.")
+	headers["x-llamarack-prompt-tokens-per-second"] = numberHeader("Prompt-processing throughput reported or derived from llama.cpp timings, in tokens per second.")
+	headers["x-llamarack-prompt-tokens"] = integerHeader("Final prompt token count when known.")
+	headers["x-llamarack-total-tokens"] = integerHeader("Final total token count when known.")
 	if !embeddings {
-		headers["x-llamacpp-manager-generation-tokens-per-second"] = numberHeader("Generation throughput reported or derived from llama.cpp timings, in tokens per second.")
-		headers["x-llamacpp-manager-generated-tokens"] = integerHeader("Final generated token count when known.")
+		headers["x-llamarack-generation-tokens-per-second"] = numberHeader("Generation throughput reported or derived from llama.cpp timings, in tokens per second.")
+		headers["x-llamarack-generated-tokens"] = integerHeader("Final generated token count when known.")
 	}
 	return headers
 }
 
 func preResponseMetricHeaders() map[string]manageropenapi.Header {
 	return map[string]manageropenapi.Header{
-		"x-llamacpp-manager-request-id":    {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamacpp-manager-instance":      {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamacpp-manager-autoloaded":    {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
-		"x-llamacpp-manager-upstream-port": {Description: "Resolved internal llama.cpp worker port. This is diagnostic metadata only; clients must continue to use the manager gateway.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
-		"x-llamacpp-manager-queue-ms":      numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
-		"x-llamacpp-manager-load-ms":       numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
+		"x-llamarack-request-id":    {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamarack-instance":      {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamarack-autoloaded":    {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
+		"x-llamarack-upstream-port": {Description: "Resolved internal llama.cpp worker port. This is diagnostic metadata only; clients must continue to use the manager gateway.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
+		"x-llamarack-queue-ms":      numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
+		"x-llamarack-load-ms":       numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
 	}
 }
 

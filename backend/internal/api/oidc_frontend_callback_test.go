@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestOIDCCallbackHandlesConfiguredFrontendURL(t *testing.T) {
@@ -68,5 +68,35 @@ func TestOIDCCallbackHandlesConfiguredFrontendURL(t *testing.T) {
 	w = adminRequest(t, f.raw, http.MethodGet, callback, nil, []*http.Cookie{stateCookie}, nil)
 	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "OIDC authentication failed") {
 		t.Fatalf("valid frontend callback provider failure=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestOIDCCallbackIgnoresPreviousStateCookieName(t *testing.T) {
+	f := newAPIOIDCFixture(t)
+	if _, err := f.settings.Set(t.Context(), settings.ExternalURL, "https://manager.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	secret := "client-secret"
+	provider, err := f.oidc.CreateProvider(t.Context(), auth.OIDCProviderInput{
+		Name: "Previous cookie", Enabled: true, Issuer: f.idp.URL,
+		ClientID: "manager", ClientSecret: &secret, Scopes: []string{"openid"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := adminRequest(t, f.raw, http.MethodGet, "/api/v1/auth/oidc/"+provider.ID+"/start", nil, nil, nil)
+	if start.Code != http.StatusFound {
+		t.Fatalf("OIDC start=%d body=%s", start.Code, start.Body.String())
+	}
+	location, err := url.Parse(start.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := location.Query().Get("state")
+	previousCookie := &http.Cookie{Name: "lcm_oidc_state", Value: state, Path: "/api/v1/auth/oidc/"}
+	callback := "/api/v1/auth/oidc/" + provider.ID + "/callback?state=" + url.QueryEscape(state) + "&code=provider-code"
+	w := adminRequest(t, f.raw, http.MethodGet, callback, nil, []*http.Cookie{previousCookie}, nil)
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "OIDC authentication failed") {
+		t.Fatalf("previous state cookie callback=%d body=%s", w.Code, w.Body.String())
 	}
 }

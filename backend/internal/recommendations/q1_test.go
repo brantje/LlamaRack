@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 func TestQ1DiscoverProfileIsKnownAndRunnable(t *testing.T) {
@@ -51,7 +51,7 @@ func TestQ1DoesNotOutrankHigherBitRunnableQuantization(t *testing.T) {
 	metadata := Metadata{Architecture: "qwen35", ContextLength: 32768, BlockCount: 64, Embedding: 5120, HeadCount: 40, KVHeadCount: 8}
 	snapshot := hardware.Snapshot{
 		RAMAvailableBytes: 32 * gib,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib, TotalBytes: 16 * gib}},
+		GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib, TotalBytes: 16 * gib}},
 	}
 	result := AnalyzeDiscover([]ArtifactInput{
 		{ID: "q1", Quantization: "Q1_0", WeightsBytes: 4 * gib, Complete: true},

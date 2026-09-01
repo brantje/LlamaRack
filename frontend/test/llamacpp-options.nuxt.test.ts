@@ -37,8 +37,8 @@ describe('llama.cpp option form validation', () => {
     const cases = [
       ['made-up=1', 'Unsupported llama.cpp option'],
       ['ctx-size=1\n--ctx-size=2', 'Duplicate llama.cpp option'],
-      ['port=8000', 'managed by LlamaCPP Manager'],
-      ['server-owned=value', 'managed by LlamaCPP Manager'],
+      ['port=8000', 'managed by LlamaRack'],
+      ['server-owned=value', 'managed by LlamaRack'],
       ['ctx-size=many', 'integer value'],
       ['temperature=warm', 'numeric value'],
       ['temperature=', 'numeric value'],
@@ -64,7 +64,7 @@ describe('llama.cpp option form validation', () => {
 
   it('requires the detected schema for non-empty overrides', () => {
     expect(() => parseLlamaCppOptions('ctx-size=8192', null)).toThrow('option schema is unavailable')
-    expect(() => parseLlamaCppOptions('device=0', null)).toThrow('managed by LlamaCPP Manager')
+    expect(() => parseLlamaCppOptions('device=0', null)).toThrow('managed by LlamaRack')
   })
 
   it('uses the profile path when an unknown option is rejected without a version', () => {

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 type apiKeysHandler struct{ auth *auth.Service }
@@ -43,7 +43,9 @@ func (h *apiKeysHandler) collection(w http.ResponseWriter, r *http.Request, user
 		}
 		writeJSON(w, http.StatusOK, items)
 	case http.MethodPost:
-		var in struct{ Name string `json:"name"` }
+		var in struct {
+			Name string `json:"name"`
+		}
 		if !decode(w, r, &in) {
 			return
 		}
@@ -69,7 +71,9 @@ func (h *apiKeysHandler) item(w http.ResponseWriter, r *http.Request, user auth.
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodPatch:
-			var in struct{ Enabled *bool `json:"enabled"` }
+			var in struct {
+				Enabled *bool `json:"enabled"`
+			}
 			if !decode(w, r, &in) {
 				return
 			}
@@ -82,7 +86,9 @@ func (h *apiKeysHandler) item(w http.ResponseWriter, r *http.Request, user auth.
 				return
 			}
 			event := "api_key.disabled"
-			if *in.Enabled { event = "api_key.enabled" }
+			if *in.Enabled {
+				event = "api_key.enabled"
+			}
 			slog.Info("security event", "event", event, "actor_user_id", user.ID, "key_id", id)
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodDelete:

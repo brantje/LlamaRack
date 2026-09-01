@@ -25,7 +25,7 @@ Do not rebuild a Nuxt UI primitive with custom HTML/CSS. Do not prefer an existi
 
 The target styling model is Tailwind + Nuxt UI. Legacy selector-driven component CSS must be removed as surfaces are migrated. A CSS entry point may exist for required Tailwind/Nuxt UI imports and narrowly scoped theme/token declarations, but it must not become a bespoke component library or a collection of `@apply`-based replacements for Nuxt UI components.
 
-Preserve the existing llamacpp-manager theme unless a task explicitly requests a redesign. Prefer semantic Nuxt UI/Tailwind theme configuration over repeated raw color literals.
+Preserve the existing LlamaRack theme unless a task explicitly requests a redesign. Prefer semantic Nuxt UI/Tailwind theme configuration over repeated raw color literals.
 
 **Never put cards inside cards.** Do not nest `UCard`, `UPageCard`, or card-like bordered/elevated containers inside another card. When content needs hierarchy within a card, use sections, separators, tables, alerts, disclosure components, spacing, or typography instead of another card surface. Components with surfaced defaults must also stay flat when nested: for example, `UEmpty` defaults to an outlined surface, so use `variant="naked"` whenever `UEmpty` is rendered inside a card.
 

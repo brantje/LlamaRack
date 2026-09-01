@@ -1,4 +1,4 @@
-# llamacpp-manager Specifications
+# LlamaRack Specifications
 
 These design specifications define the initial architecture and product contract for issue #1. They are intentionally implementation-independent and should be reviewed before feature code is added.
 

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 func TestCollectLogsHostToContainerPIDMapping(t *testing.T) {

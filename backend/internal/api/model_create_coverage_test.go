@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func TestModelMetadataValueHandlerBranches(t *testing.T) {
@@ -73,7 +73,9 @@ func TestModelCreateWrapperLeavesNonModelResponsesUntouched(t *testing.T) {
 		})
 	}
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusCreated, map[string]any{"model": models.Model{ID: "missing"}}) })
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusCreated, map[string]any{"model": models.Model{ID: "missing"}})
+	})
 	handler := NewModelCreateHandler(next, f.models)
 	response := doRequest(t, handler, http.MethodPost, "/api/v1/models", nil, nil)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"id":"missing"`) {

@@ -8,9 +8,9 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	for _, key := range []string{
-		"LCM_DATA_DIR", "LCM_MODELS_DIR", "LCM_DATABASE_PATH", "LCM_LISTEN_ADDR",
-		"LCM_LLAMA_SERVER", "LCM_HUGGINGFACE_BASE_URL", "LCM_WORKER_HOST", "LCM_WORKER_PORT_START",
-		"LCM_STARTUP_TIMEOUT_SECONDS", "LCM_ALLOWED_ORIGIN",
+		"LLAMARACK_DATA_DIR", "LLAMARACK_MODELS_DIR", "LLAMARACK_DATABASE_PATH", "LLAMARACK_LISTEN_ADDR",
+		"LLAMARACK_LLAMA_SERVER", "LLAMARACK_HUGGINGFACE_BASE_URL", "LLAMARACK_WORKER_HOST", "LLAMARACK_WORKER_PORT_START",
+		"LLAMARACK_STARTUP_TIMEOUT_SECONDS", "LLAMARACK_ALLOWED_ORIGIN",
 	} {
 		t.Setenv(key, "")
 	}
@@ -36,16 +36,16 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadOverrides(t *testing.T) {
-	t.Setenv("LCM_DATA_DIR", "/tmp/lcm")
-	t.Setenv("LCM_MODELS_DIR", "/tmp/models")
-	t.Setenv("LCM_DATABASE_PATH", "/tmp/custom.db")
-	t.Setenv("LCM_LISTEN_ADDR", ":9999")
-	t.Setenv("LCM_LLAMA_SERVER", "/bin/fake-llama")
-	t.Setenv("LCM_HUGGINGFACE_BASE_URL", "http://huggingface.test")
-	t.Setenv("LCM_WORKER_HOST", "0.0.0.0")
-	t.Setenv("LCM_WORKER_PORT_START", "12000")
-	t.Setenv("LCM_STARTUP_TIMEOUT_SECONDS", "7")
-	t.Setenv("LCM_ALLOWED_ORIGIN", "http://example.test:3000")
+	t.Setenv("LLAMARACK_DATA_DIR", "/tmp/lcm")
+	t.Setenv("LLAMARACK_MODELS_DIR", "/tmp/models")
+	t.Setenv("LLAMARACK_DATABASE_PATH", "/tmp/custom.db")
+	t.Setenv("LLAMARACK_LISTEN_ADDR", ":9999")
+	t.Setenv("LLAMARACK_LLAMA_SERVER", "/bin/fake-llama")
+	t.Setenv("LLAMARACK_HUGGINGFACE_BASE_URL", "http://huggingface.test")
+	t.Setenv("LLAMARACK_WORKER_HOST", "0.0.0.0")
+	t.Setenv("LLAMARACK_WORKER_PORT_START", "12000")
+	t.Setenv("LLAMARACK_STARTUP_TIMEOUT_SECONDS", "7")
+	t.Setenv("LLAMARACK_ALLOWED_ORIGIN", "http://example.test:3000")
 
 	cfg := Load()
 	if cfg.DataDir != "/tmp/lcm" || cfg.ModelsDir != "/tmp/models" || cfg.DatabasePath != "/tmp/custom.db" {
@@ -65,13 +65,24 @@ func TestLoadOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresPreviousEnvPrefix(t *testing.T) {
+	t.Setenv("LCM_LISTEN_ADDR", ":9999")
+	t.Setenv("LCM_DATA_DIR", "/tmp/lcm")
+	t.Setenv("LLAMARACK_LISTEN_ADDR", "")
+	t.Setenv("LLAMARACK_DATA_DIR", "")
+	cfg := Load()
+	if cfg.ListenAddr != ":8000" || cfg.DataDir != "/config" {
+		t.Fatalf("previous env prefix must be ignored: %+v", cfg)
+	}
+}
+
 func TestEnvFallback(t *testing.T) {
-	t.Setenv("LCM_TEST_ENV", "")
-	if got := env("LCM_TEST_ENV", "fallback"); got != "fallback" {
+	t.Setenv("LLAMARACK_TEST_ENV", "")
+	if got := env("LLAMARACK_TEST_ENV", "fallback"); got != "fallback" {
 		t.Fatalf("env fallback = %q", got)
 	}
-	t.Setenv("LCM_TEST_ENV", "value")
-	if got := env("LCM_TEST_ENV", "fallback"); got != "value" {
+	t.Setenv("LLAMARACK_TEST_ENV", "value")
+	if got := env("LLAMARACK_TEST_ENV", "fallback"); got != "value" {
 		t.Fatalf("env value = %q", got)
 	}
 }

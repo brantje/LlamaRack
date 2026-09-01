@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 func TestAdminManagementRouteEdges(t *testing.T) {
@@ -40,7 +40,7 @@ func TestAdminManagementRouteEdges(t *testing.T) {
 
 	w := doRequest(t, f.handler, http.MethodPut, "/api/v1/settings/general", map[string]any{
 		"login_protection_enabled": false,
-		"login_lockout_seconds": 120,
+		"login_lockout_seconds":    120,
 	}, f.cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"login_protection_enabled"`) || !strings.Contains(w.Body.String(), `"login_lockout_seconds"`) {
 		t.Fatalf("additional settings status=%d body=%s", w.Code, w.Body.String())

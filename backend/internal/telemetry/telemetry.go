@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 type GPUUsage struct {
@@ -76,7 +76,7 @@ func New(snapshot func(context.Context) (hardware.Snapshot, error)) *Collector {
 		readFile:     os.ReadFile,
 		now:          time.Now,
 		numCPU:       runtime.NumCPU(),
-		hostProcRoot: strings.TrimSpace(os.Getenv("LCM_HOST_PROC")),
+		hostProcRoot: strings.TrimSpace(os.Getenv("LLAMARACK_HOST_PROC")),
 		cpuPrev:      map[int]cpuPoint{},
 		amdPrev:      map[string]amdPoint{},
 	}
@@ -218,7 +218,7 @@ func (c *Collector) Collect(ctx context.Context, runtimes []supervisor.Runtime) 
 
 // runtimePIDResolver translates GPU-tool PIDs into the PID namespace used by
 // the manager. NVIDIA/AMD tools commonly report the host PID even when the
-// manager and llama-server run inside a container. When LCM_HOST_PROC points at
+// manager and llama-server run inside a container. When LLAMARACK_HOST_PROC points at
 // a read-only host /proc mount, NSpid gives the corresponding container PID.
 // Direct PID matches always win so native/non-container deployments are
 // unaffected.

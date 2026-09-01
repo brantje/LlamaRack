@@ -17,12 +17,12 @@ func secureArgsServerScript(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	argsFile := filepath.Join(t.TempDir(), "worker-args.txt")
-	t.Setenv("LCM_CAPTURE_ARGS", argsFile)
+	t.Setenv("LLAMARACK_CAPTURE_ARGS", argsFile)
 	path := filepath.Join(t.TempDir(), "fake-llama-server-capture")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$LCM_CAPTURE_ARGS\"\nexec \"$LCM_TEST_BINARY\" -test.run=TestHelperProcess -- \"$@\"\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$LLAMARACK_CAPTURE_ARGS\"\nexec \"$LLAMARACK_TEST_BINARY\" -test.run=TestHelperProcess -- \"$@\"\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

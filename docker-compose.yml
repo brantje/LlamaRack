@@ -1,14 +1,14 @@
 services:
-  llamacpp-manager:
-    image: ghcr.io/brantje/llamacpp-manager:${LCM_IMAGE_TAG:-latest}
+  llamarack:
+    image: ghcr.io/brantje/llamarack:${LLAMARACK_IMAGE_TAG:-latest}
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      LCM_LISTEN_ADDR: :8000
-      LCM_DATA_DIR: /config
-      LCM_MODELS_DIR: /models
-      LCM_LLAMA_SERVER: /app/llama-server
-      LCM_HOST_PROC: /host/proc
-      LCM_ALWAYS_ON_RECONCILE_SECONDS: ${LCM_ALWAYS_ON_RECONCILE_SECONDS:-15}
+      LLAMARACK_LISTEN_ADDR: :8000
+      LLAMARACK_DATA_DIR: /config
+      LLAMARACK_MODELS_DIR: /models
+      LLAMARACK_LLAMA_SERVER: /app/llama-server
+      LLAMARACK_HOST_PROC: /host/proc
+      LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS: ${LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS:-15}
     volumes:
       - ./data/config:/config
       - ./data/models:/models
@@ -16,7 +16,7 @@ services:
     ports:
       - "8888:8000"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/llamacpp-manager", "healthcheck"]
+      test: ["CMD", "/usr/local/bin/llamarack", "healthcheck"]
       interval: 3s
       timeout: 3s
       retries: 20

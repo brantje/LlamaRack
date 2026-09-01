@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func testService(t *testing.T) *Service {

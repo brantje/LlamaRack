@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) {
@@ -19,16 +19,16 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 		switch r.URL.Path {
 		case "/api/models/empero-ai/Qwen3.8-27B-Ridge-GGUF":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "empero-ai/Qwen3.8-27B-Ridge-GGUF",
+				"id":  "empero-ai/Qwen3.8-27B-Ridge-GGUF",
 				"sha": "ridge-rev",
 				"gguf": map[string]any{
-					"total": int64(27_315_000_000),
-					"architecture": "qwen35",
+					"total":          int64(27_315_000_000),
+					"architecture":   "qwen35",
 					"context_length": int64(262144),
 				},
 				"siblings": []map[string]any{{
 					"rfilename": "Qwen3.8-27B-Ridge-3.7bpw.gguf",
-					"size": int64(12_599_187_008),
+					"size":      int64(12_599_187_008),
 				}},
 			})
 		case "/empero-ai/Qwen3.8-27B-Ridge-GGUF/resolve/ridge-rev/Qwen3.8-27B-Ridge-3.7bpw.gguf":
@@ -48,13 +48,13 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	}
 	managerSettings := settings.New(fixture.models.DB(), settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
 	fullSnapshot := hardware.Snapshot{
-		RAMAvailableBytes: 64 << 30,
-		RAMTotalBytes: 64 << 30,
+		RAMAvailableBytes:          64 << 30,
+		RAMTotalBytes:              64 << 30,
 		RAMBandwidthBytesPerSecond: 52_000_000_000,
 		GPUs: []hardware.GPU{{
 			ID: "CUDA0", FreeBytes: 24 << 30, TotalBytes: 24 << 30,
 			MemoryBandwidthBytesPerSecond: 288_032_000_000,
-			PCIeBandwidthBytesPerSecond: 15_753_846_153,
+			PCIeBandwidthBytesPerSecond:   15_753_846_153,
 		}},
 	}
 	handler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: fullSnapshot}, managerSettings)
@@ -92,7 +92,7 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	hybridSnapshot.GPUs = []hardware.GPU{{
 		ID: "CUDA0", FreeBytes: 8 << 30, TotalBytes: 8 << 30,
 		MemoryBandwidthBytesPerSecond: 288_032_000_000,
-		PCIeBandwidthBytesPerSecond: 15_753_846_153,
+		PCIeBandwidthBytesPerSecond:   15_753_846_153,
 	}}
 	hybridHandler := NewDiscoverRecommendationHandler(fixture.auth, hf, staticHardware{snapshot: hybridSnapshot}, managerSettings)
 	hybridResponse := doRequest(t, hybridHandler, http.MethodGet, "/api/v1/huggingface/recommendations?repo=empero-ai%2FQwen3.8-27B-Ridge-GGUF", nil, cookie)

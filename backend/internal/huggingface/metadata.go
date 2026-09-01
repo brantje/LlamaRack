@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 const (

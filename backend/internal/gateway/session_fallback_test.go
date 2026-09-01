@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/observability"
 )
 
 func TestWithRequestLogContextGeneratesDistinctSessionFallbacks(t *testing.T) {

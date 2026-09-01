@@ -250,13 +250,12 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	fmt.Fprintln(w, "# HELP llamacpp_manager_gateway_requests_total OpenAI-compatible gateway requests.")
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gateway_requests_total counter")
+	writeMetricHelp(w, "gateway_requests_total", "OpenAI-compatible gateway requests.")
+	writeMetricType(w, "gateway_requests_total", "counter")
 	declaredMetric := map[string]bool{}
 	for _, counter := range counters {
-		name := "llamacpp_manager_" + counter.Metric
 		if counter.Metric != "gateway_requests_total" && !declaredMetric[counter.Metric] {
-			fmt.Fprintf(w, "# TYPE %s counter\n", name)
+			writeMetricType(w, counter.Metric, "counter")
 			declaredMetric[counter.Metric] = true
 		}
 		var labels []string
@@ -273,21 +272,21 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(labels) > 0 {
 			labelText = "{" + strings.Join(labels, ",") + "}"
 		}
-		fmt.Fprintf(w, "%s%s %s\n", name, labelText, strconv.FormatFloat(counter.Value, 'f', -1, 64))
+		writeMetricSample(w, counter.Metric, labelText, strconv.FormatFloat(counter.Value, 'f', -1, 64))
 	}
 	active, queued := h.service.Activity()
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gateway_active_requests gauge")
+	writeMetricType(w, "gateway_active_requests", "gauge")
 	for instanceID, value := range active {
-		fmt.Fprintf(w, "llamacpp_manager_gateway_active_requests{instance_id=\"%s\"} %d\n", promEscape(instanceID), value)
+		writeMetricSample(w, "gateway_active_requests", `{instance_id="`+promEscape(instanceID)+`"}`, strconv.Itoa(value))
 	}
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gateway_queued_requests gauge")
+	writeMetricType(w, "gateway_queued_requests", "gauge")
 	for instanceID, value := range queued {
-		fmt.Fprintf(w, "llamacpp_manager_gateway_queued_requests{instance_id=\"%s\"} %d\n", promEscape(instanceID), value)
+		writeMetricSample(w, "gateway_queued_requests", `{instance_id="`+promEscape(instanceID)+`"}`, strconv.Itoa(value))
 	}
 	summary, err := h.service.Summary(r.Context(), time.Now().Add(-15*time.Minute).UnixMilli())
 	if err == nil {
-		writeQuantiles(w, "llamacpp_manager_request_latency_seconds", summary.LatencyMS)
-		writeQuantiles(w, "llamacpp_manager_request_ttft_seconds", summary.TTFTMS)
+		writeQuantiles(w, "request_latency_seconds", summary.LatencyMS)
+		writeQuantiles(w, "request_ttft_seconds", summary.TTFTMS)
 	}
 	writeHardwareMetrics(w, h.service.LatestHardware())
 	if h.states != nil {
@@ -297,42 +296,42 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func writeHardwareMetrics(w http.ResponseWriter, overview HardwareOverview) {
 	hardware := overview.Hardware
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_ram_total_bytes gauge")
-	fmt.Fprintf(w, "llamacpp_manager_ram_total_bytes %d\n", hardware.RAMTotalBytes)
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_ram_used_bytes gauge")
+	writeMetricType(w, "ram_total_bytes", "gauge")
+	writeMetricSample(w, "ram_total_bytes", "", strconv.FormatInt(hardware.RAMTotalBytes, 10))
+	writeMetricType(w, "ram_used_bytes", "gauge")
 	ramUsed := hardware.RAMTotalBytes - hardware.RAMAvailableBytes
 	if ramUsed < 0 {
 		ramUsed = 0
 	}
-	fmt.Fprintf(w, "llamacpp_manager_ram_used_bytes %d\n", ramUsed)
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_vram_total_bytes gauge")
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_vram_used_bytes gauge")
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_gpu_utilization_percent gauge")
+	writeMetricSample(w, "ram_used_bytes", "", strconv.FormatInt(ramUsed, 10))
+	writeMetricType(w, "gpu_vram_total_bytes", "gauge")
+	writeMetricType(w, "gpu_vram_used_bytes", "gauge")
+	writeMetricType(w, "gpu_utilization_percent", "gauge")
 	for _, gpu := range hardware.GPUs {
-		label := promEscape(gpu.ID)
-		fmt.Fprintf(w, "llamacpp_manager_gpu_vram_total_bytes{device_id=\"%s\"} %d\n", label, gpu.TotalBytes)
-		fmt.Fprintf(w, "llamacpp_manager_gpu_vram_used_bytes{device_id=\"%s\"} %d\n", label, gpu.UsedBytes)
-		fmt.Fprintf(w, "llamacpp_manager_gpu_utilization_percent{device_id=\"%s\"} %s\n", label, strconv.FormatFloat(gpu.UtilizationPct, 'f', -1, 64))
+		label := `{device_id="` + promEscape(gpu.ID) + `"}`
+		writeMetricSample(w, "gpu_vram_total_bytes", label, strconv.FormatInt(gpu.TotalBytes, 10))
+		writeMetricSample(w, "gpu_vram_used_bytes", label, strconv.FormatInt(gpu.UsedBytes, 10))
+		writeMetricSample(w, "gpu_utilization_percent", label, strconv.FormatFloat(gpu.UtilizationPct, 'f', -1, 64))
 	}
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_memory_used_bytes gauge")
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_cpu_percent gauge")
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_vram_used_bytes gauge")
+	writeMetricType(w, "instance_memory_used_bytes", "gauge")
+	writeMetricType(w, "instance_cpu_percent", "gauge")
+	writeMetricType(w, "instance_vram_used_bytes", "gauge")
 	for _, sample := range overview.Telemetry {
-		instance := promEscape(sample.InstanceID)
+		instance := `{instance_id="` + promEscape(sample.InstanceID) + `"}`
 		if sample.MemoryUsedBytes != nil {
-			fmt.Fprintf(w, "llamacpp_manager_instance_memory_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.MemoryUsedBytes)
+			writeMetricSample(w, "instance_memory_used_bytes", instance, strconv.FormatInt(*sample.MemoryUsedBytes, 10))
 		}
 		if sample.CPUPercent != nil {
-			fmt.Fprintf(w, "llamacpp_manager_instance_cpu_percent{instance_id=\"%s\"} %s\n", instance, strconv.FormatFloat(*sample.CPUPercent, 'f', -1, 64))
+			writeMetricSample(w, "instance_cpu_percent", instance, strconv.FormatFloat(*sample.CPUPercent, 'f', -1, 64))
 		}
 		if sample.VRAMUsedBytes != nil {
-			fmt.Fprintf(w, "llamacpp_manager_instance_vram_used_bytes{instance_id=\"%s\"} %d\n", instance, *sample.VRAMUsedBytes)
+			writeMetricSample(w, "instance_vram_used_bytes", instance, strconv.FormatInt(*sample.VRAMUsedBytes, 10))
 		}
 	}
 }
 
 func writeInstanceStateMetrics(w http.ResponseWriter, states map[string]string) {
-	fmt.Fprintln(w, "# TYPE llamacpp_manager_instance_state gauge")
+	writeMetricType(w, "instance_state", "gauge")
 	instanceIDs := make([]string, 0, len(states))
 	for instanceID := range states {
 		instanceIDs = append(instanceIDs, instanceID)
@@ -346,16 +345,16 @@ func writeInstanceStateMetrics(w http.ResponseWriter, states map[string]string) 
 			if current == state {
 				value = 1
 			}
-			fmt.Fprintf(w, "llamacpp_manager_instance_state{instance_id=\"%s\",state=\"%s\"} %d\n", promEscape(instanceID), state, value)
+			writeMetricSample(w, "instance_state", `{instance_id="`+promEscape(instanceID)+`",state="`+state+`"}`, strconv.Itoa(value))
 		}
 	}
 }
 
-func writeQuantiles(w http.ResponseWriter, name string, values Percentiles) {
-	fmt.Fprintf(w, "# TYPE %s gauge\n", name)
+func writeQuantiles(w http.ResponseWriter, suffix string, values Percentiles) {
+	writeMetricType(w, suffix, "gauge")
 	for quantile, value := range map[string]*float64{"0.50": values.P50, "0.95": values.P95, "0.99": values.P99} {
 		if value != nil {
-			fmt.Fprintf(w, "%s{window=\"15m\",quantile=\"%s\"} %s\n", name, quantile, strconv.FormatFloat(*value/1000, 'f', -1, 64))
+			writeMetricSample(w, suffix, `{window="15m",quantile="`+quantile+`"}`, strconv.FormatFloat(*value/1000, 'f', -1, 64))
 		}
 	}
 }

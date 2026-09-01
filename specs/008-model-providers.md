@@ -6,7 +6,7 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how llamacpp-manager discovers, evaluates, downloads and stores model artifacts from external sources.
+This specification defines how LlamaRack discovers, evaluates, downloads and stores model artifacts from external sources.
 
 V1 supports:
 

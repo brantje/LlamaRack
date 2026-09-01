@@ -8,7 +8,6 @@ export default defineConfig({
   expect: { timeout: 8_000 },
   fullyParallel: false,
   workers: 1,
-  testIgnore: process.env.FAKE_NVIDIA_E2E ? [] : [/fake-nvidia-screenshots\.spec\.ts/],
   reporter: [['list'], ['html', { outputFolder: 'artifacts/playwright-report', open: 'never' }]],
   outputDir: 'artifacts/test-results',
   use: {

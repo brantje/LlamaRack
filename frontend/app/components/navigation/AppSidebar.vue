@@ -24,7 +24,7 @@ const administrationNavigation: NavigationMenuItem[] = [
     <template #header>
       <UButton to="/" color="neutral" variant="link" class="h-auto justify-start gap-3 px-1 py-2">
         <span class="font-[var(--font-heading)] text-3xl font-semibold text-[var(--color-accent)]">λ</span>
-        <span class="text-left font-[var(--font-heading)] text-sm font-semibold leading-[1.05] text-highlighted">llamacpp<br>manager</span>
+        <span class="text-left font-[var(--font-heading)] text-sm font-semibold leading-[1.05] text-highlighted">LlamaRack</span>
       </UButton>
     </template>
 

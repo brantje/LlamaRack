@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func gatewayFakeBinary(t *testing.T) string {
@@ -30,10 +30,10 @@ func gatewayFakeBinary(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LCM_GATEWAY_TEST_BINARY", exe)
+	t.Setenv("LLAMARACK_GATEWAY_TEST_BINARY", exe)
 	t.Setenv("GO_WANT_GATEWAY_HELPER", "1")
 	path := filepath.Join(t.TempDir(), "fake-llama")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec \"$LCM_GATEWAY_TEST_BINARY\" -test.run=TestGatewayHelperProcess -- \"$@\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec \"$LLAMARACK_GATEWAY_TEST_BINARY\" -test.run=TestGatewayHelperProcess -- \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -222,7 +222,7 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 func TestListModelsAndSuccessfulProxy(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	w := gatewayRequest(t, f.gateway, http.MethodGet, "/v1/models", f.secret, "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "gateway-model") || !strings.Contains(w.Body.String(), "llamacpp-manager") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "gateway-model") || !strings.Contains(w.Body.String(), `"owned_by":"llamarack"`) {
 		t.Fatalf("models=%d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/embeddings"} {
@@ -234,6 +234,12 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 			if w.Header().Get(header) == "" {
 				t.Fatalf("%s missing %s: %v", path, header, w.Header())
 			}
+			if w.Header().Get("X-LlamaCPP-Manager-Request-ID") != "" || w.Header().Get("X-LlamaCPP-Manager-Instance") != "" {
+				t.Fatalf("%s previous product headers present: %v", path, w.Header())
+			}
+		}
+		if requestID := w.Header().Get(headerRequestID); !strings.HasPrefix(requestID, "lr_") {
+			t.Fatalf("%s request id %q", path, requestID)
 		}
 		if path == "/v1/embeddings" {
 			if w.Header().Get(headerGenerationTPS) != "" || w.Header().Get(headerGeneratedTokens) != "" {

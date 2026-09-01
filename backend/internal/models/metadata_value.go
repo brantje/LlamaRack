@@ -3,7 +3,7 @@ package models
 import (
 	"path/filepath"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 // ReadGGUFValue returns a bounded page of one metadata value. The normal

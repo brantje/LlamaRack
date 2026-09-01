@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type Network struct {
@@ -291,7 +291,7 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)\bhf_[A-Za-z0-9_-]{8,}\b`),
 	regexp.MustCompile(`(?i)\bsk-lcm-[A-Za-z0-9_-]{8,}\b`),
-	regexp.MustCompile(`(?i)\blcm_(?:session|csrf)=[^;\s]+`),
+	regexp.MustCompile(`(?i)\b(?:lcm|llamarack)_(?:session|csrf|oidc_state)=[^;\s]+`),
 }
 
 func Redact(value string) string {

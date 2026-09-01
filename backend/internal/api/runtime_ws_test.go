@@ -10,8 +10,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/instances"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
@@ -32,13 +32,19 @@ func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
 
 	cookie := bootstrapAndLogin(t, f)
 	login, err := f.auth.LoginBearerWithMetadata(t.Context(), "admin", "correct-horse-battery", "127.0.0.1", "ws-test")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, session, err := f.auth.AuthenticateBearer(t.Context(), login.AccessToken)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	issueTicket := func() string {
 		t.Helper()
 		ticket, _, err := f.auth.IssueWebSocketTicket(t.Context(), session)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		return ticket
 	}
 
@@ -53,12 +59,16 @@ func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
 
 	model := createModel(t, f, cookie)
 	instance, err := f.server.lifecycle.Instances().Create(context.Background(), instances.CreateInput{ModelID: model.ID, Name: "WS instance"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	headers := http.Header{}
 	headers.Set("Origin", server.URL)
 	ticket := issueTicket()
 	conn, response, err := websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, headers)
-	if err != nil { t.Fatalf("websocket dial failed: response=%v err=%v", response, err) }
+	if err != nil {
+		t.Fatalf("websocket dial failed: response=%v err=%v", response, err)
+	}
 	defer conn.Close()
 	if replay, replayResponse, replayErr := websocket.DefaultDialer.Dial(wsURL+"?ticket="+ticket, headers); replayErr == nil {
 		_ = replay.Close()
@@ -66,20 +76,30 @@ func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
 	} else if replayResponse == nil || replayResponse.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("ticket replay response=%v err=%v", replayResponse, replayErr)
 	}
-	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil { t.Fatal(err) }
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
 	var snapshot runtimeSnapshotEvent
-	if err := conn.ReadJSON(&snapshot); err != nil { t.Fatalf("read runtime snapshot: %v", err) }
+	if err := conn.ReadJSON(&snapshot); err != nil {
+		t.Fatalf("read runtime snapshot: %v", err)
+	}
 	if snapshot.Type != "runtime_snapshot" || len(snapshot.Runtimes) != 1 || snapshot.Runtimes[0].InstanceID != instance.ID || snapshot.Runtimes[0].ModelID != model.ID || snapshot.Runtimes[0].State != supervisor.Unloaded {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 
 	start := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instance.ID+"/start", nil, cookie)
-	if start.Code != http.StatusServiceUnavailable { t.Fatalf("start status=%d body=%s", start.Code, start.Body.String()) }
+	if start.Code != http.StatusServiceUnavailable {
+		t.Fatalf("start status=%d body=%s", start.Code, start.Body.String())
+	}
 	for _, want := range []supervisor.State{supervisor.Starting, supervisor.Failed} {
 		var event runtimeEvent
-		if err := conn.ReadJSON(&event); err != nil { t.Fatalf("read %s event: %v", want, err) }
-		if event.Type != "runtime" || event.Runtime.InstanceID != instance.ID || event.Runtime.ModelID != model.ID || event.Runtime.State != want { t.Fatalf("event=%+v want state=%s instance=%s", event, want, instance.ID) }
+		if err := conn.ReadJSON(&event); err != nil {
+			t.Fatalf("read %s event: %v", want, err)
+		}
+		if event.Type != "runtime" || event.Runtime.InstanceID != instance.ID || event.Runtime.ModelID != model.ID || event.Runtime.State != want {
+			t.Fatalf("event=%+v want state=%s instance=%s", event, want, instance.ID)
+		}
 	}
 }
 
@@ -89,7 +109,9 @@ func TestRuntimeWebSocketMethodAndOriginValidation(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/ws", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusMethodNotAllowed { t.Fatalf("POST websocket status=%d", response.Code) }
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST websocket status=%d", response.Code)
+	}
 
 	for _, tc := range []struct {
 		name       string
@@ -109,8 +131,12 @@ func TestRuntimeWebSocketMethodAndOriginValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil)
 			r.Host = tc.host
-			if tc.origin != "" { r.Header.Set("Origin", tc.origin) }
-			if got := websocketOriginAllowed(r, tc.configured); got != tc.want { t.Fatalf("websocketOriginAllowed=%v want=%v", got, tc.want) }
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
+			if got := websocketOriginAllowed(r, tc.configured); got != tc.want {
+				t.Fatalf("websocketOriginAllowed=%v want=%v", got, tc.want)
+			}
 		})
 	}
 }

@@ -18,16 +18,16 @@ func TestDetailConsumesHubGGUFSummary(t *testing.T) {
 			t.Fatalf("model-info request did not ask for file metadata: %s", r.URL.RawQuery)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "empero-ai/Qwen3.8-27B-Ridge-GGUF",
+			"id":  "empero-ai/Qwen3.8-27B-Ridge-GGUF",
 			"sha": "ridge-rev",
 			"gguf": map[string]any{
-				"total": int64(27_315_000_000),
-				"architecture": "qwen35",
+				"total":          int64(27_315_000_000),
+				"architecture":   "qwen35",
 				"context_length": int64(262144),
 			},
 			"siblings": []map[string]any{{
 				"rfilename": "Qwen3.8-27B-Ridge-3.7bpw.gguf",
-				"size": int64(12_599_187_008),
+				"size":      int64(12_599_187_008),
 			}},
 		})
 	}))

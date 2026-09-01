@@ -36,12 +36,12 @@ type GPUProcess struct {
 }
 
 type Snapshot struct {
-	RAMTotalBytes                  int64        `json:"ram_total_bytes"`
-	RAMAvailableBytes              int64        `json:"ram_available_bytes"`
-	RAMBandwidthBytesPerSecond     int64        `json:"ram_bandwidth_bytes_per_second,omitempty"`
-	GPUs                           []GPU        `json:"gpus"`
-	Processes                      []GPUProcess `json:"processes"`
-	CollectedAt                    time.Time    `json:"collected_at"`
+	RAMTotalBytes              int64        `json:"ram_total_bytes"`
+	RAMAvailableBytes          int64        `json:"ram_available_bytes"`
+	RAMBandwidthBytesPerSecond int64        `json:"ram_bandwidth_bytes_per_second,omitempty"`
+	GPUs                       []GPU        `json:"gpus"`
+	Processes                  []GPUProcess `json:"processes"`
+	CollectedAt                time.Time    `json:"collected_at"`
 }
 
 type Snapshotter interface {

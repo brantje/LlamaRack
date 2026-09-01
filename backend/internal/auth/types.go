@@ -16,7 +16,7 @@ const (
 	argonThreads      = 2
 	argonKeyLength    = 32
 	apiUseWriteEvery  = 30 * time.Second
-	managerIssuer     = "llamacpp-manager"
+	managerIssuer     = "llamarack"
 	wsTicketLifetime  = 30 * time.Second
 )
 

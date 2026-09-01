@@ -51,8 +51,12 @@ func TestOIDCProviderNetworkAndStartErrorBranches(t *testing.T) {
 		AuthorizationEndpoint: badDiscovery.URL + "/authorize", TokenEndpoint: badDiscovery.URL + "/token", JWKSURL: badDiscovery.URL + "/jwks-ok",
 	}
 	provider, err := f.manager.CreateProvider(ctx, manual)
-	if err != nil { t.Fatal(err) }
-	if err := f.secrets.DeleteSecret(ctx, oidcSecretName(provider.ID)); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.secrets.DeleteSecret(ctx, oidcSecretName(provider.ID)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.manager.Start(ctx, provider.ID, false, "", "", "https://manager.example.test"); err == nil || !strings.Contains(err.Error(), "client secret is unavailable") {
 		t.Fatalf("missing Start secret err=%v", err)
 	}
@@ -65,7 +69,9 @@ func TestOIDCProviderNetworkAndStartErrorBranches(t *testing.T) {
 	disabledInput.Enabled = false
 	disabledInput.ClientSecret = &secret
 	disabled, err := f.manager.CreateProvider(ctx, disabledInput)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.manager.Start(ctx, disabled.ID, false, "", "", "https://manager.example.test"); err == nil || !strings.Contains(err.Error(), "provider is disabled") {
 		t.Fatalf("disabled Start err=%v", err)
 	}
@@ -83,7 +89,9 @@ func TestOIDCCallbackAndExchangeEarlyErrorBranches(t *testing.T) {
 		AuthorizationEndpoint: "https://issuer.example/authorize", TokenEndpoint: "https://issuer.example/token", JWKSURL: "https://issuer.example/jwks",
 	}
 	provider, err := f.manager.CreateProvider(ctx, input)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	putTransaction := func(state, providerID string, expiresAt time.Time) {
 		f.manager.mu.Lock()
@@ -107,12 +115,16 @@ func TestOIDCCallbackAndExchangeEarlyErrorBranches(t *testing.T) {
 		t.Fatalf("missing provider callback err=%v", err)
 	}
 
-	if err := f.secrets.DeleteSecret(ctx, oidcSecretName(provider.ID)); err != nil { t.Fatal(err) }
+	if err := f.secrets.DeleteSecret(ctx, oidcSecretName(provider.ID)); err != nil {
+		t.Fatal(err)
+	}
 	putTransaction("missing-secret", provider.ID, time.Now().Add(time.Minute))
 	if _, err := f.manager.CompleteCallback(ctx, provider.ID, "missing-secret", "code", "https://manager.example.test"); err == nil || !strings.Contains(err.Error(), "client secret is unavailable") {
 		t.Fatalf("missing callback secret err=%v", err)
 	}
-	if err := f.secrets.SetSecret(ctx, oidcSecretName(provider.ID), secret); err != nil { t.Fatal(err) }
+	if err := f.secrets.SetSecret(ctx, oidcSecretName(provider.ID), secret); err != nil {
+		t.Fatal(err)
+	}
 	putTransaction("bad-external", provider.ID, time.Now().Add(time.Minute))
 	if _, err := f.manager.CompleteCallback(ctx, provider.ID, "bad-external", "code", "not-a-url"); err == nil || !strings.Contains(err.Error(), "external/public URL") {
 		t.Fatalf("bad callback external URL err=%v", err)

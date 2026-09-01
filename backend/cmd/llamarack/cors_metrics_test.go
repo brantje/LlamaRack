@@ -10,7 +10,7 @@ import (
 func TestDynamicCORSExposesInferenceMetricHeaders(t *testing.T) {
 	network, _ := testCORSNetwork(t)
 	h := dynamicCORS(network, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-LlamaCPP-Manager-Request-ID", "lcm_test")
+		w.Header().Set("X-LlamaRack-Request-ID", "lr_test")
 		w.WriteHeader(http.StatusOK)
 	}))
 	r := httptest.NewRequest(http.MethodPost, "http://manager.local/v1/chat/completions", nil)
@@ -23,15 +23,17 @@ func TestDynamicCORSExposesInferenceMetricHeaders(t *testing.T) {
 	}
 	exposed := w.Header().Get("Access-Control-Expose-Headers")
 	for _, expected := range []string{
-		"X-LlamaCPP-Manager-Request-ID",
-		"X-LlamaCPP-Manager-Instance",
-		"X-LlamaCPP-Manager-Queue-MS",
-		"X-LlamaCPP-Manager-TTFT-MS",
-		"X-LlamaCPP-Manager-Prompt-Tokens-Per-Second",
-		"X-LlamaCPP-Manager-Generation-Tokens-Per-Second",
+		"X-LlamaRack-Request-ID",
+		"X-LlamaRack-Instance",
+		"X-LlamaRack-Queue-MS",
+		"X-LlamaRack-TTFT-MS",
+		"X-LiteLLM-Trace-ID",
 	} {
 		if !strings.Contains(exposed, expected) {
 			t.Fatalf("missing exposed header %s in %q", expected, exposed)
 		}
+	}
+	if strings.Contains(exposed, "X-LlamaCPP-Manager-") {
+		t.Fatalf("previous product headers still exposed: %q", exposed)
 	}
 }

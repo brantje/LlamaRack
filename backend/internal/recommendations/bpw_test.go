@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 func TestClassifyBPWQuantization(t *testing.T) {
@@ -29,7 +29,7 @@ func TestBPWArtifactCanBeRecommended(t *testing.T) {
 	snapshot := hardware.Snapshot{
 		RAMAvailableBytes: 64 * gib,
 		RAMTotalBytes:     64 * gib,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 24 * gib, TotalBytes: 24 * gib}},
+		GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 24 * gib, TotalBytes: 24 * gib}},
 	}
 	result := AnalyzeDiscover([]ArtifactInput{{
 		ID: "ridge", Quantization: "3.7BPW", WeightsBytes: 12_599_187_008, Complete: true,

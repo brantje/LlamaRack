@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 )
 
 // InspectGGUF validates a path through the normal Model path rules and reads

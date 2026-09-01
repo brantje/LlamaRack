@@ -13,24 +13,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/api"
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
-	"github.com/brantje/llamacpp-manager/backend/internal/config"
-	"github.com/brantje/llamacpp-manager/backend/internal/database"
-	"github.com/brantje/llamacpp-manager/backend/internal/downloads"
-	frontendui "github.com/brantje/llamacpp-manager/backend/internal/frontend"
-	"github.com/brantje/llamacpp-manager/backend/internal/gateway"
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
-	"github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	"github.com/brantje/llamacpp-manager/backend/internal/modelimports"
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	managersecurity "github.com/brantje/llamacpp-manager/backend/internal/security"
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/api"
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/config"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	frontendui "github.com/brantje/llamarack/backend/internal/frontend"
+	"github.com/brantje/llamarack/backend/internal/gateway"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/modelimports"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func main() {
@@ -194,7 +194,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 		return value
 	}, observabilitySampler.RuntimeStates)
-	frontendDir := os.Getenv("LCM_FRONTEND_DIR")
+	frontendDir := os.Getenv("LLAMARACK_FRONTEND_DIR")
 	if frontendDir == "" {
 		frontendDir = "/app/frontend"
 	}
@@ -273,7 +273,7 @@ func dynamicCORS(network *managersecurity.Network, next http.Handler) http.Handl
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Expose-Headers", "X-LlamaCPP-Manager-Request-ID, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID, X-LlamaCPP-Manager-Instance, X-LlamaCPP-Manager-Autoloaded, X-LlamaCPP-Manager-Upstream-Port, X-LlamaCPP-Manager-Queue-MS, X-LlamaCPP-Manager-Load-MS, X-LlamaCPP-Manager-TTFT-MS, X-LlamaCPP-Manager-Prompt-Tokens-Per-Second, X-LlamaCPP-Manager-Generation-Tokens-Per-Second, X-LlamaCPP-Manager-Prompt-Tokens, X-LlamaCPP-Manager-Generated-Tokens, X-LlamaCPP-Manager-Total-Tokens")
+			w.Header().Set("Access-Control-Expose-Headers", gateway.CORSExposeHeaders())
 		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

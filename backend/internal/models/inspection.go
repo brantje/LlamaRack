@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/ggufmeta"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 // GGUFArtifactFile mirrors the provider artifact file shape for local GGUFs.

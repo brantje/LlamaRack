@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/observability"
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 func TestRuntimeTelemetryHelpersAndEventShape(t *testing.T) {

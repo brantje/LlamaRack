@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/hardware"
 )
 
 func TestPlanPlacementPrefersOneGPU(t *testing.T) {

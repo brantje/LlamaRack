@@ -621,7 +621,7 @@ async function send(options: { allowEmpty?: boolean } = {}) {
       signal: controller.signal
     })
     responseHeaders.value = Array.from(response.headers.entries())
-    requestID = response.headers.get('X-LlamaCPP-Manager-Request-ID') || ''
+    requestID = response.headers.get('X-LlamaRack-Request-ID') || ''
 
     if (!response.ok) {
       activePanel.value = 'response'

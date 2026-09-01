@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 func TestEmptyCompanionOverrideSuppressesInheritedLaunchValue(t *testing.T) {

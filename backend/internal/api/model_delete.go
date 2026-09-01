@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/models"
 )
 
 func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, id string) {

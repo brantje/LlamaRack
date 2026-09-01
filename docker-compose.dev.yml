@@ -5,21 +5,21 @@ services:
       args:
         LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     environment:
-      LCM_LISTEN_ADDR: :8000
-      LCM_DATA_DIR: /config
-      LCM_MODELS_DIR: /models
-      LCM_LLAMA_SERVER: /app/llama-server
-      LCM_HOST_PROC: /host/proc
-      LCM_ALLOWED_ORIGIN: ${LCM_ALLOWED_ORIGIN:-http://localhost:3000}
-      LCM_ALWAYS_ON_RECONCILE_SECONDS: ${LCM_ALWAYS_ON_RECONCILE_SECONDS:-15}
+      LLAMARACK_LISTEN_ADDR: :8000
+      LLAMARACK_DATA_DIR: /config
+      LLAMARACK_MODELS_DIR: /models
+      LLAMARACK_LLAMA_SERVER: /app/llama-server
+      LLAMARACK_HOST_PROC: /host/proc
+      LLAMARACK_ALLOWED_ORIGIN: ${LLAMARACK_ALLOWED_ORIGIN:-http://localhost:3000}
+      LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS: ${LLAMARACK_ALWAYS_ON_RECONCILE_SECONDS:-15}
     volumes:
       - ./data/config:/config
-      - ${LCM_HOST_MODELS_DIR:-./data/models}:/models
+      - ${LLAMARACK_HOST_MODELS_DIR:-./data/models}:/models
       - /proc:/host/proc:ro
     ports:
       - "8888:8000"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/llamacpp-manager", "healthcheck"]
+      test: ["CMD", "/usr/local/bin/llamarack", "healthcheck"]
       interval: 3s
       timeout: 3s
       retries: 20

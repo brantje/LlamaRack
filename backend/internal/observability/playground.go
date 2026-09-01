@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-import "github.com/brantje/llamacpp-manager/backend/internal/lifecycle"
+import "github.com/brantje/llamarack/backend/internal/lifecycle"
 
 var (
 	playgroundSchemaReady sync.Map

@@ -77,7 +77,7 @@ A request record contains, where available:
 The stable request ID is returned in:
 
 ```text
-X-LlamaCPP-Manager-Request-ID
+X-LlamaRack-Request-ID
 ```
 
 The resolved trace ID is returned in:
@@ -282,7 +282,7 @@ These raw process logs are distinct from persistent inference request records in
 
 ## Prometheus
 
-Expose Prometheus text exposition at `GET /metrics` using the `llamacpp_manager_` prefix. The endpoint remains unauthenticated by default and may be protected by the configurable Prometheus bearer token.
+Expose Prometheus text exposition at `GET /metrics` using the `llamarack_` prefix. The endpoint remains unauthenticated by default and may be protected by the configurable Prometheus bearer token.
 
 Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-state metrics without high-cardinality request/log metadata labels.
 

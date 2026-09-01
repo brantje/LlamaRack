@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 func TestDirectInstanceLifecycleRestartKillRuntimeAndLogs(t *testing.T) {

@@ -3,7 +3,7 @@ package gateway
 import (
 	"net/http"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 const managementPlaygroundBearer = "Bearer management-playground-internal"

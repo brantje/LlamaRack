@@ -102,15 +102,15 @@ func New(applicationVersion string) *Document {
 	return &Document{
 		OpenAPI: Version,
 		Info: Info{
-			Title:       "LlamaCPP Manager API",
+			Title:       "LlamaRack API",
 			Version:     applicationVersion,
-			Description: "Runtime-generated management and OpenAI-compatible API contract for LlamaCPP Manager.",
+			Description: "Runtime-generated management and OpenAI-compatible API contract for LlamaRack.",
 		},
 		Paths: map[string]map[string]Operation{},
 		Components: Components{
 			SecuritySchemes: map[string]SecurityScheme{
-				"managerSession": {Type: "apiKey", In: "cookie", Name: "llamacpp_manager_session"},
-				"bearerAPIKey":   {Type: "http", Scheme: "bearer"},
+				"managementBearer": {Type: "http", Scheme: "bearer"},
+				"bearerAPIKey":     {Type: "http", Scheme: "bearer"},
 			},
 			Schemas: map[string]Schema{
 				"Error": {
@@ -214,7 +214,7 @@ func (d *Document) DocsHandler(specPath string) http.Handler {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LlamaCPP Manager API</title>
+  <title>LlamaRack API</title>
 </head>
 <body>
   <div id="app"></div>
@@ -243,7 +243,7 @@ func ErrorResponse(description string) Response {
 	return JSONResponse(description, Schema{Ref: "#/components/schemas/Error"})
 }
 
-func ObjectSchema() Schema { return Schema{Type: "object", AdditionalProperties: true} }
+func ObjectSchema() Schema            { return Schema{Type: "object", AdditionalProperties: true} }
 func ArraySchema(items Schema) Schema { return Schema{Type: "array", Items: &items} }
 
 func JSONBody(schema Schema, required bool) *RequestBody {

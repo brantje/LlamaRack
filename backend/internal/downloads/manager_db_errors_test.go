@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
 func TestDatabaseFailuresAreReturned(t *testing.T) {

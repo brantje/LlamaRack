@@ -182,7 +182,7 @@ function editable(key: keyof typeof form) {
           <AdminSettingField label="Trusted proxies" :source="source('trusted_proxies')"><UInput v-model="form.trusted_proxies" class="w-full" :disabled="!editable('trusted_proxies')" placeholder="10.0.0.10, 172.16.0.0/12" /></AdminSettingField>
           <AdminSettingField label="Allowed origins" :source="source('allowed_origins')">
             <UInput v-model="form.allowed_origins" class="w-full" :disabled="!editable('allowed_origins')" placeholder="https://manager.example.com" />
-            <template #help>A saved value here takes precedence over LCM_ALLOWED_ORIGIN.</template>
+            <template #help>A saved value here takes precedence over LLAMARACK_ALLOWED_ORIGIN.</template>
           </AdminSettingField>
           <AdminSettingField label="External/public URL" :source="source('external_url')"><UInput v-model="form.external_url" class="w-full" :disabled="!editable('external_url')" placeholder="https://manager.example.com" /></AdminSettingField>
         </div>

@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/supervisor"
-	"github.com/brantje/llamacpp-manager/backend/internal/telemetry"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 type runtimeTelemetrySample struct {

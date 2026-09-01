@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 func TestAPIValidatesLlamaCppOptionsBeforeSaving(t *testing.T) {
@@ -30,12 +30,12 @@ func TestAPIValidatesLlamaCppOptionsBeforeSaving(t *testing.T) {
 	}{
 		{"unknown", map[string]string{"not-real": "1"}, "unsupported llama.cpp option"},
 		{"bad-type", map[string]string{"ctx-size": "huge"}, "integer value"},
-		{"reserved", map[string]string{"port": "9999"}, "managed by LlamaCPP Manager"},
+		{"reserved", map[string]string{"port": "9999"}, "managed by LlamaRack"},
 		{"flag-needs-bool", map[string]string{"flash-attn": "yes"}, "true or false"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := doRequest(t, f.server, http.MethodPost, "/api/v1/models", map[string]any{
-				"name": tc.name, "gguf_path": writeModel(tc.name+".gguf"), "options": tc.opts,
+				"name": tc.name, "gguf_path": writeModel(tc.name + ".gguf"), "options": tc.opts,
 			}, cookie)
 			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.text) {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -50,7 +50,11 @@ func TestAPIValidatesLlamaCppOptionsBeforeSaving(t *testing.T) {
 	if valid.Code != http.StatusCreated {
 		t.Fatalf("valid model=%d body=%s", valid.Code, valid.Body.String())
 	}
-	var modelResponse struct { Model struct { ID string `json:"id"` } `json:"model"` }
+	var modelResponse struct {
+		Model struct {
+			ID string `json:"id"`
+		} `json:"model"`
+	}
 	if err := decodeJSONBody(valid.Body.Bytes(), &modelResponse); err != nil {
 		t.Fatal(err)
 	}

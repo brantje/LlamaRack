@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/hardware"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamacpp"
-	"github.com/brantje/llamacpp-manager/backend/internal/llamaconfig"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
 
 type staticHardware struct {

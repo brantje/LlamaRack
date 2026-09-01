@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func TestNetworkEdgeParsingAndTrust(t *testing.T) {

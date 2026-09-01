@@ -50,7 +50,7 @@ func ValidateOptions(profile Profile, options map[string]string) (map[string]str
 			return nil, errors.New("llama.cpp option key is required")
 		}
 		if managerOwnedOptions[key] {
-			return nil, fmt.Errorf("llama.cpp option %q is managed by LlamaCPP Manager and cannot be overridden here", key)
+			return nil, fmt.Errorf("llama.cpp option %q is managed by LlamaRack and cannot be overridden here", key)
 		}
 		option, ok := available[key]
 		if !ok {

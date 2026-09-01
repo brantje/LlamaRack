@@ -8,7 +8,7 @@ import (
 func TestAllowedOriginsDatabaseOverrideBeatsEnvironment(t *testing.T) {
 	ctx := context.Background()
 	s := testSettings(t)
-	t.Setenv("LCM_ALLOWED_ORIGIN", "http://env.example:3000")
+	t.Setenv("LLAMARACK_ALLOWED_ORIGIN", "http://env.example:3000")
 
 	value, err := s.Resolve(ctx, AllowedOrigins)
 	if err != nil {

@@ -1,6 +1,6 @@
 # Backend
 
-Go control plane for llamacpp-manager.
+Go control plane for LlamaRack.
 
 The backend owns persistence, authentication, model configuration, `llama-server` worker processes, lifecycle/autoload, and the unified OpenAI-compatible `/v1` gateway.
 

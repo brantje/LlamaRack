@@ -6,7 +6,7 @@ Related issue: #1
 
 ## 1. Purpose
 
-This specification defines how `llamacpp-manager` decides whether a configured Instance can start on the local machine, how RAM/VRAM is reserved, how GPU placement is selected, and how eligible running Instances are chosen for resource-pressure eviction.
+This specification defines how LlamaRack decides whether a configured Instance can start on the local machine, how RAM/VRAM is reserved, how GPU placement is selected, and how eligible running Instances are chosen for resource-pressure eviction.
 
 The scheduler is a decision engine. It never directly starts or stops processes.
 

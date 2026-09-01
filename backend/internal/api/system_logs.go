@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamacpp-manager/backend/internal/systemlog"
+	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
 type systemLogStore interface {
