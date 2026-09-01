@@ -13,7 +13,7 @@ describe('remaining redesign surfaces', () => {
     expect(page).toContain('data-testid="authentication-sign-in-policy"')
     expect(page).toContain('data-testid="authentication-providers"')
     expect(page).toContain('<StatusTag :variant="provider.enabled ? \'ready\' : \'neutral\'"')
-    expect(page).toContain('intent="primary" :loading="savingSettings"')
+    expect(page).toContain('intent="primary" :loading="savingSettings" :disabled="!settings"')
     expect(page).not.toContain('<UAlert')
     expect(page).not.toContain('<UBadge')
   })

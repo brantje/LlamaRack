@@ -27,6 +27,7 @@ describe('Authentication redesign cleanup', () => {
     expect(page).toContain('<StatusTag variant="pending">Explicit linking required</StatusTag>')
     expect(page).toContain("provider.enabled ? 'ready' : 'neutral'")
     expect(page).toContain("provider.last_test_succeeded ? 'ready' : 'pending'")
+    expect(page).toContain('intent="primary" :loading="savingSettings" :disabled="!settings"')
     expect(page).not.toContain('border-[var(--accent-800)]')
   })
 

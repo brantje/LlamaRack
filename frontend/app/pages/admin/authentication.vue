@@ -225,7 +225,7 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
 <template>
   <AdminShell title="Authentication" description="Configure local management login and OpenID Connect providers.">
     <template #actions>
-      <AppButton intent="primary" :loading="savingSettings" @click="saveSettings">Save settings</AppButton>
+      <AppButton intent="primary" :loading="savingSettings" :disabled="!settings" @click="saveSettings">Save settings</AppButton>
     </template>
 
     <div class="space-y-5">
