@@ -125,7 +125,7 @@ Filename parsing is heuristic. Do not treat an unrecognized filename as invalid 
 
 ### 8.1 Companion GGUF sidecars
 
-Some llama.cpp model repositories contain GGUF files that support a primary model but are not themselves selectable main models. Phase 8 recognizes separate companion files for:
+Some llama.cpp model repositories contain GGUF files that support a primary model but are not themselves selectable main models. Provider import recognizes separate companion files for:
 
 - multimodal projectors whose repository path/name contains the established `mmproj`, `mmoproj` or `projector` marker;
 - separate MTP draft models whose basename starts with `mtp`.
@@ -148,7 +148,7 @@ After that Hugging Face download completes, registering its main GGUF should aut
 
 These are normal model-level defaults: the user may review or override them, and the launcher still filters persisted options against the currently detected llama-server option schema before starting a process.
 
-Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Phase 8 must not invent a separate file relationship from a non-prefix MTP filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
+Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Provider import must not invent a separate file relationship from a non-prefix MTP filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
 
 ## 9. Split GGUF grouping
 

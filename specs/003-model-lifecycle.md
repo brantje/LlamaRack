@@ -344,7 +344,7 @@ On startup:
 
 ## 20. Resource eviction lifecycle
 
-When Phase 7 scheduler execution chooses an Instance as an eviction victim:
+When hardware-aware scheduler execution chooses an Instance as an eviction victim:
 
 1. revalidate that exact Instance is still eligible;
 2. mark DRAINING;

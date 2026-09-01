@@ -10,23 +10,23 @@ import (
 	"github.com/brantje/llamacpp-manager/backend/internal/auth"
 )
 
-func phase10APIKeyHandler(t *testing.T, f *apiFixture) http.Handler {
+func apiKeyHandler(t *testing.T, f *apiFixture) http.Handler {
 	t.Helper()
 	cookie := bootstrapAndLogin(t, f)
 	user, session, err := f.auth.SessionUserWithSession(t.Context(), cookie.Value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewPhase10APIKeysHandler(f.auth)
+	handler := NewAPIKeysHandler(f.auth)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, managementAuthContext{User: user, Session: session})
 		handler.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func TestPhase10APIKeyLifecycleRetainsRevocationHistory(t *testing.T) {
+func TestAPIKeyLifecycleRetainsRevocationHistory(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	handler := phase10APIKeyHandler(t, f)
+	handler := apiKeyHandler(t, f)
 
 	created := doRequest(t, handler, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "toggle-key"}, nil)
 	if created.Code != http.StatusCreated {
@@ -75,9 +75,9 @@ func TestPhase10APIKeyLifecycleRetainsRevocationHistory(t *testing.T) {
 	}
 }
 
-func TestPhase10APIKeyRotationRevokesOldSecretAndReturnsNewSecretOnce(t *testing.T) {
+func TestAPIKeyRotationRevokesOldSecretAndReturnsNewSecretOnce(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	handler := phase10APIKeyHandler(t, f)
+	handler := apiKeyHandler(t, f)
 
 	created := doRequest(t, handler, http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "rotate-key"}, nil)
 	var original struct {
@@ -114,11 +114,11 @@ func TestPhase10APIKeyRotationRevokesOldSecretAndReturnsNewSecretOnce(t *testing
 	}
 }
 
-func TestPhase10APIKeyMutationValidation(t *testing.T) {
+func TestAPIKeyMutationValidation(t *testing.T) {
 	f := newAPIFixture(t, nil)
-	handler := phase10APIKeyHandler(t, f)
+	handler := apiKeyHandler(t, f)
 
-	unauthorized := doRequest(t, NewPhase10APIKeysHandler(f.auth), http.MethodGet, "/api/v1/api-keys", nil, nil)
+	unauthorized := doRequest(t, NewAPIKeysHandler(f.auth), http.MethodGet, "/api/v1/api-keys", nil, nil)
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized list=%d body=%s", unauthorized.Code, unauthorized.Body.String())
 	}

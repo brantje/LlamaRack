@@ -27,7 +27,7 @@ func TestManagementSecurityAuthenticatesBrowserStreamsWithOneTimeTicket(t *testi
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newPhase10SecurityFixture(t)
+			fixture := newAuthSecurityFixture(t)
 			if _, err := fixture.auth.Bootstrap(t.Context(), "admin", "correct-horse-battery"); err != nil {
 				t.Fatal(err)
 			}
@@ -55,17 +55,17 @@ func TestManagementSecurityAuthenticatesBrowserStreamsWithOneTimeTicket(t *testi
 			})
 			handler := ManagementSecurity(fixture.auth, fixture.network, mux)
 
-			w := phase10Request(t, handler, http.MethodGet, tc.withID+ticket, nil, nil, nil)
+			w := adminRequest(t, handler, http.MethodGet, tc.withID+ticket, nil, nil, nil)
 			if w.Code != http.StatusNoContent {
 				t.Fatalf("ticket stream status=%d body=%s", w.Code, w.Body.String())
 			}
 
-			w = phase10Request(t, handler, http.MethodGet, tc.withID+ticket, nil, nil, nil)
+			w = adminRequest(t, handler, http.MethodGet, tc.withID+ticket, nil, nil, nil)
 			if w.Code != http.StatusUnauthorized {
 				t.Fatalf("replayed ticket status=%d body=%s", w.Code, w.Body.String())
 			}
 
-			w = phase10Request(t, handler, http.MethodGet, tc.missing, nil, nil, nil)
+			w = adminRequest(t, handler, http.MethodGet, tc.missing, nil, nil, nil)
 			if w.Code != http.StatusUnauthorized {
 				t.Fatalf("missing ticket status=%d body=%s", w.Code, w.Body.String())
 			}
@@ -74,7 +74,7 @@ func TestManagementSecurityAuthenticatesBrowserStreamsWithOneTimeTicket(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			w = phase10Request(t, handler, http.MethodPost, tc.withID+freshTicket, nil, nil, nil)
+			w = adminRequest(t, handler, http.MethodPost, tc.withID+freshTicket, nil, nil, nil)
 			if w.Code != http.StatusUnauthorized {
 				t.Fatalf("non-GET ticket stream status=%d body=%s", w.Code, w.Body.String())
 			}

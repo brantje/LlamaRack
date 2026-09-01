@@ -13,10 +13,11 @@ These design specifications define the initial architecture and product contract
 - [009 — Authentication, API Keys and Secret Storage](009-auth.md)
 - [010 — Web UI](010-ui.md)
 - [011 — GGUF Metadata and Hardware Recommendations](011-hardware-recommendations.md)
+- [012 — Observability](012-observability.md)
 
 ## Review order
 
-The recommended review order is the numeric order above. Architecture, data model and lifecycle establish the invariants used by routing and scheduling. API/options/providers/auth/UI build on those contracts. The Phase 9 GGUF metadata/recommendation specification extends the Model artifact, provider, UI and hardware-estimation contracts and should be read alongside 002, 005, 008 and 010.
+The recommended review order is the numeric order above. Architecture, data model and lifecycle establish the invariants used by routing and scheduling. API/options/providers/auth/UI build on those contracts. The GGUF metadata/recommendation specification extends the Model artifact, provider, UI and hardware-estimation contracts and should be read alongside 002, 005, 008 and 010. Observability builds on routing, lifecycle and the UI contract.
 
 ## Model configuration UI parity
 

@@ -20,7 +20,7 @@ SQLite is the durable store for configuration that must survive manager restarts
 
 The project is still in active development.
 
-For Phase 5.5, Phase 9 metadata work and related schema restructuring:
+For Model/Instance control-plane separation, GGUF metadata work and related schema restructuring:
 
 - change the current schema directly;
 - update fixtures/seeds/tests directly;
@@ -81,7 +81,7 @@ Fields include:
 
 Split GGUFs remain one logical artifact with multiple Artifact File rows.
 
-Phase 9 adds a shared GGUF inspection/cache associated with the logical artifact. The raw GGUF remains authoritative; the cache is only a performance layer for metadata inspection and derived product values.
+GGUF metadata inspection adds a shared GGUF inspection/cache associated with the logical artifact. The raw GGUF remains authoritative; the cache is only a performance layer for metadata inspection and derived product values.
 
 The cache should conceptually include:
 
@@ -299,7 +299,7 @@ For `/instances`:
 - observed runtime state;
 - placement summary;
 - health/failure information;
-- runtime metrics as later phases add them.
+- runtime metrics as observability adds them.
 
 ## 7. Model creation with optional first Instance
 
@@ -313,7 +313,7 @@ The Model creation UI may collect only these Instance-specific settings:
 - Allow resource-pressure eviction;
 - whether to start immediately.
 
-Before Model save, Phase 9 may inspect the selected local GGUF and pre-fill Model fields such as Context capability. Detected user-facing values remain editable. Failure to inspect metadata does not by itself block Model creation and must not erase an explicitly entered Context capability.
+Before Model save, GGUF inspection may inspect the selected local GGUF and pre-fill Model fields such as Context capability. Detected user-facing values remain editable. Failure to inspect metadata does not by itself block Model creation and must not erase an explicitly entered Context capability.
 
 The backend must:
 

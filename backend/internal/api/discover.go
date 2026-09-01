@@ -38,7 +38,7 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !phase7RequireUser(h.auth, w, r) {
+	if !requireAuthenticatedUser(h.auth, w, r) {
 		return
 	}
 	repoID := strings.TrimSpace(r.URL.Query().Get("repo"))
@@ -102,7 +102,7 @@ func recommendationMetadata(value ggufmeta.Derived) recommendations.Metadata {
 }
 
 func (h *discoverSettingsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !phase7RequireUser(h.auth, w, r) {
+	if !requireAuthenticatedUser(h.auth, w, r) {
 		return
 	}
 	switch r.Method {

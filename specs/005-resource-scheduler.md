@@ -141,15 +141,15 @@ Possible outcomes:
 
 Results include human-readable rationale.
 
-## 9. Delivery phase boundary
+## 9. Hardware-integration boundary
 
-Phase 5 provides policy/planning primitives: activity tracking, LRU state, idle unload, eviction eligibility/ranking, estimates and an eviction-plan API.
+The scheduler provides policy/planning primitives: activity tracking, LRU state, idle unload, eviction eligibility/ranking, estimates and an eviction-plan API.
 
-Phase 5.5 moves those policies onto durable Instances and establishes the Instance control plane.
+Model/Instance control-plane separation moves those policies onto durable Instances.
 
-Actual hardware-aware execution of `PLACE_AFTER_EVICTION` remains a **Phase 7 — Hardware integration** requirement.
+Actual hardware-aware execution of `PLACE_AFTER_EVICTION` remains a **hardware-integration** requirement.
 
-Phase 7 load flow:
+Hardware-aware load flow:
 
 ```text
 request Instance
@@ -164,7 +164,7 @@ request Instance
 -> start requested Instance
 ```
 
-Before Phase 7, code may calculate/preview eviction plans but must not claim real pre-load VRAM eviction has been executed.
+Until hardware integration is in place, code may calculate/preview eviction plans but must not claim real pre-load VRAM eviction has been executed.
 
 ## 10. Reservations
 
@@ -331,7 +331,7 @@ Inference-triggered autoload cannot wait for an interactive confirmation and pro
 
 Scheduler returns a plan; lifecycle executes it.
 
-For Phase 7 `PLACE_AFTER_EVICTION`:
+For hardware-aware `PLACE_AFTER_EVICTION`:
 
 1. scheduler reserves/commits capacity and returns target placement + victims;
 2. lifecycle revalidates victim eligibility;
@@ -440,7 +440,7 @@ Avoid uncontrolled high-cardinality labels.
 8. `eviction_enabled=true` allows an otherwise eligible Always-On Instance to be selected and ranked normally.
 9. Active requests protect an Instance from normal eviction.
 10. An evicted Always-On Instance does not immediately preempt another Instance during automatic reconciliation.
-11. Eviction execution before target load is a Phase 7 responsibility.
+11. Eviction execution before target load is a hardware-integration responsibility.
 12. Model rows do not own scheduler/lifecycle policy.
 
 ## 30. Acceptance criteria
@@ -465,4 +465,4 @@ Tests/spec behavior demonstrate:
 - reservations prevent concurrent overcommit;
 - manual Launch warns about possible automatic eviction;
 - inference-triggered autoload follows policy without interactive confirmation;
-- Phase 7 executes drain/stop/refresh/start for real `PLACE_AFTER_EVICTION` flows.
+- hardware integration executes drain/stop/refresh/start for real `PLACE_AFTER_EVICTION` flows.

@@ -33,7 +33,7 @@ func TestSystemLogFiltersCompose(t *testing.T) {
 	}
 }
 
-func TestSystemLogValidationAndPhase11Dispatch(t *testing.T) {
+func TestSystemLogValidationAndDispatch(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/logs?scope=system&limit=0",
 		"/api/v1/logs?scope=system&limit=4001",
@@ -56,7 +56,7 @@ func TestSystemLogValidationAndPhase11Dispatch(t *testing.T) {
 	defer systemlog.Default.Reset()
 	systemlog.Log(systemlog.Info, "manager", "aggregate route works")
 	w = httptest.NewRecorder()
-	NewPhase11LogHandler(&fakePhase11Logs{}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs?scope=system", nil))
+	NewInstanceLogHandler(&fakeInstanceLogs{}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs?scope=system", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "aggregate route works") {
 		t.Fatalf("dispatch=%d %s", w.Code, w.Body.String())
 	}
