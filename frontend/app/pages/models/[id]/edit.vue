@@ -25,6 +25,10 @@ function formFingerprint() {
 const valid = computed(() => Boolean(form.name.trim()))
 const dirty = computed(() => !loading.value && Boolean(baselineFingerprint.value) && formFingerprint() !== baselineFingerprint.value)
 const canSubmit = computed(() => valid.value && dirty.value)
+const overrides = computed(() => form.options['llama.cpp'] || {})
+const overrideCount = computed(() =>
+  Object.keys(form.options).filter(key => !companionOptionKeys.includes(key)).length
+)
 
 onMounted(async () => {
   try {
@@ -130,7 +134,7 @@ async function submit() {
         description="Detected from this Model's GGUF. Disable to clear the extra flags; Enable restores inspect defaults."
       />
 
-      <Frame class="p-5" data-testid="model-edit-defaults">
+      <Frame class="p-5" data-testid="model-edit-defaults" collapsible subtitle="LLAMA.CPP" title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
         <div class="mb-5">
           <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">LLAMA.CPP DEFAULTS</div>
           <h2 class="mt-1 font-heading text-[length:var(--font-size-h3)] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model llama.cpp defaults</h2>

@@ -4,11 +4,13 @@ defineOptions({ inheritAttrs: false })
 const props = withDefaults(defineProps<{
   collapsible?: boolean
   defaultOpen?: boolean
+  subtitle?: string
   title?: string
   description?: string
 }>(), {
   collapsible: false,
   defaultOpen: false,
+  subtitle: '',
   title: '',
   description: ''
 })
@@ -45,6 +47,7 @@ function toggleOpen() {
       @click="toggleOpen"
     >
       <div v-if="(title || description) && !isOpen" class="mb-4">
+        <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">{{ subtitle }}</p>
         <h2 class="mt-1 text-base font-semibold">{{ title }}</h2>
         <p class="mt-1 text-xs text-[var(--neutral-700)]">{{ description }}</p>
       </div>

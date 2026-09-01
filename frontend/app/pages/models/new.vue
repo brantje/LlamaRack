@@ -394,7 +394,7 @@ async function createModel() {
         </div>
       </Frame>
 
-      <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults" collapsible title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
+      <Frame id="model-defaults" class="p-5 scroll-mt-4" data-testid="model-form-defaults" collapsible subtitle="LLAMA.CPP" title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
         <div class="mb-4">
           <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">LLAMA.CPP</p>
           <h2 class="mt-1 text-base font-semibold">Model llama.cpp defaults</h2>

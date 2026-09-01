@@ -69,6 +69,10 @@ const companionDefinitions: CompanionDefinition[] = [
 const selectedModel = computed(() => manager.models.value.find(model => model.id === props.form.model_id))
 const detectedCompanionKeys = computed(() => companionDefinitions.filter(item => companions.value[item.key]).map(item => item.key))
 const canSubmit = computed(() => Boolean(props.form.model_id && props.form.name.trim() && props.form.slug.trim()))
+const overrides = computed(() => props.form.options['llama.cpp'] || {})
+const overrideCount = computed(() =>
+  Object.keys(props.form.options).filter(key => !detectedCompanionKeys.value.includes(key)).length
+)
 
 function slugify(value: string) {
   return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
@@ -363,7 +367,7 @@ onMounted(() => {
         />
       </Frame>
 
-      <Frame id="instance-overrides" class="p-5 scroll-mt-4" data-testid="instance-form-overrides">
+      <Frame id="instance-overrides" class="p-5 scroll-mt-4" data-testid="instance-form-overrides" collapsible subtitle="LLAMA.CPP" title="Instance llama.cpp overrides" :description="`Applied over the Model defaults, which are applied over the global defaults. Only overrides are stored at this layer. ${overrideCount} overrides configured, click to expand.`">
         <div class="mb-4">
           <h2 class="text-base font-semibold">Instance llama.cpp overrides</h2>
           <p class="mt-1 text-xs text-[var(--neutral-700)]">Applied over the Model defaults, which are applied over the global defaults. Only overrides are stored at this layer.</p>
