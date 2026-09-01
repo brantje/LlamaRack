@@ -284,6 +284,15 @@ describe('Instance detail edge branches', () => {
     expect(wrapper.find('[data-testid="instance-detail-summary"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('omits context-chart values when the model has no context length', async () => {
+    useManager().models.value = [{ id: 'm1', name: 'Detail Model', gguf_path: 'detail.gguf', total_bytes: 4 * gib, context_length: 0 }]
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/detail/detail' })
+    await flushPromises()
+    const points = ((wrapper.vm as any).contextChart as Array<{ value: number | null }>)
+    expect(points.some(point => point.value !== null)).toBe(false)
+    wrapper.unmount()
+  })
 })
 
 describe('InstanceHistoryChart branches', () => {

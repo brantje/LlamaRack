@@ -161,7 +161,7 @@ function zeroFilled(items: SeriesPoint[], normalizePerMinute = false): ChartPoin
   const divisor = normalizePerMinute ? Math.max(1, bucketSeconds.value / 60) : 1
   return timeline.value.map(timestamp => ({ timestamp, value: (values.get(timestamp) || 0) / divisor }))
 }
-function gapFilled(items: SeriesPoint[], transform: (value: number) => number = value => value): ChartPoint[] {
+function gapFilled(items: SeriesPoint[], transform: (value: number) => number | null = value => value): ChartPoint[] {
   const values = new Map(items.map(point => [point.timestamp, point.value]))
   return timeline.value.map(timestamp => ({ timestamp, value: values.has(timestamp) ? transform(values.get(timestamp)!) : null }))
 }
@@ -172,7 +172,7 @@ const latencyP50Chart = computed(() => gapFilled(latencyP50Series.value))
 const latencyP95Chart = computed(() => gapFilled(latencyP95Series.value))
 const contextChart = computed(() => gapFilled(contextSeries.value, value => model.value?.context_length
   ? clampPercent(value / model.value.context_length * 100)
-  : Number.NaN))
+  : null))
 
 const instanceColorTokens = ['var(--accent-500)', 'var(--accent-600)', 'var(--accent-700)', 'var(--accent-400)', 'var(--accent-800)']
 const instanceColorByID = computed(() => {
