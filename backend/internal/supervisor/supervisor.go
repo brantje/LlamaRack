@@ -48,10 +48,12 @@ type Runtime struct {
 }
 
 type worker struct {
-	runtime Runtime
-	cmd     *exec.Cmd
-	logs    *ring
-	done    chan struct{}
+	runtime     Runtime
+	cmd         *exec.Cmd
+	logs        *ring
+	done        chan struct{}
+	killed      bool
+	startCancel context.CancelFunc
 }
 
 type Supervisor struct {
@@ -138,25 +140,36 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	w.runtime.State = Loading
 	s.emitRuntimeLocked(w.runtime)
 	pid := w.runtime.PID
+	readyCtx, cancel := context.WithTimeout(ctx, s.startupTimeout)
+	w.startCancel = cancel
+	done := w.done
 	s.mu.Unlock()
 	slog.Info("llama-server process started", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port)
 	go copyLogs(w.logs, instanceID, modelID, "stdout", stdout)
 	go copyLogs(w.logs, instanceID, modelID, "stderr", stderr)
 	go s.wait(w)
-
-	readyCtx, cancel := context.WithTimeout(ctx, s.startupTimeout)
 	defer cancel()
-	if err := s.waitReady(readyCtx, port); err != nil {
+
+	if err := s.waitReady(readyCtx, w, port, done); err != nil {
 		slog.Error("llama-server worker readiness failed", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port, "error", err)
-		_ = s.Stop(context.Background(), instanceID)
+		if errors.Is(err, ErrKilled) || errors.Is(err, context.Canceled) {
+			_ = s.Kill(instanceID)
+		} else {
+			_ = s.Stop(context.Background(), instanceID)
+		}
 		s.setState(instanceID, Failed, err.Error())
 		return s.Status(instanceID), err
 	}
 	s.mu.Lock()
 	current := s.workers[instanceID]
-	if current != w || current.runtime.State != Loading || current.runtime.PID == 0 {
+	if current != w || current.killed || current.runtime.State != Loading || current.runtime.PID == 0 {
 		rt := w.runtime
+		killed := current != nil && current.killed
 		s.mu.Unlock()
+		if killed {
+			_ = s.Kill(instanceID)
+			return rt, ErrKilled
+		}
 		return rt, errors.New("worker exited during startup")
 	}
 	current.runtime.State = Ready
@@ -371,7 +384,7 @@ func (s *Supervisor) wait(w *worker) {
 	}
 }
 
-func (s *Supervisor) waitReady(ctx context.Context, port int) error {
+func (s *Supervisor) waitReady(ctx context.Context, w *worker, port int, done <-chan struct{}) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -387,7 +400,18 @@ func (s *Supervisor) waitReady(ctx context.Context, port int) error {
 		}
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return fmt.Errorf("%w: %w", ErrKilled, ctx.Err())
+			}
 			return fmt.Errorf("worker readiness timeout: %w", ctx.Err())
+		case <-done:
+			s.mu.RLock()
+			killed := w != nil && w.killed
+			s.mu.RUnlock()
+			if killed {
+				return ErrKilled
+			}
+			return errors.New("worker exited during startup")
 		case <-ticker.C:
 		}
 	}
