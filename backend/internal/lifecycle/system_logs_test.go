@@ -20,51 +20,19 @@ func TestAlwaysOnReconcileDiagnosticFormatting(t *testing.T) {
 	}
 }
 
-func TestThreeStartFailuresBackOffForExactDurationAndReset(t *testing.T) {
+func TestStartFailureBackoffWarnsOncePerFailure(t *testing.T) {
 	systemlog.Default.Reset()
 	defer systemlog.Default.Reset()
-	oldDuration := startFailureBackoffFor
-	startFailureBackoffFor = 60 * time.Second
-	defer func() { startFailureBackoffFor = oldDuration }()
-
-	s := &Service{manuallyStopped: map[string]bool{}}
-	key := failureBackoffKey{service: s, id: "qwen-coder-ci"}
-	failureBackoffMu.Lock()
-	delete(failureBackoffs, key)
-	failureBackoffMu.Unlock()
-	defer func() {
-		s.cancelStartFailureBackoff("qwen-coder-ci")
-		failureBackoffMu.Lock()
-		delete(failureBackoffs, key)
-		failureBackoffMu.Unlock()
-	}()
-
-	s.noteStartFailure("qwen-coder-ci")
-	s.noteStartFailure("qwen-coder-ci")
-	if s.isManuallyStopped("qwen-coder-ci") {
-		t.Fatal("backoff engaged before the third failure")
-	}
-	s.noteStartFailure("qwen-coder-ci")
-	if !s.isManuallyStopped("qwen-coder-ci") {
-		t.Fatal("third failure did not engage backoff")
-	}
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	s := &Service{now: func() time.Time { return now }}
+	s.recordStartFailure("qwen-coder-ci", "exec: no such file")
 	logs := systemlog.Default.Snapshot(10)
-	if len(logs) != 1 || logs[0].Level != systemlog.Warn || !strings.Contains(logs[0].Message, "3 consecutive start failures, backing off 60s") {
+	if len(logs) != 1 || logs[0].Level != systemlog.Warn || !strings.Contains(logs[0].Message, "qwen-coder-ci: startup backoff 15s after 1 consecutive start failure") {
 		t.Fatalf("backoff diagnostics=%+v", logs)
 	}
-}
-
-func TestCancelStartFailureBackoffResetsFailureCount(t *testing.T) {
-	s := &Service{manuallyStopped: map[string]bool{}}
-	key := failureBackoffKey{service: s, id: "one"}
-	failureBackoffMu.Lock()
-	failureBackoffs[key] = &failureBackoffState{failures: 2}
-	failureBackoffMu.Unlock()
-	s.cancelStartFailureBackoff("one")
-	failureBackoffMu.Lock()
-	_, exists := failureBackoffs[key]
-	failureBackoffMu.Unlock()
-	if exists {
-		t.Fatal("cancelled backoff retained stale failure state")
+	s.recordStartFailure("qwen-coder-ci", "still broken")
+	logs = systemlog.Default.Snapshot(10)
+	if len(logs) != 2 || !strings.Contains(logs[1].Message, "startup backoff 30s after 2 consecutive start failures") {
+		t.Fatalf("second backoff diagnostics=%+v", logs)
 	}
 }

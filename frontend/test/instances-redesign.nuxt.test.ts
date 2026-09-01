@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 const gib = 1024 ** 3
+const now = Date.parse('2026-09-01T12:00:00.000Z')
 
 function instance(id: string, overrides: Partial<Instance> = {}): Instance {
   return { id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
@@ -34,7 +35,7 @@ function seed() {
   manager.runtimes.value = { m1: [
     { instance_id: 'ready', model_id: 'm1', state: 'READY', pid: 42, port: 9010 },
     { instance_id: 'stopped', model_id: 'm1', state: 'UNLOADED' },
-    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed' },
+    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(now + 45_000).toISOString() },
     { instance_id: 'downloading', model_id: 'm1', state: 'UNLOADED' }
   ] }
   manager.runtimeTelemetry.value = { ready: telemetry('ready') }
@@ -51,6 +52,7 @@ function seed() {
 beforeEach(() => {
   mocks.request.mockReset()
   sessionStorage.clear()
+  vi.spyOn(Date, 'now').mockReturnValue(now)
   seed()
   mocks.request.mockImplementation(async (path: string) => {
     if (path === '/api/v1/imports') return [{ id: 'imp-1', job_id: 'job-1', model_id: 'm1', instance_id: 'downloading', state: 'DOWNLOADING', start_when_ready: true }]
@@ -95,6 +97,7 @@ describe('Instances redesign', () => {
     await wrapper.get('[data-testid="instances-filter-problems"]').trigger('click')
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
     expect(wrapper.text()).toContain('CUDA allocation failed')
+    expect(wrapper.get('[data-testid="instance-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
   })
 
   it('persists card view and renders required card states', async () => {
@@ -122,6 +125,7 @@ describe('Instances redesign', () => {
     expect(stoppedCard.text()).toContain('Unloaded after 300 s without inference activity.')
     const failedCard = cards.find(card => card.text().includes('failed'))!
     expect(failedCard.text()).toContain('CUDA allocation failed')
+    expect(failedCard.text()).toContain('Retry in 45s (2 consecutive start failures)')
     const downloadingCard = cards.find(card => card.text().includes('downloading'))!
     expect(downloadingCard.text()).toContain('Model is downloading')
     expect(downloadingCard.text()).toContain('launch automatically')
@@ -227,5 +231,40 @@ describe('Instances redesign', () => {
     await launch.trigger('click')
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/manual-launch/start', { method: 'POST' })
+    wrapper.unmount()
+  })
+
+  it('shows a completed import warning together with startup backoff', async () => {
+    const manager = seed()
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/imports') {
+        return [{
+          id: 'imp-warn', job_id: 'job-warn', model_id: 'm1', instance_id: 'failed', state: 'COMPLETED', start_when_ready: false,
+          error: 'Context capability could not be detected automatically from GGUF metadata.'
+        }]
+      }
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
+      if (path === '/api/v1/models') return manager.models.value
+      if (path === '/api/v1/instances') return manager.instances.value
+      const runtimeMatch = path.match(/^\/api\/v1\/instances\/([^/]+)\/runtime$/)
+      if (runtimeMatch) {
+        const id = decodeURIComponent(runtimeMatch[1])
+        for (const group of Object.values(manager.runtimes.value)) {
+          const runtime = group.find(item => item.instance_id === id)
+          if (runtime) return runtime
+        }
+        return { instance_id: id, model_id: 'm1', state: 'UNLOADED' }
+      }
+      return []
+    })
+
+    const wrapper = await mountSuspended(InstancesPage, { route: '/instances' })
+    await flushPromises()
+    const failedRow = wrapper.get('tr[data-instance-state="FAILED"]')
+    expect(failedRow.get('[data-testid="import-metadata-warning"]').text()).toContain('Import warning')
+    expect(failedRow.get('[data-testid="import-metadata-warning"]').text()).toContain('Context capability could not be detected automatically')
+    expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('CUDA allocation failed')
+    expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
+    wrapper.unmount()
   })
 })

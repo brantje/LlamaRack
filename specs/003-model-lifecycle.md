@@ -142,9 +142,27 @@ Always On is a desired-lifecycle policy. It is independent from `eviction_enable
 
 After startup recovery and hardware initialization, reconcile every enabled Always-On Instance.
 
-### 9.2 Worker crash
+### 9.2 Worker crash and startup backoff
 
-If an Always-On Instance crashes, retry with bounded backoff unless manually suppressed or a permanent configuration/hardware failure blocks it.
+If an Always-On Instance crashes or fails to start, retry with bounded backoff unless manually suppressed or a permanent configuration/hardware failure blocks it.
+
+Crash-loop protection is session-local runtime state, separate from manual-stop suppression and from resource-pressure blocks:
+
+```text
+consecutive startup failures
+last failure reason
+retry_after
+```
+
+Genuine worker, configuration, and readiness failures (including startup timeout) increment the consecutive failure count. Resource-pressure `WAIT`/blocked outcomes and explicit user Stop/Kill do not.
+
+Automatic retry delay after consecutive failures:
+
+```text
+15s → 30s → 60s → 2m → 5m (cap)
+```
+
+Automatic starts (Always-On reconcile and inference autoload) must not spawn a worker while `now < retry_after`. An explicit user Launch or Restart overrides the current cooldown and may try immediately; the streak resets only after a successful READY transition. Manual Stop and Kill do not increment or reset the streak. A targeted inference request during cooldown returns a clear unavailable/backoff error and does not start the worker. After `retry_after`, the next reconcile tick or later inference request may try once (single-flight). Do not create an unbounded retry loop inside a request.
 
 ### 9.3 Resource contention
 
@@ -292,11 +310,11 @@ On child exit:
 
 Restart behavior:
 
-- Always-On Instance: bounded automatic retry;
-- Instance with active autoload waiters: bounded retry within request/startup policy;
-- ordinary non-Always-On Instance: remain FAILED/UNLOADED until manual Launch or a later autoload request.
+- Always-On Instance: bounded automatic retry using the startup backoff schedule in §9.2;
+- Instance with active autoload waiters: one shared start attempt (single-flight); if that attempt is in cooldown, fail the request with a backoff error rather than spawning again;
+- ordinary non-Always-On Instance: remain FAILED/UNLOADED until manual Launch or a later autoload request that is not in cooldown.
 
-Never create tight crash loops.
+Never create tight crash loops. Consecutive start failures are visible on Instance runtime as `consecutive_start_failures`, `retry_after`, and `last_error`. The manager emits a WARN system log when startup backoff engages.
 
 ## 16. Startup readiness and timeout
 
@@ -309,6 +327,7 @@ On startup timeout:
 - terminate incomplete worker;
 - transition FAILED;
 - record `startup_timeout`;
+- count the timeout as a genuine startup failure for crash-loop backoff;
 - fail waiting inference requests.
 
 ## 17. Health after readiness

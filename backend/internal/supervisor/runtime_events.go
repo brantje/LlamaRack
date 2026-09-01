@@ -53,6 +53,18 @@ func (s *Supervisor) SubscribeRuntimes() ([]Runtime, <-chan Runtime, func()) {
 	return snapshot, ch, cancel
 }
 
+// PublishRuntime emits an observed runtime snapshot to subscribers without
+// mutating supervisor worker state. Lifecycle overlays such as startup backoff
+// use this so management clients see RetryAfter as soon as it is recorded.
+func (s *Supervisor) PublishRuntime(runtime Runtime) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emitRuntimeLocked(runtime)
+}
+
 // emitRuntimeLocked must be called while s.mu is held so event ordering follows
 // the exact ordering of supervisor state mutations.
 func (s *Supervisor) emitRuntimeLocked(runtime Runtime) {

@@ -35,14 +35,16 @@ func ShuttingDown(state State) bool {
 }
 
 type Runtime struct {
-	InstanceID string    `json:"instance_id"`
-	ModelID    string    `json:"model_id"`
-	State      State     `json:"state"`
-	PID        int       `json:"pid,omitempty"`
-	Port       int       `json:"port,omitempty"`
-	StartedAt  time.Time `json:"started_at,omitempty"`
-	ReadyAt    time.Time `json:"ready_at,omitempty"`
-	LastError  string    `json:"last_error,omitempty"`
+	InstanceID               string     `json:"instance_id"`
+	ModelID                  string     `json:"model_id"`
+	State                    State      `json:"state"`
+	PID                      int        `json:"pid,omitempty"`
+	Port                     int        `json:"port,omitempty"`
+	StartedAt                time.Time  `json:"started_at,omitempty"`
+	ReadyAt                  time.Time  `json:"ready_at,omitempty"`
+	LastError                string     `json:"last_error,omitempty"`
+	ConsecutiveStartFailures int        `json:"consecutive_start_failures,omitempty"`
+	RetryAfter               *time.Time `json:"retry_after,omitempty"`
 }
 
 type worker struct {

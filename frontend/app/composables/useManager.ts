@@ -33,7 +33,16 @@ export type Instance = {
   tensor_split?: string
   request_log_mode?: 'metadata' | 'full' | string
 }
-export type Runtime = { instance_id: string; model_id: string; state: string; pid?: number; port?: number; last_error?: string }
+export type Runtime = {
+  instance_id: string
+  model_id: string
+  state: string
+  pid?: number
+  port?: number
+  last_error?: string
+  consecutive_start_failures?: number
+  retry_after?: string
+}
 export type RuntimeGPUUsage = { device_id: string; vram_used_bytes?: number; utilization_pct?: number }
 export type RuntimeTelemetry = {
   instance_id: string

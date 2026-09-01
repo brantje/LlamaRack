@@ -55,6 +55,7 @@ type Service struct {
 	manuallyStopped       map[string]bool
 	resourceBlocked       map[string]string
 	activities            map[string]Activity
+	startFailures         map[string]StartFailureState
 	idleLocks             map[string]*sync.Mutex
 	operationGates        map[string]chan struct{}
 	drainWaits            map[string]chan struct{}
@@ -79,7 +80,7 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
 		reservations: scheduler.NewLedger(),
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
-		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
+		activities: map[string]Activity{}, startFailures: map[string]StartFailureState{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{},
 		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{}, now: time.Now,
 	}
@@ -131,6 +132,9 @@ func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance,
 	if !i.Autoload {
 		return "", errors.New("instance unloaded and autoload disabled")
 	}
+	if s.inStartBackoff(i.ID) {
+		return "", s.startBackoffError(i.ID)
+	}
 	if s.isManuallyStopped(i.ID) {
 		s.clearManualStop(i.ID)
 		slog.Info("manual stop overridden by inference request", "instance_id", i.ID)
@@ -158,8 +162,11 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 	if explicit {
 		s.clearManualStop(id)
 		s.clearResourceBlock(id)
+		s.overrideStartBackoff(id)
 	} else if s.isManuallyStopped(id) {
 		return "", errors.New("instance manually stopped until manager restart")
+	} else if s.inStartBackoff(id) {
+		return "", s.startBackoffError(id)
 	}
 	if err := s.waitDrain(ctx, id); err != nil {
 		return "", err
@@ -209,6 +216,7 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	s.cancelStartup(id)
 	s.clearManualStop(id)
 	s.clearResourceBlock(id)
+	s.overrideStartBackoff(id)
 	if err := s.sup.Stop(ctx, id); err != nil {
 		s.abortDrainClaim(id)
 		return "", err
@@ -270,7 +278,7 @@ func (s *Service) RuntimeInstance(ctx context.Context, id string) (supervisor.Ru
 	if rt.ModelID == "" {
 		rt.ModelID = i.ModelID
 	}
-	return rt, nil
+	return s.attachStartFailure(rt), nil
 }
 
 // Compatibility wrappers for pre-Phase-5.5 internal callers. Management routes
@@ -313,7 +321,7 @@ func (s *Service) Runtime(ctx context.Context, modelID string) ([]supervisor.Run
 		if rt.ModelID == "" {
 			rt.ModelID = i.ModelID
 		}
-		out = append(out, rt)
+		out = append(out, s.attachStartFailure(rt))
 	}
 	return out, nil
 }
@@ -383,7 +391,7 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	}
 	satisfied := 0
 	for _, i := range items {
-		if !i.Enabled || !i.AlwaysOn || s.isManuallyStopped(i.ID) {
+		if !i.Enabled || !i.AlwaysOn || s.isManuallyStopped(i.ID) || s.inStartBackoff(i.ID) {
 			continue
 		}
 		if _, ok := s.sup.Endpoint(i.ID); ok {
@@ -859,7 +867,9 @@ func (s *Service) runLoad(id string, c *loadCall) {
 	defer release()
 
 	var endpoint string
-	if s.isManuallyStopped(id) {
+	if s.inStartBackoff(id) {
+		err = s.startBackoffError(id)
+	} else if s.isManuallyStopped(id) {
 		err = errors.New("instance manually stopped until manager restart")
 	} else {
 		var i instances.Instance
@@ -918,6 +928,7 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		}
 		duration := time.Since(started)
 		if err == nil {
+			s.resetStartFailures(i.ID)
 			s.recordObservabilityEvent(ctx, ObservabilityLoad, i.ID, duration)
 			s.AddManagerLog(i.ID, fmt.Sprintf("worker ready after %s", duration.Round(time.Millisecond)))
 			return
@@ -927,6 +938,9 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 				s.AddManagerLog(i.ID, "startup killed")
 			}
 			return
+		}
+		if !errors.Is(err, context.Canceled) {
+			s.recordStartFailure(i.ID, err.Error())
 		}
 		s.recordObservabilityEvent(ctx, ObservabilityFailedStart, i.ID, duration)
 		s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())

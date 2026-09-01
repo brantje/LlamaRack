@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Instance, RuntimeTelemetry } from '~/composables/useManager'
+import { startupBackoffMessage } from '~/utils/startupBackoff'
 
 type LlamaMetrics = {
   prompt_tokens_total?: number
@@ -72,6 +73,7 @@ const model = computed(() => instance.value ? manager.models.value.find(item => 
 const runtime = computed(() => (instance.value ? manager.runtimeForInstance(instance.value) : undefined) as RuntimeWithTime | undefined)
 const telemetry = computed(() => instance.value ? manager.telemetryForInstance(instance.value) as DetailTelemetry | undefined : undefined)
 const llama = computed(() => telemetry.value?.llama_metrics)
+const backoffMessage = computed(() => startupBackoffMessage(runtime.value))
 const hardware = computed(() => manager.observabilityLive.value?.hardware)
 const fleetTelemetry = computed(() => {
   const live = manager.observabilityLive.value?.telemetry || []
@@ -490,6 +492,7 @@ defineExpose({ setSelectedWindow })
 
       <Frame class="p-4" data-testid="instance-detail-runtime">
         <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-sm font-semibold">Runtime snapshot</h2><p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ instance.id }}</p></div><StatusTag :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag></div>
+        <p v-if="backoffMessage || runtime?.last_error" class="mt-3 font-mono text-[length:var(--font-size-table-header)] leading-snug text-[var(--accent-800)]" data-testid="instance-detail-startup-backoff">{{ backoffMessage || runtime?.last_error }}</p>
         <dl class="mt-4 grid gap-0 border-t border-l border-[var(--color-divider)] sm:grid-cols-2 lg:grid-cols-4">
           <div v-for="item in [
             ['PID', runtime?.pid || '—'], ['Port', runtime?.port || '—'], ['Placed on', placementIDs.length ? placementIDs.join(', ') : '—'],
