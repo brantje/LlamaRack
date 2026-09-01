@@ -15,7 +15,7 @@ describe('Instance logs layout', () => {
 
   it('uses shared flat primitives and the Administration diagnostics route', () => {
     expect(viewerSource).toContain('embedded?: boolean')
-    expect(viewerSource).toContain("path: '/admin/logs'")
+    expect(viewerSource).toContain("path: '/admin/system-logs'")
     expect(viewerSource).toContain('<Frame')
     expect(viewerSource).toContain('<StatusTag')
     expect(viewerSource).toContain("props.embedded ? '!border-0 !bg-transparent !p-0' : 'p-4'")

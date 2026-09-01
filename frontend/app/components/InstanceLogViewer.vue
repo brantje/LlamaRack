@@ -23,7 +23,7 @@ const sourceItems = [
 ]
 
 const aggregateLogsTo = computed(() => ({
-  path: '/admin/logs',
+  path: '/admin/system-logs',
   query: { source: props.instanceId }
 }))
 
