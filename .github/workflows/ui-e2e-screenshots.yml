@@ -36,7 +36,7 @@ jobs:
           node-version: 24
 
       - name: Install frontend dependencies
-        run: npm install --no-package-lock --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -85,7 +85,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install --no-package-lock --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Install Chromium
         working-directory: frontend
