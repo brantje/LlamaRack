@@ -29,7 +29,7 @@ const viewMode = ref<ViewMode>('table')
 const stateFilter = ref<StateFilter>('all')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 const viewStorageKey = 'llamarack.instances.view'
-const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'STOPPING'])
+const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'DRAINING', 'STOPPING'])
 const filterOptions: Array<{ value: StateFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'ready', label: 'Ready' },
@@ -78,7 +78,7 @@ function instanceState(instance: Instance) {
 function statusVariant(state: string): 'ready' | 'pending' | 'neutral' | 'failed' {
   if (state === 'READY') return 'ready'
   if (state === 'FAILED' || state === 'CANCELLED') return 'failed'
-  if (['STARTING', 'LOADING', 'STOPPING', 'DOWNLOADING'].includes(state)) return 'pending'
+  if (['STARTING', 'LOADING', 'DRAINING', 'STOPPING', 'DOWNLOADING'].includes(state)) return 'pending'
   return 'neutral'
 }
 

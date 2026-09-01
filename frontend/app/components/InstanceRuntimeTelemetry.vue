@@ -6,7 +6,7 @@ const props = defineProps<{
   telemetry?: RuntimeTelemetry
 }>()
 
-const active = computed(() => ['STARTING', 'LOADING', 'READY', 'STOPPING'].includes(props.state))
+const active = computed(() => ['STARTING', 'LOADING', 'READY', 'DRAINING', 'STOPPING'].includes(props.state))
 const gpuLabel = computed(() => props.telemetry?.gpu_devices?.length ? props.telemetry.gpu_devices.join(', ') : 'No GPU allocation detected')
 const hasProcessGPUUtilization = computed(() => Boolean(props.telemetry?.gpus?.some(gpu => gpu.utilization_pct !== undefined)))
 const hasProcessVRAM = computed(() => Boolean(props.telemetry?.gpus?.some(gpu => gpu.vram_used_bytes !== undefined)))

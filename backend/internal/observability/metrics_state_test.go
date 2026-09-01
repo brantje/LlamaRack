@@ -22,6 +22,7 @@ func TestMetricsHandlerInstanceStateGauges(t *testing.T) {
 		`llamarack_instance_state{instance_id="ready\"one",state="READY"} 1`,
 		`llamarack_instance_state{instance_id="ready\"one",state="FAILED"} 0`,
 		`llamarack_instance_state{instance_id="stopped",state="UNLOADED"} 1`,
+		`llamarack_instance_state{instance_id="stopped",state="DRAINING"} 0`,
 		`llamarack_instance_state{instance_id="unknown",state="READY"} 0`,
 	} {
 		if !strings.Contains(body, expected) {

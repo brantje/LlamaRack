@@ -137,6 +137,67 @@ func TestStartReadyEndpointLogsAndStop(t *testing.T) {
 	}
 }
 
+func TestBeginDrainClosesEndpointBeforeStop(t *testing.T) {
+	binary := fakeServerScript(t)
+	s := New(binary, "127.0.0.1", 22100, 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stopCancel()
+		s.Shutdown(stopCtx)
+	})
+
+	if s.BeginDrain("missing") {
+		t.Fatal("BeginDrain on missing worker should fail")
+	}
+	rt, err := s.Start(ctx, "drain-me", "model-1", "/tmp/model.gguf", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.BeginDrain("drain-me") {
+		t.Fatal("BeginDrain on READY worker should succeed")
+	}
+	if s.BeginDrain("drain-me") {
+		t.Fatal("BeginDrain on DRAINING worker should fail")
+	}
+	if got := s.Status("drain-me"); got.State != Draining {
+		t.Fatalf("state=%s", got.State)
+	}
+	if _, ok := s.Endpoint("drain-me"); ok {
+		t.Fatal("DRAINING worker must not expose an endpoint")
+	}
+	if _, err := s.Start(ctx, "drain-me", "model-1", "/tmp/model.gguf", nil); err == nil || !strings.Contains(err.Error(), "shutting down") {
+		t.Fatalf("start during drain err=%v", err)
+	}
+	if !s.AbortDrain("drain-me") {
+		t.Fatal("AbortDrain should restore READY")
+	}
+	if got := s.Status("drain-me"); got.State != Ready || got.PID != rt.PID {
+		t.Fatalf("aborted drain runtime=%+v", got)
+	}
+	if !s.BeginDrain("drain-me") {
+		t.Fatal("BeginDrain after abort should succeed")
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stopCancel()
+	if err := s.Stop(stopCtx, "drain-me"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Status("drain-me"); got.State != Unloaded {
+		t.Fatalf("stopped after drain=%+v", got)
+	}
+	if s.AbortDrain("drain-me") {
+		t.Fatal("AbortDrain after stop should fail")
+	}
+	if err := s.WaitInactive(ctx, "drain-me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitInactive(ctx, "never-started"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStartFailuresAndStatusDefaults(t *testing.T) {
 	missing := New(filepath.Join(t.TempDir(), "missing-binary"), "127.0.0.1", 24000, 100*time.Millisecond)
 	if _, err := missing.Start(context.Background(), "bad", "model", "/tmp/model.gguf", nil); err == nil {

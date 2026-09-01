@@ -337,7 +337,7 @@ func writeInstanceStateMetrics(w http.ResponseWriter, states map[string]string) 
 		instanceIDs = append(instanceIDs, instanceID)
 	}
 	sort.Strings(instanceIDs)
-	knownStates := []string{"UNLOADED", "STARTING", "LOADING", "READY", "STOPPING", "FAILED"}
+	knownStates := []string{"UNLOADED", "STARTING", "LOADING", "READY", "DRAINING", "STOPPING", "FAILED"}
 	for _, instanceID := range instanceIDs {
 		current := strings.ToUpper(strings.TrimSpace(states[instanceID]))
 		for _, state := range knownStates {

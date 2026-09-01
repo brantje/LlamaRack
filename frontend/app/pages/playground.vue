@@ -180,7 +180,7 @@ watch(reuseSession, () => {
 function runtimeVariant(state: string) {
   if (state === 'READY') return 'ready' as const
   if (state === 'FAILED') return 'failed' as const
-  if (state === 'STARTING' || state === 'LOADING' || state === 'STOPPING') return 'pending' as const
+  if (state === 'STARTING' || state === 'LOADING' || state === 'DRAINING' || state === 'STOPPING') return 'pending' as const
   return 'neutral' as const
 }
 

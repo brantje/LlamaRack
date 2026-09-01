@@ -106,7 +106,7 @@ type RuntimeEvent = {
 let runtimeSocket: WebSocket | null = null
 let runtimeReconnectTimer: ReturnType<typeof setTimeout> | undefined
 let runtimeConnecting = false
-const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'STOPPING'])
+const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'DRAINING', 'STOPPING'])
 
 export function useManager() {
   const { request, apiBase } = useManagerApi()
@@ -347,7 +347,7 @@ export function useManager() {
 
   function modelState(model: Model) {
     const items = runtimes.value[model.id] || []
-    return items.find(x => x.state === 'READY')?.state || items.find(x => ['STARTING', 'LOADING'].includes(x.state))?.state || items.find(x => x.state === 'STOPPING')?.state || items.find(x => x.state === 'FAILED')?.state || 'UNLOADED'
+    return items.find(x => x.state === 'READY')?.state || items.find(x => ['STARTING', 'LOADING'].includes(x.state))?.state || items.find(x => x.state === 'STOPPING')?.state || items.find(x => x.state === 'DRAINING')?.state || items.find(x => x.state === 'FAILED')?.state || 'UNLOADED'
   }
   function runtimeForInstance(instance: Instance) { return (runtimes.value[instance.model_id] || []).find(item => item.instance_id === instance.id) || { instance_id: instance.id, model_id: instance.model_id, state: 'UNLOADED' } as Runtime }
   function telemetryForInstance(instance: Instance) { return runtimeTelemetry.value[instance.id] }

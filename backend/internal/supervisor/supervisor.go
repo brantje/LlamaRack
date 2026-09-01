@@ -25,9 +25,14 @@ const (
 	Starting State = "STARTING"
 	Loading  State = "LOADING"
 	Ready    State = "READY"
+	Draining State = "DRAINING"
 	Stopping State = "STOPPING"
 	Failed   State = "FAILED"
 )
+
+func ShuttingDown(state State) bool {
+	return state == Draining || state == Stopping
+}
 
 type Runtime struct {
 	InstanceID string    `json:"instance_id"`
@@ -73,6 +78,9 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	if w := s.workers[instanceID]; w != nil && w.runtime.State != Unloaded && w.runtime.State != Failed {
 		rt := w.runtime
 		s.mu.Unlock()
+		if ShuttingDown(rt.State) {
+			return rt, errors.New("instance is shutting down")
+		}
 		slog.Info("llama-server worker already active", "instance_id", instanceID, "model_id", modelID, "state", rt.State, "pid", rt.PID)
 		return rt, nil
 	}
@@ -156,6 +164,63 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	s.mu.Unlock()
 	slog.Info("llama-server worker ready", "instance_id", instanceID, "model_id", modelID, "pid", rt.PID, "port", rt.Port)
 	return rt, nil
+}
+
+// BeginDrain claims READY -> DRAINING so Endpoint() stops returning the worker
+// before Stop() runs. Returns false when the Instance was not READY.
+func (s *Supervisor) BeginDrain(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := s.workers[id]
+	if w == nil || w.runtime.State != Ready {
+		return false
+	}
+	w.runtime.State = Draining
+	s.emitRuntimeLocked(w.runtime)
+	slog.Info("llama-server worker draining", "instance_id", id, "model_id", w.runtime.ModelID, "pid", w.runtime.PID)
+	return true
+}
+
+// AbortDrain restores DRAINING -> READY when a claimed drain did not stop the worker.
+func (s *Supervisor) AbortDrain(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w := s.workers[id]
+	if w == nil || w.runtime.State != Draining || w.cmd == nil || w.cmd.Process == nil {
+		return false
+	}
+	select {
+	case <-w.done:
+		return false
+	default:
+	}
+	w.runtime.State = Ready
+	s.emitRuntimeLocked(w.runtime)
+	slog.Info("llama-server worker drain aborted", "instance_id", id, "model_id", w.runtime.ModelID, "pid", w.runtime.PID)
+	return true
+}
+
+func (s *Supervisor) WaitInactive(ctx context.Context, id string) error {
+	for {
+		s.mu.RLock()
+		w := s.workers[id]
+		if w == nil {
+			s.mu.RUnlock()
+			return nil
+		}
+		state := w.runtime.State
+		done := w.done
+		s.mu.RUnlock()
+		if state == Unloaded || state == Failed {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		}
+	}
 }
 
 func (s *Supervisor) Stop(ctx context.Context, id string) error {
