@@ -46,7 +46,7 @@ func (h *systemLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.stream(w, r, limit, level, source, query)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": filterSystemLogEntries(h.store.Snapshot(limit), level, source, query)})
+	writeJSON(w, http.StatusOK, map[string]any{"entries": limitedSystemLogEntries(h.store.Snapshot(systemLogScanLimit), limit, level, source, query)})
 }
 
 func systemLogLimit(r *http.Request) (int, bool) {
@@ -99,13 +99,19 @@ func filterSystemLogEntries(entries []systemlog.Entry, level, source, query stri
 	return out
 }
 
+const systemLogScanLimit = 4000
+
+func limitedSystemLogEntries(entries []systemlog.Entry, limit int, level, source, query string) []systemlog.Entry {
+	return systemlog.LimitPerSource(filterSystemLogEntries(entries, level, source, query), limit)
+}
+
 func (h *systemLogHandler) stream(w http.ResponseWriter, r *http.Request, limit int, level, source, query string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
 		return
 	}
-	snapshot, events, cancel := h.store.Subscribe(limit)
+	snapshot, events, cancel := h.store.Subscribe(systemLogScanLimit)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -120,7 +126,7 @@ func (h *systemLogHandler) stream(w http.ResponseWriter, r *http.Request, limit 
 		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, payload)
 		return err == nil
 	}
-	if !writeEvent("snapshot", filterSystemLogEntries(snapshot, level, source, query)) {
+	if !writeEvent("snapshot", limitedSystemLogEntries(snapshot, limit, level, source, query)) {
 		return
 	}
 	_, _ = w.Write([]byte(": connected\n\n"))

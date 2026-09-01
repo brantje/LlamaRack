@@ -103,3 +103,26 @@ func TestSystemLogDefaultLimitKeepsLastHundredPerSource(t *testing.T) {
 		t.Fatalf("window first=%s %s last=%s", body.Entries[0].Message, body.Entries[1].Message, body.Entries[len(body.Entries)-1].Message)
 	}
 }
+
+func TestSystemLogFiltersApplyBeforePerSourceLimit(t *testing.T) {
+	store := systemlog.New(200)
+	store.Add(systemlog.Error, "manager", "old failure")
+	for i := 0; i < 100; i++ {
+		store.Add(systemlog.Info, "manager", fmt.Sprintf("info-%d", i))
+	}
+
+	w := httptest.NewRecorder()
+	NewSystemLogHandler(store).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs?scope=system&level=ERROR&limit=100", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "old failure") {
+		t.Fatalf("json snapshot=%d %s", w.Code, w.Body.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/logs/stream?scope=system&level=ERROR&limit=100", nil).WithContext(ctx)
+	NewSystemLogHandler(store).ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "old failure") {
+		t.Fatalf("stream snapshot=%d %s", w.Code, w.Body.String())
+	}
+}

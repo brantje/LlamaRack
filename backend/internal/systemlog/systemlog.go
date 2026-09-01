@@ -120,6 +120,11 @@ func (s *Store) Reset() {
 	s.mu.Unlock()
 }
 
+// LimitPerSource keeps the newest `limit` entries for each source, preserving order.
+func LimitPerSource(entries []Entry, limit int) []Entry {
+	return lastPerSource(entries, limit)
+}
+
 func lastPerSource(entries []Entry, limit int) []Entry {
 	if limit <= 0 || len(entries) == 0 {
 		return []Entry{}
