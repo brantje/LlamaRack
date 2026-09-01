@@ -420,9 +420,11 @@ onBeforeUnmount(() => {
               <StatusTag :variant="statusVariant(instanceState(instance))">{{ instanceState(instance) }}</StatusTag>
               <p v-if="importFor(instance)?.state === 'DOWNLOADING'" class="mt-1 max-w-[180px] text-[length:var(--font-size-kicker)] leading-snug text-[var(--neutral-700)]">Model is downloading. {{ importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when ready.' : 'Open Downloads to monitor progress.' }}</p>
               <p v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ importFor(instance)?.error || 'Open Downloads to retry or inspect this import.' }}</p>
-              <div v-else-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 max-w-[220px] border border-[var(--accent-600)] bg-[var(--accent-100)] px-2 py-1 text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]"><span class="font-semibold">Import warning</span> · {{ importFor(instance)?.error }}</div>
-              <p v-else-if="startupBackoffMessage(runtimeFor(instance))" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]" data-testid="instance-startup-backoff">{{ startupBackoffMessage(runtimeFor(instance)) }}</p>
-              <p v-else-if="instanceState(instance) === 'FAILED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ runtimeFor(instance).last_error || 'llama-server exited unexpectedly.' }}</p>
+              <template v-else>
+                <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 max-w-[220px] border border-[var(--accent-600)] bg-[var(--accent-100)] px-2 py-1 text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]"><span class="font-semibold">Import warning</span> · {{ importFor(instance)?.error }}</div>
+                <p v-if="startupBackoffMessage(runtimeFor(instance))" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]" data-testid="instance-startup-backoff">{{ startupBackoffMessage(runtimeFor(instance)) }}</p>
+                <p v-else-if="instanceState(instance) === 'FAILED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ runtimeFor(instance).last_error || 'llama-server exited unexpectedly.' }}</p>
+              </template>
             </td>
             <td class="px-3 py-3 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ placement(instance) }}</td>
             <td class="px-3 py-3">

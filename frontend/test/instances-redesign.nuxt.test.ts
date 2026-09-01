@@ -232,4 +232,25 @@ describe('Instances redesign', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/manual-launch/start', { method: 'POST' })
   })
+
+  it('shows a completed import warning together with startup backoff', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/imports') {
+        return [{
+          id: 'imp-warn', job_id: 'job-warn', model_id: 'm1', instance_id: 'failed', state: 'COMPLETED', start_when_ready: false,
+          error: 'Context capability could not be detected automatically from GGUF metadata.'
+        }]
+      }
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
+      return []
+    })
+
+    const wrapper = await mountSuspended(InstancesPage, { route: '/instances' })
+    await flushPromises()
+    const failedRow = wrapper.get('tr[data-instance-state="FAILED"]')
+    expect(failedRow.get('[data-testid="import-metadata-warning"]').text()).toContain('Import warning')
+    expect(failedRow.get('[data-testid="import-metadata-warning"]').text()).toContain('Context capability could not be detected automatically')
+    expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('CUDA allocation failed')
+    expect(failedRow.get('[data-testid="instance-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
+  })
 })
