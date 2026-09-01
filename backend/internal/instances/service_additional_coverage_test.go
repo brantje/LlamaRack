@@ -26,6 +26,9 @@ func TestUpdateValidationConflictAndNilOptionsBranches(t *testing.T) {
 	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", IdleUnloadSeconds: -1}); err == nil {
 		t.Fatal("expected invalid update idle timeout")
 	}
+	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", MaxPendingRequests: -1}); err == nil {
+		t.Fatal("expected invalid update pending limit")
+	}
 	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", Slug: second.ID}); err == nil {
 		t.Fatal("expected unique slug conflict")
 	}

@@ -29,18 +29,19 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	})
 
 	create := doRequest(t, f.server, http.MethodPost, "/api/v1/instances", map[string]any{
-		"model_id":            model.ID,
-		"name":                "Primary Coder",
-		"enabled":             true,
-		"autoload_enabled":    true,
-		"always_on":           false,
-		"priority":            "high",
-		"eviction_enabled":    true,
-		"idle_unload_seconds": 120,
-		"gpu_mode":            "manual",
-		"gpu_devices":         []string{"0", "1"},
-		"tensor_split":        "1,1",
-		"options":             map[string]string{"ctx-size": "8192", "threads": "4"},
+		"model_id":             model.ID,
+		"name":                 "Primary Coder",
+		"enabled":              true,
+		"autoload_enabled":     true,
+		"always_on":            false,
+		"priority":             "high",
+		"eviction_enabled":     true,
+		"idle_unload_seconds":  120,
+		"max_pending_requests": 8,
+		"gpu_mode":             "manual",
+		"gpu_devices":          []string{"0", "1"},
+		"tensor_split":         "1,1",
+		"options":              map[string]string{"ctx-size": "8192", "threads": "4"},
 	}, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create instance=%d body=%s", create.Code, create.Body.String())
@@ -49,7 +50,7 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.ID != "primary-coder" || created.ModelID != model.ID {
+	if created.ID != "primary-coder" || created.ModelID != model.ID || created.MaxPendingRequests != 8 {
 		t.Fatalf("created=%+v", created)
 	}
 

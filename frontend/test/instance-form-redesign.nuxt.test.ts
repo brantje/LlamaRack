@@ -13,7 +13,7 @@ function form(overrides: Record<string, any> = {}) {
   return {
     model_id: '', name: '', slug: '', enabled: true, always_on: false,
     autoload_enabled: true, priority: 'normal', eviction_enabled: true,
-    idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '',
+    idle_unload_seconds: 0, max_pending_requests: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '',
     request_log_mode: 'metadata', options: {}, ...overrides
   }
 }
@@ -61,7 +61,7 @@ beforeEach(() => {
 describe('shared Instance form redesign', () => {
   it('drives identity, slug ownership, priority and launch state from the flat form', async () => {
     mocks.request.mockImplementation(async (path: string) => {
-      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 45 } }
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 45 }, max_pending_requests_per_instance: { value: 16 } }
       if (path === '/api/v1/hardware') return { gpus: [] }
       if (path.startsWith('/api/v1/llamacpp/config')) return { effective: { values: {}, sources: {} } }
       return {}
@@ -105,6 +105,7 @@ describe('shared Instance form redesign', () => {
     expect(wrapper.get('[data-testid="priority-low"]').attributes('aria-pressed')).toBe('true')
     await wrapper.get('[data-testid="priority-high"]').trigger('click')
     expect(state.priority).toBe('high')
+    expect(wrapper.text()).toContain('Max pending requests (0 inherits the global 16)')
 
     const launch = controls(wrapper, 'Checkbox', 'UCheckbox').find((item: any) => item.props('label') === 'Launch after creation')!
     launch.vm.$emit('update:modelValue', true)

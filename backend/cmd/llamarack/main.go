@@ -95,6 +95,18 @@ func run(ctx context.Context, cfg config.Config) error {
 	}()
 	lifecycleService := lifecycle.New(modelService, sup)
 	observabilityService := observability.New(db)
+	pendingLimits := func(requestCtx context.Context) (int, int) {
+		perInstance, global := 32, 128
+		if value, resolveErr := managerSettings.Int(requestCtx, settings.MaxPendingRequestsPerInstance); resolveErr == nil {
+			perInstance = value
+		}
+		if value, resolveErr := managerSettings.Int(requestCtx, settings.MaxPendingRequestsGlobal); resolveErr == nil {
+			global = value
+		}
+		return perInstance, global
+	}
+	lifecycleService.SetPendingLimits(pendingLimits)
+	observabilityService.SetPendingLimits(pendingLimits)
 	observabilitySampler := observability.NewSampler(lifecycleService, observabilityService, idleUnloadTimeout)
 
 	var profileMu sync.RWMutex

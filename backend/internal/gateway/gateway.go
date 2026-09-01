@@ -420,6 +420,17 @@ func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spe
 			g.observability.EndQueued(instance.ID)
 		}
 		record.Error = sanitizeError(err.Error())
+		if errors.Is(err, lifecycle.ErrQueueLimitExceeded) {
+			scope := lifecycle.QueueLimitScope(err)
+			if g.observability != nil {
+				if recErr := g.observability.RecordQueueLimitRejection(r.Context(), instance.ID, scope); recErr != nil {
+					slog.Warn("record queue-limit rejection failed", "instance_id", instance.ID, "error", recErr)
+				}
+			}
+			slog.Warn("gateway pending request rejected", "instance_id", instance.ID, "limit", scope)
+			writeError(observed, http.StatusServiceUnavailable, "server_error", "overloaded", err.Error())
+			return
+		}
 		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		return
 	}

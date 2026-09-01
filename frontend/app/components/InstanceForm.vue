@@ -11,6 +11,7 @@ type InstanceFormState = {
   priority: string
   eviction_enabled: boolean
   idle_unload_seconds: number
+  max_pending_requests: number
   gpu_mode: string
   gpu_devices: string[]
   tensor_split: string
@@ -18,7 +19,7 @@ type InstanceFormState = {
   options: Record<string, string>
 }
 type SettingValue<T> = { value?: T }
-type GeneralSettings = { idle_unload_seconds?: SettingValue<number> }
+type GeneralSettings = { idle_unload_seconds?: SettingValue<number>; max_pending_requests_per_instance?: SettingValue<number> }
 type EffectiveConfig = { effective?: { values?: Record<string, string>; sources?: Record<string, string> } }
 type InspectionDependency = { kind: string; total_bytes?: number }
 type ModelInspection = { dependencies?: InspectionDependency[] }
@@ -56,6 +57,7 @@ const emit = defineEmits<{
 
 const manager = useManager()
 const globalIdleSeconds = ref(300)
+const globalPendingPerInstance = ref(32)
 const hardwareGPUs = ref<HardwareGPU[]>([])
 const companions = ref<Partial<Record<CompanionDefinition['key'], DetectedCompanion>>>({})
 const companionLoading = ref(false)
@@ -182,6 +184,8 @@ async function loadSupportingData() {
     const settings = await manager.request<GeneralSettings>('/api/v1/settings/general')
     const idle = Number(settings?.idle_unload_seconds?.value)
     if (Number.isFinite(idle) && idle >= 0) globalIdleSeconds.value = idle
+    const pending = Number(settings?.max_pending_requests_per_instance?.value)
+    if (Number.isFinite(pending) && pending >= 0) globalPendingPerInstance.value = pending
   } catch {
     // Global lifecycle defaults are optional context; the form remains usable without them.
   }
@@ -330,6 +334,7 @@ onMounted(() => {
             </div>
           </div>
           <UFormField :label="`Idle unload timeout (seconds · 0 inherits the global ${globalIdleSeconds} s)`" name="idle_unload_seconds"><UInputNumber v-model="form.idle_unload_seconds" class="w-full" :min="0" /></UFormField>
+          <UFormField :label="`Max pending requests (0 inherits the global ${globalPendingPerInstance})`" name="max_pending_requests"><UInputNumber v-model="form.max_pending_requests" class="w-full" :min="0" /></UFormField>
         </div>
         <div class="mt-5 grid gap-4 md:grid-cols-2">
           <UCheckbox v-model="form.enabled" label="Enabled" />

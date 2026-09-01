@@ -268,6 +268,9 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if counter.Metric == "gateway_requests_total" {
 			labels = append(labels, `status_code="`+strconv.Itoa(counter.StatusCode)+`"`, `result="`+promEscape(counter.Result)+`"`)
 		}
+		if counter.Metric == "gateway_queue_limit_rejections_total" && counter.Result != "" {
+			labels = append(labels, `limit="`+promEscape(counter.Result)+`"`)
+		}
 		labelText := ""
 		if len(labels) > 0 {
 			labelText = "{" + strings.Join(labels, ",") + "}"
@@ -283,6 +286,11 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for instanceID, value := range queued {
 		writeMetricSample(w, "gateway_queued_requests", `{instance_id="`+promEscape(instanceID)+`"}`, strconv.Itoa(value))
 	}
+	perInstance, global := h.service.PendingLimits(r.Context())
+	writeMetricHelp(w, "gateway_pending_request_limit", "Configured pending-request admission limits.")
+	writeMetricType(w, "gateway_pending_request_limit", "gauge")
+	writeMetricSample(w, "gateway_pending_request_limit", `{scope="instance"}`, strconv.Itoa(perInstance))
+	writeMetricSample(w, "gateway_pending_request_limit", `{scope="global"}`, strconv.Itoa(global))
 	summary, err := h.service.Summary(r.Context(), time.Now().Add(-15*time.Minute).UnixMilli())
 	if err == nil {
 		writeQuantiles(w, "request_latency_seconds", summary.LatencyMS)

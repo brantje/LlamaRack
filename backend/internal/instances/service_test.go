@@ -39,6 +39,7 @@ func TestSlugifyAndValidation(t *testing.T) {
 		{ModelID: "m1", Name: "One", Priority: "urgent"},
 		{ModelID: "m1", Name: "One", GPUMode: "magic"},
 		{ModelID: "m1", Name: "One", IdleUnloadSeconds: -1},
+		{ModelID: "m1", Name: "One", MaxPendingRequests: -1},
 	} {
 		if _, err := normalize(in); err == nil {
 			t.Fatalf("expected validation error for %+v", in)
@@ -51,14 +52,14 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	s, _ := testService(t)
 	i, err := s.Create(ctx, CreateInput{
 		ModelID: "m1", Name: "Coder Primary", Slug: "Coding API", Enabled: boolp(false), Autoload: boolp(false), AlwaysOn: true,
-		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90,
+		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90, MaxPendingRequests: 8,
 		GPUMode: "manual", GPUDevices: []string{"0", " 1 ", "0", ""}, TensorSplit: "1,1",
 		Options: map[string]string{"ctx-size": "8192", " threads ": "8", "": "ignored"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i.ID != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || len(i.GPUDevices) != 2 {
+	if i.ID != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || i.MaxPendingRequests != 8 || len(i.GPUDevices) != 2 {
 		t.Fatalf("created=%+v", i)
 	}
 	got, err := s.Get(ctx, i.ID)

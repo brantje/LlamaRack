@@ -28,6 +28,7 @@ export type Instance = {
   priority: 'low' | 'normal' | 'high' | string
   eviction_enabled: boolean
   idle_unload_seconds: number
+  max_pending_requests?: number
   gpu_mode: 'auto' | 'manual' | string
   gpu_devices?: string[]
   tensor_split?: string

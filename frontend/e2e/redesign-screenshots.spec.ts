@@ -170,6 +170,8 @@ const generalSettings = {
   startup_timeout_seconds: setting(180),
   idle_unload_seconds: setting(900),
   always_on_reconcile_seconds: setting(15),
+  max_pending_requests_per_instance: setting(32),
+  max_pending_requests_global: setting(128),
   observability_retention_days: setting(30),
   prometheus_auth_token: setting(''),
   runtime: {

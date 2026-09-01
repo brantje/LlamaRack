@@ -82,6 +82,7 @@ function settingsResponse(overrides: Record<string, any> = {}) {
     login_failure_threshold: setting(4), login_lockout_seconds: setting(60),
     trusted_proxies: setting(''), allowed_origins: setting(''), external_url: setting(''),
     startup_timeout_seconds: setting(120), idle_unload_seconds: setting(0), always_on_reconcile_seconds: setting(0),
+    max_pending_requests_per_instance: setting(32), max_pending_requests_global: setting(128),
     runtime: { data_dir: '/data', models_dir: '/models', database_path: '/data/db', listen_addr: ':8000', llama_server_path: '/llama-server' },
     ...overrides
   }

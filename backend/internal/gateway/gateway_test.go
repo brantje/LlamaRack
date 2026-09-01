@@ -167,6 +167,7 @@ func TestGatewayHelperProcess(t *testing.T) {
 
 type gatewayFixture struct {
 	gateway       *Gateway
+	lifecycle     *lifecycle.Service
 	secret        string
 	sup           *supervisor.Supervisor
 	observability *observability.Service
@@ -206,7 +207,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	})
 	l := lifecycle.New(m, sup)
 	obs := observability.New(db)
-	return &gatewayFixture{gateway: New(a, m, l, obs), secret: secret, sup: sup, observability: obs}
+	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, sup: sup, observability: obs}
 }
 
 func gatewayRequest(t *testing.T, g http.Handler, method, path, secret, body string) *httptest.ResponseRecorder {
@@ -382,6 +383,9 @@ func TestStreamingHeadersDoNotBufferOrFabricateFinalMetrics(t *testing.T) {
 	}
 	if !strings.Contains(line, "hello") || time.Since(started) >= 750*time.Millisecond {
 		t.Fatalf("streaming first chunk was buffered: elapsed=%v line=%q", time.Since(started), line)
+	}
+	if activity := f.lifecycle.Activity("gateway-model"); activity.ActiveRequests != 1 || activity.PendingRequests != 0 {
+		t.Fatalf("streaming should remain active until proxy completion: %+v", activity)
 	}
 	_, _ = reader.ReadString(0)
 	correlated, err := f.observability.GetRequestByRequestID(context.Background(), resp.Header.Get(headerRequestID))

@@ -291,6 +291,8 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, a
 		StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
 		IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
 		AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
+		MaxPendingPerInstance      *int    `json:"max_pending_requests_per_instance"`
+		MaxPendingGlobal           *int    `json:"max_pending_requests_global"`
 		ObservabilityRetentionDays *int    `json:"observability_retention_days"`
 		PrometheusAuthToken        *string `json:"prometheus_auth_token"`
 	}
@@ -327,6 +329,12 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, a
 	}
 	if in.AlwaysOnReconcileSeconds != nil {
 		updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds
+	}
+	if in.MaxPendingPerInstance != nil {
+		updates[settings.MaxPendingRequestsPerInstance] = *in.MaxPendingPerInstance
+	}
+	if in.MaxPendingGlobal != nil {
+		updates[settings.MaxPendingRequestsGlobal] = *in.MaxPendingGlobal
 	}
 	if in.ObservabilityRetentionDays != nil {
 		updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays

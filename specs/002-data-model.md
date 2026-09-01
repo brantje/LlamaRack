@@ -156,6 +156,7 @@ Conceptual fields:
 - `eviction_enabled`;
 - `priority` — `low`, `normal`, `high`;
 - `idle_timeout_seconds` nullable/inherited where supported;
+- `max_pending_requests` — `0` inherits the manager `max_pending_requests_per_instance` default; a positive value is this Instance’s pending-request cap;
 - `startup_timeout_seconds` nullable/inherited where supported;
 - GPU assignment mode;
 - selected GPU stable identifiers;

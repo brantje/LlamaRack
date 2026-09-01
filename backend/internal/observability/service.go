@@ -115,6 +115,8 @@ type Service struct {
 
 	correlationMu    sync.Mutex
 	correlationReady bool
+
+	pendingLimits func(context.Context) (perInstance, global int)
 }
 
 func New(db *sql.DB) *Service {
@@ -150,6 +152,35 @@ func (s *Service) EndActive(instanceID string) {
 		s.active[instanceID]--
 	}
 	s.mu.Unlock()
+}
+
+func (s *Service) SetPendingLimits(getter func(context.Context) (perInstance, global int)) {
+	s.pendingLimits = getter
+}
+
+func (s *Service) PendingLimits(ctx context.Context) (perInstance, global int) {
+	if s.pendingLimits != nil {
+		return s.pendingLimits(ctx)
+	}
+	return 32, 128
+}
+
+func (s *Service) RecordQueueLimitRejection(ctx context.Context, instanceID, scope string) error {
+	if strings.TrimSpace(instanceID) == "" {
+		return fmt.Errorf("instance_id is required")
+	}
+	if scope != "instance" && scope != "global" {
+		scope = "instance"
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := addCounter(ctx, tx, Counter{Metric: "gateway_queue_limit_rejections_total", InstanceID: instanceID, Result: scope, Value: 1}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Service) Activity() (active, queued map[string]int) {

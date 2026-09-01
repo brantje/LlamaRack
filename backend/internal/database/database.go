@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS instances (
  priority TEXT NOT NULL DEFAULT 'normal',
  eviction_enabled INTEGER NOT NULL DEFAULT 1,
  idle_unload_seconds INTEGER NOT NULL DEFAULT 0 CHECK(idle_unload_seconds >= 0),
+ max_pending_requests INTEGER NOT NULL DEFAULT 0 CHECK(max_pending_requests >= 0),
  gpu_mode TEXT NOT NULL DEFAULT 'auto',
  gpu_devices TEXT,
  tensor_split TEXT,
@@ -280,6 +281,36 @@ CREATE TABLE IF NOT EXISTS provider_imports (
 CREATE INDEX IF NOT EXISTS provider_imports_job_idx ON provider_imports(job_id);
 CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(instance_id);
 `
-	_, err := db.ExecContext(ctx, schema)
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	return ensureInstanceColumns(ctx, db)
+}
+
+func ensureInstanceColumns(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(instances)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasMaxPending := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "max_pending_requests" {
+			hasMaxPending = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if hasMaxPending {
+		return nil
+	}
+	_, err = db.ExecContext(ctx, `ALTER TABLE instances ADD COLUMN max_pending_requests INTEGER NOT NULL DEFAULT 0`)
 	return err
 }

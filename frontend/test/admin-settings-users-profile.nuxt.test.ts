@@ -86,6 +86,8 @@ function generalSettings(overrides: Record<string, any> = {}) {
     startup_timeout_seconds: setting(180),
     idle_unload_seconds: setting(300),
     always_on_reconcile_seconds: setting(15),
+    max_pending_requests_per_instance: setting(32),
+    max_pending_requests_global: setting(128),
     runtime: { data_dir: '/config', models_dir: '/models', database_path: '/config/manager.db', listen_addr: ':8000', llama_server_path: '/app/llama-server' },
     ...overrides
   }
@@ -156,6 +158,8 @@ describe('General settings', () => {
     const wrapper = await mountSuspended(AdminGeneralPage, { route: '/admin/general' })
     await flushPromises()
     expect(wrapper.text()).toContain('Global idle unload (seconds)')
+    expect(wrapper.text()).toContain('Max pending requests per Instance')
+    expect(wrapper.text()).toContain('Max pending requests global')
     expect(wrapper.text()).toContain('300 seconds (5 minutes)')
     expect(wrapper.text()).toContain('Streaming responses keep an Instance active')
     expect(wrapper.text()).toContain('https')

@@ -239,6 +239,41 @@ func TestMetricsHandlerAuthAndLabels(t *testing.T) {
 	}
 }
 
+func TestQueueLimitRejectionMetricAndPendingLimitGauges(t *testing.T) {
+	s := testService(t)
+	s.SetPendingLimits(func(context.Context) (int, int) { return 7, 9 })
+	if err := s.RecordQueueLimitRejection(context.Background(), "coder", "instance"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordQueueLimitRejection(context.Background(), "coder", "global"); err != nil {
+		t.Fatal(err)
+	}
+	h := NewMetricsHandler(s, nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := w.Body.String()
+	if !strings.Contains(body, `llamarack_gateway_queue_limit_rejections_total{instance_id="coder",limit="instance"} 1`) {
+		t.Fatalf("missing instance rejection metric: %s", body)
+	}
+	if !strings.Contains(body, `llamarack_gateway_queue_limit_rejections_total{instance_id="coder",limit="global"} 1`) {
+		t.Fatalf("missing global rejection metric: %s", body)
+	}
+	if !strings.Contains(body, `llamarack_gateway_pending_request_limit{scope="instance"} 7`) || !strings.Contains(body, `llamarack_gateway_pending_request_limit{scope="global"} 9`) {
+		t.Fatalf("missing pending limit gauges: %s", body)
+	}
+	if err := s.RecordQueueLimitRejection(context.Background(), " ", "instance"); err == nil {
+		t.Fatal("expected instance_id validation error")
+	}
+	if err := s.RecordQueueLimitRejection(context.Background(), "coder", "unknown"); err != nil {
+		t.Fatal(err)
+	}
+	blank := testService(t)
+	perInstance, global := blank.PendingLimits(context.Background())
+	if perInstance != 32 || global != 128 {
+		t.Fatalf("default pending limits=%d %d", perInstance, global)
+	}
+}
+
 func TestJSONAndParsingHelpers(t *testing.T) {
 	w := httptest.NewRecorder()
 	writeJSON(w, 201, map[string]bool{"ok": true})

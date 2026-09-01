@@ -142,14 +142,28 @@ This is required because sibling Instances may have different context, GPU place
 
 ## 9. Request accounting
 
+Distinguish pending waiters from in-flight proxy work:
+
+- a request is **pending** after it is admitted to wait for drain/startup and before it has acquired a worker endpoint;
+- it becomes **active** exactly once when `Acquire()` is about to return that endpoint and the gateway is about to proxy;
+- streaming requests remain **active** until proxy completion or disconnect.
+
+Pending admission is bounded:
+
+- manager settings `max_pending_requests_per_instance` (default 32) and `max_pending_requests_global` (default 128);
+- `0` on either manager setting means unlimited for that bound;
+- Instance `max_pending_requests` of `0` inherits the manager per-Instance default; a positive value overrides that default only;
+- the manager-wide global ceiling still applies even when an Instance override is higher.
+
+When a bound is exceeded, reject immediately with HTTP 503 `server_error` / `overloaded`. Do not start another worker. Already admitted waiters continue to wait and remain context-cancellable; cancellation and startup failure must release pending accounting.
+
 Before proxying to a READY Instance:
 
-1. reserve/increment active request accounting for that exact Instance;
-2. verify it remains routable;
-3. dispatch;
-4. release accounting exactly once on completion/failure/cancellation.
-
-For streaming requests, the reservation remains active until the stream ends or disconnects.
+1. reserve a pending slot (or reject);
+2. wait for drain/startup of that exact Instance;
+3. convert pending → active exactly once;
+4. dispatch;
+5. release active accounting exactly once on completion/failure/cancellation.
 
 ## 10. Autoload integration
 
@@ -162,6 +176,7 @@ Possible outcomes:
 - already READY;
 - existing startup joined;
 - startup initiated;
+- pending-request admission limit exceeded;
 - autoload disabled;
 - startup timeout;
 - insufficient resources;
