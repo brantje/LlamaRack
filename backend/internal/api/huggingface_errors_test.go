@@ -45,7 +45,7 @@ func TestHuggingFaceMalformedBodiesAndActionMethods(t *testing.T) {
 	if got := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/downloads/missing/cancel", nil, true).Code; got != http.StatusNotFound {
 		t.Fatalf("missing cancel status = %d", got)
 	}
-	if got := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/downloads/missing/retry", nil, true).Code; got != http.StatusBadRequest {
+	if got := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/downloads/missing/retry", nil, true).Code; got != http.StatusNotFound {
 		t.Fatalf("missing retry status = %d", got)
 	}
 	if got := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/downloads/missing", nil, true).Code; got != http.StatusMethodNotAllowed {
