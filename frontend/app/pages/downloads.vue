@@ -135,6 +135,7 @@ async function connectDownloadEvents() {
     socket = new WebSocket(`${manager.apiBase.value.replace(/^http/, 'ws')}/api/v1/downloads/ws?ticket=${encodeURIComponent(ticket)}`)
   } catch {
     downloadConnecting = false
+    scheduleDownloadReconnect()
     return
   }
   downloadSocket = socket
