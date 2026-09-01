@@ -21,8 +21,12 @@ import (
 )
 
 const resourcePressureReason = "resource_pressure"
+const maxEvictionPlanAttempts = 2
 
-var errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
+var (
+	errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
+	errEvictionIneligible      = errors.New("instance is no longer eligible for resource-pressure eviction")
+)
 
 type Activity struct {
 	ActiveRequests int       `json:"active_requests"`
@@ -44,6 +48,10 @@ type Service struct {
 	activities            map[string]Activity
 	idleLocks             map[string]*sync.Mutex
 	operationGates        map[string]chan struct{}
+	drainWaits            map[string]chan struct{}
+	beforeEvictionLock    func(id string)
+	afterEvictionClaim    func(id string)
+	afterIdleDrainClaim   func(id string)
 	now                   func() time.Time
 }
 
@@ -59,7 +67,7 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
 		loads: map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, idleLocks: map[string]*sync.Mutex{},
-		operationGates: map[string]chan struct{}{}, now: time.Now,
+		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{}, now: time.Now,
 	}
 }
 
@@ -76,10 +84,9 @@ func (s *Service) Acquire(ctx context.Context, instanceID string) (string, func(
 	if err != nil {
 		return "", nil, err
 	}
-	lock := s.idleLock(i.ID)
-	lock.Lock()
-	s.beginRequest(i.ID)
-	lock.Unlock()
+	if err := s.admitRequest(ctx, i.ID); err != nil {
+		return "", nil, err
+	}
 	endpoint, err := s.ensureReadyInstance(ctx, i, true)
 	if err != nil {
 		s.finishRequest(i.ID)
@@ -100,6 +107,9 @@ func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, e
 func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance, inferenceRequest ...bool) (string, error) {
 	if !i.Enabled {
 		return "", errors.New("instance disabled")
+	}
+	if err := s.waitDrain(ctx, i.ID); err != nil {
+		return "", err
 	}
 	if endpoint, ok := s.sup.Endpoint(i.ID); ok {
 		return endpoint, nil
@@ -137,6 +147,9 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 	} else if s.isManuallyStopped(id) {
 		return "", errors.New("instance manually stopped until manager restart")
 	}
+	if err := s.waitDrain(ctx, id); err != nil {
+		return "", err
+	}
 	if endpoint, ok := s.sup.Endpoint(id); ok {
 		return endpoint, nil
 	}
@@ -144,21 +157,16 @@ func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (
 }
 
 func (s *Service) StopInstance(ctx context.Context, id string) error {
-	release, err := s.acquireOperation(ctx, id)
-	if err != nil {
-		return err
-	}
-	defer release()
-
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
 		return err
 	}
+	s.claimDrain(id)
 	if i.AlwaysOn {
 		s.clearResourceBlock(id)
 		s.markManualStop(id)
 	}
-	if err := s.sup.Stop(ctx, id); err != nil {
+	if err := s.stopWorker(ctx, id); err != nil {
 		if i.AlwaysOn {
 			s.clearManualStop(id)
 		}
@@ -169,14 +177,6 @@ func (s *Service) StopInstance(ctx context.Context, id string) error {
 }
 
 func (s *Service) RestartInstance(ctx context.Context, id string) (string, error) {
-	release, err := s.acquireOperation(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-
-	s.clearManualStop(id)
-	s.clearResourceBlock(id)
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -184,9 +184,21 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 	if !i.Enabled {
 		return "", errors.New("instance disabled")
 	}
-	if err := s.sup.Stop(ctx, id); err != nil {
+	s.claimDrain(id)
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		s.abortDrainClaim(id)
 		return "", err
 	}
+	defer release()
+
+	s.clearManualStop(id)
+	s.clearResourceBlock(id)
+	if err := s.sup.Stop(ctx, id); err != nil {
+		s.abortDrainClaim(id)
+		return "", err
+	}
+	s.finishDrainWait(id)
 	endpoint, err := s.startOne(ctx, i)
 	if err == nil {
 		s.AddManagerLog(id, "restart completed")
@@ -195,20 +207,25 @@ func (s *Service) RestartInstance(ctx context.Context, id string) (string, error
 }
 
 func (s *Service) KillInstance(ctx context.Context, id string) error {
+	if _, err := s.instances.Get(ctx, id); err != nil {
+		return err
+	}
+	s.claimDrain(id)
 	release, err := s.acquireOperation(ctx, id)
 	if err != nil {
+		s.abortDrainClaim(id)
 		return err
 	}
 	defer release()
 
-	if _, err := s.instances.Get(ctx, id); err != nil {
-		return err
-	}
 	s.clearResourceBlock(id)
 	s.markManualStop(id)
 	if err := s.sup.Kill(id); err != nil {
+		s.abortDrainClaim(id)
 		return err
 	}
+	_ = s.sup.WaitInactive(ctx, id)
+	s.finishDrainWait(id)
 	s.AddManagerLog(id, "worker killed")
 	return nil
 }
@@ -407,8 +424,12 @@ func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Dura
 			lock.Unlock()
 			continue
 		}
-		err := s.StopInstance(ctx, i.ID)
+		s.claimDrainLocked(i.ID)
 		lock.Unlock()
+		if s.afterIdleDrainClaim != nil {
+			s.afterIdleDrainClaim(i.ID)
+		}
+		err := s.StopInstance(ctx, i.ID)
 		if err != nil {
 			slog.Warn("idle unload failed", "instance_id", i.ID, "error", err)
 			continue
@@ -456,6 +477,140 @@ func (s *Service) RunIdleReconciler(ctx context.Context, globalIdleTimeout time.
 		case <-ticker.C:
 			s.ReconcileIdle(ctx, globalIdleTimeout)
 		}
+	}
+}
+
+func (s *Service) admitRequest(ctx context.Context, id string) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		lock := s.idleLock(id)
+		lock.Lock()
+		if ch := s.drainWaitLocked(id); ch != nil {
+			lock.Unlock()
+			if err := waitChan(ctx, ch); err != nil {
+				return err
+			}
+			continue
+		}
+		if supervisor.ShuttingDown(s.sup.Status(id).State) {
+			lock.Unlock()
+			if err := s.sup.WaitInactive(ctx, id); err != nil {
+				return err
+			}
+			continue
+		}
+		s.beginRequest(id)
+		lock.Unlock()
+		return nil
+	}
+}
+
+func (s *Service) waitDrain(ctx context.Context, id string) error {
+	for {
+		if ch := s.drainWaitLocked(id); ch != nil {
+			if err := waitChan(ctx, ch); err != nil {
+				return err
+			}
+			continue
+		}
+		if supervisor.ShuttingDown(s.sup.Status(id).State) {
+			return s.sup.WaitInactive(ctx, id)
+		}
+		return nil
+	}
+}
+
+func waitChan(ctx context.Context, ch <-chan struct{}) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-ch:
+		return nil
+	}
+}
+
+func (s *Service) claimDrain(id string) {
+	lock := s.idleLock(id)
+	lock.Lock()
+	s.claimDrainLocked(id)
+	lock.Unlock()
+}
+
+func (s *Service) claimDrainLocked(id string) {
+	if s.drainWaitLocked(id) != nil {
+		return
+	}
+	_ = s.sup.BeginDrain(id)
+	if supervisor.ShuttingDown(s.sup.Status(id).State) {
+		s.registerDrainWaitLocked(id)
+	}
+}
+
+func (s *Service) claimEviction(ctx context.Context, id string) error {
+	if s.beforeEvictionLock != nil {
+		s.beforeEvictionLock(id)
+	}
+	i, err := s.instances.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	lock := s.idleLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	activity := s.Activity(id)
+	if !i.EvictionEnabled || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
+		return errEvictionIneligible
+	}
+	if !s.sup.BeginDrain(id) {
+		return errEvictionIneligible
+	}
+	s.registerDrainWaitLocked(id)
+	return nil
+}
+
+func (s *Service) stopWorker(ctx context.Context, id string) error {
+	release, err := s.acquireOperation(ctx, id)
+	if err != nil {
+		s.abortDrainClaim(id)
+		return err
+	}
+	defer release()
+	if err := s.sup.Stop(ctx, id); err != nil {
+		s.abortDrainClaim(id)
+		return err
+	}
+	s.finishDrainWait(id)
+	return nil
+}
+
+func (s *Service) abortDrainClaim(id string) {
+	s.sup.AbortDrain(id)
+	s.finishDrainWait(id)
+}
+
+func (s *Service) drainWaitLocked(id string) <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.drainWaits[id]
+}
+
+func (s *Service) registerDrainWaitLocked(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drainWaits[id] == nil {
+		s.drainWaits[id] = make(chan struct{})
+	}
+}
+
+func (s *Service) finishDrainWait(id string) {
+	s.mu.Lock()
+	ch := s.drainWaits[id]
+	delete(s.drainWaits, id)
+	s.mu.Unlock()
+	if ch != nil {
+		close(ch)
 	}
 }
 
@@ -593,6 +748,13 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 }
 
 func (s *Service) runLoad(id string, c *loadCall) {
+	if err := s.waitDrain(context.Background(), id); err != nil {
+		if c.autoload {
+			s.AddManagerLog(id, "autoload triggered by inference request")
+		}
+		s.completeLoad(id, c, "", err)
+		return
+	}
 	release, err := s.acquireOperation(context.Background(), id)
 	if err != nil {
 		if c.autoload {
@@ -748,12 +910,34 @@ func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.
 	if !plan.Fits {
 		return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
 	}
-	for _, candidate := range plan.Evict {
-		if candidate.InstanceID == i.ID {
-			continue
+	for attempt := 0; attempt < maxEvictionPlanAttempts; attempt++ {
+		if attempt > 0 {
+			plan, err = s.EvictionPlan(ctx, shortfall)
+			if err != nil {
+				return scheduler.Placement{}, err
+			}
+			if !plan.Fits {
+				return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
+			}
 		}
-		if err := s.evictInstance(ctx, candidate.InstanceID); err != nil {
-			return scheduler.Placement{}, fmt.Errorf("evict %s: %w", candidate.InstanceID, err)
+		stale := false
+		for _, candidate := range plan.Evict {
+			if candidate.InstanceID == i.ID {
+				continue
+			}
+			if err := s.evictInstance(ctx, candidate.InstanceID); err != nil {
+				if errors.Is(err, errEvictionIneligible) {
+					stale = true
+					break
+				}
+				return scheduler.Placement{}, fmt.Errorf("evict %s: %w", candidate.InstanceID, err)
+			}
+		}
+		if !stale {
+			break
+		}
+		if attempt == maxEvictionPlanAttempts-1 {
+			return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
 		}
 	}
 
@@ -772,24 +956,22 @@ func (s *Service) preparePlacementWithEviction(ctx context.Context, i instances.
 }
 
 func (s *Service) evictInstance(ctx context.Context, id string) error {
-	release, err := s.acquireOperation(ctx, id)
-	if err != nil {
+	if err := s.claimEviction(ctx, id); err != nil {
 		return err
 	}
-	defer release()
+	if s.afterEvictionClaim != nil {
+		s.afterEvictionClaim(id)
+	}
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
+		s.abortDrainClaim(id)
 		return err
-	}
-	activity := s.Activity(id)
-	if !i.EvictionEnabled || activity.ActiveRequests > 0 || s.sup.Status(id).State != supervisor.Ready {
-		return errors.New("instance is no longer eligible for resource-pressure eviction")
 	}
 	blocked := i.AlwaysOn
 	if blocked {
 		s.markResourceBlock(id)
 	}
-	if err := s.sup.Stop(ctx, id); err != nil {
+	if err := s.stopWorker(ctx, id); err != nil {
 		if blocked {
 			s.clearResourceBlock(id)
 		}

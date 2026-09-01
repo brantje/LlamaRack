@@ -320,7 +320,7 @@ describe('Playground edge branches', () => {
     expect(promptSubmit(wrapper).attributes('disabled')).toBeDefined()
     wrapper.unmount()
 
-    for (const state of ['FAILED', 'STARTING', 'LOADING', 'STOPPING', 'UNLOADED']) {
+    for (const state of ['FAILED', 'STARTING', 'LOADING', 'DRAINING', 'STOPPING', 'UNLOADED']) {
       resetManager()
       mocks.runtime.state = state
       wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })

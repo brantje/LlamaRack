@@ -58,7 +58,7 @@ const rangeOptions = [
   { label: '24 hours', value: 86400 },
   { label: '1 week', value: 604800 }
 ] as const
-const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'STOPPING'])
+const activeRuntimeStates = new Set(['STARTING', 'LOADING', 'READY', 'DRAINING', 'STOPPING'])
 const requestSeries = ref<SeriesPoint[]>([])
 const promptSeries = ref<SeriesPoint[]>([])
 const generatedSeries = ref<SeriesPoint[]>([])
@@ -222,7 +222,7 @@ function vramSegments(gpu: NonNullable<typeof hardware.value>['gpus'][number]): 
 function statusVariant(state?: string): 'ready' | 'pending' | 'neutral' | 'failed' {
   if (state === 'READY') return 'ready'
   if (state === 'FAILED' || state === 'CANCELLED') return 'failed'
-  if (state === 'STARTING' || state === 'LOADING' || state === 'STOPPING') return 'pending'
+  if (state === 'STARTING' || state === 'LOADING' || state === 'DRAINING' || state === 'STOPPING') return 'pending'
   return 'neutral'
 }
 function clampPercent(value: number) { return Math.max(0, Math.min(100, value)) }
