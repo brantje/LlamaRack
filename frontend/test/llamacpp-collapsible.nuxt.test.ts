@@ -62,6 +62,11 @@ describe('llama.cpp override editors', () => {
   it('uses the structured llama.cpp editor on the shared New Instance form', async () => {
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await flushPromises()
+    const toggle = wrapper.get('[data-testid="instance-form-overrides"]').find('[data-testid="frame-collapse-toggle"]')
+    if (toggle.exists() && toggle.attributes('aria-expanded') === 'false') {
+      await toggle.trigger('click')
+      await flushPromises()
+    }
     const editor = wrapper.findComponent(LlamaCppOptionsEditor)
     expect(editor.exists()).toBe(true)
     expect(editor.props('scope')).toBe('instance')

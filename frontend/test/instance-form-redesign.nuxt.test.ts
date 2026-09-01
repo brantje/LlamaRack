@@ -45,6 +45,14 @@ function controls(wrapper: any, name: string, fallback: string) {
   return found.length ? found : wrapper.findAllComponents({ name: fallback })
 }
 
+async function expandOverrides(wrapper: any) {
+  const toggle = wrapper.get('[data-testid="instance-form-overrides"]').find('[data-testid="frame-collapse-toggle"]')
+  if (toggle.exists() && toggle.attributes('aria-expanded') === 'false') {
+    await toggle.trigger('click')
+    await flushPromises()
+  }
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   seedManager()
@@ -63,6 +71,7 @@ describe('shared Instance form redesign', () => {
       props: { form: state, title: 'New Instance', submitLabel: 'Create Instance', showLaunchAfterCreate: true, launchAfterCreate: false }
     })
     await flushPromises()
+    await expandOverrides(wrapper)
 
     expect((wrapper.get('button[type="submit"]').element as HTMLButtonElement).disabled).toBe(true)
     const sectionNav = wrapper.get('[data-testid="instance-form-section-nav"]')
@@ -120,6 +129,7 @@ describe('shared Instance form redesign', () => {
     const state = reactive(form({ model_id: 'm1', name: 'Vision Model', slug: 'vision-model', options: { mmproj: '' } }))
     const wrapper = await mountSuspended(InstanceForm, { props: { form: state, title: 'Edit Instance', submitLabel: 'Save' } })
     await flushPromises()
+    await expandOverrides(wrapper)
 
     const projector = wrapper.get('[data-testid="companion-mmproj"]')
     const draft = wrapper.get('[data-testid="companion-spec-draft-model"]')

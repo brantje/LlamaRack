@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { companionOptionKeys, type ModelInspection } from '~/utils/modelCompanions'
+import { type ModelInspection } from '~/utils/modelCompanions'
 
 const manager = useManager()
 const route = useRoute()
@@ -10,8 +10,8 @@ const loading = ref(true)
 const loaded = ref(false)
 const inspecting = ref(false)
 const error = ref('')
-const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
 const inspection = ref<ModelInspection | null>(null)
+const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
 const baselineFingerprint = ref('')
 
 function formFingerprint() {
@@ -25,10 +25,6 @@ function formFingerprint() {
 const valid = computed(() => Boolean(form.name.trim()))
 const dirty = computed(() => !loading.value && Boolean(baselineFingerprint.value) && formFingerprint() !== baselineFingerprint.value)
 const canSubmit = computed(() => valid.value && dirty.value)
-const overrides = computed(() => form.options['llama.cpp'] || {})
-const overrideCount = computed(() =>
-  Object.keys(form.options).filter(key => !companionOptionKeys.includes(key)).length
-)
 
 onMounted(async () => {
   try {
@@ -82,76 +78,43 @@ async function submit() {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex flex-wrap items-start justify-between gap-5">
-      <div class="min-w-0 flex-1">
-        <div class="mb-1 text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL REGISTRY</div>
-        <h1 class="font-heading text-[length:var(--font-size-screen-title)] font-semibold leading-none tracking-[-.015em] text-[var(--color-text)]">Edit model</h1>
-        <p class="mt-2 max-w-3xl text-[length:var(--font-size-body)] leading-[1.55] text-[var(--neutral-800)]">
-          Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately.
-        </p>
-      </div>
+  <div v-if="loading" class="space-y-4" data-testid="model-edit-loading">
+    <USkeleton class="h-44 w-full" />
+    <USkeleton class="h-64 w-full" />
+  </div>
+  <div v-else-if="!loaded" class="space-y-5">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <UPageHeader
+        class="min-w-0 flex-1"
+        headline="MODEL REGISTRY"
+        title="Edit model"
+        description="Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately."
+      />
       <AppButton to="/models" intent="secondary">Back to Models</AppButton>
     </div>
-
-    <Frame v-if="error" class="p-3" data-testid="model-edit-error">
+    <Frame class="p-3" data-testid="model-edit-error">
       <div class="flex flex-wrap items-start gap-2">
-        <StatusTag variant="failed">Model update failed</StatusTag>
+        <StatusTag variant="failed">Unable to load Model</StatusTag>
         <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
       </div>
     </Frame>
-
-    <div v-if="loading" class="space-y-4" data-testid="model-edit-loading">
-      <USkeleton class="h-44 w-full" />
-      <USkeleton class="h-64 w-full" />
-    </div>
-
-    <UForm v-else-if="loaded" :state="form" class="space-y-5" @submit="submit">
-      <Frame class="p-5" data-testid="model-edit-metadata">
-        <div class="mb-5">
-          <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">MODEL METADATA</div>
-          <h2 class="mt-1 font-heading text-[length:var(--font-size-h3)] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model metadata</h2>
-        </div>
-        <div class="grid gap-4 md:grid-cols-2">
-          <UFormField label="Model name" name="name" required>
-            <UInput v-model="form.name" class="w-full" required />
-          </UFormField>
-          <UFormField
-            label="Context capability"
-            name="context_length"
-            description="Maximum context supported by this registered artifact/configuration. Use 0 when unknown."
-          >
-            <UInputNumber v-model="form.context_length" class="w-full font-mono tabular-nums" :min="0" />
-          </UFormField>
-        </div>
-      </Frame>
-
-      <ModelCompanionFiles
-        v-model="form.options"
-        :inspection="inspection"
-        :inspecting="inspecting"
-        testid="model-edit-companions"
-        description="Detected from this Model's GGUF. Disable to clear the extra flags; Enable restores inspect defaults."
-      />
-
-      <Frame class="p-5" data-testid="model-edit-defaults" collapsible subtitle="LLAMA.CPP" title="Model llama.cpp defaults" :description="`Reusable across every Instance of this Model. ${overrideCount} overrides configured, click to expand.`">
-        <div class="mb-5">
-          <div class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.1em] text-[var(--neutral-700)]">LLAMA.CPP DEFAULTS</div>
-          <h2 class="mt-1 font-heading text-[length:var(--font-size-h3)] font-semibold tracking-[-.015em] text-[var(--color-text)]">Model llama.cpp defaults</h2>
-          <p class="mt-1 text-sm text-[var(--neutral-800)]">
-            Reusable defaults inherited by every Instance of this Model unless that Instance overrides the flag.
-          </p>
-        </div>
-        <LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="id" :exclude-keys="companionOptionKeys" />
-      </Frame>
-
-      <div class="flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">
-        <p class="mr-auto text-xs text-[var(--neutral-700)]" data-testid="model-edit-submit-hint">
-          {{ !valid ? 'Required: Model name.' : dirty ? 'Unsaved changes.' : 'No changes to save.' }}
-        </p>
-        <AppButton to="/models" intent="secondary">Cancel</AppButton>
-        <AppButton type="submit" intent="primary" :loading="busy" :disabled="!canSubmit">Save Model</AppButton>
-      </div>
-    </UForm>
   </div>
+  <ModelForm
+    v-else
+    :form="form"
+    mode="edit"
+    title="Edit model"
+    description="Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately."
+    submit-label="Save Model"
+    :busy="busy"
+    :error="error"
+    :submit-disabled="!dirty"
+    :dirty="dirty"
+    :model-id="id"
+    :inspection="inspection"
+    :inspecting="inspecting"
+    back-to="/models"
+    back-label="Back to Models"
+    @submit="submit"
+  />
 </template>

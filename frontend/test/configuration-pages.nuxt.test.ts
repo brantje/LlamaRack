@@ -86,6 +86,14 @@ async function selectRegisteredModel(wrapper: any, value: string) {
   await flushPromises()
 }
 
+async function expandFrame(wrapper: any, testId: string) {
+  const toggle = wrapper.get(`[data-testid="${testId}"]`).find('[data-testid="frame-collapse-toggle"]')
+  if (toggle.exists() && toggle.attributes('aria-expanded') === 'false') {
+    await toggle.trigger('click')
+    await flushPromises()
+  }
+}
+
 async function clickConfirmation(kind: 'confirm' | 'cancel') {
   await flushPromises()
   const buttons = [...document.body.querySelectorAll<HTMLButtonElement>(`[data-testid="confirmation-${kind}"]`)]
@@ -116,6 +124,7 @@ describe('Instance configuration pages', () => {
 
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await selectRegisteredModel(wrapper, 'm1')
+    await expandFrame(wrapper, 'instance-form-overrides')
     await wrapper.get('[data-testid="priority-high"]').trigger('click')
 
     expect((wrapper.get('[data-testid="instance-name"]').element as HTMLInputElement).value).toBe('Coder Model')
@@ -168,6 +177,7 @@ describe('Instance configuration pages', () => {
     })
     const wrapper = await mountSuspended(NewInstancePage, { route: '/instances/new' })
     await selectRegisteredModel(wrapper, 'm1')
+    await expandFrame(wrapper, 'instance-form-overrides')
     await wrapper.get('[data-testid="instance-name"]').setValue('Cancelled Launch')
     checkbox(wrapper, 'Launch after creation').vm.$emit('update:modelValue', true)
     wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { 'ctx-size': '4096' })
@@ -204,6 +214,7 @@ describe('Instance configuration pages', () => {
 
     const wrapper = await mountSuspended(EditInstancePage, { route: '/instances/primary-coder/edit' })
     await flushPromises()
+    await expandFrame(wrapper, 'instance-form-overrides')
     expect(wrapper.text()).toContain('Edit Instance')
     expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
     expect(wrapper.findComponent(LlamaCppOptionsEditor).props('instanceId')).toBe('primary-coder')
@@ -300,6 +311,7 @@ describe('Model edit page', () => {
     })
     const wrapper = await mountSuspended(EditModelPage, { route: '/models/m1/edit' })
     await flushPromises()
+    await expandFrame(wrapper, 'model-edit-defaults')
     expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192', threads: '4' })
     inputWithValue(wrapper, 'Coder Model').vm.$emit('update:modelValue', 'Updated Model')
     numbers(wrapper)[0]!.vm.$emit('update:modelValue', 32768)
@@ -334,6 +346,7 @@ describe('Model edit page', () => {
     })
     wrapper = await mountSuspended(EditModelPage, { route: '/models/m1/edit' })
     await flushPromises()
+    await expandFrame(wrapper, 'model-edit-defaults')
     wrapper.findComponent(LlamaCppOptionsEditor).vm.$emit('update:modelValue', { threads: '4' })
     await wrapper.find('form').trigger('submit')
     await flushPromises()

@@ -22,10 +22,13 @@ describe('Instance lifecycle policy copy', () => {
   })
 
   it('keeps Model creation lifecycle copy independent', () => {
-    const page = source('app/pages/models/new.vue')
-    expect(page).toContain('label="Always On"')
-    expect(page).toContain(alwaysOnCopy)
-    expect(page).toContain('label="Allow resource-pressure eviction"')
-    expect(page).toContain(evictionCopy)
+    const form = source('app/components/ModelForm.vue')
+    expect(form).toContain('label="Always On"')
+    expect(form).toContain(alwaysOnCopy)
+    expect(form).toContain('label="Allow resource-pressure eviction"')
+    expect(form).toContain(evictionCopy)
+
+    expect(source('app/pages/models/new.vue')).toContain('<ModelForm')
+    expect(source('app/pages/models/[id]/edit.vue')).toContain('<ModelForm')
   })
 })
