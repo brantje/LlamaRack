@@ -32,7 +32,7 @@ func TestNVIDIAProcessUtilizationRetriesPlainPMon(t *testing.T) {
 		t.Fatalf("plain pmon result=%+v", got)
 	}
 	logs := systemlog.Default.Snapshot(10)
-	if len(logs) != 1 || logs[0].Level != systemlog.Warn || logs[0].Source != "telemetry" || logs[0].Message != "nvidia-smi pmon -s u returned no process rows, retrying plain pmon" {
+	if len(logs) != 1 || logs[0].Level != systemlog.Debug || logs[0].Source != "telemetry" || logs[0].Message != "nvidia-smi pmon -s u returned no process rows, retrying plain pmon" {
 		t.Fatalf("diagnostics=%+v", logs)
 	}
 }

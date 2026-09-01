@@ -274,7 +274,7 @@ func (c *Collector) nvidiaProcessUtilization(ctx context.Context) map[gpuProcess
 			return result
 		}
 		if index == 0 {
-			systemlog.Log(systemlog.Warn, "telemetry", "nvidia-smi pmon -s u returned no process rows, retrying plain pmon")
+			systemlog.Log(systemlog.Debug, "telemetry", "nvidia-smi pmon -s u returned no process rows, retrying plain pmon")
 		}
 	}
 	return nil
