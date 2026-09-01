@@ -292,12 +292,12 @@ onMounted(() => void load())
           <template v-else-if="valuePage">
             <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--neutral-700)]">
               <span>{{ valuePage.type }}</span>
-              <span data-testid="metadata-expanded-count">{{ valuePage.offset.toLocaleString() }}–{{ valueRangeEnd.toLocaleString() }} of {{ valueDisplayedTotal.toLocaleString() }}{{ selectedEntry?.array_length && selectedEntry.array_length > (valuePage.total || 0) ? ' (truncated)' : '' }}</span>
+              <span data-testid="metadata-expanded-count">{{ (valuePage.offset + 1).toLocaleString() }}–{{ valueRangeEnd.toLocaleString() }} of {{ valueDisplayedTotal.toLocaleString() }}{{ selectedEntry?.array_length && selectedEntry.array_length > (valuePage.total || 0) ? ' (truncated)' : '' }}</span>
             </div>
             <pre v-if="valuePage.value !== undefined" data-testid="metadata-expanded-value" class="max-h-[60vh] overflow-auto whitespace-pre-wrap break-all border border-[var(--color-divider)] p-4 font-mono text-xs">{{ valuePage.value }}</pre>
             <div v-else data-testid="metadata-expanded-items" class="max-h-[60vh] overflow-auto border border-[var(--color-divider)] p-2 font-mono text-xs">
               <div v-for="(item, itemIndex) in valuePage.items || []" :key="`${valuePage.offset + itemIndex}:${item}`" class="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 border-b border-[var(--color-divider)] px-2 py-1.5 last:border-b-0">
-                <span class="text-[var(--neutral-700)]">{{ valuePage.offset + itemIndex }}</span>
+                <span class="text-[var(--neutral-700)]">{{ valuePage.offset + itemIndex + 1 }}</span>
                 <span class="break-all">{{ item }}</span>
               </div>
             </div>

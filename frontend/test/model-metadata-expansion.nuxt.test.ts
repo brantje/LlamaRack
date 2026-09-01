@@ -75,6 +75,7 @@ describe('Model metadata lazy expansion', () => {
     let expanded = document.body.querySelector<HTMLElement>('[data-testid="metadata-expanded-items"]')
     expect(expanded?.textContent).toContain('alpha')
     expect(expanded?.textContent).toContain('beta')
+    expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain('1–')
     expect(document.body.textContent).toContain('200')
 
     const next = modalButton('Next')
