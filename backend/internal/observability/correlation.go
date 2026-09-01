@@ -282,6 +282,95 @@ func (s *Service) GetRequestByRequestID(ctx context.Context, requestID string) (
 	return CorrelatedRequestRecord{RequestRecord: record, RequestBody: record.RequestBody, ResponseBody: record.ResponseBody}, nil
 }
 
+// StoredOpenAIResponse is the Manager-side lookup row for OpenAI Responses
+// retrieve/delete/input-items. These fields are not part of /logs DTOs.
+type StoredOpenAIResponse struct {
+	InstanceID   string
+	Endpoint     string
+	Streaming    bool
+	Deleted      bool
+	StartedAt    int64
+	RequestBody  *string
+	ResponseBody *string
+}
+
+func (s *Service) SetOpenAIResponseID(ctx context.Context, requestID, openaiID string) error {
+	requestID = strings.TrimSpace(requestID)
+	openaiID = strings.TrimSpace(openaiID)
+	if requestID == "" || openaiID == "" {
+		return nil
+	}
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET openai_response_id=?
+		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?)
+		AND (openai_response_id IS NULL OR openai_response_id='')`, openaiID, requestID)
+	if err != nil && isUniqueConstraint(err) {
+		return ErrDuplicateOpenAIResponseID
+	}
+	return err
+}
+
+func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) (StoredOpenAIResponse, error) {
+	openaiID = strings.TrimSpace(openaiID)
+	if openaiID == "" {
+		return StoredOpenAIResponse{}, sql.ErrNoRows
+	}
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return StoredOpenAIResponse{}, err
+	}
+	var item StoredOpenAIResponse
+	var deleted, streaming int
+	var requestBody, responseBody sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT instance_id,endpoint,streaming,openai_response_deleted,started_at,request_body,response_body
+		FROM inference_requests WHERE openai_response_id=? AND endpoint='/v1/responses'`, openaiID).Scan(
+		&item.InstanceID, &item.Endpoint, &streaming, &deleted, &item.StartedAt, &requestBody, &responseBody)
+	if err != nil {
+		return StoredOpenAIResponse{}, err
+	}
+	item.Streaming = streaming != 0
+	item.Deleted = deleted != 0
+	if requestBody.Valid {
+		value := requestBody.String
+		item.RequestBody = &value
+	}
+	if responseBody.Valid {
+		value := responseBody.String
+		item.ResponseBody = &value
+	}
+	return item, nil
+}
+
+func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openaiID string) error {
+	openaiID = strings.TrimSpace(openaiID)
+	if openaiID == "" {
+		return sql.ErrNoRows
+	}
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET openai_response_deleted=1
+		WHERE openai_response_id=? AND endpoint='/v1/responses' AND openai_response_deleted=0`, openaiID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+var ErrDuplicateOpenAIResponseID = fmt.Errorf("duplicate openai response id")
+
+func isUniqueConstraint(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
+}
+
 func NewCorrelatedRequestHandler(service *Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +25,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/observability"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
+
+var helperSeq atomic.Uint64
 
 func gatewayFakeBinary(t *testing.T) string {
 	t.Helper()
@@ -69,19 +73,82 @@ func TestGatewayHelperProcess(t *testing.T) {
 			http.Error(w, "authorization leaked", 500)
 			return
 		}
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"text": "transcribed", "path": r.URL.Path, "proxied": true})
+			return
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
 		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.Unmarshal(bodyBytes, &body)
+		if force, _ := body["force_404"].(bool); force {
+			http.NotFound(w, r)
+			return
+		}
+		seq := helperSeq.Add(1)
 		usage := map[string]any{"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}
 		timings := map[string]any{"prompt_n": 2, "prompt_ms": 4, "prompt_per_second": 500, "predicted_n": 3, "predicted_ms": 6, "predicted_per_second": 500}
+		switch r.URL.Path {
+		case "/v1/responses/input_tokens", "/v1/chat/completions/input_tokens":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "list", "input_tokens": 7, "path": r.URL.Path, "proxied": true,
+				"usage": map[string]any{"input_tokens": 7, "total_tokens": 7},
+			})
+			return
+		case "/v1/rerank", "/v1/reranking":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"proxied": true, "path": r.URL.Path, "model": body["model"], "results": []any{}})
+			return
+		case "/v1/chat/completions/control":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "path": r.URL.Path, "id": body["id"], "proxied": true})
+			return
+		case "/v1/responses":
+			id := fmt.Sprintf("resp_%d", seq)
+			if streaming, _ := body["stream"].(bool); streaming {
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, _ := w.(http.Flusher)
+				_, _ = fmt.Fprintf(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"object\":\"response\",\"status\":\"in_progress\"}}\n\n", id)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				if slow, _ := body["slow"].(bool); slow {
+					time.Sleep(1500 * time.Millisecond)
+				} else {
+					time.Sleep(200 * time.Millisecond)
+				}
+				completed := map[string]any{
+					"type": "response.completed",
+					"response": map[string]any{
+						"id": id, "object": "response", "status": "completed",
+						"output": []any{}, "usage": usage, "timings": timings,
+					},
+				}
+				payload, _ := json.Marshal(completed)
+				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", payload)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": id, "object": "response", "status": "completed", "proxied": true,
+				"path": r.URL.Path, "model": body["model"], "usage": usage, "timings": timings,
+			})
+			return
+		}
 		if streaming, _ := body["stream"].(bool); streaming {
+			id := fmt.Sprintf("chatcmpl-%d", seq)
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher, _ := w.(http.Flusher)
-			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+			_, _ = fmt.Fprintf(w, "data: {\"id\":%q,\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n", id)
 			if flusher != nil {
 				flusher.Flush()
 			}
 			time.Sleep(time.Second)
-			payload, _ := json.Marshal(map[string]any{"usage": usage, "timings": timings})
+			payload, _ := json.Marshal(map[string]any{"id": id, "usage": usage, "timings": timings})
 			_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
 			if flusher != nil {
 				flusher.Flush()
@@ -90,11 +157,8 @@ func TestGatewayHelperProcess(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"proxied": true,
-			"path":    r.URL.Path,
-			"model":   body["model"],
-			"usage":   usage,
-			"timings": timings,
+			"id": fmt.Sprintf("chatcmpl-%d", seq), "proxied": true, "path": r.URL.Path,
+			"model": body["model"], "usage": usage, "timings": timings,
 		})
 	})
 	_ = (&http.Server{Handler: mux}).Serve(ln)

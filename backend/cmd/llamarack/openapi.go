@@ -155,14 +155,28 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 }
 
 func registerInferenceOperations(doc *manageropenapi.Document) {
+	const persistenceNote = "Manager-side retrievability is governed by the selected Instance request_log_mode (full retains request/response bodies; metadata does not). The OpenAI store field is forwarded to llama.cpp unchanged and does not override Manager persistence. DELETE /v1/responses/{response_id} only hides the Response from the OpenAI-compatible API; /logs and observability retain the original row. Normal observability retention is the maximum lifetime of a retrievable Response. previous_response_id is forwarded to llama.cpp but Manager does not reconstruct prior turns from stored history."
+	bearer := []map[string][]string{{"bearerAPIKey": {}}}
 	doc.MustRegister(http.MethodGet, "/v1/models", manageropenapi.Operation{
 		OperationID: "listOpenAIModels",
 		Summary:     "List addressable OpenAI-compatible model IDs",
 		Tags:        []string{"OpenAI Compatible"},
-		Security:    []map[string][]string{{"bearerAPIKey": {}}},
+		Security:    bearer,
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("OpenAI-compatible model list", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+		},
+	})
+	doc.MustRegister(http.MethodGet, "/v1/models/{model}", manageropenapi.Operation{
+		OperationID: "retrieveOpenAIModel",
+		Summary:     "Retrieve one addressable OpenAI-compatible model ID",
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		Parameters:  []manageropenapi.Parameter{pathParameter("model", "Addressable Instance ID")},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("OpenAI-compatible model object", manageropenapi.ObjectSchema()),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Unknown or disabled model"),
 		},
 	})
 	for _, endpoint := range []struct {
@@ -171,7 +185,6 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 	}{
 		{"/v1/chat/completions", "createChatCompletion", "Create a chat completion", false},
 		{"/v1/completions", "createCompletion", "Create a completion", false},
-		{"/v1/responses", "createResponse", "Create a response", false},
 		{"/v1/embeddings", "createEmbedding", "Create embeddings", true},
 	} {
 		headers := managerMetricHeaders(endpoint.embeddings)
@@ -180,7 +193,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			Summary:     endpoint.summary,
 			Description: "The JSON/SSE body remains OpenAI-compatible. LlamaRack observability is exposed only through X-LlamaRack-* response headers. For streaming responses only metrics known before headers are committed are returned; final metrics remain queryable through /api/v1/observability/requests/{request_id}.",
 			Tags:        []string{"OpenAI Compatible"},
-			Security:    []map[string][]string{{"bearerAPIKey": {}}},
+			Security:    bearer,
 			RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
 			Responses: map[string]manageropenapi.Response{
 				"200": {Description: "OpenAI-compatible response", Headers: headers, Content: map[string]manageropenapi.MediaType{
@@ -190,6 +203,157 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 				"400": manageropenapi.ErrorResponse("Invalid request"),
 				"401": manageropenapi.ErrorResponse("Invalid API key"),
 				"503": {Description: "Model or worker unavailable", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
+			},
+		})
+	}
+	doc.MustRegister(http.MethodPost, "/v1/responses", manageropenapi.Operation{
+		OperationID: "createResponse",
+		Summary:     "Create a response",
+		Description: "The JSON/SSE body remains OpenAI-compatible. " + persistenceNote,
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
+		Responses: map[string]manageropenapi.Response{
+			"200": {Description: "OpenAI-compatible response", Headers: managerMetricHeaders(false), Content: map[string]manageropenapi.MediaType{
+				"application/json":  {Schema: manageropenapi.ObjectSchema()},
+				"text/event-stream": {Schema: manageropenapi.Schema{Type: "string"}},
+			}},
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"503": {Description: "Model or worker unavailable", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
+		},
+	})
+	doc.MustRegister(http.MethodGet, "/v1/responses/{response_id}", manageropenapi.Operation{
+		OperationID: "getResponse",
+		Summary:     "Retrieve a stored Response",
+		Description: persistenceNote,
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		Parameters:  []manageropenapi.Parameter{pathParameter("response_id", "Upstream OpenAI-compatible Response ID")},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Stored Response JSON", manageropenapi.ObjectSchema()),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Response not found"),
+		},
+	})
+	doc.MustRegister(http.MethodDelete, "/v1/responses/{response_id}", manageropenapi.Operation{
+		OperationID: "deleteResponse",
+		Summary:     "Hide a stored Response from the OpenAI-compatible API",
+		Description: persistenceNote,
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		Parameters:  []manageropenapi.Parameter{pathParameter("response_id", "Upstream OpenAI-compatible Response ID")},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Deletion acknowledgement", manageropenapi.ObjectSchema()),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Response not found"),
+		},
+	})
+	doc.MustRegister(http.MethodGet, "/v1/responses/{response_id}/input_items", manageropenapi.Operation{
+		OperationID: "listResponseInputItems",
+		Summary:     "List retained input items for a stored Response",
+		Description: persistenceNote,
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		Parameters: []manageropenapi.Parameter{
+			pathParameter("response_id", "Upstream OpenAI-compatible Response ID"),
+			{Name: "limit", In: "query", Description: "Maximum number of items to return. Defaults to 20 and is capped at 100.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
+			{Name: "after", In: "query", Description: "Return items after this item ID.", Schema: manageropenapi.Schema{Type: "string"}},
+		},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Input item list", manageropenapi.ObjectSchema()),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Response not found"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/responses/{response_id}/cancel", manageropenapi.Operation{
+		OperationID: "cancelResponse",
+		Summary:     "Cancel an in-flight Response",
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		Parameters:  []manageropenapi.Parameter{pathParameter("response_id", "Upstream OpenAI-compatible Response ID")},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Cancelled or current Response", manageropenapi.ObjectSchema()),
+			"400": manageropenapi.ErrorResponse("Response is not cancellable"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Response not found"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/responses/input_tokens", manageropenapi.Operation{
+		OperationID: "countResponseInputTokens",
+		Summary:     "Count Responses input tokens",
+		Description: "Proxied to llama.cpp. If the worker does not implement this route, Manager returns 501.",
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
+		Responses: map[string]manageropenapi.Response{
+			"200": {Description: "Token count", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/audio/transcriptions", manageropenapi.Operation{
+		OperationID: "createTranscription",
+		Summary:     "Create an audio transcription",
+		Description: "Multipart form request. The model field is the addressable Instance ID. Binary audio is not stored as TEXT; full request logging retains filename, content type, and size.",
+		Tags:        []string{"OpenAI Compatible"},
+		Security:    bearer,
+		RequestBody: manageropenapi.MultipartBody(true),
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Transcription", manageropenapi.ObjectSchema()),
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"413": manageropenapi.ErrorResponse("Request body is too large"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/chat/completions/input_tokens", manageropenapi.Operation{
+		OperationID: "countChatCompletionInputTokens",
+		Summary:     "Count chat completion input tokens",
+		Description: "llama.cpp extension. Proxied to the selected Instance. If the worker does not implement this route, Manager returns 501.",
+		Tags:        []string{"llama.cpp Extensions"},
+		Security:    bearer,
+		RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
+		Responses: map[string]manageropenapi.Response{
+			"200": {Description: "Token count", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/chat/completions/control", manageropenapi.Operation{
+		OperationID: "controlChatCompletion",
+		Summary:     "Control an in-flight chat completion",
+		Description: "llama.cpp extension. Routes the control payload to the worker that owns the in-flight completion ID.",
+		Tags:        []string{"llama.cpp Extensions"},
+		Security:    bearer,
+		RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Control result", manageropenapi.ObjectSchema()),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"404": manageropenapi.ErrorResponse("Unknown in-flight completion"),
+			"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
+		},
+	})
+	for _, endpoint := range []struct{ path, id, summary string }{
+		{"/v1/rerank", "createRerank", "Rerank documents"},
+		{"/v1/reranking", "createReranking", "Rerank documents (alias)"},
+	} {
+		doc.MustRegister(http.MethodPost, endpoint.path, manageropenapi.Operation{
+			OperationID: endpoint.id,
+			Summary:     endpoint.summary,
+			Description: "llama.cpp extension. Proxied with the same auth, lifecycle, and observability behavior as other inference routes.",
+			Tags:        []string{"llama.cpp Extensions"},
+			Security:    bearer,
+			RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true),
+			Responses: map[string]manageropenapi.Response{
+				"200": {Description: "Rerank result", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
+				"400": manageropenapi.ErrorResponse("Invalid request"),
+				"401": manageropenapi.ErrorResponse("Invalid API key"),
+				"503": manageropenapi.ErrorResponse("Model or worker unavailable"),
 			},
 		})
 	}

@@ -24,6 +24,17 @@ func TestRuntimeOpenAPIDocumentCoversCorePublicRoutes(t *testing.T) {
 		{http.MethodPost, "/v1/responses"},
 		{http.MethodPost, "/v1/embeddings"},
 		{http.MethodGet, "/v1/models"},
+		{http.MethodGet, "/v1/models/{model}"},
+		{http.MethodGet, "/v1/responses/{response_id}"},
+		{http.MethodDelete, "/v1/responses/{response_id}"},
+		{http.MethodGet, "/v1/responses/{response_id}/input_items"},
+		{http.MethodPost, "/v1/responses/{response_id}/cancel"},
+		{http.MethodPost, "/v1/responses/input_tokens"},
+		{http.MethodPost, "/v1/chat/completions/input_tokens"},
+		{http.MethodPost, "/v1/chat/completions/control"},
+		{http.MethodPost, "/v1/rerank"},
+		{http.MethodPost, "/v1/reranking"},
+		{http.MethodPost, "/v1/audio/transcriptions"},
 	}
 	for _, route := range required {
 		if !doc.HasOperation(route.method, route.path) {
@@ -99,5 +110,33 @@ func TestMuxServesRuntimeOpenAPIAndScalarDocs(t *testing.T) {
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/docs", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "@scalar/api-reference") {
 		t.Fatalf("docs status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+func TestInferenceOpenAPIDocumentsNewSurface(t *testing.T) {
+	doc := newOpenAPIDocument()
+	retrieve := doc.Paths["/v1/responses/{response_id}"]["get"]
+	if retrieve.Security == nil || len(retrieve.Parameters) == 0 || retrieve.Parameters[0].Name != "response_id" {
+		t.Fatalf("retrieve params=%+v", retrieve.Parameters)
+	}
+	if !strings.Contains(retrieve.Description, "request_log_mode") || !strings.Contains(retrieve.Description, "store") {
+		t.Fatalf("missing persistence note: %s", retrieve.Description)
+	}
+	if tag := doc.Paths["/v1/rerank"]["post"].Tags[0]; tag != "llama.cpp Extensions" {
+		t.Fatalf("rerank tag=%q", tag)
+	}
+	if tag := doc.Paths["/v1/chat/completions/control"]["post"].Tags[0]; tag != "llama.cpp Extensions" {
+		t.Fatalf("control tag=%q", tag)
+	}
+	audio := doc.Paths["/v1/audio/transcriptions"]["post"]
+	if _, ok := audio.RequestBody.Content["multipart/form-data"]; !ok {
+		t.Fatalf("audio content=%v", audio.RequestBody.Content)
+	}
+	if _, ok := doc.Paths["/v1/responses/input_tokens"]["post"].Responses["501"]; !ok {
+		t.Fatal("token count missing 501")
+	}
+	create := doc.Paths["/v1/responses"]["post"]
+	if !strings.Contains(create.Description, "previous_response_id") {
+		t.Fatalf("missing previous_response_id note: %s", create.Description)
 	}
 }

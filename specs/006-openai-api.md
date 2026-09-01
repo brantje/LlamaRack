@@ -12,15 +12,31 @@ The manager exposes OpenAI-compatible endpoints while using llama.cpp workers pr
 
 ## 2. Compatibility scope
 
-Initial required endpoints:
+Required endpoints:
 
 - `GET /v1/models`
+- `GET /v1/models/{model}`
 - `POST /v1/chat/completions`
 - `POST /v1/completions`
 - `POST /v1/responses`
+- `GET /v1/responses/{response_id}`
+- `DELETE /v1/responses/{response_id}`
+- `GET /v1/responses/{response_id}/input_items`
+- `POST /v1/responses/{response_id}/cancel`
+- `POST /v1/responses/input_tokens`
 - `POST /v1/embeddings`
+- `POST /v1/audio/transcriptions`
 
-Supported fields ultimately depend on the active llama.cpp build and effective Instance configuration.
+llama.cpp extensions:
+
+- `POST /v1/chat/completions/input_tokens`
+- `POST /v1/chat/completions/control`
+- `POST /v1/rerank`
+- `POST /v1/reranking`
+
+Supported fields ultimately depend on the active llama.cpp build and effective Instance configuration. Token-count routes that the worker does not implement return Manager `501`.
+
+`previous_response_id` is forwarded to llama.cpp. Manager does not reconstruct prior turns from stored Responses.
 
 ## 3. Instance identity contract
 
@@ -70,6 +86,8 @@ Requirements:
 Detailed runtime state belongs to `/api/v1/instances`.
 
 A registered Model with zero Instances is absent from `/v1/models`.
+
+`GET /v1/models/{model}` uses the same namespace: enabled Instance IDs. Absent or disabled IDs return an OpenAI-style `404`. Model retrieve must not start or acquire llama.cpp.
 
 ## 6. Request model resolution
 
@@ -121,14 +139,30 @@ Do not transform text completions into chat unless a future compatibility requir
 
 `POST /v1/responses` is supported to the extent provided by active llama.cpp.
 
-The manager should remain thin:
+The manager should remain thin for generation:
 
 - authenticate;
 - resolve exact Instance ID;
 - autoload when permitted;
 - stream/proxy;
+- capture the upstream `resp_*` ID even when request logging is metadata-only;
 - normalize external Instance identity;
 - map manager-level failures.
+
+Stored Responses reuse `inference_requests` rather than a second table.
+
+Manager-side retrievability follows the Instance `request_log_mode` at request time:
+
+- `full` retains request/response bodies and later `GET /v1/responses/{id}` can return the Response JSON (streaming rows return the final embedded object, not raw SSE);
+- `metadata` does not retain bodies, so later GET returns `404` even if `store=true` was forwarded to llama.cpp.
+
+`DELETE /v1/responses/{id}` sets `openai_response_deleted` only. It must not erase `/logs` or observability data. Deleted, expired, metadata-only, and unknown IDs all return `404` from GET.
+
+`GET /v1/responses/{id}/input_items` reconstructs OpenAI input items from the retained original request body and honors `limit`/`after`.
+
+In-flight Responses may be retrieved as `status=in_progress` from the active-request registry and cancelled with `POST /v1/responses/{id}/cancel`. Completed Responses return `400` on cancel; unknown IDs return `404`.
+
+Normal observability retention is the maximum lifetime of a retrievable Response.
 
 ## 11. Embeddings
 
@@ -137,6 +171,18 @@ The manager should remain thin:
 If that Instance's effective Model/configuration cannot serve embeddings and this is known before dispatch, fail clearly.
 
 Never silently route to a different embedding-capable Instance.
+
+## 11.1 Audio transcription
+
+`POST /v1/audio/transcriptions` is multipart form data. Authenticate before accepting a large body. The `model` form field is the addressable Instance ID. Proxy the original multipart bytes intact and never forward Manager `Authorization`. Full request logging stores filename, content type, and size — never raw audio as SQLite TEXT.
+
+## 11.2 Token counting, rerank, and chat control
+
+`POST /v1/responses/input_tokens` and `POST /v1/chat/completions/input_tokens` use normal Instance resolution/autoload. Map returned input-token counts into observability `prompt_tokens`. Do not expose generation-token metrics. A worker `404` for these routes is rewritten to Manager `501`.
+
+`POST /v1/rerank` and `POST /v1/reranking` are equivalent llama.cpp extensions.
+
+`POST /v1/chat/completions/control` routes an in-flight completion ID through the shared active-request registry to the owning worker. It does not resolve a new Instance from a `model` field.
 
 ## 12. Instance availability
 

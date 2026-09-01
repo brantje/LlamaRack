@@ -98,8 +98,16 @@ Persist a normalized `call_type` for supported endpoints:
 | `/v1/completions` | `completion` | Completion |
 | `/v1/responses` | `response` | Responses |
 | `/v1/embeddings` | `embedding` | Embedding |
+| `/v1/responses/input_tokens` | `response_input_tokens` | Response Input Tokens |
+| `/v1/chat/completions/input_tokens` | `chat_input_tokens` | Chat Input Tokens |
+| `/v1/rerank`, `/v1/reranking` | `rerank` | Rerank |
+| `/v1/audio/transcriptions` | `transcription` | Transcription |
+| `/v1/responses/{id}/cancel` | `response_cancel` | Response Cancel |
+| `/v1/chat/completions/control` | `chat_control` | Chat Control |
 
 Unsupported endpoints are still logged but have an empty/null call type. Do not invent a generic `other` call type.
+
+`openai_response_id` and `openai_response_deleted` on `inference_requests` are OpenAI-facing stored-Response state only. They must not affect `/admin/logs`, request-log list/detail APIs, observability request list/detail APIs, trace/session grouping, metrics, or retention. A deleted OpenAI Response remains a normal historical inference log record.
 
 ## Flat multi-request tracing
 

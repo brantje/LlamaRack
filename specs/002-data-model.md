@@ -242,6 +242,15 @@ PID, port and READY state are ephemeral and cannot be trusted after manager rest
 
 Retain the existing durable download-job model and bounded provider cache behavior.
 
+### 4.11 Inference request OpenAI Response state
+
+`inference_requests` remains the single persistence source for inference traffic. OpenAI stored-Response support adds:
+
+- `openai_response_id` (nullable text)
+- `openai_response_deleted` (integer, default 0)
+
+A partial unique index on non-null `openai_response_id` values enforces one Manager row per upstream Response ID. OpenAI deletion only sets `openai_response_deleted`; it does not delete the row or clear debugging bodies. Development databases with an incompatible earlier schema are recreated; this work does not introduce a general migration framework.
+
 ## 5. Configuration fingerprints
 
 Each Instance has a deterministic desired launch fingerprint based on:
