@@ -72,6 +72,7 @@ describe('shared Instance form redesign', () => {
     ])
     expect(wrapper.get('[data-testid="priority-normal"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.get('[data-testid="placement-mode-auto"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
     expect(wrapper.findComponent(LlamaCppOptionsEditor).props('scope')).toBe('instance')
     expect(wrapper.get('[data-testid="llamacpp-mode-basic"]').text()).toBe('Basic')
     expect(wrapper.get('[data-testid="llamacpp-mode-advanced"]').text()).toBe('Advanced')

@@ -352,16 +352,15 @@ onMounted(() => {
           </div>
           <UFormField label="Tensor split" name="tensor_split" class="max-w-[320px]"><UInput v-model="form.tensor_split" class="w-full font-mono" placeholder="60,40" /></UFormField>
         </div>
-        <div class="hardware-placement-core">
-          <HardwarePlacementEditor
-            :model-id="form.model_id"
-            :llama-options="form.options"
-            v-model:gpu-mode="form.gpu_mode"
-            v-model:gpu-devices="form.gpu_devices"
-            v-model:tensor-split="form.tensor_split"
-            @update:context-size="setContextSize"
-          />
-        </div>
+        <HardwarePlacementEditor
+          hide-placement-controls
+          :model-id="form.model_id"
+          :llama-options="form.options"
+          v-model:gpu-mode="form.gpu_mode"
+          v-model:gpu-devices="form.gpu_devices"
+          v-model:tensor-split="form.tensor_split"
+          @update:context-size="setContextSize"
+        />
       </Frame>
 
       <Frame id="instance-overrides" class="p-5 scroll-mt-4" data-testid="instance-form-overrides">
@@ -405,8 +404,3 @@ onMounted(() => {
     </UForm>
   </div>
 </template>
-
-<style scoped>
-.hardware-placement-core :deep(.space-y-4 > .grid.gap-4.md\:grid-cols-2) { display: none; }
-.hardware-placement-core :deep(.space-y-4 > .grid.gap-4.md\:grid-cols-2 + [role="alert"]) { display: none; }
-</style>

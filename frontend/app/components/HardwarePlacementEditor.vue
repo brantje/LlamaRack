@@ -53,6 +53,7 @@ const props = defineProps<{
   tensorSplit: string
   modelId?: string
   llamaOptions?: Record<string, string>
+  hidePlacementControls?: boolean
 }>()
 const emit = defineEmits<{
   'update:gpuMode': [value: string]
@@ -389,19 +390,21 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2">
-      <UFormField label="Placement mode" name="gpu_mode">
-        <USelectMenu :model-value="gpuMode" class="w-full" :items="modeItems" label-key="label" value-key="value" @update:model-value="emit('update:gpuMode', String($event || 'auto'))" />
-      </UFormField>
-      <UFormField v-if="gpuMode === 'manual'" label="GPU devices" name="gpu_devices" description="Choose the exact llama.cpp device set. Manual selection is never expanded automatically.">
-        <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="updateDevices" />
-      </UFormField>
-      <UFormField v-if="gpuMode === 'manual' && gpuDevices.length > 1" label="Tensor split" name="tensor_split" description="Optional comma-separated proportions. Leave empty to let llama.cpp choose across the selected devices.">
-        <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
-      </UFormField>
-    </div>
-    <div v-if="gpuMode === 'auto'" class="border border-[var(--color-divider)] p-3">
-      <div class="flex items-start gap-2"><StatusTag variant="pending">Single-GPU first</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">At launch the manager reads fresh VRAM state, binds one adequate GPU when possible, and only then considers multi-GPU placement and eligible resource-pressure eviction.</p></div>
-    </div>
+    <template v-if="!hidePlacementControls">
+      <div class="grid gap-4 md:grid-cols-2">
+        <UFormField label="Placement mode" name="gpu_mode">
+          <USelectMenu :model-value="gpuMode" class="w-full" :items="modeItems" label-key="label" value-key="value" @update:model-value="emit('update:gpuMode', String($event || 'auto'))" />
+        </UFormField>
+        <UFormField v-if="gpuMode === 'manual'" label="GPU devices" name="gpu_devices" description="Choose the exact llama.cpp device set. Manual selection is never expanded automatically.">
+          <USelectMenu :model-value="gpuDevices" class="w-full" :items="deviceItems" label-key="label" value-key="value" multiple @update:model-value="updateDevices" />
+        </UFormField>
+        <UFormField v-if="gpuMode === 'manual' && gpuDevices.length > 1" label="Tensor split" name="tensor_split" description="Optional comma-separated proportions. Leave empty to let llama.cpp choose across the selected devices.">
+          <UInput :model-value="tensorSplit" class="w-full font-mono" placeholder="3,1" @update:model-value="emit('update:tensorSplit', String($event || ''))" />
+        </UFormField>
+      </div>
+      <div v-if="gpuMode === 'auto'" class="border border-[var(--color-divider)] p-3">
+        <div class="flex items-start gap-2"><StatusTag variant="pending">Single-GPU first</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">At launch the manager reads fresh VRAM state, binds one adequate GPU when possible, and only then considers multi-GPU placement and eligible resource-pressure eviction.</p></div>
+      </div>
+    </template>
   </div>
 </template>
