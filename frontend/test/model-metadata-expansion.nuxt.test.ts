@@ -135,7 +135,7 @@ describe('Model metadata lazy expansion', () => {
     await wrapper.get('[data-testid="metadata-expand"]').trigger('click')
     await flushPromises()
 
-    expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain('151,936')
+    expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain((151936).toLocaleString())
     expect(document.body.querySelector('[data-testid="metadata-expanded-count"]')?.textContent).toContain('truncated')
     expect(modalButton('Next')?.disabled).toBe(true)
     wrapper.unmount()

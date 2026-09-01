@@ -217,11 +217,10 @@ describe('Downloads live-event and formatting branches', () => {
     const jobRows = wrapper.findAll('[data-testid="download-job"]')
     const overCard = jobRows.find(row => row.text().includes('over.gguf'))!
     const filesToggle = overCard.findAll('button').find(button => button.text().includes('1 file'))
-    if (filesToggle) {
-      await filesToggle.trigger('click')
-      await flushPromises()
-      expect(overCard.text()).toContain('local/model.gguf')
-    }
+    expect(filesToggle).toBeTruthy()
+    await filesToggle!.trigger('click')
+    await flushPromises()
+    expect(overCard.text()).toContain('local/model.gguf')
     const card = jobRows.find(row => row.text().includes('cancelled.gguf'))!
     const retry = card.findAll('button').find(button => button.text() === 'Retry')!
     await retry.trigger('click'); await flushPromises()
@@ -274,7 +273,8 @@ describe('Downloads live-event and formatting branches', () => {
     const pending = await mountSuspended(DownloadsPage, { route: false })
     await flushPromises()
     pending.unmount()
-    resolveTicket?.({ ticket: 'late-ticket' })
+    expect(resolveTicket).toEqual(expect.any(Function))
+    resolveTicket!({ ticket: 'late-ticket' })
     await flushPromises()
     expect(FakeWebSocket.instances).toHaveLength(0)
   })

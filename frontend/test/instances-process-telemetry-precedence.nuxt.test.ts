@@ -90,6 +90,7 @@ describe('Instances process telemetry precedence', () => {
     expect(readyRow.text()).toContain('3.0 GiB')
     expect(readyRow.text()).not.toContain('91%')
     expect(readyRow.text()).not.toContain('12 GiB')
+    expect(readyRow.text()).not.toContain('12.0 GiB')
     expect(readyRow.text()).not.toContain('global')
   })
 })

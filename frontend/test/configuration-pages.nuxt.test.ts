@@ -82,7 +82,7 @@ function inputWithValue(wrapper: any, value: string) {
   return control
 }
 async function selectRegisteredModel(wrapper: any, value: string) {
-  await wrapper.get(`input[type="radio"][value="${value}"]`).trigger('change')
+  await wrapper.get(`input[type="radio"][value="${value}"]`).setValue(true)
   await flushPromises()
 }
 
