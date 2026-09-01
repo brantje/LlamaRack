@@ -97,7 +97,9 @@ jobs:
 
       - name: Build manager backend
         working-directory: backend
-        run: go build -mod=mod -o ../artifacts/bin/llamacpp-manager ./cmd/llamacpp-manager
+        run: |
+          mkdir -p ../artifacts/bin
+          go build -mod=mod -o ../artifacts/bin/llamacpp-manager ./cmd/llamacpp-manager
 
       - name: Install pinned fake-nvidia release
         shell: bash
