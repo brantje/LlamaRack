@@ -340,7 +340,7 @@ onBeforeUnmount(() => {
       description="How much text the model can keep in memory at once."
     >
       <div class="mb-2 flex flex-wrap justify-between gap-2 text-xs text-muted">
-        <span>Selected: <strong class="font-mono tabular-nums">{{ contextSize.toLocaleString() }}</strong> tokens</span>
+        <span>Selected: <strong class="font-mono tabular-nums">{{ contextSize.toLocaleString() }}</strong> tokens · {{ contextSource }}</span>
         <span v-if="contextCapability">Model capability: <strong class="font-mono tabular-nums">{{ contextCapability.toLocaleString() }}</strong> tokens</span>
       </div>
       <USlider
