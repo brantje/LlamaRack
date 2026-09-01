@@ -105,6 +105,21 @@ describe('Request logs', () => {
     expect(mocks.request.mock.calls.some(call => String(call[0]).includes('/api/v1/observability/requests/lcm_abc123'))).toBe(true)
   })
 
+  it('opens request details once when the Request ID is clicked', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/v1/observability/requests?')) return { items: [request], limit: 25, offset: 0, has_more: false }
+      if (path === '/api/v1/observability/requests/lcm_abc123') return request
+      return {}
+    })
+    const wrapper = await mountSuspended(LogsPage, { route: '/logs' })
+    await flushPromises()
+    await wrapper.get('[data-testid="request-detail-trigger"]').trigger('click')
+    await flushPromises()
+    const detailCalls = mocks.request.mock.calls.filter(call => String(call[0]) === '/api/v1/observability/requests/lcm_abc123')
+    expect(detailCalls).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('uses the trace query as a server filter and supports clearing it', async () => {
     mocks.request.mockResolvedValue({ items: [request], limit: 25, offset: 0, has_more: false })
     const wrapper = await mountSuspended(LogsPage, { route: `/logs?trace_id=${traceID}` })

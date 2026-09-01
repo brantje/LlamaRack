@@ -474,7 +474,7 @@ watch(liveRequestFingerprint, (next, previous) => {
           <template #prompt_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatRate(row.original.prompt_tokens_per_second) }}</span></template>
           <template #generation_tokens_per_second-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatRate(row.original.generation_tokens_per_second) }}</span></template>
           <template #call_type-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ callTypeLabel(row.original.call_type) }}</span></template>
-          <template #request_id-cell="{ row }"><AppButton v-if="row.original.request_id" data-testid="request-detail-trigger" intent="ghost" size="xs" class="font-mono" @click="openRequest(row.original)">{{ shortID(row.original.request_id, 20) }}</AppButton><span v-else>—</span></template>
+          <template #request_id-cell="{ row }"><AppButton v-if="row.original.request_id" data-testid="request-detail-trigger" intent="ghost" size="xs" class="font-mono" @click.stop="openRequest(row.original)">{{ shortID(row.original.request_id, 20) }}</AppButton><span v-else>—</span></template>
           <template #session_id-cell="{ row }"><span v-if="row.original.session_id" class="font-mono text-xs text-[var(--neutral-800)]">{{ shortID(row.original.session_id) }}</span><span v-else>—</span></template>
           <template #endpoint-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.endpoint }}</span></template>
         </UTable>
