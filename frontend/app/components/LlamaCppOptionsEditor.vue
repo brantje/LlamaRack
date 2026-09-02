@@ -45,7 +45,7 @@ const legacyProtectedKeys = new Set([
   'api-key', 'api-key-file'
 ])
 const basicKeys = new Set([
-  'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
+  'ctx-size', 'n-gpu-layers', 'gpu-layers', 'n-cpu-moe', 'cpu-moe', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
   'parallel', 'flash-attn', 'jinja', 'reasoning-format', 'reasoning-budget', 'embeddings', 'reranking',
   'cache-type-k', 'cache-type-v', 'kv-unified', 'spec-type', 'spec-draft-model', 'mmproj', 'draft-max', 'draft-min', 'tensor-split'
 ])
