@@ -86,40 +86,45 @@ func TestAdminUserAndSessionServiceEdges(t *testing.T) {
 func TestAPIKeyServiceEdges(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if _, err := s.Bootstrap(ctx, "admin", "correct-horse-battery"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.AuthenticateAPIKey(ctx, ""); err == nil || err.Error() != "missing api key" {
-		t.Fatalf("missing key error=%v", err)
-	}
-	if err := s.AuthenticateAPIKey(ctx, "definitely-invalid"); err == nil || err.Error() != "invalid api key" {
-		t.Fatalf("invalid key error=%v", err)
-	}
-	if err := s.RevokeAPIKey(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("missing revoke error=%v", err)
-	}
-	if _, _, err := s.RotateAPIKey(ctx, "missing", 0); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("missing rotate error=%v", err)
-	}
-
-	key, secret, err := s.CreateAPIKeyForUser(ctx, "no-creator", 0)
+	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key.CreatedByUserID != nil {
+
+	if err := s.AuthenticateAPIKey(ctx, ""); !errors.Is(err, ErrAPIKeyMissing) {
+		t.Fatalf("missing key error=%v", err)
+	}
+	if err := s.AuthenticateAPIKey(ctx, "definitely-invalid"); !errors.Is(err, ErrAPIKeyInvalid) {
+		t.Fatalf("invalid key error=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, "missing", UpdateAPIKeyInput{}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing update error=%v", err)
+	}
+	if _, _, err := s.RotateAPIKey(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing rotate error=%v", err)
+	}
+
+	if _, _, err := s.CreateAPIKeyForUser(ctx, "no-creator", 0); !errors.Is(err, ErrAPIKeyOwnerRequired) {
+		t.Fatalf("missing owner error=%v", err)
+	}
+	key, secret, err := s.CreateAPIKeyForUser(ctx, "owned", admin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.CreatedByUserID == nil || *key.CreatedByUserID != admin.ID {
 		t.Fatalf("unexpected creator: %+v", key.CreatedByUserID)
 	}
 	if err := s.AuthenticateAPIKey(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeAPIKey(ctx, key.ID); err != nil {
+	if err := s.SetAPIKeyEnabled(ctx, key.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetAPIKeyEnabled(ctx, key.ID, true); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("revoked key re-enable error=%v", err)
+	if err := s.AuthenticateAPIKey(ctx, secret); err == nil {
+		t.Fatal("disabled key should fail")
 	}
-	if _, _, err := s.RotateAPIKey(ctx, key.ID, 0); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("revoked rotate error=%v", err)
+	rotated, rotatedSecret, err := s.RotateAPIKey(ctx, key.ID)
+	if err != nil || rotated.ID != key.ID || rotatedSecret == secret {
+		t.Fatalf("rotate disabled key: %+v err=%v", rotated, err)
 	}
 }

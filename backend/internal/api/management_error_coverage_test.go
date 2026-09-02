@@ -63,7 +63,9 @@ func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
 		return base
 	}
 
-	w := request(http.MethodGet, "/api/v1/users", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.users(w, r, actor) })
+	w := request(http.MethodGet, "/api/v1/users", nil, func(w *httptest.ResponseRecorder, r *http.Request) {
+		h.users(w, r, managementAuthContext{User: &actor})
+	})
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("users status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -73,17 +75,23 @@ func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
 		t.Fatalf("sessions status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	w = request(http.MethodDelete, "/api/v1/sessions/session", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.sessionRoute(w, r, actor, "session") })
+	w = request(http.MethodDelete, "/api/v1/sessions/session", nil, func(w *httptest.ResponseRecorder, r *http.Request) {
+		h.sessionRoute(w, r, managementAuthContext{User: &actor}, "session")
+	})
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("revoke status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	w = request(http.MethodGet, "/api/v1/settings/general", nil, func(w *httptest.ResponseRecorder, r *http.Request) { h.generalSettings(w, r, actor) })
+	w = request(http.MethodGet, "/api/v1/settings/general", nil, func(w *httptest.ResponseRecorder, r *http.Request) {
+		h.generalSettings(w, r, managementAuthContext{User: &actor})
+	})
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("settings get status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	w = request(http.MethodPut, "/api/v1/settings/general", map[string]any{"allowed_origins": "https://other.example.test"}, func(w *httptest.ResponseRecorder, r *http.Request) { h.generalSettings(w, r, actor) })
+	w = request(http.MethodPut, "/api/v1/settings/general", map[string]any{"allowed_origins": "https://other.example.test"}, func(w *httptest.ResponseRecorder, r *http.Request) {
+		h.generalSettings(w, r, managementAuthContext{User: &actor})
+	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("settings put status=%d body=%s", w.Code, w.Body.String())
 	}
@@ -98,7 +106,9 @@ func TestAdminManagementClosedDatabaseErrorPaths(t *testing.T) {
 		t.Fatalf("system status=%d body=%s", w.Code, w.Body.String())
 	}
 
-	w = request(http.MethodPatch, "/api/v1/users/1", map[string]any{"enabled": false}, func(w *httptest.ResponseRecorder, r *http.Request) { h.userRoute(w, r, actor, auth.Session{}, "1") })
+	w = request(http.MethodPatch, "/api/v1/users/1", map[string]any{"enabled": false}, func(w *httptest.ResponseRecorder, r *http.Request) {
+		h.userRoute(w, r, managementAuthContext{User: &actor}, auth.Session{}, "1")
+	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("user mutation status=%d body=%s", w.Code, w.Body.String())
 	}

@@ -19,6 +19,8 @@ func TestRuntimeOpenAPIDocumentCoversCorePublicRoutes(t *testing.T) {
 		{http.MethodGet, "/api/v1/observability/requests/{request_id}"},
 		{http.MethodPost, "/api/v1/auth/login"},
 		{http.MethodPost, "/api/v1/api-keys/{id}/rotate"},
+		{http.MethodGet, "/api/v1/admin/service-accounts"},
+		{http.MethodPost, "/api/v1/admin/service-accounts"},
 		{http.MethodPost, "/v1/chat/completions"},
 		{http.MethodPost, "/v1/completions"},
 		{http.MethodPost, "/v1/responses"},
@@ -138,5 +140,9 @@ func TestInferenceOpenAPIDocumentsNewSurface(t *testing.T) {
 	create := doc.Paths["/v1/responses"]["post"]
 	if !strings.Contains(create.Description, "previous_response_id") {
 		t.Fatalf("missing previous_response_id note: %s", create.Description)
+	}
+	sa := doc.Paths["/api/v1/admin/service-accounts"]["get"]
+	if !strings.Contains(sa.Summary, "Full Access key") || !strings.Contains(sa.Description, "any owner") {
+		t.Fatalf("service-account OpenAPI must allow Full Access keys: %+v", sa)
 	}
 }

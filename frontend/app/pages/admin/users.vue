@@ -131,7 +131,7 @@ async function submitReset() {
       <div v-if="!users.length" class="px-4 py-8 text-center text-sm text-[var(--neutral-700)]">No users</div>
     </Frame>
 
-    <p class="mt-4 text-xs leading-5 text-[var(--neutral-700)]">Accounts are equivalent local management users. Inference API keys are managed separately under <NuxtLink to="/api" class="font-semibold text-[var(--accent-700)] hover:underline">API</NuxtLink> and are not owned by a user.</p>
+    <p class="mt-4 text-xs leading-5 text-[var(--neutral-700)]">Accounts are equivalent local management users. API keys are owned by a user or service account and are managed under <NuxtLink to="/api" class="font-semibold text-[var(--accent-700)] hover:underline">API</NuxtLink>.</p>
 
     <UModal v-model:open="createOpen" title="Add user">
       <template #body>

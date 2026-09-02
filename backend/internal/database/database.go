@@ -54,18 +54,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
-CREATE TABLE IF NOT EXISTS api_keys (
+CREATE TABLE IF NOT EXISTS service_accounts (
  id TEXT PRIMARY KEY,
  name TEXT NOT NULL,
- prefix TEXT NOT NULL,
- token_hash TEXT NOT NULL UNIQUE,
  enabled INTEGER NOT NULL DEFAULT 1,
- created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
- last_used_at INTEGER,
- revoked_at INTEGER
+ created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
-CREATE INDEX IF NOT EXISTS api_keys_token_hash_idx ON api_keys(token_hash);
 CREATE TABLE IF NOT EXISTS manager_settings (
  setting_key TEXT PRIMARY KEY,
  setting_value TEXT NOT NULL,
@@ -284,7 +279,72 @@ CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(ins
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return err
 	}
+	if err := ensureAPIKeysSchema(ctx, db); err != nil {
+		return err
+	}
 	return ensureInstanceColumns(ctx, db)
+}
+
+func ensureAPIKeysSchema(ctx context.Context, db *sql.DB) error {
+	var tableName sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name='api_keys'`).Scan(&tableName); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if tableName.Valid {
+		hasKeyType, err := tableHasColumn(ctx, db, "api_keys", "key_type")
+		if err != nil {
+			return err
+		}
+		if !hasKeyType {
+			if _, err := db.ExecContext(ctx, `DROP TABLE api_keys`); err != nil {
+				return err
+			}
+		}
+	}
+	const schema = `
+CREATE TABLE IF NOT EXISTS api_keys (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ prefix TEXT NOT NULL,
+ token_hash TEXT NOT NULL UNIQUE,
+ key_type TEXT NOT NULL CHECK(key_type IN ('inference','management','full')),
+ owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+ owner_service_account_id TEXT REFERENCES service_accounts(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL DEFAULT 1,
+ expires_on TEXT,
+ instance_ids TEXT NOT NULL DEFAULT '[]',
+ created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+ created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+ last_used_at INTEGER,
+ CHECK (
+  (owner_user_id IS NOT NULL AND owner_service_account_id IS NULL)
+  OR (owner_user_id IS NULL AND owner_service_account_id IS NOT NULL)
+ )
+);
+CREATE INDEX IF NOT EXISTS api_keys_token_hash_idx ON api_keys(token_hash);
+`
+	_, err := db.ExecContext(ctx, schema)
+	return err
+}
+
+func tableHasColumn(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
 }
 
 func ensureInstanceColumns(ctx context.Context, db *sql.DB) error {

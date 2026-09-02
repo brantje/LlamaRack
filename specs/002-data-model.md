@@ -45,13 +45,21 @@ A production/release migration policy can be introduced before schema backward c
 
 ## 4. Core entities
 
-### 4.1 User / Session / API Key / Secret
+### 4.1 User / Session / Service account / API Key / Secret
 
-These retain the existing v1 security model:
+These retain the existing v1 security model with typed owner-bound keys:
 
 - local management users;
 - server-side sessions;
-- hashed inference API keys;
+- service accounts (name, enabled, created_at, optional created_by_user_id);
+- hashed API keys (`sk-` secrets) with:
+  - `key_type` of `inference`, `management`, or `full`;
+  - exactly one owner (`owner_user_id` or `owner_service_account_id`);
+  - optional `expires_on` (`YYYY-MM-DD`, valid through end of that UTC day);
+  - optional inference `instance_ids` allowlist;
+  - `enabled`, `prefix`, `last_used_at`;
+  - no `revoked_at`; rotate replaces `token_hash` and `prefix` in place;
+- deleting a user or service account cascades and deletes that owner's keys;
 - encrypted provider secrets;
 - no management RBAC in v1.
 

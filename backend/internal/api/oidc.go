@@ -55,7 +55,7 @@ func (h *oidcHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v1/admin/auth/identities/"):
 		h.identity(w, r, strings.TrimPrefix(path, "/api/v1/admin/auth/identities/"))
 	case path == "/api/v1/me/identities" && r.Method == http.MethodGet:
-		user, _, ok := managementAuthFromRequest(r)
+		user, _, ok := managementUserFromRequest(r)
 		if !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
@@ -279,7 +279,7 @@ func (h *oidcHandler) exchange(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *oidcHandler) wsTicket(w http.ResponseWriter, r *http.Request) {
-	_, session, ok := managementAuthFromRequest(r)
+	_, session, ok := managementUserFromRequest(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
@@ -451,7 +451,7 @@ func (h *oidcHandler) unlinkOwnIdentity(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	user, _, ok := managementAuthFromRequest(r)
+	user, _, ok := managementUserFromRequest(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return

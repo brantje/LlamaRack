@@ -111,7 +111,7 @@ func (h *llamaConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func requireAuthenticatedUser(a *auth.Service, w http.ResponseWriter, r *http.Request) bool {
-	if _, _, ok := managementAuthFromRequest(r); ok {
+	if _, ok := managementAuthFromRequest(r); ok {
 		return true
 	}
 	if token := bearerToken(r.Header.Get("Authorization")); token != "" {

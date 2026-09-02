@@ -99,7 +99,34 @@ export type ObservabilityRequest = {
   response_body?: string
 }
 export type ObservabilityLive = { collected_at: string; hardware: HardwareSnapshot; telemetry: RuntimeTelemetry[]; gateway: GatewaySummary; requests: ObservabilityRequest[] }
-export type APIKey = { id: string; name: string; prefix: string; enabled: boolean; created_at: number; last_used_at?: number }
+export type APIKeyType = 'inference' | 'management' | 'full'
+export type APIKeyOwnerKind = 'user' | 'service_account'
+export type APIKey = {
+  id: string
+  name: string
+  prefix: string
+  enabled: boolean
+  key_type: APIKeyType
+  owner_kind: APIKeyOwnerKind
+  owner_id: string | number
+  owner_name: string
+  owner_enabled: boolean
+  status?: 'enabled' | 'disabled' | 'owner_disabled' | 'expired' | string
+  instance_ids?: string[]
+  missing_instance_ids?: string[]
+  expires_on?: string | null
+  created_at: number
+  last_used_at?: number
+  created_by_user_id?: number
+}
+export type ServiceAccount = {
+  id: string
+  name: string
+  enabled: boolean
+  created_at: number
+  created_by_user_id?: number
+  keys?: APIKey[]
+}
 export type Profile = { path: string; version?: string; fingerprint: string; options: Array<{ key: string; value_hint?: string; description?: string; kind?: string; choices?: string[] }> }
 
 type RuntimeEvent = {

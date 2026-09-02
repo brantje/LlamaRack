@@ -2,7 +2,7 @@
 
 ## Status
 
-This specification defines the v1 management-plane authentication model. It covers local accounts, OpenID Connect (OIDC), manager-issued bearer JWTs, revocable sessions, external identities and inference API keys.
+This specification defines the v1 management-plane authentication model. It covers local accounts, OpenID Connect (OIDC), manager-issued bearer JWTs, revocable sessions, external identities, typed API keys, and service accounts.
 
 SAML and RBAC are explicitly out of scope for v1.
 
@@ -10,10 +10,26 @@ SAML and RBAC are explicitly out of scope for v1.
 
 LlamaRack has two independent credential domains:
 
-- **Management plane** — the Nuxt UI and `/api/v1/*` use manager-issued JWT bearer credentials backed by server-side sessions.
-- **Inference plane** — `/v1/*` uses inference API keys.
+- **Management JWT** — the Nuxt UI uses manager-issued JWT bearer credentials backed by server-side sessions. JWTs authenticate `/api/v1/*` including `/me`, WebSocket tickets, Playground, and service-account administration. A management JWT MUST NOT authenticate `/v1/*`.
+- **API keys** — `sk-` secrets owned by a user or a service account. Tokens that do not start with `sk-` are not API keys. Invalid, expired, disabled, or owner-disabled keys return 401.
 
-A management JWT MUST NOT authenticate inference requests. An inference API key MUST NOT authenticate management requests. OIDC provider tokens are never management API credentials; successful OIDC authentication always terminates in the same manager session/JWT model used by local login.
+Typed API key access:
+
+- **Inference** — `/v1/*` only, with an optional instance allowlist. **403** on all `/api/v1/*`.
+- **Management** — `/api/v1/*` except session/Playground routes and except `/api/v1/admin/service-accounts` including `/{id}`. **403** on `/v1/*`.
+- **Full Access** — `/v1/*` with no instance allowlist, and `/api/v1/*` except session/Playground routes. Full Access keys of any owner, including service-account-owned keys, can CRUD `/api/v1/admin/service-accounts`.
+
+JWT users and Full Access API keys can administer service accounts. Management and inference keys cannot.
+
+Session-bound denylist for any API key (403): `/api/v1/me`, `/api/v1/me/*`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/ws-ticket`, ticket streams, `/api/v1/playground/*`. Playground trusted-inference bypass stays JWT-only.
+
+OIDC provider tokens are never management API credentials; successful OIDC authentication always terminates in the same manager session/JWT model used by local login.
+
+API key secrets are `sk-` plus base64url(32 random bytes). The stored prefix is `sk-` plus the first eight characters of the random part. Rotate replaces `token_hash` and `prefix` in place (same `id`); there is no revoke/delete. `expires_on` is `YYYY-MM-DD` and is valid through the end of that UTC day. `last_used_at` updates on any successful authentication. Deleting a user or service account cascades and deletes that owner's keys.
+
+Management requests authenticated by an API key carry an API-key principal. They MUST NOT invent a synthetic `User`. Lifecycle actor logs use `user.Username` or `api_key:<id>`. `created_by_user_id` is set only for JWT creates.
+
+Wrong plane, allowlist miss, all-stale allowlist, session/Playground denylist, and service-account admin blocks return **403**. Invalid/expired/disabled keys return **401**.
 
 ## Management JWTs
 
@@ -174,6 +190,8 @@ Bearer-protected endpoints include:
 - `/api/v1/admin/auth/settings`
 - `/api/v1/admin/auth/providers` and provider CRUD/test routes
 - `/api/v1/admin/auth/identities` and unlink routes
+- `/api/v1/api-keys` (JWT or management/full API key; no GET by id; PATCH 204; in-place rotate; no revoke)
+- `/api/v1/admin/service-accounts` (management JWT or Full Access API key, any owner; management and inference keys receive 403)
 - all other protected management APIs.
 
 The v1 product intentionally remains flat-authorized: no roles, group mapping or provider-driven permission mapping are introduced by OIDC.

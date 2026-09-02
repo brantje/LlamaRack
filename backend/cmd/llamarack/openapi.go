@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"runtime/debug"
+	"strings"
 
 	manageropenapi "github.com/brantje/llamarack/backend/internal/openapi"
 )
@@ -56,12 +57,15 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		{http.MethodPut, "/api/v1/settings/general", "updateGeneralSettings", "Update manager settings", "Administration", true, true, "200"},
 		{http.MethodGet, "/api/v1/system", "getSystemDiagnostics", "Get safe system diagnostics", "Administration", true, false, "200"},
 		{http.MethodGet, "/api/v1/admin/summary", "getAdminSummary", "Get administration summary", "Administration", true, false, "200"},
-		{http.MethodGet, "/api/v1/api-keys", "listAPIKeys", "List inference API keys", "API Keys", true, false, "200"},
-		{http.MethodPost, "/api/v1/api-keys", "createAPIKey", "Create an inference API key", "API Keys", true, true, "201"},
-		{http.MethodPatch, "/api/v1/api-keys/{id}", "updateAPIKey", "Enable or disable an inference API key", "API Keys", true, true, "204"},
-		{http.MethodDelete, "/api/v1/api-keys/{id}", "deleteAPIKey", "Revoke an inference API key", "API Keys", true, false, "204"},
-		{http.MethodPost, "/api/v1/api-keys/{id}/revoke", "revokeAPIKey", "Revoke an inference API key", "API Keys", true, false, "204"},
-		{http.MethodPost, "/api/v1/api-keys/{id}/rotate", "rotateAPIKey", "Rotate an inference API key", "API Keys", true, false, "201"},
+		{http.MethodGet, "/api/v1/api-keys", "listAPIKeys", "List API keys", "API Keys", true, false, "200"},
+		{http.MethodPost, "/api/v1/api-keys", "createAPIKey", "Create an API key", "API Keys", true, true, "201"},
+		{http.MethodPatch, "/api/v1/api-keys/{id}", "updateAPIKey", "Update an API key", "API Keys", true, true, "204"},
+		{http.MethodPost, "/api/v1/api-keys/{id}/rotate", "rotateAPIKey", "Rotate an API key secret in place", "API Keys", true, false, "200"},
+		{http.MethodGet, "/api/v1/admin/service-accounts", "listServiceAccounts", "List service accounts (JWT or Full Access key)", "Service Accounts", true, false, "200"},
+		{http.MethodPost, "/api/v1/admin/service-accounts", "createServiceAccount", "Create a service account (JWT or Full Access key)", "Service Accounts", true, true, "201"},
+		{http.MethodGet, "/api/v1/admin/service-accounts/{id}", "getServiceAccount", "Get a service account and its keys (JWT or Full Access key)", "Service Accounts", true, false, "200"},
+		{http.MethodPatch, "/api/v1/admin/service-accounts/{id}", "updateServiceAccount", "Update a service account (JWT or Full Access key)", "Service Accounts", true, true, "204"},
+		{http.MethodDelete, "/api/v1/admin/service-accounts/{id}", "deleteServiceAccount", "Delete a service account and its keys (JWT or Full Access key)", "Service Accounts", true, false, "204"},
 		{http.MethodGet, "/api/v1/models", "listModels", "List registered models", "Models", true, false, "200"},
 		{http.MethodPost, "/api/v1/models", "createModel", "Register a model", "Models", true, true, "201"},
 		{http.MethodGet, "/api/v1/models/available", "listAvailableModels", "List available GGUF files", "Models", true, false, "200"},
@@ -133,6 +137,7 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		if route.security {
 			op.Security = []map[string][]string{{"managementBearer": {}}}
 			responses["401"] = manageropenapi.ErrorResponse("Authentication required")
+			responses["403"] = manageropenapi.ErrorResponse("This credential cannot access this endpoint")
 		}
 		if route.requestBody {
 			op.RequestBody = manageropenapi.JSONBody(manageropenapi.ObjectSchema(), true)
@@ -142,6 +147,9 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		}
 		if containsPathParameter(route.path, "request_id") {
 			op.Parameters = append(op.Parameters, pathParameter("request_id", "Stable X-LlamaRack-Request-ID correlation identifier"))
+		}
+		if strings.HasPrefix(route.path, "/api/v1/admin/service-accounts") {
+			op.Description = "Service-account administration is allowed for a management JWT or a Full Access API key (any owner, including service-account-owned). Management and inference keys receive 403."
 		}
 		if route.path == "/api/v1/instances/{id}/logs/stream" {
 			op.Description = "Server-sent event stream. OpenAPI describes the handshake; the response remains streaming and is flushed incrementally."
@@ -165,6 +173,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("OpenAI-compatible model list", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 		},
 	})
 	doc.MustRegister(http.MethodGet, "/v1/models/{model}", manageropenapi.Operation{
@@ -176,6 +185,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("OpenAI-compatible model object", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Unknown or disabled model"),
 		},
 	})
@@ -202,6 +212,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 				}},
 				"400": manageropenapi.ErrorResponse("Invalid request"),
 				"401": manageropenapi.ErrorResponse("Invalid API key"),
+				"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 				"503": {Description: "Model or worker unavailable, or pending-request admission limit exceeded", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
 			},
 		})
@@ -220,6 +231,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			}},
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"503": {Description: "Model or worker unavailable, or pending-request admission limit exceeded", Headers: preResponseMetricHeaders(), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.Schema{Ref: "#/components/schemas/Error"}}}},
 		},
 	})
@@ -233,6 +245,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("Stored Response JSON", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Response not found"),
 		},
 	})
@@ -246,6 +259,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("Deletion acknowledgement", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Response not found"),
 		},
 	})
@@ -263,6 +277,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("Input item list", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Response not found"),
 		},
 	})
@@ -276,6 +291,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"200": manageropenapi.JSONResponse("Cancelled or current Response", manageropenapi.ObjectSchema()),
 			"400": manageropenapi.ErrorResponse("Response is not cancellable"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Response not found"),
 		},
 	})
@@ -290,6 +306,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"200": {Description: "Token count", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
 			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
@@ -305,6 +322,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"200": manageropenapi.JSONResponse("Transcription", manageropenapi.ObjectSchema()),
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"413": manageropenapi.ErrorResponse("Request body is too large"),
 			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
@@ -320,6 +338,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			"200": {Description: "Token count", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
 			"400": manageropenapi.ErrorResponse("Invalid request"),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
 			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
@@ -334,6 +353,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 		Responses: map[string]manageropenapi.Response{
 			"200": manageropenapi.JSONResponse("Control result", manageropenapi.ObjectSchema()),
 			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 			"404": manageropenapi.ErrorResponse("Unknown in-flight completion"),
 			"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 		},
@@ -353,6 +373,7 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 				"200": {Description: "Rerank result", Headers: managerMetricHeaders(true), Content: map[string]manageropenapi.MediaType{"application/json": {Schema: manageropenapi.ObjectSchema()}}},
 				"400": manageropenapi.ErrorResponse("Invalid request"),
 				"401": manageropenapi.ErrorResponse("Invalid API key"),
+				"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
 				"503": manageropenapi.ErrorResponse("Model or worker unavailable, or pending-request admission limit exceeded"),
 			},
 		})

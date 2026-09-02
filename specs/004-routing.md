@@ -66,12 +66,13 @@ Those behaviors require a future explicit routing layer and must not be implied 
 
 For every inference endpoint that includes `model`:
 
-1. authenticate inference API key;
-2. parse the `model` value;
-3. look up the exact `instance.id`;
-4. validate that the referenced Model/artifact/configuration can serve the requested endpoint where known;
-5. evaluate Instance availability;
-6. proxy only to that Instance's worker.
+1. authenticate a typed API key (`sk-`); management keys receive 403; JWTs are not inference credentials;
+2. enforce the inference instance allowlist when the key is inference-typed;
+3. parse the `model` value;
+4. look up the exact `instance.id`;
+5. validate that the referenced Model/artifact/configuration can serve the requested endpoint where known;
+6. evaluate Instance availability;
+7. proxy only to that Instance's worker.
 
 If no matching Instance exists, return model-not-found.
 
@@ -80,6 +81,8 @@ A matching registered Model name does not count as an inference target unless it
 ## 6. `/v1/models`
 
 The gateway generates `/v1/models` from configured addressable Instances.
+
+Inference keys with a non-empty instance allowlist see only those still-existing enabled Instances. An empty allowlist means all enabled Instances. If every allowlisted ID is missing, the gateway returns 403. Full Access keys are not allowlisted.
 
 Requirements:
 
@@ -97,7 +100,7 @@ Registered Models are listed through `/api/v1/models` and the Models UI, not as 
 HTTP /v1 request
       |
       v
-Authenticate API key
+Authenticate API key (`sk-`; reject management keys; apply inference allowlist)
       |
       v
 Read model=<instance.id>

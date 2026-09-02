@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -169,6 +170,8 @@ type gatewayFixture struct {
 	gateway       *Gateway
 	lifecycle     *lifecycle.Service
 	secret        string
+	ownerID       int64
+	db            *sql.DB
 	sup           *supervisor.Supervisor
 	observability *observability.Service
 }
@@ -187,7 +190,11 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	a := auth.New(db, time.Hour)
-	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", 0)
+	user, err := a.Bootstrap(ctx, "admin", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +214,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	})
 	l := lifecycle.New(m, sup)
 	obs := observability.New(db)
-	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, sup: sup, observability: obs}
+	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, ownerID: user.ID, db: db, sup: sup, observability: obs}
 }
 
 func gatewayRequest(t *testing.T, g http.Handler, method, path, secret, body string) *httptest.ResponseRecorder {
@@ -406,7 +413,11 @@ func TestListModelsDatabaseError(t *testing.T) {
 	}
 	defer authDB.Close()
 	a := auth.New(authDB, time.Hour)
-	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", 0)
+	user, err := a.Bootstrap(ctx, "admin", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

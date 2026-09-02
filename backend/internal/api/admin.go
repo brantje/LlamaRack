@@ -30,22 +30,43 @@ func NewAdminHandler(a *auth.Service, managerSettings *settings.Service, secrets
 }
 
 func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	user, session, ok := h.current(r)
+	principal, ok := h.current(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
+	user, session, hasUser := principal.UserSession()
 	switch {
 	case path == "/api/v1/me" && r.Method == http.MethodGet:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		writeJSON(w, http.StatusOK, user)
 	case path == "/api/v1/me/password" && r.Method == http.MethodPost:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		h.changePassword(w, r, user, session)
 	case path == "/api/v1/me/sessions" && r.Method == http.MethodGet:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		h.listSessions(w, r, user.ID, session.ID)
 	case strings.HasPrefix(path, "/api/v1/me/sessions/") && r.Method == http.MethodDelete:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		h.revokeOwnSession(w, r, user, strings.TrimPrefix(path, "/api/v1/me/sessions/"))
 	case path == "/api/v1/me/sessions/revoke-others" && r.Method == http.MethodPost:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		count, err := h.auth.RevokeOtherSessions(r.Context(), user.ID, session.ID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -54,6 +75,10 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Info("security event", "event", "session.all_revoked", "user_id", user.ID, "except_current", true, "count", count)
 		writeJSON(w, http.StatusOK, map[string]int64{"revoked": count})
 	case path == "/api/v1/me/sessions/revoke-all" && r.Method == http.MethodPost:
+		if !hasUser {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+			return
+		}
 		count, err := h.auth.RevokeAllSessions(r.Context(), user.ID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -62,13 +87,13 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Info("security event", "event", "session.all_revoked", "user_id", user.ID, "except_current", false, "count", count)
 		w.WriteHeader(http.StatusNoContent)
 	case path == "/api/v1/users":
-		h.users(w, r, user)
+		h.users(w, r, principal)
 	case strings.HasPrefix(path, "/api/v1/users/"):
-		h.userRoute(w, r, user, session, strings.TrimPrefix(path, "/api/v1/users/"))
+		h.userRoute(w, r, principal, session, strings.TrimPrefix(path, "/api/v1/users/"))
 	case strings.HasPrefix(path, "/api/v1/sessions/"):
-		h.sessionRoute(w, r, user, strings.TrimPrefix(path, "/api/v1/sessions/"))
+		h.sessionRoute(w, r, principal, strings.TrimPrefix(path, "/api/v1/sessions/"))
 	case path == "/api/v1/settings/general":
-		h.generalSettings(w, r, user)
+		h.generalSettings(w, r, principal)
 	case path == "/api/v1/system" && r.Method == http.MethodGet:
 		h.system(w, r)
 	case path == "/api/v1/admin/summary" && r.Method == http.MethodGet:
@@ -78,19 +103,22 @@ func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *adminHandler) current(r *http.Request) (auth.User, auth.Session, bool) {
-	if user, session, ok := managementAuthFromRequest(r); ok {
-		return user, session, true
+func (h *adminHandler) current(r *http.Request) (managementAuthContext, bool) {
+	if principal, ok := managementAuthFromRequest(r); ok {
+		return principal, true
 	}
 	cookie := sessionCookieValue(r)
 	if cookie == "" {
-		return auth.User{}, auth.Session{}, false
+		return managementAuthContext{}, false
 	}
 	user, session, err := h.auth.SessionUserWithSession(r.Context(), cookie)
-	return user, session, err == nil
+	if err != nil {
+		return managementAuthContext{}, false
+	}
+	return managementAuthContext{User: &user, Session: &session}, true
 }
 
-func (h *adminHandler) users(w http.ResponseWriter, r *http.Request, actor auth.User) {
+func (h *adminHandler) users(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
 	switch r.Method {
 	case http.MethodGet:
 		users, err := h.auth.ListUsers(r.Context())
@@ -112,14 +140,14 @@ func (h *adminHandler) users(w http.ResponseWriter, r *http.Request, actor auth.
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		slog.Info("security event", "event", "user.created", "actor_user_id", actor.ID, "target_user_id", created.ID)
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "user.created", "target_user_id", created.ID)...)
 		writeJSON(w, http.StatusCreated, created)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, actor auth.User, currentSession auth.Session, rest string) {
+func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, principal managementAuthContext, currentSession auth.Session, rest string) {
 	parts := strings.Split(rest, "/")
 	id, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || id <= 0 {
@@ -147,14 +175,14 @@ func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, actor a
 			if *in.Enabled {
 				event = "user.enabled"
 			}
-			slog.Info("security event", "event", event, "actor_user_id", actor.ID, "target_user_id", id)
+			slog.Info("security event", append(actorLogAttrs(principal), "event", event, "target_user_id", id)...)
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodDelete:
-			if err := h.auth.DeleteUser(r.Context(), actor.ID, id); err != nil {
+			if err := h.auth.DeleteUser(r.Context(), principal.CreatedByUserID(), id); err != nil {
 				writeUserMutationError(w, err)
 				return
 			}
-			slog.Info("security event", "event", "user.deleted", "actor_user_id", actor.ID, "target_user_id", id)
+			slog.Info("security event", append(actorLogAttrs(principal), "event", "user.deleted", "target_user_id", id)...)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -181,7 +209,7 @@ func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, actor a
 			writeUserMutationError(w, err)
 			return
 		}
-		slog.Info("security event", "event", "user.password_reset", "actor_user_id", actor.ID, "target_user_id", id)
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "user.password_reset", "target_user_id", id)...)
 		w.WriteHeader(http.StatusNoContent)
 	case "sessions":
 		if r.Method != http.MethodGet {
@@ -189,7 +217,7 @@ func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, actor a
 			return
 		}
 		currentID := ""
-		if actor.ID == id {
+		if principal.User != nil && principal.User.ID == id {
 			currentID = currentSession.ID
 		}
 		h.listSessions(w, r, id, currentID)
@@ -232,7 +260,7 @@ func (h *adminHandler) listSessions(w http.ResponseWriter, r *http.Request, user
 	writeJSON(w, http.StatusOK, items)
 }
 
-func (h *adminHandler) sessionRoute(w http.ResponseWriter, r *http.Request, actor auth.User, id string) {
+func (h *adminHandler) sessionRoute(w http.ResponseWriter, r *http.Request, principal managementAuthContext, id string) {
 	if r.Method != http.MethodDelete || strings.Contains(id, "/") || id == "" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -245,7 +273,7 @@ func (h *adminHandler) sessionRoute(w http.ResponseWriter, r *http.Request, acto
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	slog.Info("security event", "event", "session.revoked", "actor_user_id", actor.ID, "session_id", id)
+	slog.Info("security event", append(actorLogAttrs(principal), "event", "session.revoked", "session_id", id)...)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -266,7 +294,7 @@ func (h *adminHandler) revokeOwnSession(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, actor auth.User) {
+func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
 	if r.Method == http.MethodGet {
 		general, err := h.settings.General(r.Context())
 		if err != nil {
@@ -352,7 +380,7 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, a
 				h.auth.SetSessionLifetime(time.Duration(seconds) * time.Second)
 			}
 		}
-		slog.Info("security event", "event", "settings.changed", "actor_user_id", actor.ID, "setting", key)
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", key)...)
 	}
 	general, err := h.settings.General(r.Context())
 	if err != nil {

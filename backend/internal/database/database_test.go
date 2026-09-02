@@ -38,7 +38,7 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"users", "sessions", "api_keys", "models", "model_options", "instances", "instance_options"} {
+	for _, table := range []string{"users", "sessions", "service_accounts", "api_keys", "models", "model_options", "instances", "instance_options"} {
 		var name string
 		if err := db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name); err != nil {
 			t.Fatalf("table %s missing: %v", table, err)
@@ -173,5 +173,72 @@ func TestOpenFailsWhenContextCanceledDuringPragma(t *testing.T) {
 	if db, err := Open(ctx, filepath.Join(t.TempDir(), "manager.db")); err == nil {
 		_ = db.Close()
 		t.Fatal("expected canceled context error")
+	}
+}
+
+func TestEnsureAPIKeysSchemaWipesLegacyTableWithoutKeyType(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-keys.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE api_keys (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		prefix TEXT NOT NULL,
+		token_hash TEXT NOT NULL UNIQUE,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at INTEGER NOT NULL,
+		revoked_at INTEGER
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,created_at) VALUES('legacy','Legacy','abcd','hash',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	opened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = opened.Close() })
+	if !hasColumn(t, ctx, opened, "api_keys", "key_type") {
+		t.Fatal("expected recreated api_keys.key_type")
+	}
+	if hasColumn(t, ctx, opened, "api_keys", "revoked_at") {
+		t.Fatal("legacy revoked_at must not survive wipe")
+	}
+	var count int
+	if err := opened.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("legacy secrets should be wiped, count=%d", count)
+	}
+}
+
+func TestEnsureAPIKeysSchemaKeepsTypedTable(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "typed-keys.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(username,password_hash) VALUES('admin','hash')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,key_type,owner_user_id) VALUES('keep','Keep','sk-abcd1234','hash','inference',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureAPIKeysSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	if err := db.QueryRowContext(ctx, "SELECT name FROM api_keys WHERE id='keep'").Scan(&name); err != nil || name != "Keep" {
+		t.Fatalf("typed key should remain: name=%q err=%v", name, err)
 	}
 }

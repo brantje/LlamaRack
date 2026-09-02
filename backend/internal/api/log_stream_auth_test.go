@@ -46,8 +46,8 @@ func TestManagementSecurityAuthenticatesBrowserStreamsWithOneTimeTicket(t *testi
 
 			mux := http.NewServeMux()
 			mux.HandleFunc(tc.path, func(w http.ResponseWriter, r *http.Request) {
-				user, authenticatedSession, ok := managementAuthFromRequest(r)
-				if !ok || user.ID != login.User.ID || authenticatedSession.ID != session.ID {
+				principal, ok := managementAuthFromRequest(r)
+				if !ok || principal.User == nil || principal.Session == nil || principal.User.ID != login.User.ID || principal.Session.ID != session.ID {
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "missing management auth context"})
 					return
 				}
