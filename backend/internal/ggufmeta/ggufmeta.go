@@ -32,14 +32,16 @@ type Entry struct {
 }
 
 type Derived struct {
-	Architecture  string `json:"architecture,omitempty"`
-	ContextLength int64  `json:"context_length,omitempty"`
-	BlockCount    int64  `json:"block_count,omitempty"`
-	Embedding     int64  `json:"embedding_length,omitempty"`
-	HeadCount     int64  `json:"head_count,omitempty"`
-	KVHeadCount   int64  `json:"kv_head_count,omitempty"`
-	KeyLength     int64  `json:"key_length,omitempty"`
-	ValueLength   int64  `json:"value_length,omitempty"`
+	Architecture    string `json:"architecture,omitempty"`
+	ContextLength   int64  `json:"context_length,omitempty"`
+	BlockCount      int64  `json:"block_count,omitempty"`
+	Embedding       int64  `json:"embedding_length,omitempty"`
+	HeadCount       int64  `json:"head_count,omitempty"`
+	KVHeadCount     int64  `json:"kv_head_count,omitempty"`
+	KeyLength       int64  `json:"key_length,omitempty"`
+	ValueLength     int64  `json:"value_length,omitempty"`
+	ExpertCount     int64  `json:"expert_count,omitempty"`
+	ExpertUsedCount int64  `json:"expert_used_count,omitempty"`
 }
 
 type Inspection struct {
@@ -490,6 +492,8 @@ func derive(values map[string]string) Derived {
 	d.KVHeadCount = exactInt(values, prefix+"attention.head_count_kv")
 	d.KeyLength = exactInt(values, prefix+"attention.key_length")
 	d.ValueLength = exactInt(values, prefix+"attention.value_length")
+	d.ExpertCount = exactInt(values, prefix+"expert_count")
+	d.ExpertUsedCount = exactInt(values, prefix+"expert_used_count")
 	return d
 }
 
