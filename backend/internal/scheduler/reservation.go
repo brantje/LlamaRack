@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,9 +36,14 @@ type ResourceLease struct {
 // Credit treats another Instance's reserved/estimated capacity as available to
 // the acquiring start (resource-pressure eviction). A credited Instance cannot
 // be credited to two in-flight starts at once.
+//
+// GPUs is the per-device vector that may be added to free VRAM. Scalar Bytes is
+// retained for callers that only identify a victim; it is never applied to an
+// arbitrary GPU.
 type Credit struct {
 	InstanceID string
 	Bytes      int64
+	GPUs       []GPUReservation
 }
 
 type AcquireRequest struct {
@@ -271,15 +277,24 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 			continue
 		}
 		usable[victim] = true
-		reserved := int64(0)
+		if len(credit.GPUs) > 0 {
+			for _, gpu := range credit.GPUs {
+				id := strings.TrimSpace(gpu.DeviceID)
+				if id == "" || gpu.Bytes <= 0 {
+					continue
+				}
+				bytesByDevice[id] += gpu.Bytes
+			}
+			continue
+		}
 		if existing, ok := l.leaseByInstanceLocked(victim); ok {
 			for _, gpu := range existing.GPUs {
-				bytesByDevice[gpu.DeviceID] += gpu.Bytes
-				reserved += gpu.Bytes
+				id := strings.TrimSpace(gpu.DeviceID)
+				if id == "" || gpu.Bytes <= 0 {
+					continue
+				}
+				bytesByDevice[id] += gpu.Bytes
 			}
-		}
-		if extra := credit.Bytes - reserved; extra > 0 {
-			bytesByDevice[""] += extra
 		}
 	}
 	return usable, bytesByDevice
@@ -327,20 +342,10 @@ func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccup
 		return adjusted
 	}
 	adjusted.GPUs = append([]hardware.GPU(nil), snapshot.GPUs...)
-	unassignedCredit := creditBytes[""]
-	best := 0
-	for i := range adjusted.GPUs {
-		if adjusted.GPUs[i].FreeBytes > adjusted.GPUs[best].FreeBytes {
-			best = i
-		}
-	}
 	for i := range adjusted.GPUs {
 		gpu := adjusted.GPUs[i]
 		occ := occupancy[gpu.ID]
 		credit := creditBytes[gpu.ID]
-		if i == best {
-			credit += unassignedCredit
-		}
 		managed := occ.pending + occ.committed
 		if gpu.TotalBytes > 0 {
 			unmanaged := gpu.UsedBytes - occ.committed - credit

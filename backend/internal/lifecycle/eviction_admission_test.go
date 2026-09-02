@@ -212,6 +212,7 @@ func TestPreparePlacementReplansWhenVictimBecomesActive(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("instances=%+v err=%v", items, err)
 		}
+		s.hardware = abundantSingleGPUHardware()
 		if _, err := s.StartInstance(ctx, items[0].ID); err != nil {
 			t.Fatal(err)
 		}

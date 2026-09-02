@@ -38,6 +38,10 @@ func (s *sequenceHardware) Snapshot(context.Context) (hardware.Snapshot, error) 
 	return s.snapshots[index], nil
 }
 
+func insufficientGPUHardware() *sequenceHardware {
+	return &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 0}}}}}
+}
+
 func TestPreparePlacementPrefersSingleAdequateGPU(t *testing.T) {
 	s, _, _, _, _ := setupLifecycle(t, true, false)
 	fake := &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{
@@ -66,6 +70,7 @@ func TestPreparePlacementExecutesEvictionThenRefreshesHardware(t *testing.T) {
 		t.Fatalf("victim instances=%+v err=%v", victims, err)
 	}
 	victim := victims[0]
+	s.hardware = abundantSingleGPUHardware()
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -39,6 +39,7 @@ func TestPreparePlacementReportsRefreshFailureAfterEviction(t *testing.T) {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	victim := items[0]
+	s.hardware = abundantSingleGPUHardware()
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +63,7 @@ func TestPreparePlacementRejectsCapacityThatDidNotRecover(t *testing.T) {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	victim := items[0]
+	s.hardware = abundantSingleGPUHardware()
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}

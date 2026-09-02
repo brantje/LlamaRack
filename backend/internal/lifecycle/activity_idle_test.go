@@ -150,10 +150,13 @@ func TestEvictionPlanUsesActivityAlwaysOnAndInstancePolicy(t *testing.T) {
 	defer cancel()
 	t.Run("inactive instance eligible unless eviction disabled", func(t *testing.T) {
 		s, _, m, _, exec := setupLifecycle(t, true, false)
+		s.hardware = abundantSingleGPUHardware()
 		if _, err := s.StartModel(ctx, m.ID); err != nil {
 			t.Fatal(err)
 		}
-		plan, err := s.EvictionPlan(ctx, 1)
+		s.hardware = insufficientGPUHardware()
+		exec("UPDATE models SET total_bytes=? WHERE id=?", 2*testGiB, m.ID)
+		plan, err := s.EvictionPlan(ctx, testGiB)
 		if err != nil || !plan.Fits || len(plan.Evict) != 1 || plan.Evict[0].ModelID != m.ID {
 			t.Fatalf("inactive plan=%+v err=%v", plan, err)
 		}
@@ -165,6 +168,7 @@ func TestEvictionPlanUsesActivityAlwaysOnAndInstancePolicy(t *testing.T) {
 	})
 	t.Run("active instance protected", func(t *testing.T) {
 		s, _, m, _, _ := setupLifecycle(t, true, false)
+		s.hardware = abundantSingleGPUHardware()
 		if _, err := s.StartModel(ctx, m.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -172,6 +176,7 @@ func TestEvictionPlanUsesActivityAlwaysOnAndInstancePolicy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		s.hardware = insufficientGPUHardware()
 		plan, err := s.EvictionPlan(ctx, 1)
 		release()
 		if err != nil || plan.Fits || len(plan.Evict) != 0 {
@@ -180,10 +185,13 @@ func TestEvictionPlanUsesActivityAlwaysOnAndInstancePolicy(t *testing.T) {
 	})
 	t.Run("always-on follows eviction policy", func(t *testing.T) {
 		s, _, m, _, exec := setupLifecycle(t, true, true)
+		s.hardware = abundantSingleGPUHardware()
 		if _, err := s.StartModel(ctx, m.ID); err != nil {
 			t.Fatal(err)
 		}
-		plan, err := s.EvictionPlan(ctx, 1)
+		s.hardware = insufficientGPUHardware()
+		exec("UPDATE models SET total_bytes=? WHERE id=?", 2*testGiB, m.ID)
+		plan, err := s.EvictionPlan(ctx, testGiB)
 		if err != nil || !plan.Fits || len(plan.Evict) != 1 || !plan.Evict[0].AlwaysOn {
 			t.Fatalf("evictable always-on plan=%+v err=%v", plan, err)
 		}

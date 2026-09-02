@@ -334,15 +334,23 @@ Scheduler returns a plan; lifecycle executes it.
 For hardware-aware `PLACE_AFTER_EVICTION`:
 
 1. scheduler reserves/commits capacity and returns target placement + victims;
-2. lifecycle revalidates victim eligibility;
+2. lifecycle revalidates victim eligibility and observed device placement;
 3. lifecycle marks any Always-On victim as desired-running but `resource_pressure`-blocked;
-4. lifecycle drains/stops victims;
+4. lifecycle drains/stops **one** victim at a time;
 5. hardware state is refreshed;
-6. scheduler confirms the target placement;
+6. scheduler confirms the target placement on the needed device(s); if observed release does not cover the remaining hole, it re-plans before stopping additional Instances;
 7. supervisor starts the requested Instance using explicit placement;
 8. reservation converts/releases based on outcome.
 
-If a victim becomes active before drain, re-plan.
+Eviction accounting is per-GPU:
+
+- reclaimable VRAM is a per-device vector (observed process usage, then lease/configured devices plus the runtime estimate);
+- a victim on CUDA1 never counts toward a CUDA0 hole;
+- automatic placement stays single-GPU first and compares victim sets for the GPU being considered;
+- leftover/unassigned credit is never applied to an unrelated GPU;
+- unknown device identity is conservative: the candidate cannot satisfy a device-specific shortfall (except on a single-GPU host).
+
+If a victim becomes active before drain, or observed placement no longer matches the plan, re-plan.
 
 For an evicted Always-On victim, normal Always-On reconciliation must preserve desired state but use a no-eviction retry while `resource_pressure`-blocked. If current capacity is still insufficient, it remains unloaded and blocked. Once it fits without displacing another Instance, lifecycle starts it and clears the block.
 
@@ -465,4 +473,6 @@ Tests/spec behavior demonstrate:
 - reservations prevent concurrent overcommit;
 - manual Launch warns about possible automatic eviction;
 - inference-triggered autoload follows policy without interactive confirmation;
-- hardware integration executes drain/stop/refresh/start for real `PLACE_AFTER_EVICTION` flows.
+- hardware integration executes drain/stop/refresh/start for real `PLACE_AFTER_EVICTION` flows;
+- eviction plans reason about the device(s) that need capacity, not aggregate VRAM on the wrong GPU;
+- an inaccurate victim estimate re-plans before additional unrelated Instances are stopped.

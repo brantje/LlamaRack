@@ -340,6 +340,52 @@ func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
 	}
 }
 
+func TestLedgerDeviceCreditDoesNotApplyToUnrelatedGPU(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
+		{ID: "CUDA0", FreeBytes: 2 * gib},
+		{ID: "CUDA1", FreeBytes: 12 * gib},
+	}}
+	lease, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "requester",
+		Snapshot:   snapshot,
+		Placement:  PlacementRequest{RequiredBytes: 6 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		Credits:    []Credit{{InstanceID: "victim", Bytes: 8 * gib, GPUs: []GPUReservation{{DeviceID: "CUDA1", Bytes: 8 * gib}}}},
+	})
+	if err != nil || lease.Placement.Fits {
+		t.Fatalf("CUDA1 credit must not satisfy CUDA0: %+v err=%v", lease, err)
+	}
+
+	ok, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "requester",
+		Snapshot:   snapshot,
+		Placement:  PlacementRequest{RequiredBytes: 6 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		Credits:    []Credit{{InstanceID: "victim", GPUs: []GPUReservation{{DeviceID: "CUDA0", Bytes: 8 * gib}}}},
+	})
+	if err != nil || !ok.Placement.Fits || len(ok.Placement.Devices) != 1 || ok.Placement.Devices[0] != "CUDA0" {
+		t.Fatalf("same-device credit should fit: %+v err=%v", ok, err)
+	}
+}
+
+func TestLedgerScalarCreditDoesNotDumpOntoBestGPU(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
+		{ID: "CUDA0", FreeBytes: 2 * gib},
+		{ID: "CUDA1", FreeBytes: 12 * gib},
+	}}
+	lease, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "requester",
+		Snapshot:   snapshot,
+		Placement:  PlacementRequest{RequiredBytes: 6 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		Credits:    []Credit{{InstanceID: "victim", Bytes: 8 * gib}},
+	})
+	if err != nil || lease.Placement.Fits {
+		t.Fatalf("scalar credit without a device must not inflate CUDA0: %+v err=%v", lease, err)
+	}
+}
+
 func TestNewLedgerWithTTLAndNilClock(t *testing.T) {
 	ledger := NewLedgerWithTTL(0)
 	ledger.SetClock(nil)
