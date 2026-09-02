@@ -7,7 +7,8 @@ import {
   apiKeyStatus,
   apiKeyTypeLabel,
   formatAPIKeyPrefix,
-  formatAPIKeyTimestamp
+  formatAPIKeyTimestamp,
+  formatExpiresOnDisplay
 } from '~/utils/apiKeys'
 
 type AdminUser = User & { created_at?: number; last_login_at?: number }
@@ -225,7 +226,7 @@ async function rotate(key: APIKey) {
           <template #key_type-cell="{ row }"><span class="text-[length:var(--font-size-table-body)]">{{ apiKeyTypeLabel(row.original.key_type) }}</span></template>
           <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ formatAPIKeyPrefix(row.original.prefix) }}</span></template>
           <template #status-cell="{ row }"><StatusTag :variant="apiKeyStatus(row.original).variant">{{ apiKeyStatus(row.original).label }}</StatusTag></template>
-          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ row.original.expires_on || '—' }}</span></template>
+          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatExpiresOnDisplay(row.original.expires_on) }}</span></template>
           <template #last_used_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatAPIKeyTimestamp(row.original.last_used_at) }}</span></template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end gap-1">

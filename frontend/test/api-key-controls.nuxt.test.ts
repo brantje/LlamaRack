@@ -147,6 +147,10 @@ describe('API key controls', () => {
     expect(nameInput.disabled).toBe(true)
     expect(document.body.querySelector('[data-testid="api-key-owner-readonly"]')).not.toBeNull()
     expect(document.body.querySelector('[data-testid="api-key-instances"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="api-key-expires-picker"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="api-key-expires-picker"]')?.getAttribute('aria-label')).toBe('Select a date')
+    const dateField = [...wrapper.findAllComponents({ name: 'InputDate' }), ...wrapper.findAllComponents({ name: 'UInputDate' })][0]
+    expect(dateField?.props('locale')).toBe('en-GB')
     await click('api-key-save')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1', {
       method: 'PATCH',

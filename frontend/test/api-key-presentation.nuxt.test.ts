@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CalendarDate } from '@internationalized/date'
 import {
+  API_KEY_DATE_LOCALE,
   API_KEY_TYPE_ITEMS,
   API_KEY_TYPE_TOOLTIP,
   apiKeyStatus,
@@ -12,6 +13,7 @@ import {
   expiresOnToCalendarDate,
   formatAPIKeyPrefix,
   formatAPIKeyTimestamp,
+  formatExpiresOnDisplay,
   isAPIKeyDateUnavailable,
   isAPIKeyExpired,
   ownerValueForKey,
@@ -31,6 +33,12 @@ describe('API key presentation helpers', () => {
     expect(formatAPIKeyTimestamp(0)).toBe('—')
     expect(formatAPIKeyTimestamp(1_700_000_000)).toBe(new Date(1_700_000_000 * 1000).toLocaleString())
     expect(formatAPIKeyTimestamp(Number.POSITIVE_INFINITY)).toBe('—')
+    expect(formatExpiresOnDisplay('2026-01-09')).toBe('09-01-2026')
+    expect(formatExpiresOnDisplay('2027-01-01')).toBe('01-01-2027')
+    expect(formatExpiresOnDisplay(null)).toBe('—')
+    expect(formatExpiresOnDisplay()).toBe('—')
+    expect(formatExpiresOnDisplay('nope')).toBe('nope')
+    expect(API_KEY_DATE_LOCALE).toBe('en-GB')
     expect(API_KEY_TYPE_ITEMS.map(item => item.label)).toEqual(['Inference', 'Management', 'Full Access'])
     expect(API_KEY_TYPE_ITEMS.find(item => item.value === 'inference')?.description).toBe('OpenAI-compatible /v1/* only')
     expect(API_KEY_TYPE_ITEMS.find(item => item.value === 'management')?.description).toContain('cannot call /v1/*')

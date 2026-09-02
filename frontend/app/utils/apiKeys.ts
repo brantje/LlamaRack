@@ -28,6 +28,15 @@ export function utcDateString(now = new Date()) {
   return `${now.getUTCFullYear()}-${padDatePart(now.getUTCMonth() + 1)}-${padDatePart(now.getUTCDate())}`
 }
 
+/** Day-first English locale so UInputDate/UCalendar render dd/mm/yyyy, not US mm/dd/yyyy. */
+export const API_KEY_DATE_LOCALE = 'en-GB'
+
+export function formatExpiresOnDisplay(value?: string | null) {
+  const date = expiresOnToCalendarDate(value)
+  if (!date) return value ? value : '—'
+  return `${padDatePart(date.day)}-${padDatePart(date.month)}-${date.year}`
+}
+
 export function apiKeyTypeLabel(type?: string) {
   return API_KEY_TYPE_ITEMS.find(item => item.value === type)?.label || type || '—'
 }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { CalendarDate } from '@internationalized/date'
+import type { ComponentPublicInstance } from 'vue'
 import type { APIKey, APIKeyType, Instance, ServiceAccount, User } from '~/composables/useManager'
 import {
+  API_KEY_DATE_LOCALE,
   API_KEY_TYPE_ITEMS,
   API_KEY_TYPE_TOOLTIP,
   calendarDateToExpiresOn,
@@ -37,6 +39,7 @@ const owner = ref('')
 const keyType = ref<APIKeyType>('inference')
 const instanceIds = ref<string[]>([])
 const expiresOn = shallowRef<CalendarDate | undefined>()
+const inputDate = ref<{ inputsRef: ComponentPublicInstance[] } | null>(null)
 const copyError = ref('')
 
 const ownerItems = computed(() => {
@@ -167,9 +170,37 @@ function clearExpires() {
           <p v-if="missingInstanceIds.length" class="mt-2 text-xs text-[var(--neutral-700)]">Missing instances stay on the allowlist and never collapse to all instances: <span class="font-mono">{{ missingInstanceIds.join(', ') }}</span></p>
         </UFormField>
 
-        <UFormField label="Expires" description="Optional. Valid through the end of that UTC day.">
+        <UFormField label="Expires" description="Optional. Day, month, year (dd-mm-yyyy). Valid through the end of that UTC day.">
           <div class="flex items-center gap-2" data-testid="api-key-expires">
-            <UInputDate v-model="expiresOn" class="min-w-0 flex-1" :is-date-unavailable="isAPIKeyDateUnavailable" />
+            <UInputDate
+              ref="inputDate"
+              v-model="expiresOn"
+              :locale="API_KEY_DATE_LOCALE"
+              class="min-w-0 flex-1"
+              :is-date-unavailable="isAPIKeyDateUnavailable"
+            >
+              <template #trailing>
+                <UPopover :reference="inputDate?.inputsRef[3]?.$el">
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-calendar"
+                    aria-label="Select a date"
+                    class="cursor-pointer px-0"
+                    data-testid="api-key-expires-picker"
+                  />
+                  <template #content>
+                    <UCalendar
+                      v-model="expiresOn"
+                      :locale="API_KEY_DATE_LOCALE"
+                      :is-date-unavailable="isAPIKeyDateUnavailable"
+                      class="p-2"
+                    />
+                  </template>
+                </UPopover>
+              </template>
+            </UInputDate>
             <AppButton v-if="expiresOn" type="button" intent="ghost" size="xs" data-testid="clear-api-key-expires" @click="clearExpires">Clear</AppButton>
           </div>
         </UFormField>

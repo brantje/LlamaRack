@@ -88,7 +88,7 @@ describe('API redesign', () => {
     expect(table.text()).toContain('sk-abcd1234…')
     expect(table.text()).toContain('admin')
     expect(table.text()).toContain('Inference')
-    expect(table.text()).toContain('1999-01-01')
+    expect(table.text()).toContain('01-01-1999')
     expect(table.text()).not.toContain('Revoke')
     expect(wrapper.findAll('button').some(button => button.text() === 'Revoke')).toBe(false)
 
