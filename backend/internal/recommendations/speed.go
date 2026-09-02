@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
 
 // GenerationSpeedEstimate is a bandwidth-model estimate for autoregressive
@@ -32,7 +33,7 @@ func estimateGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEstimate, 
 	switch offload.Mode {
 	case "full", "multi_gpu":
 		return estimateGPUGenerationSpeed(snapshot, memory, offload, guide)
-	case "partial", "hybrid":
+	case "partial", "hybrid", "moe":
 		return estimateHybridGenerationSpeed(snapshot, memory, offload, guide, metadata)
 	case "cpu":
 		return unavailableGenerationSpeed("CPU-only generation speed is not estimated yet; the current model focuses on GPU and GPU + CPU placements.")
@@ -85,11 +86,19 @@ func estimateHybridGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEsti
 	}
 
 	gpuFraction := math.Min(1, float64(offload.GPULayers)/float64(metadata.BlockCount))
-	if gpuFraction <= 0 {
-		return unavailableGenerationSpeed("The placement does not offload enough model layers to estimate a GPU + CPU generation path.")
-	}
 	gpuWeights := float64(memory.WeightsBytes) * gpuFraction
 	hostWeights := float64(memory.WeightsBytes) - gpuWeights
+	if offload.Mode == "moe" {
+		if metadata.ExpertCount <= 0 {
+			return unavailableGenerationSpeed("MoE expert metadata is incomplete, so expert GPU/RAM traffic cannot be estimated.")
+		}
+		gpuBytes, hostBytes := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, offload.NCPUMoe, metadata.ExpertCount)
+		gpuWeights, hostWeights = float64(gpuBytes), float64(hostBytes)
+		gpuFraction = gpuWeights / float64(memory.WeightsBytes)
+	}
+	if gpuFraction <= 0 {
+		return unavailableGenerationSpeed("The placement does not offload enough model weights to estimate a GPU + CPU generation path.")
+	}
 	gpuTraffic := gpuWeights
 	hostTraffic := hostWeights
 	if offload.KVOnGPU {
@@ -134,23 +143,37 @@ func estimateHybridGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEsti
 	if !offload.KVOnGPU {
 		kvLocation = "system RAM"
 	}
-	reason = fmt.Sprintf(
-		"Hybrid bandwidth-limited generation/decode estimate: about %.0f%% of model-layer weights are on GPU and %.0f%% remain in system RAM. GPU traffic uses %s; host traffic uses %.0f GB/s measured memory-copy throughput; approximately %s/token of activation traffic crosses a %.1f GB/s theoretical PCIe link. The selected context's %s KV cache is accounted for in %s traffic. The range assumes %.0f–%.0f%% VRAM, %.0f–%.0f%% host-memory and %.0f–%.0f%% PCIe efficiency; actual llama.cpp kernels and layer boundaries can differ.",
-		gpuFraction*100,
-		(1-gpuFraction)*100,
-		formatDeviceBandwidth(devices),
-		float64(snapshot.RAMBandwidthBytesPerSecond)/1_000_000_000,
-		formatBinaryBytes(transferBytes),
-		float64(pcieBandwidth)/1_000_000_000,
-		formatBinaryBytes(memory.KVCacheBytes),
-		kvLocation,
-		gpuLow*100,
-		gpuHigh*100,
-		hostLowEfficiency*100,
-		hostHighEfficiency*100,
-		pcieLowEfficiency*100,
-		pcieHighEfficiency*100,
-	)
+	if offload.Mode == "moe" {
+		reason = fmt.Sprintf(
+			"MoE bandwidth-limited generation/decode estimate: about %.0f%% of model weights stay on GPU and %.0f%% of routed-expert weight traffic is served from system RAM under the conservative expert-share heuristic. GPU traffic uses %s; host traffic uses %.0f GB/s measured memory-copy throughput; approximately %s/token of activation traffic crosses a %.1f GB/s theoretical PCIe link. The selected context's %s KV cache is accounted for in %s traffic. Actual routed-expert activation, llama.cpp kernels and expert locality can differ.",
+			gpuFraction*100,
+			(1-gpuFraction)*100,
+			formatDeviceBandwidth(devices),
+			float64(snapshot.RAMBandwidthBytesPerSecond)/1_000_000_000,
+			formatBinaryBytes(transferBytes),
+			float64(pcieBandwidth)/1_000_000_000,
+			formatBinaryBytes(memory.KVCacheBytes),
+			kvLocation,
+		)
+	} else {
+		reason = fmt.Sprintf(
+			"Hybrid bandwidth-limited generation/decode estimate: about %.0f%% of model-layer weights are on GPU and %.0f%% remain in system RAM. GPU traffic uses %s; host traffic uses %.0f GB/s measured memory-copy throughput; approximately %s/token of activation traffic crosses a %.1f GB/s theoretical PCIe link. The selected context's %s KV cache is accounted for in %s traffic. The range assumes %.0f–%.0f%% VRAM, %.0f–%.0f%% host-memory and %.0f–%.0f%% PCIe efficiency; actual llama.cpp kernels and layer boundaries can differ.",
+			gpuFraction*100,
+			(1-gpuFraction)*100,
+			formatDeviceBandwidth(devices),
+			float64(snapshot.RAMBandwidthBytesPerSecond)/1_000_000_000,
+			formatBinaryBytes(transferBytes),
+			float64(pcieBandwidth)/1_000_000_000,
+			formatBinaryBytes(memory.KVCacheBytes),
+			kvLocation,
+			gpuLow*100,
+			gpuHigh*100,
+			hostLowEfficiency*100,
+			hostHighEfficiency*100,
+			pcieLowEfficiency*100,
+			pcieHighEfficiency*100,
+		)
+	}
 	return finishGenerationSpeed(slowSeconds, fastSeconds, reason)
 }
 
