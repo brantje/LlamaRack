@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ type Service struct {
 	sup                   *supervisor.Supervisor
 	hardware              hardware.Snapshotter
 	profile               func() (llamacpp.Profile, error)
+	dataDir               string
 	observabilityRecorder ObservabilityRecorder
 	reservations          *scheduler.Ledger
 	mu                    sync.Mutex
@@ -94,6 +96,7 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 
 func (s *Service) Instances() *instances.Service                            { return s.instances }
 func (s *Service) SetProfileGetter(getter func() (llamacpp.Profile, error)) { s.profile = getter }
+func (s *Service) SetDataDir(dataDir string)                                { s.dataDir = strings.TrimSpace(dataDir) }
 func (s *Service) HardwareSnapshot(ctx context.Context) (hardware.Snapshot, error) {
 	return s.hardware.Snapshot(ctx)
 }
@@ -1053,7 +1056,11 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		args, workerEnv = appendPlacementLaunchArgs(args, i.GPUDevices, i.TensorSplit, hasTensorSplitOverride)
 	}
 
-	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv)
+	slotSavePath, err := s.slotSavePath(i.ID)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
 	if err != nil {
 		if isStartupInterrupt(err) {
 			return "", fmt.Errorf("%w: %w", errStartupKilled, err)
@@ -1428,4 +1435,29 @@ func optionArgs(options map[string]string) []string {
 		}
 	}
 	return out
+}
+
+func (s *Service) slotSavePath(instanceID string) (string, error) {
+	if strings.TrimSpace(s.dataDir) == "" || s.profile == nil {
+		return "", nil
+	}
+	profile, err := s.profile()
+	if err != nil || len(profile.Options) == 0 {
+		return "", nil
+	}
+	supported := false
+	for _, option := range profile.Options {
+		if option.Key == "slot-save-path" {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		return "", nil
+	}
+	slotDir := filepath.Join(s.dataDir, "slots", instanceID)
+	if err := os.MkdirAll(slotDir, 0o700); err != nil {
+		return "", err
+	}
+	return slotDir, nil
 }

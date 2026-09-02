@@ -24,6 +24,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/slots"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
@@ -260,6 +261,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		g.proxyJSON(observed, r, spec, requestID, &record, envelope, body, started, &promptTPS, &proxyPanic)
+	case routeSlotsProxy:
+		if spec.Body == bodyJSON && parseErr != nil {
+			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
+			return
+		}
+		g.proxySlots(observed, r, spec, params, &record, body, &proxyPanic)
 	default:
 		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
 	}
@@ -410,6 +417,52 @@ func (g *Gateway) proxyChatControl(observed *responseObserver, r *http.Request, 
 		observed.captureAll = true
 	}
 	g.proxyToTarget(observed, r, spec, requestID, record, instance, active.target, body, false, started, promptTPS, proxyPanic, false)
+}
+
+func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec routeSpec, params map[string]string, record *observability.RequestRecord, body []byte, proxyPanic *any) {
+	model := strings.TrimSpace(r.URL.Query().Get("model"))
+	if model == "" {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
+		return
+	}
+	record.InstanceID = model
+	instance, ok := g.resolveInstance(observed, r, record, model)
+	if !ok {
+		return
+	}
+	setProductHeader(wHeader(observed), headerInstance, instance.ID)
+
+	upstreamPath := slots.UpstreamPath(r.Method, params["slot_id"])
+	if r.Method == http.MethodPost {
+		action := strings.TrimSpace(r.URL.Query().Get("action"))
+		if err := slots.ValidateAction(action); err != nil {
+			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_request", err.Error())
+			return
+		}
+		validated, err := slots.ValidateRequestBody(body, action)
+		if err != nil {
+			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_request", err.Error())
+			return
+		}
+		body = validated
+	}
+
+	endpoint, ready := g.lifecycle.RuntimeEndpoint(instance.ID)
+	if !ready {
+		record.Error = "instance unloaded"
+		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", "instance unloaded and autoload disabled")
+		return
+	}
+
+	func() {
+		defer func() {
+			*proxyPanic = recover()
+		}()
+		if err := slots.Proxy(observed, r, endpoint, upstreamPath, body, spec.MapNotImplemented); err != nil {
+			record.Error = "Invalid worker endpoint"
+			writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
+		}
+	}()
 }
 
 func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, record *observability.RequestRecord, instanceID string) (instances.Instance, bool) {

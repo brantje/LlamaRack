@@ -42,7 +42,7 @@ const config = ref<ConfigResponse | null>(null)
 const legacyProtectedKeys = new Set([
   'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
   'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
-  'api-key', 'api-key-file'
+  'api-key', 'api-key-file', 'slots', 'no-slots', 'slot-save-path'
 ])
 const basicKeys = new Set([
   'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',
@@ -231,6 +231,7 @@ function sourceVariant(source: string): StatusVariant {
                     v-if="kind(option) === 'boolean' && !option.unsupported"
                     :model-value="overrides[option.key] === 'true'"
                     :label="overrides[option.key] === 'true' ? 'Enabled' : 'Disabled'"
+                    :disabled="isProtected(option)"
                     @update:model-value="updateValue(option.key, $event ? 'true' : 'false')"
                   />
                   <USelectMenu
@@ -238,13 +239,14 @@ function sourceVariant(source: string): StatusVariant {
                     :model-value="overrides[option.key]"
                     class="w-full"
                     :items="choices(option)"
+                    :disabled="isProtected(option)"
                     @update:model-value="updateValue(option.key, String($event || ''))"
                   />
                   <UInput
                     v-else
                     :model-value="overrides[option.key]"
                     class="w-full font-mono"
-                    :disabled="option.unsupported"
+                    :disabled="option.unsupported || isProtected(option)"
                     :placeholder="option.value_hint || 'value'"
                     @update:model-value="updateValue(option.key, String($event || ''))"
                   />

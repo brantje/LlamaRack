@@ -95,6 +95,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		sup.Shutdown(shutdownCtx)
 	}()
 	lifecycleService := lifecycle.New(modelService, sup)
+	lifecycleService.SetDataDir(cfg.DataDir)
 	observabilityService := observability.New(db)
 	pendingLimits := func(requestCtx context.Context) (int, int) {
 		perInstance, global := 32, 128

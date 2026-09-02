@@ -3,7 +3,7 @@ import type { Profile } from '~/composables/useManager'
 const legacyManagerOwnedOptions = new Set([
   'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
   'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
-  'api-key', 'api-key-file'
+  'api-key', 'api-key-file', 'slots', 'no-slots', 'slot-save-path'
 ])
 
 type ProfileOption = Profile['options'][number] & { kind?: string; choices?: string[]; manager_owned?: boolean }
