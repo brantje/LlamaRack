@@ -239,13 +239,14 @@ func recommendOffloadWithCapabilities(snapshot hardware.Snapshot, memory MemoryE
 	return false, Offload{Mode: "cpu", Reason: moeFallbackPrefix + "Current free GPU and system memory are below the conservative estimate for this context size."}
 }
 
+type usableGPU struct {
+	id    string
+	bytes int64
+}
+
 func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata) (bool, Offload) {
 	if metadata.ExpertCount <= 0 || metadata.BlockCount <= 0 || memory.WeightsBytes <= 0 {
 		return false, Offload{}
-	}
-	type usableGPU struct {
-		id    string
-		bytes int64
 	}
 	usable := make([]usableGPU, 0, len(snapshot.GPUs))
 	var pooled int64
@@ -266,26 +267,49 @@ func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, meta
 		}
 		return usable[i].id < usable[j].id
 	})
+	for len(usable) > 0 {
+		offload, pooledOK, devicesOK := planMoEOffload(snapshot, memory, metadata, usable)
+		if pooledOK && devicesOK {
+			return true, offload
+		}
+		if !pooledOK {
+			return false, Offload{}
+		}
+		usable = usable[:len(usable)-1]
+	}
+	return false, Offload{}
+}
+
+func planMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata, usable []usableGPU) (Offload, bool, bool) {
 	devices := make([]string, 0, len(usable))
 	weights := make([]int64, 0, len(usable))
+	var pooled int64
 	for _, gpu := range usable {
 		devices = append(devices, gpu.id)
 		weights = append(weights, gpu.bytes)
+		pooled += gpu.bytes
 	}
 	tensorSplit := moeTensorSplit(weights)
-
-	fits := func(blocks int64, kvOnGPU bool) bool {
+	demand := func(blocks int64, kvOnGPU bool) (gpuNeeded, hostNeeded int64) {
 		gpuWeights, hostWeights := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, blocks, metadata.ExpertCount)
-		gpuNeeded := gpuWeights + memory.RuntimeOverheadBytes
-		hostNeeded := hostWeights
+		gpuNeeded = gpuWeights + memory.RuntimeOverheadBytes
+		hostNeeded = hostWeights
 		if kvOnGPU {
 			gpuNeeded += memory.KVCacheBytes
 		} else {
 			hostNeeded += memory.KVCacheBytes
 		}
+		return gpuNeeded, hostNeeded
+	}
+	pooledFits := func(blocks int64, kvOnGPU bool) bool {
+		gpuNeeded, hostNeeded := demand(blocks, kvOnGPU)
 		return gpuNeeded <= pooled && fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
 	}
-
+	fits := func(blocks int64, kvOnGPU bool) bool {
+		gpuNeeded, hostNeeded := demand(blocks, kvOnGPU)
+		return gpuNeeded <= pooled && fitsRAM(snapshot.RAMAvailableBytes, hostNeeded) && splitFitsDevices(gpuNeeded, weights)
+	}
+	pooledOK := pooledFits(metadata.BlockCount, true) || pooledFits(metadata.BlockCount, false)
 	if fits(metadata.BlockCount, true) {
 		lo, hi := int64(0), metadata.BlockCount
 		for lo < hi {
@@ -296,20 +320,33 @@ func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, meta
 				lo = mid + 1
 			}
 		}
-		return true, Offload{
+		return Offload{
 			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: lo,
 			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: true,
 			Reason: "Full GPU offload does not fit. Keep all transformer layers and the KV cache on the currently free GPUs while placing only the routed expert weights required to fit in system RAM. Expert weight size is conservatively estimated from GGUF size.",
-		}
+		}, true, true
 	}
 	if fits(metadata.BlockCount, false) {
-		return true, Offload{
+		return Offload{
 			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: metadata.BlockCount,
 			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: false,
 			Reason: "Even with all routed experts in system RAM, the KV cache does not fit within current VRAM headroom. Keep the same GPU set and full expert spill, then move the KV cache to system RAM. Expert weight size is conservatively estimated from GGUF size.",
-		}
+		}, true, true
 	}
-	return false, Offload{}
+	return Offload{}, pooledOK, false
+}
+
+func moeSplitWeights(bytes []int64) []int64 {
+	const unit = int64(256 * mib)
+	out := make([]int64, len(bytes))
+	for i, value := range bytes {
+		weight := value / unit
+		if weight < 1 {
+			weight = 1
+		}
+		out[i] = weight
+	}
+	return out
 }
 
 func moeTensorSplit(bytes []int64) string {
@@ -317,15 +354,41 @@ func moeTensorSplit(bytes []int64) string {
 		return ""
 	}
 	parts := make([]string, 0, len(bytes))
-	const unit = int64(256 * mib)
-	for _, value := range bytes {
-		weight := value / unit
-		if weight < 1 {
-			weight = 1
-		}
+	for _, weight := range moeSplitWeights(bytes) {
 		parts = append(parts, itoa(weight))
 	}
 	return strings.Join(parts, ",")
+}
+
+func splitFitsDevices(gpuNeeded int64, available []int64) bool {
+	if len(available) == 0 {
+		return false
+	}
+	if len(available) == 1 {
+		return gpuNeeded <= available[0]
+	}
+	weights := moeSplitWeights(available)
+	var sum int64
+	for _, weight := range weights {
+		sum += weight
+	}
+	if sum <= 0 {
+		return false
+	}
+	assigned := int64(0)
+	for i, avail := range available {
+		var share int64
+		if i == len(available)-1 {
+			share = gpuNeeded - assigned
+		} else {
+			share = gpuNeeded * weights[i] / sum
+			assigned += share
+		}
+		if share > avail {
+			return false
+		}
+	}
+	return true
 }
 
 func recommendedLayers(blockCount int64, fraction float64) int64 {

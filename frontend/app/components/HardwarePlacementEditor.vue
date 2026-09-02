@@ -140,7 +140,7 @@ const fitsAfterFreeing = computed(() => Boolean(recommendation.value && !recomme
 const autoPlacementCopy = computed(() => {
   if (recommendation.value?.offload.mode === 'moe') {
     return {
-      summary: 'LlamaRack uses every currently free GPU for this MoE placement and keeps routed experts in system RAM.',
+      summary: 'LlamaRack uses currently free GPUs with enough spare VRAM for this MoE placement and keeps routed experts in system RAM.',
       detail: 'Attention and the configured GPU layers stay on GPU; system RAM is reserved for the expert blocks that do not fit in VRAM.'
     }
   }

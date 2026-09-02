@@ -88,7 +88,7 @@ describe('MoE placement UI', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('every currently free GPU')
+    expect(wrapper.text()).toContain('currently free GPUs with enough spare VRAM')
     expect(wrapper.text()).toContain('routed experts in system RAM')
     expect(wrapper.text()).toContain('2 GPUs + experts in RAM')
     expect(wrapper.text()).toContain('Context cache: GPU')
@@ -97,6 +97,31 @@ describe('MoE placement UI', () => {
     await clickButtonContaining(wrapper, 'Technical details')
     expect(wrapper.text()).toContain('CPU expert blocks')
     expect(wrapper.text()).toContain('17')
+  })
+
+  it('does not claim every free GPU when a low-VRAM card is excluded', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return {
+        gpus: [
+          { id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU 0', total_bytes: 16 * gib, used_bytes: 2 * gib, free_bytes: 14 * gib, utilization_pct: 10 },
+          { id: 'CUDA1', backend: 'cuda', index: 1, name: 'GPU 1', total_bytes: 16 * gib, used_bytes: 3 * gib, free_bytes: 13 * gib, utilization_pct: 20 },
+          { id: 'CUDA2', backend: 'cuda', index: 2, name: 'GPU 2', total_bytes: 2 * gib, used_bytes: 1.75 * gib, free_bytes: 256 * 1024 * 1024, utilization_pct: 5 }
+        ]
+      }
+      if (path === '/api/v1/llamacpp/config?model_id=m1') return { effective: { values: { 'ctx-size': '4096' } } }
+      if (path.startsWith('/api/v1/models/m1/recommendation?')) return moeRecommendation()
+      return []
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'm1', llamaOptions: {} }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('currently free GPUs with enough spare VRAM')
+    expect(wrapper.text()).not.toContain('every currently free GPU')
+    expect(wrapper.text()).toContain('Using 2 of 3 GPUs')
   })
 
   it('renders Discover MoE as a warning placement with expert details', async () => {

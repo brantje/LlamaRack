@@ -50,6 +50,29 @@ func TestRecommendMoEOffloadUsesAllCurrentlyFreeGPUsAndMinimumSpill(t *testing.T
 	}
 }
 
+func TestRecommendMoEOffloadExcludesGPUThatCannotHoldTensorSplitShare(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	metadata := Metadata{BlockCount: 40, ExpertCount: 64}
+	memory := MemoryEstimate{WeightsBytes: 20 * gib, KVCacheBytes: gib, RuntimeOverheadBytes: gib}
+	snapshot := hardware.Snapshot{
+		RAMAvailableBytes: 64 * gib,
+		GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: 8 * gib},
+			{ID: "CUDA1", FreeBytes: defaultVRAMReserve + mib},
+		},
+	}
+	fit, got := recommendMoEOffload(snapshot, memory, metadata)
+	if !fit || got.Mode != "moe" {
+		t.Fatalf("expected MoE after dropping unsafe GPU, fit=%v offload=%+v", fit, got)
+	}
+	if len(got.Devices) != 1 || got.Devices[0] != "CUDA0" {
+		t.Fatalf("GPU just above VRAM reserve must be excluded, devices=%v", got.Devices)
+	}
+	if got.TensorSplit != "" {
+		t.Fatalf("single-GPU MoE must not emit tensor split, got %q", got.TensorSplit)
+	}
+}
+
 func TestRecommendMoEOffloadMovesKVOnlyAtCliff(t *testing.T) {
 	const gib = int64(1024 * 1024 * 1024)
 	metadata := Metadata{BlockCount: 40, ExpertCount: 64}
