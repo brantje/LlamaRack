@@ -139,6 +139,63 @@ func TestReconcileNotifiesOnceOnImportCompletion(t *testing.T) {
 	notifyMu.Unlock()
 }
 
+func TestReconcileCompletionNotifiesOnceUnderConcurrency(t *testing.T) {
+	ctx, modelsDir, db, modelService, _, service := newImportFixture(t, http.NotFoundHandler())
+	if err := os.WriteFile(filepath.Join(modelsDir, "ready.gguf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	model, err := modelService.Create(ctx, models.CreateModelInput{Name: "Ready", GGUFPath: "ready.gguf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := false
+	instance, err := service.instances.Create(ctx, instances.CreateInput{ModelID: model.ID, Name: "Ready", Slug: "ready-concurrent", Enabled: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state) VALUES('ready-job','huggingface','acme/demo','rev','a','ready.gguf',?)`, downloads.StateCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,instance_id,owns_model,start_when_ready,state,start_attempted) VALUES('ready-import','ready-job',?,?,0,0,?,0)`, model.ID, instance.ID, StateDownloading); err != nil {
+		t.Fatal(err)
+	}
+
+	var notifyMu sync.Mutex
+	notifyCounts := map[string]int{}
+	service.SetInstanceOnChange(func(_ context.Context, instanceID string) {
+		notifyMu.Lock()
+		defer notifyMu.Unlock()
+		notifyCounts[instanceID]++
+	})
+
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- service.Reconcile(ctx)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	notifyMu.Lock()
+	defer notifyMu.Unlock()
+	if notifyCounts[instance.ID] != 1 {
+		t.Fatalf("expected exactly one completion notify, got %d", notifyCounts[instance.ID])
+	}
+}
+
 func TestPrepareCreatesDownloadingInstanceAndStartsAfterCompletion(t *testing.T) {
 	release := make(chan struct{})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
