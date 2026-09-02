@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ type liteLLMFixture struct {
 	cookie  *http.Cookie
 	service *litellm.Service
 	fake    *litellmFakeServer
+	db      *sql.DB
 }
 
 type litellmFakeServer struct {
@@ -65,6 +67,7 @@ func newLiteLLMFixture(t *testing.T) liteLLMFixture {
 		cookie:  &http.Cookie{Name: sessionCookie, Value: token},
 		service: service,
 		fake:    fake,
+		db:      db,
 	}
 }
 
@@ -290,5 +293,73 @@ func TestLiteLLMProxyConnectionFailureIsBadGateway(t *testing.T) {
 	}, true)
 	if save.Code != http.StatusBadGateway {
 		t.Fatalf("expected bad gateway, got %d body=%s", save.Code, save.Body.String())
+	}
+}
+
+func TestLiteLLMDisconnectInvalidJSON(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/litellm", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(fixture.cookie)
+	w := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid disconnect json status=%d", w.Code)
+	}
+}
+
+func TestLiteLLMDisconnectUnpublishFailure(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	save := liteLLMRequest(t, fixture, http.MethodPut, "/api/v1/litellm", map[string]string{
+		"proxy_url": fixture.fake.URL,
+		"api_base":  "http://llamarack.example/v1",
+		"proxy_key": "proxy-key",
+	}, true)
+	if save.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", save.Code, save.Body.String())
+	}
+	fixture.fake.Close()
+	w := liteLLMRequest(t, fixture, http.MethodDelete, "/api/v1/litellm", map[string]bool{"unpublish": true}, true)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected unpublish failure, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestLiteLLMUnsupportedMethodOnCollection(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	if got := liteLLMRequest(t, fixture, http.MethodPatch, "/api/v1/litellm", nil, true).Code; got != http.StatusNotFound {
+		t.Fatalf("patch collection status=%d", got)
+	}
+}
+
+func TestLiteLLMStatusInternalError(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	if _, err := fixture.db.Exec("DROP TABLE manager_settings"); err != nil {
+		t.Fatal(err)
+	}
+	w := liteLLMRequest(t, fixture, http.MethodGet, "/api/v1/litellm", nil, true)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status after settings drop=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestLiteLLMRotateWhenUnconfigured(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	w := liteLLMRequest(t, fixture, http.MethodPost, "/api/v1/litellm/rotate", nil, true)
+	if w.Code != http.StatusBadGateway && w.Code != http.StatusBadRequest {
+		t.Fatalf("unconfigured rotate status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestLiteLLMDisconnectInvalidJSONSetsContentLength(t *testing.T) {
+	fixture := newLiteLLMFixture(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/litellm", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = 1
+	req.AddCookie(fixture.cookie)
+	w := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid disconnect json status=%d", w.Code)
 	}
 }

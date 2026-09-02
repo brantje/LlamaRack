@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -133,7 +134,24 @@ func parseAPIError(status int, raw []byte) error {
 	if text == "" {
 		return fmt.Errorf("litellm proxy returned HTTP %d", status)
 	}
-	return fmt.Errorf("litellm proxy returned HTTP %d: %s", status, text)
+	return fmt.Errorf("litellm proxy returned HTTP %d: %s", status, sanitizeProxyErrorText(text))
+}
+
+const maxProxyErrorText = 512
+
+var (
+	apiKeyJSONPattern = regexp.MustCompile(`(?i)("api_key"\s*:\s*")[^"]*(")`)
+	skTokenPattern    = regexp.MustCompile(`sk-[A-Za-z0-9_-]{8,}`)
+)
+
+func sanitizeProxyErrorText(text string) string {
+	text = apiKeyJSONPattern.ReplaceAllString(text, `${1}[redacted]$2`)
+	text = skTokenPattern.ReplaceAllString(text, "sk-[redacted]")
+	runes := []rune(text)
+	if len(runes) > maxProxyErrorText {
+		return string(runes[:maxProxyErrorText]) + "…"
+	}
+	return text
 }
 
 func IsManaged(entry ModelEntry) bool {
@@ -170,11 +188,23 @@ func entryDrifted(entry ModelEntry, instanceID, apiBase, inferenceKey string) bo
 	if entry.LiteLLMParams.APIBase != apiBase {
 		return true
 	}
-	if entry.LiteLLMParams.APIKey != inferenceKey {
+	if comparableRemoteAPIKey(entry.LiteLLMParams.APIKey) && entry.LiteLLMParams.APIKey != inferenceKey {
 		return true
 	}
 	if entry.ModelInfo.LlamaRackInstanceID != instanceID {
 		return true
 	}
 	return false
+}
+
+func comparableRemoteAPIKey(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if strings.Contains(value, "*") || strings.Contains(lower, "redact") {
+		return false
+	}
+	return true
 }

@@ -118,8 +118,8 @@ func TestServiceRotateAndDisconnect(t *testing.T) {
 	if status.Configured {
 		t.Fatalf("expected disconnected status, got %+v", status)
 	}
-	if len(fake.models) != 0 {
-		t.Fatalf("expected unpublish to clear fake models, got %#v", fake.models)
+	if remaining := len(fake.snapshotModels()); remaining != 0 {
+		t.Fatalf("expected unpublish to clear fake models, got %d", remaining)
 	}
 	accounts, err := authService.ListServiceAccounts(context.Background())
 	if err != nil {
@@ -268,7 +268,7 @@ func TestServiceReconcileRenamesInstanceID(t *testing.T) {
 	_, hasBeta := fake.models["litellm-beta"]
 	fake.mu.Unlock()
 	if !hasBeta {
-		t.Fatalf("expected renamed model in fake catalog, got %#v", fake.models)
+		t.Fatalf("expected renamed model in fake catalog, got %#v", fake.snapshotModels())
 	}
 }
 
@@ -325,7 +325,7 @@ func TestServiceReconcileUnpublishesDisabledInstance(t *testing.T) {
 	}
 	result, err := service.Reconcile(context.Background())
 	if err != nil || !result.OK || result.Unpublished != 1 {
-		t.Fatalf("reconcile=%+v err=%v models=%#v", result, err, fake.models)
+		t.Fatalf("reconcile=%+v err=%v models=%#v", result, err, fake.snapshotModels())
 	}
 }
 

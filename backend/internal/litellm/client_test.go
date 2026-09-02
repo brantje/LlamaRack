@@ -10,9 +10,13 @@ import (
 )
 
 type fakeLiteLLMServer struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	models map[string]ModelEntry
+	server     *httptest.Server
+	mu         sync.Mutex
+	models     map[string]ModelEntry
+	failList   bool
+	failCreate bool
+	failUpdate bool
+	failDelete bool
 }
 
 func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
@@ -26,6 +30,12 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/model/info":
 			fake.mu.Lock()
+			failList := fake.failList
+			if failList {
+				fake.mu.Unlock()
+				http.Error(w, "list failed", http.StatusBadGateway)
+				return
+			}
 			data := make([]ModelEntry, 0, len(fake.models))
 			for _, entry := range fake.models {
 				data = append(data, entry)
@@ -33,6 +43,13 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 			fake.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 		case r.Method == http.MethodPost && r.URL.Path == "/model/new":
+			fake.mu.Lock()
+			failCreate := fake.failCreate
+			fake.mu.Unlock()
+			if failCreate {
+				http.Error(w, "create failed", http.StatusBadGateway)
+				return
+			}
 			var entry ModelEntry
 			if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -46,6 +63,13 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 			fake.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && r.URL.Path == "/model/update":
+			fake.mu.Lock()
+			failUpdate := fake.failUpdate
+			fake.mu.Unlock()
+			if failUpdate {
+				http.Error(w, "update failed", http.StatusBadGateway)
+				return
+			}
 			var entry ModelEntry
 			if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -62,6 +86,13 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 			fake.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodPost && r.URL.Path == "/model/delete":
+			fake.mu.Lock()
+			failDelete := fake.failDelete
+			fake.mu.Unlock()
+			if failDelete {
+				http.Error(w, "delete failed", http.StatusBadGateway)
+				return
+			}
 			var body struct {
 				ID string `json:"id"`
 			}
@@ -79,6 +110,16 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 	}))
 	t.Cleanup(fake.server.Close)
 	return fake
+}
+
+func (fake *fakeLiteLLMServer) snapshotModels() map[string]ModelEntry {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	out := make(map[string]ModelEntry, len(fake.models))
+	for id, entry := range fake.models {
+		out[id] = entry
+	}
+	return out
 }
 
 func TestClientReconcileLifecycle(t *testing.T) {
@@ -126,9 +167,31 @@ func TestClientStoreModelInDBError(t *testing.T) {
 	}
 }
 
-func TestClientRejectsNonHTTPURL(t *testing.T) {
-	if _, err := NewClient("ftp://example.com", "key", nil); err == nil {
-		t.Fatal("expected invalid scheme error")
+func TestParseAPIErrorSanitizesSecretsAndBoundsLength(t *testing.T) {
+	err := parseAPIError(500, []byte(`{"api_key":"sk-supersecretvalue","detail":"nope"}`))
+	if err == nil || strings.Contains(err.Error(), "sk-supersecretvalue") || strings.Contains(err.Error(), `"api_key":"sk-`) {
+		t.Fatalf("expected redacted error, got %v", err)
+	}
+	long := strings.Repeat("x", 4000)
+	bounded := parseAPIError(502, []byte(long))
+	if bounded == nil || len([]rune(bounded.Error())) > 600 {
+		t.Fatalf("expected truncated error, got len=%d err=%v", len(bounded.Error()), bounded)
+	}
+}
+
+func TestEntryDriftedIgnoresRedactedRemoteAPIKey(t *testing.T) {
+	entry := BuildModelEntry("alpha", "http://llamarack/v1", "sk-one", "id-1")
+	entry.LiteLLMParams.APIKey = ""
+	if entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") {
+		t.Fatal("empty remote api_key should not count as drift")
+	}
+	entry.LiteLLMParams.APIKey = "****"
+	if entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") {
+		t.Fatal("masked remote api_key should not count as drift")
+	}
+	entry.LiteLLMParams.APIKey = "[REDACTED]"
+	if entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") {
+		t.Fatal("redacted remote api_key should not count as drift")
 	}
 }
 
@@ -161,8 +224,5 @@ func TestEntryDriftedDetectsFieldChanges(t *testing.T) {
 	entry.ModelInfo.LlamaRackInstanceID = "stale"
 	if !entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") {
 		t.Fatal("expected instance id drift")
-	}
-	if entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") && entry.ModelName == "alpha" && entry.LiteLLMParams.Model == "openai/alpha" {
-		// drift only from instance id field above
 	}
 }

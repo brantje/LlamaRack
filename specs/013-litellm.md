@@ -77,7 +77,7 @@ If LiteLLM returns `STORE_MODEL_IN_DB`, persist a clear last-sync error instruct
 
 ## 6. Management API
 
-Mounted at `/api/v1/litellm` (authenticated management user/session; same class as Hugging Face admin APIs).
+Mounted at `/api/v1/litellm` (management JWT or management/full API key; same class as Hugging Face admin APIs). Hidden principals are managed only through these routes.
 
 | Method | Path | Behavior |
 |--------|------|----------|
@@ -88,7 +88,7 @@ Mounted at `/api/v1/litellm` (authenticated management user/session; same class 
 | POST | `/api/v1/litellm/rotate` | Rotate managed inference key and republish |
 | DELETE | `/api/v1/litellm` | Disconnect; body `{ "unpublish": true\|false }` |
 
-`GET /api/v1/admin/summary` MAY include LiteLLM `configured` and `last_sync_ok` fields.
+`GET /api/v1/admin/summary` MAY include LiteLLM `configured`. Include `last_sync_ok` only after a sync has been attempted so the dashboard can distinguish never-synced from a failed sync.
 
 ## 7. Lifecycle hooks
 

@@ -413,11 +413,13 @@ func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	liteLLM := map[string]any{"configured": false, "last_sync_ok": false}
+	liteLLM := map[string]any{"configured": false}
 	if h.litellm != nil {
 		if status, statusErr := h.litellm.Status(r.Context()); statusErr == nil {
 			liteLLM["configured"] = status.Configured
-			liteLLM["last_sync_ok"] = status.LastSyncOK
+			if status.LastSync != nil {
+				liteLLM["last_sync_ok"] = status.LastSyncOK
+			}
 		}
 	}
 	profile, profileErr := h.profile()

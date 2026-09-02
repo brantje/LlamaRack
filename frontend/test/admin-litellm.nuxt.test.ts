@@ -107,7 +107,7 @@ describe('LiteLLM administration', () => {
       }
       if (path === '/api/v1/litellm/test' && options?.method === 'POST') return { ok: true }
       if (path === '/api/v1/litellm/sync' && options?.method === 'POST') {
-        current = configuredStatus({ last_sync: { at: '2023-11-15T10:13:20Z', ok: true, published: 3, unpublished: 1 } })
+        current = configuredStatus({ last_sync: { at: 1_700_000_000, ok: true, counts: { published: 3, unpublished: 1 } } })
         return { at: '2023-11-15T10:13:20Z', ok: true, published: 3, unpublished: 1 }
       }
       if (path === '/api/v1/litellm/rotate' && options?.method === 'POST') {
@@ -348,6 +348,24 @@ describe('LiteLLM administration', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('LiteLLM')
     expect(wrapper.text()).toContain('Last sync failed')
+    wrapper.unmount()
+  })
+
+  it('renders never synced when the summary omits last_sync_ok', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/admin/summary') {
+        return {
+          users: { total: 2, enabled: 2 },
+          huggingface: { configured: false },
+          litellm: { configured: true },
+          llamacpp: { available: true, version: 'b1' }
+        }
+      }
+      return []
+    })
+    const wrapper = await mountSuspended(AdminIndexPage, { route: '/admin' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Never synced')
     wrapper.unmount()
   })
 

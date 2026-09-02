@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -324,8 +325,57 @@ func TestAdminSummaryIncludesLiteLLMStatus(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"litellm"`) {
 		t.Fatalf("summary=%d body=%s", w.Code, w.Body.String())
 	}
+	if strings.Contains(w.Body.String(), `"last_sync_ok"`) {
+		t.Fatalf("unconfigured summary should omit last_sync_ok, body=%s", w.Body.String())
+	}
 }
 
 func itoa(value int64) string {
 	return strconv.FormatInt(value, 10)
+}
+
+func TestAdminSummaryReportsConfiguredLiteLLM(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(root, "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	authService := auth.New(db, time.Hour)
+	if _, err := authService.Bootstrap(ctx, "admin", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
+	}
+	token, _, _, err := authService.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "192.0.2.10", "Chrome/100 Windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	managerSettings := settings.New(db, settings.Defaults{DataDir: root})
+	if _, err := managerSettings.Set(ctx, settings.ExternalURL, "http://llamarack.example"); err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := huggingface.NewSecretStore(db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liteLLM := litellm.New(db, authService, secrets, managerSettings)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/model/info" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(fake.Close)
+	liteLLM.SetHTTPClient(fake.Client())
+	if _, err := liteLLM.Save(ctx, litellm.SaveInput{ProxyURL: fake.URL, APIBase: "http://llamarack.example/v1", ProxyKey: "proxy-key"}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewAdminHandler(authService, managerSettings, secrets, managersecurity.NewNetwork(managerSettings), func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Path: "/app/llama-server", Version: "test", Fingerprint: "abc"}, nil
+	}, liteLLM)
+	w := doRequest(t, handler, http.MethodGet, "/api/v1/admin/summary", nil, &http.Cookie{Name: sessionCookie, Value: token})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"configured":true`) || !strings.Contains(w.Body.String(), `"last_sync_ok":true`) {
+		t.Fatalf("summary=%d body=%s", w.Code, w.Body.String())
+	}
 }

@@ -172,3 +172,32 @@ func TestRotateManagedAPIKeyRejectsNonManagedKey(t *testing.T) {
 		t.Fatalf("expected hidden-only rotate rejection, got %v", err)
 	}
 }
+
+func TestEnsureHiddenServiceAccountRejectsEmptyName(t *testing.T) {
+	ctx := context.Background()
+	s := testService(t)
+	if _, err := s.EnsureHiddenServiceAccount(ctx, "  "); !errors.Is(err, ErrServiceAccountNameRequired) {
+		t.Fatalf("expected name required, got %v", err)
+	}
+}
+
+func TestDeleteHiddenServiceAccountByName(t *testing.T) {
+	ctx := context.Background()
+	s := testService(t)
+	if _, err := s.EnsureHiddenServiceAccount(ctx, ManagedPrincipalName); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := s.ListServiceAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("expected no visible accounts, got %#v", accounts)
+	}
+}
