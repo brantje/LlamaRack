@@ -178,6 +178,10 @@ func TestAPIKeyMutationValidation(t *testing.T) {
 	if cleared.Code != http.StatusNoContent {
 		t.Fatalf("clear expiry status=%d body=%s", cleared.Code, cleared.Body.String())
 	}
+	listed := doRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"id":"`+created.Key.ID+`"`) || strings.Contains(listed.Body.String(), `"expires_on":"`+tomorrow+`"`) {
+		t.Fatalf("cleared expiry list status=%d body=%s", listed.Code, listed.Body.String())
+	}
 	setExpiry := doRequest(t, handler, http.MethodPatch, "/api/v1/api-keys/"+created.Key.ID, map[string]any{"expires_on": tomorrow}, nil)
 	if setExpiry.Code != http.StatusNoContent {
 		t.Fatalf("set expiry status=%d body=%s", setExpiry.Code, setExpiry.Body.String())

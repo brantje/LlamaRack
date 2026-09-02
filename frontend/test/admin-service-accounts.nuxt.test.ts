@@ -324,4 +324,22 @@ describe('Service accounts administration', () => {
     expect(wrapper.text()).toContain('Unable to load service account')
     wrapper.unmount()
   })
+
+  it('discards a stale detail response after the route id changes', async () => {
+    let finishSlow: (value: unknown) => void
+    const slow = new Promise(resolve => { finishSlow = resolve })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path.endsWith('/sa-slow')) return slow
+      if (path.endsWith('/sa-2')) return sampleAccount({ id: 'sa-2', name: 'Second' })
+      return {}
+    })
+    const wrapper = await mountSuspended(AdminServiceAccountDetailPage, { route: '/admin/service-accounts/sa-slow' })
+    await useRouter().replace('/admin/service-accounts/sa-2')
+    await flushPromises()
+    finishSlow!(sampleAccount({ id: 'sa-slow', name: 'First' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Second')
+    expect(wrapper.text()).not.toContain('First')
+    wrapper.unmount()
+  })
 })

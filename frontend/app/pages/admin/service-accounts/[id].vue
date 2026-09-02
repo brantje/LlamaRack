@@ -39,10 +39,15 @@ function normalizeDetail(value: ServiceAccountDetail | { account?: ServiceAccoun
 
 async function load() {
   if (!manager.user.value || !id.value) return
+  const requested = id.value
+  account.value = null
   error.value = ''
   try {
-    account.value = normalizeDetail(await manager.request<ServiceAccountDetail>(`/api/v1/admin/service-accounts/${encodeURIComponent(id.value)}`))
+    const result = normalizeDetail(await manager.request<ServiceAccountDetail>(`/api/v1/admin/service-accounts/${encodeURIComponent(requested)}`))
+    if (id.value !== requested) return
+    account.value = result
   } catch (value: any) {
+    if (id.value !== requested) return
     account.value = null
     error.value = value?.data?.error || value?.message || 'Unable to load service account'
   }

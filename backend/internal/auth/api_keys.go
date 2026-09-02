@@ -30,7 +30,7 @@ func (s *Service) CreateAPIKeyForUser(ctx context.Context, name string, ownerUse
 }
 
 func (s *Service) CreateAPIKey(ctx context.Context, in CreateAPIKeyInput) (APIKey, string, error) {
-	name, keyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, err := s.normalizeAPIKeyWrite(ctx, in.Name, in.KeyType, in.OwnerUserID, in.OwnerServiceAccountID, in.InstanceIDs, in.ExpiresOn, true)
+	name, keyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, err := s.normalizeAPIKeyWrite(ctx, in.Name, in.KeyType, in.OwnerUserID, in.OwnerServiceAccountID, in.InstanceIDs, in.ExpiresOn, true, true, true)
 	if err != nil {
 		return APIKey{}, "", err
 	}
@@ -164,7 +164,8 @@ func (s *Service) UpdateAPIKey(ctx context.Context, id string, in UpdateAPIKeyIn
 	} else if in.ExpiresOn != nil {
 		expiresOn = *in.ExpiresOn
 	}
-	name, _, ownerUserValue, ownerSAValue, instanceIDs, expiresOnValue, err := s.normalizeAPIKeyWrite(ctx, name, existing.KeyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, in.ExpiresOn != nil)
+	ownerChanged := in.OwnerUserID != nil || in.OwnerServiceAccountID != nil
+	name, _, ownerUserValue, ownerSAValue, instanceIDs, expiresOnValue, err := s.normalizeAPIKeyWrite(ctx, name, existing.KeyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, in.ExpiresOn != nil, ownerChanged, in.InstanceIDs != nil)
 	if err != nil {
 		return err
 	}
@@ -370,7 +371,7 @@ func scanAPIKey(row apiKeyRow, liveIDs map[string]struct{}) (APIKey, error) {
 	return item, nil
 }
 
-func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string, ownerUserID *int64, ownerServiceAccountID string, instanceIDs []string, expiresOn string, requireExpiresFuture bool) (string, string, any, any, []string, any, error) {
+func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string, ownerUserID *int64, ownerServiceAccountID string, instanceIDs []string, expiresOn string, requireExpiresFuture, validateOwnerEnabled, validateInstanceIDs bool) (string, string, any, any, []string, any, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", "", nil, nil, nil, nil, ErrAPIKeyNameRequired
@@ -398,7 +399,7 @@ func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string
 			}
 			return "", "", nil, nil, nil, nil, err
 		}
-		if enabled == 0 {
+		if validateOwnerEnabled && enabled == 0 {
 			return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerDisabled
 		}
 	} else {
@@ -409,7 +410,7 @@ func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string
 			}
 			return "", "", nil, nil, nil, nil, err
 		}
-		if enabled == 0 {
+		if validateOwnerEnabled && enabled == 0 {
 			return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerDisabled
 		}
 	}
@@ -420,8 +421,10 @@ func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string
 	if len(normalizedIDs) > 0 && keyType != APIKeyTypeInference {
 		return "", "", nil, nil, nil, nil, ErrAPIKeyInstancesNotAllowed
 	}
-	if err := s.rejectUnknownInstanceIDs(ctx, normalizedIDs); err != nil {
-		return "", "", nil, nil, nil, nil, err
+	if validateInstanceIDs {
+		if err := s.rejectUnknownInstanceIDs(ctx, normalizedIDs); err != nil {
+			return "", "", nil, nil, nil, nil, err
+		}
 	}
 	var expiresValue any
 	expiresOn = strings.TrimSpace(expiresOn)

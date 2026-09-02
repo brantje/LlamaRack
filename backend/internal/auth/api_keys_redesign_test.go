@@ -173,6 +173,10 @@ func TestAPIKeyUnknownInstanceAndPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	operator, err := s.CreateUser(ctx, "operator", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "allow", OwnerUserID: &admin.ID, InstanceIDs: []string{"missing"}}); !errors.Is(err, ErrUnknownInstanceID) {
 		t.Fatalf("unknown instance=%v", err)
 	}
@@ -193,7 +197,7 @@ func TestAPIKeyUnknownInstanceAndPrefix(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
-	scoped, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "scoped", OwnerUserID: &admin.ID, InstanceIDs: []string{"coder"}})
+	scoped, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "scoped", OwnerUserID: &operator.ID, InstanceIDs: []string{"coder"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +216,21 @@ func TestAPIKeyUnknownInstanceAndPrefix(t *testing.T) {
 	}
 	if !foundMissing {
 		t.Fatalf("expected missing_instance_ids in %+v", listed)
+	}
+	if err := s.UpdateAPIKey(ctx, scoped.ID, UpdateAPIKeyInput{Name: strPtr("scoped-renamed")}); err != nil {
+		t.Fatalf("rename with stale instance ids=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, scoped.ID, UpdateAPIKeyInput{InstanceIDs: &[]string{"coder"}}); !errors.Is(err, ErrUnknownInstanceID) {
+		t.Fatalf("re-supplying deleted instance=%v", err)
+	}
+	if err := s.SetUserEnabled(ctx, operator.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateAPIKey(ctx, scoped.ID, UpdateAPIKeyInput{Enabled: boolPtr(false)}); err != nil {
+		t.Fatalf("disable key with disabled owner=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, scoped.ID, UpdateAPIKeyInput{OwnerUserID: &operator.ID}); !errors.Is(err, ErrAPIKeyOwnerDisabled) {
+		t.Fatalf("reassign to disabled owner=%v", err)
 	}
 }
 

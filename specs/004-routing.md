@@ -82,7 +82,7 @@ A matching registered Model name does not count as an inference target unless it
 
 The gateway generates `/v1/models` from configured addressable Instances.
 
-Inference keys with a non-empty instance allowlist see only those live Instances. An empty allowlist means all enabled Instances. If every allowlisted ID is missing, the gateway returns 403. Full Access keys are not allowlisted.
+Inference keys with a non-empty instance allowlist see only those still-existing enabled Instances. An empty allowlist means all enabled Instances. If every allowlisted ID is missing, the gateway returns 403. Full Access keys are not allowlisted.
 
 Requirements:
 

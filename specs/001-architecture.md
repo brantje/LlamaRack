@@ -405,7 +405,7 @@ The first task remains completing the llama.cpp options GUI. Then implement real
 9. Always On, Autoload and eviction policy are Instance-owned.
 10. Persisted runtime observations are never blindly trusted after restart.
 11. New llama.cpp options can appear without a manager release.
-12. V1 management access is authenticated but not role-differentiated.
+12. V1 JWT management access is authenticated but not role-differentiated. API-key principals remain typed (inference / management / full).
 
 ## 17. Acceptance criteria
 

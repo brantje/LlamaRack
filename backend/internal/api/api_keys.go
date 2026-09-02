@@ -126,8 +126,8 @@ func (h *apiKeysHandler) patch(w http.ResponseWriter, r *http.Request, principal
 		OwnerUserID           *int64           `json:"owner_user_id"`
 		OwnerServiceAccountID *string          `json:"owner_service_account_id"`
 		InstanceIDs           *[]string        `json:"instance_ids"`
-		ExpiresOn             *json.RawMessage `json:"expires_on"`
-		Enabled               *bool            `json:"enabled"`
+		ExpiresOn             json.RawMessage `json:"expires_on"`
+		Enabled               *bool           `json:"enabled"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -139,13 +139,13 @@ func (h *apiKeysHandler) patch(w http.ResponseWriter, r *http.Request, principal
 		InstanceIDs:           in.InstanceIDs,
 		Enabled:               in.Enabled,
 	}
-	if in.ExpiresOn != nil {
-		raw := strings.TrimSpace(string(*in.ExpiresOn))
+	if len(in.ExpiresOn) > 0 {
+		raw := strings.TrimSpace(string(in.ExpiresOn))
 		if raw == "null" {
 			update.ClearExpiresOn = true
 		} else {
 			var expires string
-			if err := json.Unmarshal(*in.ExpiresOn, &expires); err != nil {
+			if err := json.Unmarshal(in.ExpiresOn, &expires); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": auth.ErrAPIKeyExpiresOnInvalid.Error()})
 				return
 			}
