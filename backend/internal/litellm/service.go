@@ -15,6 +15,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
@@ -415,7 +416,7 @@ func (s *Service) newClient(ctx context.Context) (*Client, error) {
 }
 
 func (s *Service) enabledInstances(ctx context.Context) ([]instances.Instance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE enabled=1 ORDER BY name,id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE enabled=1 AND NOT EXISTS (SELECT 1 FROM provider_imports pi WHERE pi.instance_id=instances.id AND pi.state=?) ORDER BY name,id`, modelimports.StateDownloading)
 	if err != nil {
 		return nil, err
 	}

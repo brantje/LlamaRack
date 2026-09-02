@@ -65,6 +65,80 @@ func newImportFixture(t *testing.T, handler http.Handler) (context.Context, stri
 	return ctx, modelsDir, db, modelService, downloadManager, service
 }
 
+func TestReconcileNotifiesOnceOnImportCompletion(t *testing.T) {
+	release := make(chan struct{})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/acme/demo/resolve/rev1/demo-Q4_K_M.gguf" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("ETag", "v1")
+		w.Header().Set("X-Linked-Size", "4")
+		if r.Method == http.MethodHead {
+			return
+		}
+		<-release
+		_, _ = w.Write([]byte("data"))
+	})
+	ctx, _, _, _, downloadManager, service := newImportFixture(t, handler)
+	var notifyMu sync.Mutex
+	notifyCounts := map[string]int{}
+	service.SetInstanceOnChange(func(_ context.Context, instanceID string) {
+		notifyMu.Lock()
+		defer notifyMu.Unlock()
+		notifyCounts[instanceID]++
+	})
+	artifact := huggingface.Artifact{
+		ID: "artifact-1", Name: "demo-Q4_K_M.gguf", Quantization: "Q4_K_M",
+		ModelBytes: 4, TotalBytes: 4, ShardCount: 1, ExpectedShards: 1, Complete: true,
+		Files: []huggingface.File{{Path: "demo-Q4_K_M.gguf", Size: 4, OID: "oid"}},
+	}
+	result, err := service.Prepare(ctx, huggingface.ModelDetail{ID: "acme/demo", Revision: "rev1"}, artifact, PrepareInput{
+		Name: "Demo Q4", ContextLength: 4096,
+		FirstInstance: FirstInstanceInput{Name: "Demo Instance", Slug: "demo-instance"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notifyMu.Lock()
+	if notifyCounts[result.Instance.ID] != 1 {
+		t.Fatalf("expected one notify on create, got %d", notifyCounts[result.Instance.ID])
+	}
+	notifyMu.Unlock()
+
+	close(release)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		job, err := downloadManager.Get(ctx, result.Download.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.State == downloads.StateCompleted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("download state = %s", job.State)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := service.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	notifyMu.Lock()
+	if notifyCounts[result.Instance.ID] != 2 {
+		t.Fatalf("expected completion notify, got %d total", notifyCounts[result.Instance.ID])
+	}
+	notifyMu.Unlock()
+	if err := service.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	notifyMu.Lock()
+	if notifyCounts[result.Instance.ID] != 2 {
+		t.Fatalf("expected no extra notify after completed reconcile, got %d", notifyCounts[result.Instance.ID])
+	}
+	notifyMu.Unlock()
+}
+
 func TestPrepareCreatesDownloadingInstanceAndStartsAfterCompletion(t *testing.T) {
 	release := make(chan struct{})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -244,7 +244,7 @@ func (s *Service) CleanupJob(ctx context.Context, jobID string) error {
 
 func (s *Service) reconcilePrepared(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT pi.id,pi.model_id,COALESCE(pi.instance_id,''),pi.start_when_ready,pi.start_attempted,dj.state,dj.error
+SELECT pi.id,pi.model_id,COALESCE(pi.instance_id,''),pi.start_when_ready,pi.start_attempted,pi.state,dj.state,dj.error
 FROM provider_imports pi
 JOIN download_jobs dj ON dj.id=pi.job_id
 WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
@@ -252,14 +252,14 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 		return err
 	}
 	type pending struct {
-		id, modelID, instanceID, downloadState, downloadError string
-		startWhenReady, startAttempted                        bool
+		id, modelID, instanceID, importState, downloadState, downloadError string
+		startWhenReady, startAttempted                                        bool
 	}
 	var items []pending
 	for rows.Next() {
 		var item pending
 		var start, attempted int
-		if err := rows.Scan(&item.id, &item.modelID, &item.instanceID, &start, &attempted, &item.downloadState, &item.downloadError); err != nil {
+		if err := rows.Scan(&item.id, &item.modelID, &item.instanceID, &start, &attempted, &item.importState, &item.downloadState, &item.downloadError); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -287,6 +287,9 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 			}
 			if _, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error='',updated_at=unixepoch() WHERE id=?`, StateCompleted, item.id); err != nil {
 				return err
+			}
+			if item.importState == StateDownloading {
+				s.instances.NotifyChange(ctx, item.instanceID)
 			}
 			if item.startWhenReady && !item.startAttempted && s.starter != nil {
 				_, startErr := s.starter.StartInstance(context.Background(), item.instanceID)

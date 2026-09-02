@@ -64,6 +64,10 @@ func (s *Service) notifyChange(ctx context.Context, instanceID string) {
 	}
 }
 
+func (s *Service) NotifyChange(ctx context.Context, instanceID string) {
+	s.notifyChange(ctx, instanceID)
+}
+
 func Slugify(name string) string {
 	name = strings.TrimSpace(strings.ToLower(name))
 	var b strings.Builder

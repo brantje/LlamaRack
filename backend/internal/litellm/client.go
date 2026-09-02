@@ -30,7 +30,7 @@ type ModelParams struct {
 }
 
 type ModelInfo struct {
-	ID                  string `json:"id"`
+	ID                  string `json:"id,omitempty"`
 	LlamaRackManaged    bool   `json:"llamarack_managed"`
 	LlamaRackInstanceID string `json:"llamarack_instance_id"`
 }
