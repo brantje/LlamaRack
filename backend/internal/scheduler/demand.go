@@ -43,6 +43,7 @@ type KVMetadata struct {
 	KVHeadCount   int64
 	KeyLength     int64
 	ValueLength   int64
+	ExpertCount   int64
 }
 
 type DemandInput struct {
@@ -80,6 +81,14 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 	if weightsGPU > weights {
 		weightsGPU = weights
 	}
+	if !cpuOnly {
+		if cpuMoe, ok := cpuMoeBlocks(in.Options, in.Metadata.BlockCount); ok && in.Metadata.ExpertCount > 0 {
+			moeGPU, _ := MoEWeightDistribution(weights, in.Metadata.BlockCount, cpuMoe, in.Metadata.ExpertCount)
+			if moeGPU < weightsGPU {
+				weightsGPU = moeGPU
+			}
+		}
+	}
 	kvGPUBytes, kvRAMBytes := kv, int64(0)
 	if !kvGPU {
 		kvGPUBytes, kvRAMBytes = 0, kv
@@ -101,6 +110,65 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 		demand.GPU = []GPUResourceDemand{{Bytes: vram}}
 	}
 	return demand
+}
+
+// ExpertWeightShare estimates the routed-expert share of GGUF weight bytes.
+// It is intentionally conservative until tensor-directory accounting is added.
+func ExpertWeightShare(expertCount int64) float64 {
+	if expertCount > 1 {
+		return math.Min(0.85, float64(expertCount-1)/float64(expertCount))
+	}
+	return 0.75
+}
+
+// MoEWeightDistribution estimates how many weight bytes remain on GPU when
+// routed experts from cpuMoeBlocks transformer blocks are placed in host RAM.
+func MoEWeightDistribution(weights, blockCount, cpuMoeBlocks, expertCount int64) (gpuWeights, hostWeights int64) {
+	if weights <= 0 {
+		return 0, 0
+	}
+	if blockCount <= 0 || cpuMoeBlocks <= 0 || expertCount <= 0 {
+		return weights, 0
+	}
+	if cpuMoeBlocks > blockCount {
+		cpuMoeBlocks = blockCount
+	}
+	share := ExpertWeightShare(expertCount)
+	hostWeights = int64(math.Round(float64(weights) * share * float64(cpuMoeBlocks) / float64(blockCount)))
+	if hostWeights < 0 {
+		hostWeights = 0
+	}
+	if hostWeights > weights {
+		hostWeights = weights
+	}
+	return weights - hostWeights, hostWeights
+}
+
+func cpuMoeBlocks(options map[string]string, blockCount int64) (int64, bool) {
+	if blockCount <= 0 {
+		return 0, false
+	}
+	if optionEnabled(options, "cpu-moe") {
+		return blockCount, true
+	}
+	raw := strings.TrimSpace(optionValue(options, "n-cpu-moe"))
+	if raw == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 || value > blockCount {
+		return 0, false
+	}
+	return value, true
+}
+
+func optionEnabled(options map[string]string, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(optionValue(options, key))) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func estimateKVBytes(context int64, m KVMetadata, options map[string]string) int64 {
