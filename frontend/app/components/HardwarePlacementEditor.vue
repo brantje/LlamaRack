@@ -60,7 +60,7 @@ type Recommendation = {
   current_fit: boolean
   total_hardware_fit: boolean
   cpu_fit: boolean
-  offload: { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu?: boolean; reason: string }
+  offload: { mode: string; gpu_layers?: number; n_cpu_moe?: number; devices?: string[]; tensor_split?: string; kv_on_gpu?: boolean; reason: string }
   placement_ranges?: PlacementRanges
 }
 type ConfigResponse = {
@@ -137,6 +137,18 @@ const whyCopy = computed(() => {
 const selectedDevices = computed(() => currentZone.value?.devices || recommendation.value?.offload.devices || [])
 const gpuSummary = computed(() => usingGpuSummary(selectedDevices.value.length, gpus.value.length))
 const fitsAfterFreeing = computed(() => Boolean(recommendation.value && !recommendation.value.current_fit && recommendation.value.total_hardware_fit))
+const autoPlacementCopy = computed(() => {
+  if (recommendation.value?.offload.mode === 'moe') {
+    return {
+      summary: 'LlamaRack uses every currently free GPU for this MoE placement and keeps routed experts in system RAM.',
+      detail: 'Attention and the configured GPU layers stay on GPU; system RAM is reserved for the expert blocks that do not fit in VRAM.'
+    }
+  }
+  return {
+    summary: 'LlamaRack chooses the smallest GPU set that safely fits the model.',
+    detail: 'It keeps the model on one GPU when possible and adds GPUs only when needed.'
+  }
+})
 
 function isRecommendation(value: unknown): value is Recommendation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -330,8 +342,8 @@ onBeforeUnmount(() => {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <p class="font-semibold">{{ gpuMode === 'manual' ? 'Manual' : 'Automatic' }}</p>
-        <p class="text-xs text-muted">{{ gpuMode === 'manual' ? 'Select the GPUs this Instance should use.' : 'LlamaRack chooses the smallest GPU set that safely fits the model.' }}</p>
-        <p v-if="gpuMode !== 'manual'" class="mt-1 text-xs text-muted">It keeps the model on one GPU when possible and adds GPUs only when needed.</p>
+        <p class="text-xs text-muted">{{ gpuMode === 'manual' ? 'Select the GPUs this Instance should use.' : autoPlacementCopy.summary }}</p>
+        <p v-if="gpuMode !== 'manual'" class="mt-1 text-xs text-muted">{{ autoPlacementCopy.detail }}</p>
       </div>
       <UButton size="xs" color="neutral" variant="soft" :loading="loading || recommendationLoading" @click="refresh">Refresh hardware</UButton>
     </div>
@@ -485,6 +497,7 @@ onBeforeUnmount(() => {
               <div><dt class="text-dimmed">Selected context</dt><dd class="font-mono font-semibold tabular-nums">{{ recommendation.context_length.toLocaleString() }} tokens</dd></div>
               <div v-if="contextCapability"><dt class="text-dimmed">Context capability</dt><dd class="font-mono font-semibold tabular-nums">{{ contextCapability.toLocaleString() }} tokens</dd></div>
               <div v-if="recommendation.offload.gpu_layers"><dt class="text-dimmed">GPU layers</dt><dd class="font-mono font-semibold tabular-nums">{{ recommendation.offload.gpu_layers }}</dd></div>
+              <div v-if="recommendation.offload.n_cpu_moe"><dt class="text-dimmed">CPU expert blocks</dt><dd class="font-mono font-semibold tabular-nums">{{ recommendation.offload.n_cpu_moe }}</dd></div>
             </dl>
             <div class="flex flex-wrap gap-2 text-xs">
               <StatusTag v-for="device in recommendation.offload.devices" :key="device" variant="neutral"><span class="font-mono">{{ device }}</span></StatusTag>
@@ -559,7 +572,7 @@ onBeforeUnmount(() => {
         </UFormField>
       </div>
       <div v-if="gpuMode === 'auto'" class="border border-[var(--color-divider)] p-3">
-        <div class="flex items-start gap-2"><StatusTag variant="pending">Automatic</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">LlamaRack chooses the smallest GPU set that safely fits the model. It keeps the model on one GPU when possible and adds GPUs only when needed.</p></div>
+        <div class="flex items-start gap-2"><StatusTag variant="pending">Automatic</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ autoPlacementCopy.summary }} {{ autoPlacementCopy.detail }}</p></div>
       </div>
     </template>
   </div>
