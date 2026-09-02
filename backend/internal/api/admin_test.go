@@ -13,6 +13,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
@@ -291,6 +292,37 @@ func TestAdminGeneralSettingsSummaryAndSystem(t *testing.T) {
 	w = doRequest(t, f.handler, http.MethodGet, "/api/v1/system", nil, f.cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"uptime_seconds"`) || !strings.Contains(w.Body.String(), `"secure_cookie":true`) || !strings.Contains(w.Body.String(), `"options":1`) {
 		t.Fatalf("system=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminSummaryIncludesLiteLLMStatus(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db, err := database.Open(ctx, filepath.Join(root, "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	authService := auth.New(db, time.Hour)
+	if _, err := authService.Bootstrap(ctx, "admin", "correct-horse-battery"); err != nil {
+		t.Fatal(err)
+	}
+	token, _, _, err := authService.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "192.0.2.10", "Chrome/100 Windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	managerSettings := settings.New(db, settings.Defaults{DataDir: root})
+	secrets, err := huggingface.NewSecretStore(db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liteLLM := litellm.New(db, authService, secrets, managerSettings)
+	handler := NewAdminHandler(authService, managerSettings, secrets, managersecurity.NewNetwork(managerSettings), func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Path: "/app/llama-server", Version: "test", Fingerprint: "abc"}, nil
+	}, liteLLM)
+	w := doRequest(t, handler, http.MethodGet, "/api/v1/admin/summary", nil, &http.Cookie{Name: sessionCookie, Value: token})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"litellm"`) {
+		t.Fatalf("summary=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

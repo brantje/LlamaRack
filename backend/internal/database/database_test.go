@@ -156,6 +156,30 @@ func TestEnsureInstanceColumnsAddsMaxPending(t *testing.T) {
 	}
 }
 
+func TestEnsureServiceAccountColumnsAddsHidden(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy-sa.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, `CREATE TABLE service_accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if hasColumn(t, ctx, db, "service_accounts", "hidden") {
+		t.Fatal("legacy table should not already have hidden")
+	}
+	if err := ensureServiceAccountColumns(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if !hasColumn(t, ctx, db, "service_accounts", "hidden") {
+		t.Fatal("expected ALTER TABLE to add hidden")
+	}
+	if err := ensureServiceAccountColumns(ctx, db); err != nil {
+		t.Fatalf("idempotent ensure: %v", err)
+	}
+}
+
 func TestOpenFailsWhenParentCannotBeCreated(t *testing.T) {
 	root := t.TempDir()
 	blocker := filepath.Join(root, "file")

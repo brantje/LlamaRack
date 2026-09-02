@@ -58,7 +58,11 @@ var (
 	ErrAPIKeyExpiresOnInvalid     = errors.New("expires_on must be a YYYY-MM-DD date")
 	ErrAPIKeyExpiresOnPast        = errors.New("expires_on must not be in the past")
 	ErrServiceAccountNameRequired = errors.New("name is required")
+	ErrHiddenPrincipal            = errors.New("hidden principal")
+	ErrManagedAPIKeyImmutable     = errors.New("this key's name and owner cannot be changed")
 )
+
+const ManagedPrincipalName = "LiteLLM"
 
 type User struct {
 	ID             int64  `json:"id"`
@@ -104,6 +108,8 @@ type APIKey struct {
 	CreatedByUserID    *int64   `json:"created_by_user_id,omitempty"`
 	CreatedAt          int64    `json:"created_at"`
 	LastUsedAt         *int64   `json:"last_used_at,omitempty"`
+	HiddenOwner        bool     `json:"-"`
+	Managed            bool     `json:"managed,omitempty"`
 }
 
 type CreateAPIKeyInput struct {
@@ -131,6 +137,7 @@ type ServiceAccount struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
 	Enabled         bool     `json:"enabled"`
+	Hidden          bool     `json:"-"`
 	CreatedAt       int64    `json:"created_at"`
 	CreatedByUserID *int64   `json:"created_by_user_id,omitempty"`
 	Keys            []APIKey `json:"-"`

@@ -56,6 +56,7 @@ const instanceItems = computed(() => {
 })
 
 const missingInstanceIds = computed(() => props.initialKey?.missing_instance_ids || [])
+const managed = computed(() => Boolean(props.editing && props.initialKey?.managed))
 const canSave = computed(() => name.value.trim().length > 0 && !!owner.value)
 const modalTitle = computed(() => {
   if (props.phase === 'secret') return 'Copy this key now'
@@ -134,10 +135,13 @@ function clearExpires() {
 
       <form v-else class="space-y-4" data-testid="api-key-form" @submit.prevent="save">
         <UFormField label="Name" required>
-          <UInput v-model="name" data-testid="key-name" class="w-full" autocomplete="off" required />
+          <UInput v-model="name" data-testid="key-name" class="w-full" autocomplete="off" required :disabled="managed" />
         </UFormField>
 
-        <UFormField label="Owner" required>
+        <UFormField v-if="managed" label="Owner" description="This LiteLLM key is owned by a hidden service account. Rotate it from Administration → LiteLLM.">
+          <UInput :model-value="initialKey?.owner_name || 'LiteLLM'" class="w-full" disabled data-testid="api-key-owner-readonly" />
+        </UFormField>
+        <UFormField v-else label="Owner" required>
           <div data-testid="api-key-owner">
             <USelectMenu v-model="owner" class="w-full" :items="ownerItems" value-key="value" label-key="label" placeholder="Select owner" />
           </div>

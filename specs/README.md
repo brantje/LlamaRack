@@ -14,6 +14,7 @@ These design specifications define the initial architecture and product contract
 - [010 — Web UI](010-ui.md)
 - [011 — GGUF Metadata and Hardware Recommendations](011-hardware-recommendations.md)
 - [012 — Observability](012-observability.md)
+- [013 — LiteLLM Proxy catalog sync](013-litellm.md)
 
 ## Review order
 

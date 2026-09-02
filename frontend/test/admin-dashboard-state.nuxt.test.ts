@@ -37,7 +37,7 @@ describe('Administration dashboard recovery state', () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path !== '/api/v1/admin/summary') return []
       if (fail) throw { data: { error: 'summary denied' } }
-      return { users: { total: 3, enabled: 2 }, huggingface: { configured: true, prefix: 'hf_ab' }, llamacpp: { available: false } }
+      return { users: { total: 3, enabled: 2 }, huggingface: { configured: true, prefix: 'hf_ab' }, litellm: { configured: true, last_sync_ok: true }, llamacpp: { available: false } }
     })
 
     const wrapper = await mountSuspended(AdminIndexPage, { route: '/admin' })

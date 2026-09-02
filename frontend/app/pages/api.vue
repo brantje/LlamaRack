@@ -99,6 +99,12 @@ function createBody(draft: APIKeyDraft) {
 }
 
 function patchBody(draft: APIKeyDraft) {
+  if (editingKey.value?.managed) {
+    return {
+      expires_on: draft.expires_on ?? null,
+      instance_ids: draft.instance_ids || []
+    }
+  }
   const body: Record<string, unknown> = {
     name: draft.name,
     owner_user_id: draft.owner_user_id ?? null,
@@ -225,7 +231,7 @@ async function rotate(key: APIKey) {
             <div class="flex justify-end gap-1">
               <AppButton intent="ghost" size="xs" :disabled="!!pending[row.original.id]" @click="openEdit(row.original)">Edit</AppButton>
               <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
+              <AppButton v-if="!row.original.managed" intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
             </div>
           </template>
         </UTable>

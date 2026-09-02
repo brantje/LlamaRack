@@ -25,6 +25,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
@@ -142,6 +143,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient)
 	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
+	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
+	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
+	importService.SetInstanceOnChange(liteLLMService.NotifyInstanceChange)
 	if err := downloadManager.ResumePending(ctx); err != nil {
 		return fmt.Errorf("resume downloads: %w", err)
 	}
@@ -169,6 +173,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/observability/", observability.NewManagementHandler(observabilityService))
 	huggingFace := api.NewHuggingFaceHandler(authService, hfClient, providerSecrets, downloadManager, importService)
 	managementAPI.Handle("/api/v1/huggingface/", huggingFace)
+	liteLLMHandler := api.NewLiteLLMHandler(authService, liteLLMService)
+	managementAPI.Handle("/api/v1/litellm/", liteLLMHandler)
+	managementAPI.Handle("/api/v1/litellm", liteLLMHandler)
 	managementAPI.Handle("/api/v1/imports", huggingFace)
 	managementAPI.Handle("/api/v1/downloads", huggingFace)
 	managementAPI.Handle("/api/v1/downloads/", huggingFace)
@@ -182,7 +189,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("/api/v1/admin/auth/", oidcHandler)
 	managementAPI.Handle("/api/v1/me/identities", oidcHandler)
 	managementAPI.Handle("/api/v1/me/identities/", oidcHandler)
-	adminHandler := api.NewAdminHandler(authService, managerSettings, providerSecrets, network, profileGetter)
+	adminHandler := api.NewAdminHandler(authService, managerSettings, providerSecrets, network, profileGetter, liteLLMService)
 	managementAPI.Handle("GET /api/v1/me", adminHandler)
 	managementAPI.Handle("/api/v1/me/", adminHandler)
 	managementAPI.Handle("/api/v1/users", adminHandler)
@@ -224,6 +231,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	serveErr := make(chan error, 1)
 	go lifecycleService.RunReconciler(ctx, alwaysOnInterval)
 	go lifecycleService.RunIdleReconciler(ctx, idleUnloadTimeout)
+	go func() { liteLLMService.BootReconcile(ctx) }()
 	go modelService.RunMetadataReconciler(ctx, 2*time.Second)
 	go importService.Run(ctx, 500*time.Millisecond)
 	go observabilitySampler.Run(ctx)

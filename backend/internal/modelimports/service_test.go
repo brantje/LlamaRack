@@ -306,3 +306,4 @@ func TestHelpersAndResolvedFailureState(t *testing.T) {
 		t.Fatalf("resolved statuses=%+v err=%v", items, err)
 	}
 }
+

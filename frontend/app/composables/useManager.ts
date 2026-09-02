@@ -118,6 +118,7 @@ export type APIKey = {
   created_at: number
   last_used_at?: number
   created_by_user_id?: number
+  managed?: boolean
 }
 export type ServiceAccount = {
   id: string
