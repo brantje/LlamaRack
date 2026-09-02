@@ -2,6 +2,7 @@
 type Summary = {
   users: { total: number; enabled: number }
   huggingface: { configured: boolean; prefix?: string }
+  litellm: { configured: boolean; last_sync_ok?: boolean }
   llamacpp: { available: boolean; path?: string; version?: string; fingerprint?: string }
 }
 
@@ -13,7 +14,7 @@ const loading = ref(false)
 function isSummary(value: unknown): value is Summary {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<Summary>
-  return Boolean(candidate.users && candidate.huggingface && candidate.llamacpp)
+  return Boolean(candidate.users && candidate.huggingface && candidate.litellm && candidate.llamacpp)
 }
 
 async function load() {
@@ -49,7 +50,7 @@ watch(manager.user, user => {
       </div>
     </Frame>
 
-    <div v-if="summary" class="grid gap-4 lg:grid-cols-3" data-testid="admin-summary-cards">
+    <div v-if="summary" class="grid gap-4 lg:grid-cols-2 xl:grid-cols-4" data-testid="admin-summary-cards">
       <NuxtLink to="/admin/users" class="block">
         <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
           <p class="text-sm font-semibold">Users</p>
@@ -68,6 +69,17 @@ watch(manager.user, user => {
         </Frame>
       </NuxtLink>
 
+      <NuxtLink to="/admin/litellm" class="block">
+        <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
+          <p class="text-sm font-semibold">LiteLLM</p>
+          <p class="mt-1 text-xs text-[var(--neutral-700)]">Proxy catalog sync</p>
+          <p class="mt-6 font-[var(--font-heading)] text-[length:var(--font-size-h3)] font-semibold leading-none">{{ summary.litellm.configured ? 'Configured' : 'Not configured' }}</p>
+          <p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">
+            {{ summary.litellm.configured ? (summary.litellm.last_sync_ok === true ? 'Last sync ok' : summary.litellm.last_sync_ok === false ? 'Last sync failed' : 'Never synced') : 'No proxy' }}
+          </p>
+        </Frame>
+      </NuxtLink>
+
       <NuxtLink to="/admin/llamacpp" class="block">
         <Frame class="h-full p-5 transition-colors hover:bg-[var(--neutral-100)]">
           <p class="text-sm font-semibold">llama.cpp</p>
@@ -77,6 +89,6 @@ watch(manager.user, user => {
         </Frame>
       </NuxtLink>
     </div>
-    <div v-else-if="loading" class="grid gap-4 md:grid-cols-3" data-testid="admin-summary-loading"><USkeleton v-for="n in 3" :key="n" class="h-40 w-full" /></div>
+    <div v-else-if="loading" class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="admin-summary-loading"><USkeleton v-for="n in 4" :key="n" class="h-40 w-full" /></div>
   </AdminShell>
 </template>

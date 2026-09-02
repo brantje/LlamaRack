@@ -134,3 +134,32 @@ func TestSmallInstanceHelpers(t *testing.T) {
 		t.Fatal("blank tensor split should persist as NULL")
 	}
 }
+
+func TestServiceNotifiesOnLifecycleChanges(t *testing.T) {
+	ctx := context.Background()
+	s, _ := testService(t)
+	var notified []string
+	s.SetOnChange(func(_ context.Context, instanceID string) {
+		notified = append(notified, instanceID)
+	})
+	created, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Notify Me", Slug: "notify-me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notified) != 1 || notified[0] != created.ID {
+		t.Fatalf("create notifications=%v", notified)
+	}
+	updated, err := s.Update(ctx, created.ID, UpdateInput{ModelID: "m1", Name: "Notify Me", Slug: "notify-me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notified) != 2 || notified[1] != updated.ID {
+		t.Fatalf("update notifications=%v", notified)
+	}
+	if err := s.Delete(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(notified) != 3 || notified[2] != created.ID {
+		t.Fatalf("delete notifications=%v", notified)
+	}
+}

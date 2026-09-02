@@ -104,7 +104,7 @@ describe('Administration dashboard and navigation', () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/admin/summary') {
         if (failSummary) throw { data: { error: 'summary denied' } }
-        return { users: { total: 3, enabled: 2 }, huggingface: { configured: true, prefix: 'hf_ab' }, llamacpp: { available: false } }
+        return { users: { total: 3, enabled: 2 }, huggingface: { configured: true, prefix: 'hf_ab' }, litellm: { configured: false }, llamacpp: { available: false } }
       }
       return []
     })
@@ -129,6 +129,7 @@ describe('Administration dashboard and navigation', () => {
     expect(sidebar.text()).toContain('General')
     expect(sidebar.text()).toContain('llama.cpp')
     expect(sidebar.text()).toContain('Hugging Face')
+    expect(sidebar.text()).toContain('LiteLLM')
     expect(sidebar.text()).toContain('Users')
     expect(sidebar.text()).toContain('Service accounts')
     expect(sidebar.text()).toContain('System')

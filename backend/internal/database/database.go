@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS service_accounts (
  id TEXT PRIMARY KEY,
  name TEXT NOT NULL,
  enabled INTEGER NOT NULL DEFAULT 1,
+ hidden INTEGER NOT NULL DEFAULT 0,
  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
@@ -282,7 +283,10 @@ CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(ins
 	if err := ensureAPIKeysSchema(ctx, db); err != nil {
 		return err
 	}
-	return ensureInstanceColumns(ctx, db)
+	if err := ensureInstanceColumns(ctx, db); err != nil {
+		return err
+	}
+	return ensureServiceAccountColumns(ctx, db)
 }
 
 func ensureAPIKeysSchema(ctx context.Context, db *sql.DB) error {
@@ -372,5 +376,17 @@ func ensureInstanceColumns(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 	_, err = db.ExecContext(ctx, `ALTER TABLE instances ADD COLUMN max_pending_requests INTEGER NOT NULL DEFAULT 0 CHECK(max_pending_requests >= 0)`)
+	return err
+}
+
+func ensureServiceAccountColumns(ctx context.Context, db *sql.DB) error {
+	hasHidden, err := tableHasColumn(ctx, db, "service_accounts", "hidden")
+	if err != nil {
+		return err
+	}
+	if hasHidden {
+		return nil
+	}
+	_, err = db.ExecContext(ctx, `ALTER TABLE service_accounts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	return err
 }

@@ -118,6 +118,46 @@ describe('API key controls', () => {
     expect(wrapper.text()).not.toContain('Revoked')
   })
 
+  it('shows the managed LiteLLM key without rotate and keeps name and owner read-only', async () => {
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/api-keys' && !options?.method) {
+        return [sampleKey({
+          name: 'LiteLLM',
+          owner_kind: 'service_account',
+          owner_id: 'sa-hidden',
+          owner_name: 'LiteLLM',
+          managed: true,
+          instance_ids: ['coder']
+        })]
+      }
+      if (path === '/api/v1/users') return [{ id: 1, username: 'admin', enabled: true }]
+      if (path === '/api/v1/admin/service-accounts') return []
+      return []
+    })
+
+    const wrapper = await mountSuspended(APIPage, { route: false })
+    await flushPromises()
+    expect(wrapper.text()).toContain('LiteLLM')
+    expect(wrapper.text()).toContain('sk-abcd1234')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Rotate')).toBe(false)
+
+    await wrapper.findAll('button').find(button => button.text() === 'Edit')!.trigger('click')
+    await flushPromises()
+    const nameInput = [...document.body.querySelectorAll<HTMLInputElement>('[data-testid="key-name"]')].at(-1)!
+    expect(nameInput.disabled).toBe(true)
+    expect(document.body.querySelector('[data-testid="api-key-owner-readonly"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="api-key-instances"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="api-key-expires-picker"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="api-key-expires-picker"]')?.getAttribute('aria-label')).toBe('Select a date')
+    const dateField = [...wrapper.findAllComponents({ name: 'InputDate' }), ...wrapper.findAllComponents({ name: 'UInputDate' })][0]
+    expect(dateField?.props('locale')).toBe('en-GB')
+    await click('api-key-save')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1', {
+      method: 'PATCH',
+      body: { expires_on: null, instance_ids: ['coder'] }
+    })
+  })
+
   it('cancels disable and surfaces mutation errors', async () => {
     let mode: 'toggle-error' | 'ok' = 'toggle-error'
     mocks.request.mockImplementation(async (path: string, options?: any) => {

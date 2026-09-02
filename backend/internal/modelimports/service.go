@@ -71,6 +71,10 @@ type PrepareResult struct {
 	Download downloads.Job      `json:"download"`
 }
 
+func (s *Service) SetInstanceOnChange(fn instances.ChangeNotifier) {
+	s.instances.SetOnChange(fn)
+}
+
 func New(db *sql.DB, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
 	return &Service{
 		db: db, modelsDir: modelsDir, models: modelService, instances: instances.New(db),

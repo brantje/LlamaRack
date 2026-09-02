@@ -195,3 +195,28 @@ func TestAPIKeyMutationValidation(t *testing.T) {
 		t.Fatalf("reassign owner status=%d body=%s", reassign.Code, reassign.Body.String())
 	}
 }
+
+func TestManagedLiteLLMKeyIsListedAndNameIsImmutable(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	handler := apiKeyHandler(t, f)
+	account, err := f.auth.EnsureHiddenServiceAccount(t.Context(), auth.ManagedPrincipalName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _, err := f.auth.EnsureManagedInferenceKey(t.Context(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := doRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"id":"`+key.ID+`"`) || !strings.Contains(listed.Body.String(), `"managed":true`) {
+		t.Fatalf("managed key missing from list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	renamed := doRequest(t, handler, http.MethodPatch, "/api/v1/api-keys/"+key.ID, map[string]any{"name": "renamed"}, nil)
+	if renamed.Code != http.StatusBadRequest || !strings.Contains(renamed.Body.String(), auth.ErrManagedAPIKeyImmutable.Error()) {
+		t.Fatalf("rename managed key status=%d body=%s", renamed.Code, renamed.Body.String())
+	}
+	rotated := doRequest(t, handler, http.MethodPost, "/api/v1/api-keys/"+key.ID+"/rotate", nil, nil)
+	if rotated.Code != http.StatusNotFound {
+		t.Fatalf("public rotate managed key status=%d body=%s", rotated.Code, rotated.Body.String())
+	}
+}

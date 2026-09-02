@@ -47,9 +47,22 @@ type CreateInput struct {
 
 type UpdateInput = CreateInput
 
-type Service struct{ db *sql.DB }
+type ChangeNotifier func(ctx context.Context, instanceID string)
+
+type Service struct {
+	db       *sql.DB
+	onChange ChangeNotifier
+}
 
 func New(db *sql.DB) *Service { return &Service{db: db} }
+
+func (s *Service) SetOnChange(fn ChangeNotifier) { s.onChange = fn }
+
+func (s *Service) notifyChange(ctx context.Context, instanceID string) {
+	if s.onChange != nil {
+		s.onChange(ctx, instanceID)
+	}
+}
 
 func Slugify(name string) string {
 	name = strings.TrimSpace(strings.ToLower(name))
@@ -93,6 +106,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 	if err := tx.Commit(); err != nil {
 		return Instance{}, err
 	}
+	s.notifyChange(ctx, i.ID)
 	return i, nil
 }
 
@@ -135,6 +149,7 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err := tx.Commit(); err != nil {
 		return Instance{}, err
 	}
+	s.notifyChange(ctx, i.ID)
 	return i, nil
 }
 
@@ -223,6 +238,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if n, _ := result.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	s.notifyChange(ctx, id)
 	return nil
 }
 

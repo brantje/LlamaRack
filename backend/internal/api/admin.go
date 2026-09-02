@@ -12,6 +12,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/litellm"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
@@ -20,13 +21,18 @@ type adminHandler struct {
 	auth     *auth.Service
 	settings *settings.Service
 	secrets  *huggingface.SecretStore
+	litellm  *litellm.Service
 	network  *managersecurity.Network
 	profile  func() (llamacpp.Profile, error)
 	started  time.Time
 }
 
-func NewAdminHandler(a *auth.Service, managerSettings *settings.Service, secrets *huggingface.SecretStore, network *managersecurity.Network, profile func() (llamacpp.Profile, error)) http.Handler {
-	return &adminHandler{auth: a, settings: managerSettings, secrets: secrets, network: network, profile: profile, started: time.Now()}
+func NewAdminHandler(a *auth.Service, managerSettings *settings.Service, secrets *huggingface.SecretStore, network *managersecurity.Network, profile func() (llamacpp.Profile, error), liteLLMServices ...*litellm.Service) http.Handler {
+	var liteLLM *litellm.Service
+	if len(liteLLMServices) > 0 {
+		liteLLM = liteLLMServices[0]
+	}
+	return &adminHandler{auth: a, settings: managerSettings, secrets: secrets, litellm: liteLLM, network: network, profile: profile, started: time.Now()}
 }
 
 func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +413,15 @@ func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	liteLLM := map[string]any{"configured": false}
+	if h.litellm != nil {
+		if status, statusErr := h.litellm.Status(r.Context()); statusErr == nil {
+			liteLLM["configured"] = status.Configured
+			if status.LastSync != nil {
+				liteLLM["last_sync_ok"] = status.LastSyncOK
+			}
+		}
+	}
 	profile, profileErr := h.profile()
 	llama := map[string]any{"available": profileErr == nil}
 	if profileErr == nil {
@@ -417,6 +432,7 @@ func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"users":       map[string]int{"total": len(users), "enabled": enabled},
 		"huggingface": hfStatus,
+		"litellm":     liteLLM,
 		"llamacpp":    llama,
 	})
 }

@@ -241,7 +241,7 @@ describe('Service accounts administration', () => {
     expect(keys.text()).toContain('worker')
     expect(keys.text()).toContain('Full Access')
     expect(keys.text()).toContain('sk-work1234…')
-    expect(keys.text()).toContain('2027-01-01')
+    expect(keys.text()).toContain('01-01-2027')
     expect(keys.text()).toContain('Create, edit and rotate secrets on API')
     expect(keys.findAll('button').some(button => ['Edit', 'Rotate', 'Disable', 'Create key'].includes(button.text()))).toBe(false)
 

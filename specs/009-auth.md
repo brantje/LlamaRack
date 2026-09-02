@@ -27,6 +27,17 @@ OIDC provider tokens are never management API credentials; successful OIDC authe
 
 API key secrets are `sk-` plus base64url(32 random bytes). The stored prefix is `sk-` plus the first eight characters of the random part. Rotate replaces `token_hash` and `prefix` in place (same `id`); there is no revoke/delete. `expires_on` is `YYYY-MM-DD` and is valid through the end of that UTC day. `last_used_at` updates on any successful authentication. Deleting a user or service account cascades and deletes that owner's keys.
 
+### Hidden service accounts (LiteLLM)
+
+LiteLLM integration uses one hidden service account named `LiteLLM` and one managed inference key with the same name. These principals exist only to let a configured LiteLLM Proxy call LlamaRack `/v1` on behalf of published Instances.
+
+- `service_accounts.hidden = 1` rows are omitted from `GET /api/v1/admin/service-accounts` and from owner pickers. Direct `GET`, `PATCH`, and `DELETE` of a hidden service account return **404**.
+- The managed inference key **does** appear on `GET /api/v1/api-keys` and the `/api` table (prefix only). There is no `hidden` flag on `api_keys`.
+- Creating an API key owned by a hidden service account through public routes returns **404**.
+- The managed key's name and owner are immutable through public routes (**400**). Its inference `instance_ids` allowlist remains editable.
+- Public `POST /api/v1/api-keys/{id}/rotate` of the managed key returns **404**. Only `/api/v1/litellm/rotate` may rotate it; the new secret is stored encrypted and republished on owned LiteLLM models.
+- Disconnecting LiteLLM deletes the hidden account (keys cascade) and both LiteLLM-related stored secrets.
+
 Management requests authenticated by an API key carry an API-key principal. They MUST NOT invent a synthetic `User`. Lifecycle actor logs use `user.Username` or `api_key:<id>`. `created_by_user_id` is set only for JWT creates.
 
 Wrong plane, allowlist miss, all-stale allowlist, session/Playground denylist, and service-account admin blocks return **403**. Invalid/expired/disabled keys return **401**.
@@ -192,6 +203,7 @@ Bearer-protected endpoints include:
 - `/api/v1/admin/auth/identities` and unlink routes
 - `/api/v1/api-keys` (JWT or management/full API key; no GET by id; PATCH 204; in-place rotate; no revoke)
 - `/api/v1/admin/service-accounts` (management JWT or Full Access API key, any owner; management and inference keys receive 403)
+- `/api/v1/litellm` and LiteLLM subroutes (management JWT or management/full API key; hidden principals are managed only through these routes)
 - all other protected management APIs.
 
 The v1 product intentionally remains flat-authorized: no roles, group mapping or provider-driven permission mapping are introduced by OIDC.

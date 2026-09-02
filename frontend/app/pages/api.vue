@@ -7,7 +7,8 @@ import {
   apiKeyStatus,
   apiKeyTypeLabel,
   formatAPIKeyPrefix,
-  formatAPIKeyTimestamp
+  formatAPIKeyTimestamp,
+  formatExpiresOnDisplay
 } from '~/utils/apiKeys'
 
 type AdminUser = User & { created_at?: number; last_login_at?: number }
@@ -99,6 +100,12 @@ function createBody(draft: APIKeyDraft) {
 }
 
 function patchBody(draft: APIKeyDraft) {
+  if (editingKey.value?.managed) {
+    return {
+      expires_on: draft.expires_on ?? null,
+      instance_ids: draft.instance_ids || []
+    }
+  }
   const body: Record<string, unknown> = {
     name: draft.name,
     owner_user_id: draft.owner_user_id ?? null,
@@ -219,13 +226,13 @@ async function rotate(key: APIKey) {
           <template #key_type-cell="{ row }"><span class="text-[length:var(--font-size-table-body)]">{{ apiKeyTypeLabel(row.original.key_type) }}</span></template>
           <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ formatAPIKeyPrefix(row.original.prefix) }}</span></template>
           <template #status-cell="{ row }"><StatusTag :variant="apiKeyStatus(row.original).variant">{{ apiKeyStatus(row.original).label }}</StatusTag></template>
-          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ row.original.expires_on || '—' }}</span></template>
+          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatExpiresOnDisplay(row.original.expires_on) }}</span></template>
           <template #last_used_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatAPIKeyTimestamp(row.original.last_used_at) }}</span></template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end gap-1">
               <AppButton intent="ghost" size="xs" :disabled="!!pending[row.original.id]" @click="openEdit(row.original)">Edit</AppButton>
               <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
+              <AppButton v-if="!row.original.managed" intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
             </div>
           </template>
         </UTable>

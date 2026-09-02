@@ -95,7 +95,7 @@ beforeEach(() => {
 
 describe('Admin pages branch coverage', () => {
   it('covers dashboard empty, unavailable, available and malformed summary branches', async () => {
-    let response: any = { users: { total: 1, enabled: 0 }, huggingface: { configured: false }, llamacpp: { available: true } }
+    let response: any = { users: { total: 1, enabled: 0 }, huggingface: { configured: false }, litellm: { configured: false }, llamacpp: { available: true } }
     mocks.request.mockImplementation(async (path: string) => path === '/api/v1/admin/summary' ? response : [])
     const wrapper = await mountSuspended(AdminIndexPage, { route: false })
     await flushPromises()
@@ -105,12 +105,12 @@ describe('Admin pages branch coverage', () => {
     expect(wrapper.text()).toContain('Available')
     expect(wrapper.find('[data-testid="admin-summary-cards"]').exists()).toBe(true)
 
-    response = { users: { total: 2, enabled: 2 }, huggingface: { configured: true }, llamacpp: { available: true, version: 'b9999' } }
+    response = { users: { total: 2, enabled: 2 }, huggingface: { configured: true }, litellm: { configured: true, last_sync_ok: false }, llamacpp: { available: true, version: 'b9999' } }
     await button(wrapper, 'Refresh').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('b9999')
 
-    for (const malformed of [null, {}, { users: {} }, { users: {}, huggingface: {} }]) {
+    for (const malformed of [null, {}, { users: {} }, { users: {}, huggingface: {} }, { users: {}, huggingface: {}, litellm: {} }]) {
       response = malformed
       await button(wrapper, 'Refresh').trigger('click')
       await flushPromises()

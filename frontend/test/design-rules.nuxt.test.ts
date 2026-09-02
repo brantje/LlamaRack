@@ -205,6 +205,7 @@ describe('frontend design rules', () => {
       'pages/admin/index.vue',
       'pages/admin/general.vue',
       'pages/admin/huggingface.vue',
+      'pages/admin/litellm.vue',
       'pages/admin/llamacpp.vue',
       'pages/admin/system.vue',
       'pages/admin/users.vue'

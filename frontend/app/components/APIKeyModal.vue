@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { CalendarDate } from '@internationalized/date'
+import type { ComponentPublicInstance } from 'vue'
 import type { APIKey, APIKeyType, Instance, ServiceAccount, User } from '~/composables/useManager'
 import {
+  API_KEY_DATE_LOCALE,
   API_KEY_TYPE_ITEMS,
   API_KEY_TYPE_TOOLTIP,
   calendarDateToExpiresOn,
@@ -37,6 +39,7 @@ const owner = ref('')
 const keyType = ref<APIKeyType>('inference')
 const instanceIds = ref<string[]>([])
 const expiresOn = shallowRef<CalendarDate | undefined>()
+const inputDate = ref<{ inputsRef: ComponentPublicInstance[] } | null>(null)
 const copyError = ref('')
 
 const ownerItems = computed(() => {
@@ -56,6 +59,7 @@ const instanceItems = computed(() => {
 })
 
 const missingInstanceIds = computed(() => props.initialKey?.missing_instance_ids || [])
+const managed = computed(() => Boolean(props.editing && props.initialKey?.managed))
 const canSave = computed(() => name.value.trim().length > 0 && !!owner.value)
 const modalTitle = computed(() => {
   if (props.phase === 'secret') return 'Copy this key now'
@@ -134,10 +138,13 @@ function clearExpires() {
 
       <form v-else class="space-y-4" data-testid="api-key-form" @submit.prevent="save">
         <UFormField label="Name" required>
-          <UInput v-model="name" data-testid="key-name" class="w-full" autocomplete="off" required />
+          <UInput v-model="name" data-testid="key-name" class="w-full" autocomplete="off" required :disabled="managed" />
         </UFormField>
 
-        <UFormField label="Owner" required>
+        <UFormField v-if="managed" label="Owner" description="This LiteLLM key is owned by a hidden service account. Rotate it from Administration → LiteLLM.">
+          <UInput :model-value="initialKey?.owner_name || 'LiteLLM'" class="w-full" disabled data-testid="api-key-owner-readonly" />
+        </UFormField>
+        <UFormField v-else label="Owner" required>
           <div data-testid="api-key-owner">
             <USelectMenu v-model="owner" class="w-full" :items="ownerItems" value-key="value" label-key="label" placeholder="Select owner" />
           </div>
@@ -163,9 +170,37 @@ function clearExpires() {
           <p v-if="missingInstanceIds.length" class="mt-2 text-xs text-[var(--neutral-700)]">Missing instances stay on the allowlist and never collapse to all instances: <span class="font-mono">{{ missingInstanceIds.join(', ') }}</span></p>
         </UFormField>
 
-        <UFormField label="Expires" description="Optional. Valid through the end of that UTC day.">
+        <UFormField label="Expires" description="Optional. Day, month, year (dd-mm-yyyy). Valid through the end of that UTC day.">
           <div class="flex items-center gap-2" data-testid="api-key-expires">
-            <UInputDate v-model="expiresOn" class="min-w-0 flex-1" :is-date-unavailable="isAPIKeyDateUnavailable" />
+            <UInputDate
+              ref="inputDate"
+              v-model="expiresOn"
+              :locale="API_KEY_DATE_LOCALE"
+              class="min-w-0 flex-1"
+              :is-date-unavailable="isAPIKeyDateUnavailable"
+            >
+              <template #trailing>
+                <UPopover :reference="inputDate?.inputsRef[3]?.$el">
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-calendar"
+                    aria-label="Select a date"
+                    class="cursor-pointer px-0"
+                    data-testid="api-key-expires-picker"
+                  />
+                  <template #content>
+                    <UCalendar
+                      v-model="expiresOn"
+                      :locale="API_KEY_DATE_LOCALE"
+                      :is-date-unavailable="isAPIKeyDateUnavailable"
+                      class="p-2"
+                    />
+                  </template>
+                </UPopover>
+              </template>
+            </UInputDate>
             <AppButton v-if="expiresOn" type="button" intent="ghost" size="xs" data-testid="clear-api-key-expires" @click="clearExpires">Clear</AppButton>
           </div>
         </UFormField>

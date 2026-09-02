@@ -34,6 +34,19 @@ func (s *SecretStore) GetSecret(ctx context.Context, name string) (string, error
 // prefixes are intentionally reserved for token-specific storage such as
 // SetToken, where the prefix is part of the product UX.
 func (s *SecretStore) SetSecret(ctx context.Context, name, value string) error {
+	return s.setSecret(ctx, name, value, "")
+}
+
+func (s *SecretStore) SetSecretWithPrefix(ctx context.Context, name, value string) error {
+	value = strings.TrimSpace(value)
+	prefix := value
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
+	return s.setSecret(ctx, name, value, prefix)
+}
+
+func (s *SecretStore) setSecret(ctx context.Context, name, value, prefix string) error {
 	name = strings.TrimSpace(name)
 	value = strings.TrimSpace(value)
 	if name == "" || value == "" {
@@ -46,8 +59,20 @@ func (s *SecretStore) SetSecret(ctx context.Context, name, value string) error {
 	ciphertext := s.aead.Seal(nil, nonce, []byte(value), []byte(name))
 	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_secrets(name,ciphertext,nonce,prefix,updated_at)
 VALUES(?,?,?,?,unixepoch())
-ON CONFLICT(name) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,prefix=excluded.prefix,updated_at=unixepoch()`, name, ciphertext, nonce, "")
+ON CONFLICT(name) DO UPDATE SET ciphertext=excluded.ciphertext,nonce=excluded.nonce,prefix=excluded.prefix,updated_at=unixepoch()`, name, ciphertext, nonce, prefix)
 	return err
+}
+
+func (s *SecretStore) SecretStatus(ctx context.Context, name string) (TokenStatus, error) {
+	var prefix string
+	err := s.db.QueryRowContext(ctx, "SELECT prefix FROM provider_secrets WHERE name=?", strings.TrimSpace(name)).Scan(&prefix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TokenStatus{}, nil
+	}
+	if err != nil {
+		return TokenStatus{}, err
+	}
+	return TokenStatus{Configured: true, Prefix: prefix}, nil
 }
 
 func (s *SecretStore) DeleteSecret(ctx context.Context, name string) error {

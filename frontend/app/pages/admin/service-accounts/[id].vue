@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { APIKey, ServiceAccount } from '~/composables/useManager'
-import { apiKeyStatus, apiKeyTypeLabel, formatAPIKeyPrefix, formatAPIKeyTimestamp } from '~/utils/apiKeys'
+import { apiKeyStatus, apiKeyTypeLabel, formatAPIKeyPrefix, formatAPIKeyTimestamp, formatExpiresOnDisplay } from '~/utils/apiKeys'
 
 type ServiceAccountDetail = ServiceAccount & { keys?: APIKey[] }
 
@@ -156,7 +156,7 @@ async function deleteAccount() {
           <template #key_type-cell="{ row }"><span class="text-[length:var(--font-size-table-body)]">{{ apiKeyTypeLabel(row.original.key_type) }}</span></template>
           <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ formatAPIKeyPrefix(row.original.prefix) }}</span></template>
           <template #status-cell="{ row }"><StatusTag :variant="apiKeyStatus(row.original).variant">{{ apiKeyStatus(row.original).label }}</StatusTag></template>
-          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ row.original.expires_on || '—' }}</span></template>
+          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatExpiresOnDisplay(row.original.expires_on) }}</span></template>
           <template #last_used_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatAPIKeyTimestamp(row.original.last_used_at) }}</span></template>
         </UTable>
       </div>

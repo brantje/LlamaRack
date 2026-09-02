@@ -187,7 +187,8 @@ func writeAPIKeyMutationError(w http.ResponseWriter, err error) {
 		errors.Is(err, auth.ErrAPIKeyInstancesNotAllowed),
 		errors.Is(err, auth.ErrUnknownInstanceID),
 		errors.Is(err, auth.ErrAPIKeyExpiresOnInvalid),
-		errors.Is(err, auth.ErrAPIKeyExpiresOnPast):
+		errors.Is(err, auth.ErrAPIKeyExpiresOnPast),
+		errors.Is(err, auth.ErrManagedAPIKeyImmutable):
 		writeErr(w, http.StatusBadRequest, err)
 	default:
 		writeErr(w, http.StatusInternalServerError, err)

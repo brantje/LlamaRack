@@ -7,6 +7,7 @@ const navigation = [
   { label: 'Authentication', description: 'Local login and OIDC providers', to: '/admin/authentication' },
   { label: 'llama.cpp', description: 'Binary capabilities and global defaults', to: '/admin/llamacpp' },
   { label: 'Hugging Face', description: 'Provider credential', to: '/admin/huggingface' },
+  { label: 'LiteLLM', description: 'Proxy catalog sync', to: '/admin/litellm' },
   { label: 'Users', description: 'Local management accounts', to: '/admin/users' },
   { label: 'Service accounts', description: 'Non-user API key owners', to: '/admin/service-accounts' },
   { label: 'System', description: 'Read-only diagnostics', to: '/admin/system' },
