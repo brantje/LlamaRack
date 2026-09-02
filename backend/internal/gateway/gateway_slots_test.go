@@ -11,7 +11,7 @@ import (
 )
 
 func TestClassifySlotsRoutes(t *testing.T) {
-	spec, params, ok := classify(http.MethodGet, "/v1/slots")
+	spec, _, ok := classify(http.MethodGet, "/v1/slots")
 	if !ok || spec.Kind != routeSlotsProxy || spec.CallType != "slots_list" || !spec.MapNotImplemented || spec.NeedsAcquire {
 		t.Fatalf("GET slots=%+v ok=%v", spec, ok)
 	}
