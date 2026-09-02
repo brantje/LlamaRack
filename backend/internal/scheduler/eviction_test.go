@@ -350,6 +350,17 @@ func TestSplitEstimateEvenWhenTensorSplitInvalid(t *testing.T) {
 	}
 }
 
+func TestSplitEstimateAcceptsFractionalTensorSplit(t *testing.T) {
+	got := SplitEstimateAcrossDevices(10, []string{"CUDA0", "CUDA1"}, "0.7,0.3")
+	if len(got) != 2 || got[0].Bytes != 7 || got[1].Bytes != 3 {
+		t.Fatalf("fractional split=%+v", got)
+	}
+	integers := SplitEstimateAcrossDevices(8, []string{"CUDA0", "CUDA1"}, "3,1")
+	if len(integers) != 2 || integers[0].Bytes != 6 || integers[1].Bytes != 2 {
+		t.Fatalf("integer split=%+v", integers)
+	}
+}
+
 func gpuCandidate(id, device string, bytes int64) Candidate {
 	return gpuCandidateAt(id, device, bytes, time.Time{})
 }

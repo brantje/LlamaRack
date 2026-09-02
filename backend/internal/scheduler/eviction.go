@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -389,16 +390,16 @@ func SplitEstimateAcrossDevices(total int64, devices []string, tensorSplit strin
 		return []GPUResource{{DeviceID: devices[0], Bytes: total}}
 	}
 	weights := tensorSplitWeights(tensorSplit, len(devices))
-	sum := 0
+	sum := 0.0
 	for _, weight := range weights {
 		sum += weight
 	}
-	if sum < 1 {
-		sum = len(devices)
-		weights = make([]int, len(devices))
+	if sum <= 0 {
+		weights = make([]float64, len(devices))
 		for i := range weights {
 			weights[i] = 1
 		}
+		sum = float64(len(devices))
 	}
 	out := make([]GPUResource, len(devices))
 	remaining := total
@@ -407,7 +408,7 @@ func SplitEstimateAcrossDevices(total int64, devices []string, tensorSplit strin
 		if i == len(devices)-1 {
 			bytes = remaining
 		} else {
-			bytes = total * int64(weights[i]) / int64(sum)
+			bytes = int64(float64(total) * weights[i] / sum)
 			remaining -= bytes
 		}
 		out[i] = GPUResource{DeviceID: id, Bytes: bytes}
@@ -415,16 +416,16 @@ func SplitEstimateAcrossDevices(total int64, devices []string, tensorSplit strin
 	return out
 }
 
-func tensorSplitWeights(tensorSplit string, count int) []int {
+func tensorSplitWeights(tensorSplit string, count int) []float64 {
 	parts := strings.Split(tensorSplit, ",")
-	weights := make([]int, 0, count)
+	weights := make([]float64, 0, count)
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		value, err := strconv.Atoi(part)
-		if err != nil || value < 0 {
+		value, err := strconv.ParseFloat(part, 64)
+		if err != nil || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 			return nil
 		}
 		weights = append(weights, value)

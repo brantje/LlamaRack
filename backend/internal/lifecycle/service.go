@@ -23,6 +23,9 @@ import (
 )
 
 const resourcePressureReason = "resource_pressure"
+
+// maxEvictionPlanAttempts is also the maximum number of Instances one placement
+// request may stop. Keep it small; raising it increases disruption.
 const maxEvictionPlanAttempts = 8
 
 var (
