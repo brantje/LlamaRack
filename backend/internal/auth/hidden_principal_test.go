@@ -190,14 +190,10 @@ func TestDeleteHiddenServiceAccountByName(t *testing.T) {
 	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.FindHiddenServiceAccountByName(ctx, ManagedPrincipalName); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected hidden account gone after delete, got %v", err)
+	}
 	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {
 		t.Fatal(err)
-	}
-	accounts, err := s.ListServiceAccounts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(accounts) != 0 {
-		t.Fatalf("expected no visible accounts, got %#v", accounts)
 	}
 }

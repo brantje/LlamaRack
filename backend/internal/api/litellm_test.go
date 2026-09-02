@@ -334,7 +334,7 @@ func TestLiteLLMUnsupportedMethodOnCollection(t *testing.T) {
 
 func TestLiteLLMStatusInternalError(t *testing.T) {
 	fixture := newLiteLLMFixture(t)
-	if _, err := fixture.db.Exec("DROP TABLE manager_settings"); err != nil {
+	if _, err := fixture.db.ExecContext(context.Background(), "DROP TABLE manager_settings"); err != nil {
 		t.Fatal(err)
 	}
 	w := liteLLMRequest(t, fixture, http.MethodGet, "/api/v1/litellm", nil, true)

@@ -480,7 +480,9 @@ func TestSetHTTPClientReplacesClient(t *testing.T) {
 
 func TestClientListModelsInvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"data":`))
+		if _, err := w.Write([]byte(`{"data":`)); err != nil {
+			return
+		}
 	}))
 	t.Cleanup(server.Close)
 	client, err := NewClient(server.URL, "key", server.Client())
