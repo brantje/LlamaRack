@@ -267,17 +267,16 @@ func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, meta
 		}
 		return usable[i].id < usable[j].id
 	})
-	for len(usable) > 0 {
+	for {
 		offload, pooledOK, devicesOK := planMoEOffload(snapshot, memory, metadata, usable)
 		if pooledOK && devicesOK {
 			return true, offload
 		}
-		if !pooledOK {
+		if !pooledOK || len(usable) == 1 {
 			return false, Offload{}
 		}
 		usable = usable[:len(usable)-1]
 	}
-	return false, Offload{}
 }
 
 func planMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata, usable []usableGPU) (Offload, bool, bool) {
@@ -371,9 +370,6 @@ func splitFitsDevices(gpuNeeded int64, available []int64) bool {
 	var sum int64
 	for _, weight := range weights {
 		sum += weight
-	}
-	if sum <= 0 {
-		return false
 	}
 	assigned := int64(0)
 	for i, avail := range available {

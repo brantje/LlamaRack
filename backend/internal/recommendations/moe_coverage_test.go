@@ -40,6 +40,33 @@ func TestMoERecommendationHelperCoverage(t *testing.T) {
 	); fit || offload.Mode != "" {
 		t.Fatalf("no usable GPU headroom must not fit: fit=%v offload=%+v", fit, offload)
 	}
+
+	if splitFitsDevices(1, nil) {
+		t.Fatal("empty device list must not fit")
+	}
+	if splitFitsDevices(2, []int64{1}) {
+		t.Fatal("single GPU below demand must not fit")
+	}
+	if !splitFitsDevices(2, []int64{2}) {
+		t.Fatal("single GPU meeting demand must fit")
+	}
+	unit := 256 * mib
+	if splitFitsDevices(4*unit, []int64{2 * unit, unit}) {
+		t.Fatal("last-device remainder overcommit must fail")
+	}
+
+	const gib = int64(1024 * 1024 * 1024)
+	fit, offload := recommendMoEOffload(
+		hardware.Snapshot{RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: defaultVRAMReserve + mib},
+			{ID: "CUDA1", FreeBytes: defaultVRAMReserve + mib},
+		}},
+		MemoryEstimate{WeightsBytes: 20 * gib, KVCacheBytes: gib, RuntimeOverheadBytes: gib},
+		Metadata{BlockCount: 40, ExpertCount: 64},
+	)
+	if fit || offload.Mode != "" {
+		t.Fatalf("pooled miss must not recommend MoE: fit=%v offload=%+v", fit, offload)
+	}
 }
 
 func TestCompatibilityRecommendationWrappers(t *testing.T) {
