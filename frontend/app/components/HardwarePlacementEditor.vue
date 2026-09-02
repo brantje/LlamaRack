@@ -104,11 +104,17 @@ const contextCapability = computed(() => Math.max(0, knownCapability.value, reco
 const placementRanges = computed(() => recommendation.value && isPlacementRanges(recommendation.value.placement_ranges) ? recommendation.value.placement_ranges : undefined)
 const placementZones = computed(() => placementRanges.value?.available ? placementRanges.value.zones || [] : [])
 const mappingZones = computed(() => sliderZones(placementZones.value, placementRanges.value?.context_step || contextStep))
-const contextMaximum = computed(() => {
+const modelContextLimit = computed(() => {
+  const fromRanges = placementRanges.value?.maximum_context || 0
+  return Math.max(fromRanges, contextCapability.value, 0)
+})
+const sliderContextMaximum = computed(() => {
   const capped = noFitSliderMaximum(placementZones.value, placementRanges.value?.context_step || contextStep)
   if (capped) return Math.max(minimumContext, capped)
+  if (modelContextLimit.value > 0) return modelContextLimit.value
   return Math.max(contextSize.value, contextCapability.value || 32768, defaultContext)
 })
+const contextMaximum = computed(() => sliderContextMaximum.value)
 const compactRanges = computed(() => useCompactRangeLayout(placementZones.value.length))
 const currentRangeIndex = computed(() => currentZoneIndex(placementZones.value, contextSize.value))
 const currentZone = computed(() => currentRangeIndex.value >= 0 ? placementZones.value[currentRangeIndex.value] : undefined)
@@ -149,7 +155,8 @@ function parseContext(value: unknown) {
 }
 
 function commitContext(value: number) {
-  return snapContext(value, minimumContext, contextMaximum.value)
+  const max = modelContextLimit.value > 0 ? modelContextLimit.value : sliderContextMaximum.value
+  return snapContext(value, minimumContext, max)
 }
 
 async function refreshHardware() {
@@ -207,10 +214,13 @@ async function refreshRecommendation() {
     recommendation.value = result
     const capability = result.context_capability || result.metadata?.context_length || 0
     if (capability > 0) knownCapability.value = capability
-    const capped = Math.min(contextSize.value, contextMaximum.value)
-    if (capped !== contextSize.value) {
-      contextSize.value = capped
-      emit('update:contextSize', String(commitContext(capped)))
+    const limit = result.placement_ranges && isPlacementRanges(result.placement_ranges)
+      ? result.placement_ranges.maximum_context || capability
+      : capability
+    if (limit > 0 && contextSize.value > limit) {
+      const next = snapContext(limit, minimumContext, limit)
+      contextSize.value = next
+      emit('update:contextSize', String(next))
     }
   } catch (value: any) {
     recommendation.value = null
@@ -252,7 +262,7 @@ function updateContext(value: unknown, live = false) {
   const raw = Array.isArray(value) ? value[0] : value
   const parsed = parseContext(raw)
   if (!parsed) return
-  const clamped = Math.min(Math.max(parsed, minimumContext), contextMaximum.value)
+  const clamped = Math.min(Math.max(parsed, minimumContext), sliderContextMaximum.value)
   const next = live ? clamped : commitContext(clamped)
   contextSize.value = next
   contextSource.value = 'Instance override'

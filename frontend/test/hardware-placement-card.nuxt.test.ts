@@ -476,6 +476,37 @@ describe('GPU placement cards', () => {
     expect(wrapper.find('[data-testid="placement-ranges"]').exists()).toBe(true)
   })
 
+  it('keeps a saved context above the no-fit slider cap', async () => {
+    const zoneRanges = ranges({
+      gpu_only_max_context: 14336,
+      zones: [
+        { start_context: 512, end_context: 14336, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 14848, end_context: 65536, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, current_fit: true, total_hardware_fit: true },
+        { start_context: 66048, end_context: 262144, kind: 'no_fit', offload_mode: 'none', gpu_count: 0, current_fit: false, total_hardware_fit: false }
+      ]
+    })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path === '/api/v1/models/model-1/recommendation?context_length=131072') {
+        return recommendation({ context_length: 131072, current_fit: false, placement_ranges: zoneRanges })
+      }
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: { 'ctx-size': '131072' } }
+    })
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=131072')
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 131,072 tokens')
+    expect(wrapper.text()).toContain('Instance override')
+    expect(wrapper.emitted('update:contextSize') || []).toEqual([])
+  })
+
   it('does not treat automatic GPU cards as placement toggles', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
