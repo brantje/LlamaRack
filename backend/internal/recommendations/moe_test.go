@@ -74,7 +74,9 @@ func TestRecommendOffloadMoERequiresBinaryCapability(t *testing.T) {
 	const gib = int64(1024 * 1024 * 1024)
 	metadata := Metadata{BlockCount: 40, ExpertCount: 64}
 	memory := MemoryEstimate{WeightsBytes: 12 * gib, KVCacheBytes: gib, RuntimeOverheadBytes: gib, CPUOnlyRAMBytes: 14 * gib, FullOffloadVRAMBytes: 14 * gib}
-	snapshot := hardware.Snapshot{RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}}}
+	// Two 6 GiB cards leave 11 GiB pooled after the 512 MiB/card reserve, so
+	// the 14 GiB full-offload path must fail while routed-expert spill can fit.
+	snapshot := hardware.Snapshot{RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 6 * gib}, {ID: "CUDA1", FreeBytes: 6 * gib}}}
 
 	fit, withCapability := recommendOffloadWithCapabilities(snapshot, memory, metadata, Capabilities{NCPUMoe: true})
 	if !fit || withCapability.Mode != "moe" {
