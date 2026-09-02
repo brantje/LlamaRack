@@ -145,7 +145,7 @@ func estimateHybridGenerationSpeed(snapshot hardware.Snapshot, memory MemoryEsti
 	}
 	if offload.Mode == "moe" {
 		reason = fmt.Sprintf(
-			"MoE bandwidth-limited generation/decode estimate: about %.0f%% of model weights stay on GPU and %.0f%% of routed-expert weight traffic is served from system RAM under the conservative expert-share heuristic. GPU traffic uses %s; host traffic uses %.0f GB/s measured memory-copy throughput; approximately %s/token of activation traffic crosses a %.1f GB/s theoretical PCIe link. The selected context's %s KV cache is accounted for in %s traffic. Actual routed-expert activation, llama.cpp kernels and expert locality can differ.",
+			"MoE bandwidth-limited generation/decode estimate: about %.0f%% of model weight bytes stay on GPU and %.0f%% are served from system RAM as routed-expert weights, under the conservative expert-share heuristic. GPU traffic uses %s; host traffic uses %.0f GB/s measured memory-copy throughput; approximately %s/token of activation traffic crosses a %.1f GB/s theoretical PCIe link. The selected context's %s KV cache is accounted for in %s traffic. Actual routed-expert activation, llama.cpp kernels and expert locality can differ.",
 			gpuFraction*100,
 			(1-gpuFraction)*100,
 			formatDeviceBandwidth(devices),
