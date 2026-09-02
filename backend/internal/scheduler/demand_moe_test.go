@@ -73,3 +73,41 @@ func TestMoEWeightDistributionUsesLockedExpertShareHeuristic(t *testing.T) {
 		t.Fatalf("single expert half-block distribution=(%d,%d) want (625,375)", gpu, host)
 	}
 }
+
+func TestMoEWeightDistributionBoundaryInputs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		weights     int64
+		blocks      int64
+		cpuBlocks   int64
+		experts     int64
+		wantGPU     int64
+		wantHost    int64
+	}{
+		"no weights":       {weights: 0, blocks: 10, cpuBlocks: 5, experts: 8, wantGPU: 0, wantHost: 0},
+		"no blocks":        {weights: 1000, blocks: 0, cpuBlocks: 5, experts: 8, wantGPU: 1000, wantHost: 0},
+		"no cpu blocks":    {weights: 1000, blocks: 10, cpuBlocks: 0, experts: 8, wantGPU: 1000, wantHost: 0},
+		"negative cpu":     {weights: 1000, blocks: 10, cpuBlocks: -1, experts: 8, wantGPU: 1000, wantHost: 0},
+		"cpu blocks capped": {weights: 1000, blocks: 10, cpuBlocks: 99, experts: 8, wantGPU: 150, wantHost: 850},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gpu, host := MoEWeightDistribution(tc.weights, tc.blocks, tc.cpuBlocks, tc.experts)
+			if gpu != tc.wantGPU || host != tc.wantHost {
+				t.Fatalf("distribution=(%d,%d) want (%d,%d)", gpu, host, tc.wantGPU, tc.wantHost)
+			}
+		})
+	}
+}
+
+func TestExpertWeightShareBoundaries(t *testing.T) {
+	for experts, want := range map[int64]float64{
+		0:  0.75,
+		1:  0.75,
+		2:  0.50,
+		4:  0.75,
+		64: 0.85,
+	} {
+		if got := ExpertWeightShare(experts); got != want {
+			t.Fatalf("ExpertWeightShare(%d)=%v want %v", experts, got, want)
+		}
+	}
+}
