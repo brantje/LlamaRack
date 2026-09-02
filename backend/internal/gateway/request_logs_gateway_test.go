@@ -71,6 +71,7 @@ func TestCallTypeMapping(t *testing.T) {
 		"/v1/chat/completions/input_tokens": "chat_input_tokens",
 		"/v1/rerank":                        "rerank",
 		"/v1/audio/transcriptions":          "transcription",
+		"/v1/slots":                         "slots_list",
 	}
 	for path, want := range cases {
 		if got := callType(path); got != want {

@@ -33,8 +33,10 @@ llama.cpp extensions:
 - `POST /v1/chat/completions/control`
 - `POST /v1/rerank`
 - `POST /v1/reranking`
+- `GET /v1/slots`
+- `POST /v1/slots/{slot_id}`
 
-Supported fields ultimately depend on the active llama.cpp build and effective Instance configuration. Token-count routes that the worker does not implement return Manager `501`.
+Supported fields ultimately depend on the active llama.cpp build and effective Instance configuration. Token-count and slots routes that the worker does not implement return Manager `501`.
 
 `previous_response_id` is forwarded to llama.cpp. Manager does not reconstruct prior turns from stored Responses.
 
@@ -183,6 +185,22 @@ Never silently route to a different embedding-capable Instance.
 `POST /v1/rerank` and `POST /v1/reranking` are equivalent llama.cpp extensions.
 
 `POST /v1/chat/completions/control` routes an in-flight completion ID through the shared active-request registry to the owning worker. It does not resolve a new Instance from a `model` field.
+
+## 11.3 Slots
+
+`GET /v1/slots?model=<instance.id>` and `POST /v1/slots/{slot_id}?model=<instance.id>&action=save|restore|erase` are llama.cpp extensions proxied to the worker's native `/slots` API.
+
+Requirements:
+
+- resolve the Instance from the `model` query parameter because these routes have no OpenAI JSON `model` field;
+- require the selected Instance to already be **READY**; do not autoload and do not consume pending-admission slots;
+- rewrite `/v1/slots` to worker `/slots` and `/v1/slots/{slot_id}` to worker `/slots/{slot_id}`;
+- drop `model` from the forwarded query and forward remaining query parameters such as `action`;
+- allowlist `action` to `save`, `restore`, and `erase`; reject anything else with `400`;
+- for `save` and `restore`, reject empty or path-escaping `filename` values in the JSON body with `400`;
+- map worker `404` to Manager `501`.
+
+Security: `GET /slots` can include in-flight prompts and slot state from other concurrent traffic on the same worker. Any Inference key allowed for that Instance can read that data. This is accepted for v1 because the gateway already shares one worker per Instance among allowlisted keys.
 
 ## 12. Instance availability
 

@@ -42,7 +42,7 @@ const config = ref<ConfigResponse | null>(null)
 const legacyProtectedKeys = new Set([
   'model', 'host', 'port', 'device', 'split-mode', 'main-gpu',
   'cors-origins', 'cors-methods', 'cors-headers', 'cors-credentials', 'no-cors-credentials',
-  'api-key', 'api-key-file'
+  'api-key', 'api-key-file', 'slots', 'no-slots', 'slot-save-path'
 ])
 const basicKeys = new Set([
   'ctx-size', 'n-gpu-layers', 'gpu-layers', 'threads', 'threads-batch', 'batch-size', 'ubatch-size',

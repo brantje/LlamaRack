@@ -384,6 +384,45 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 			},
 		})
 	}
+	doc.MustRegister(http.MethodGet, "/v1/slots", manageropenapi.Operation{
+		OperationID: "listSlots",
+		Summary:     "List llama.cpp slots",
+		Description: "llama.cpp extension. Proxied to the selected READY Instance using the model query parameter (Instance ID). Does not autoload stopped Instances. GET /slots may include in-flight prompts from other concurrent traffic on the same worker. If the worker does not implement this route, Manager returns 501.",
+		Tags:        []string{"llama.cpp Extensions"},
+		Security:    bearer,
+		Parameters: []manageropenapi.Parameter{
+			{Name: "model", In: "query", Description: "Addressable Instance ID.", Required: true, Schema: manageropenapi.Schema{Type: "string"}},
+		},
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Slot list", manageropenapi.ObjectSchema()),
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
+			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
+			"503": manageropenapi.ErrorResponse("Instance is not READY and slots polling does not autoload"),
+		},
+	})
+	doc.MustRegister(http.MethodPost, "/v1/slots/{slot_id}", manageropenapi.Operation{
+		OperationID: "slotsAction",
+		Summary:     "Save, restore, or erase a llama.cpp slot",
+		Description: "llama.cpp extension. Proxied to POST /slots/{slot_id}?action=save|restore|erase on the selected READY Instance. The model query parameter is the Instance ID. save/restore JSON may include filename; Manager rejects path-escaping filenames. Does not autoload stopped Instances.",
+		Tags:        []string{"llama.cpp Extensions"},
+		Security:    bearer,
+		Parameters: []manageropenapi.Parameter{
+			{Name: "slot_id", In: "path", Description: "Slot identifier.", Required: true, Schema: manageropenapi.Schema{Type: "string"}},
+			{Name: "model", In: "query", Description: "Addressable Instance ID.", Required: true, Schema: manageropenapi.Schema{Type: "string"}},
+			{Name: "action", In: "query", Description: "Slot action: save, restore, or erase.", Required: true, Schema: manageropenapi.Schema{Type: "string"}},
+		},
+		RequestBody: manageropenapi.JSONBody(manageropenapi.ObjectSchema(), false),
+		Responses: map[string]manageropenapi.Response{
+			"200": manageropenapi.JSONResponse("Slot action result", manageropenapi.ObjectSchema()),
+			"400": manageropenapi.ErrorResponse("Invalid request"),
+			"401": manageropenapi.ErrorResponse("Invalid API key"),
+			"403": manageropenapi.ErrorResponse("API key cannot access this inference route or instance"),
+			"501": manageropenapi.ErrorResponse("Worker does not implement this route"),
+			"503": manageropenapi.ErrorResponse("Instance is not READY and slots polling does not autoload"),
+		},
+	})
 }
 
 func managerMetricHeaders(embeddings bool) map[string]manageropenapi.Header {

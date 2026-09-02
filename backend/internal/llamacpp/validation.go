@@ -21,6 +21,9 @@ var managerOwnedOptions = map[string]bool{
 	"no-cors-credentials": true,
 	"api-key":             true,
 	"api-key-file":        true,
+	"slots":               true,
+	"no-slots":            true,
+	"slot-save-path":      true,
 }
 
 var companionOptions = map[string]bool{

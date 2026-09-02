@@ -102,6 +102,8 @@ Persist a normalized `call_type` for supported endpoints:
 | `/v1/chat/completions/input_tokens` | `chat_input_tokens` | Chat Input Tokens |
 | `/v1/rerank`, `/v1/reranking` | `rerank` | Rerank |
 | `/v1/audio/transcriptions` | `transcription` | Transcription |
+| `/v1/slots` | `slots_list` | Slots List |
+| `/v1/slots/{slot_id}` | `slots_action` | Slots Action |
 | `/v1/responses/{id}/cancel` | `response_cancel` | Response Cancel |
 | `/v1/chat/completions/control` | `chat_control` | Chat Control |
 

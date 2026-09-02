@@ -40,6 +40,8 @@ func TestSanitizeWorkerOwnedArgs(t *testing.T) {
 		"--api-key-file=/tmp/key",
 		"--cors-headers=X-Test",
 		"--cors-credentials",
+		"--no-slots",
+		"--slot-save-path", "/tmp/escape",
 	})
 	want := []string{"--ctx-size", "1024"}
 	if !reflect.DeepEqual(got, want) {

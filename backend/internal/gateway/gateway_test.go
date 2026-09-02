@@ -90,6 +90,26 @@ func TestGatewayHelperProcess(t *testing.T) {
 		usage := map[string]any{"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}
 		timings := map[string]any{"prompt_n": 2, "prompt_ms": 4, "prompt_per_second": 500, "predicted_n": 3, "predicted_ms": 6, "predicted_per_second": 500}
 		switch r.URL.Path {
+		case "/slots":
+			if r.URL.Query().Get("force_404") == "1" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"slots": []any{}, "path": r.URL.Path, "query": r.URL.RawQuery, "proxied": true,
+			})
+			return
+		default:
+			if strings.HasPrefix(r.URL.Path, "/slots/") {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok": true, "path": r.URL.Path, "query": r.URL.RawQuery, "proxied": true,
+				})
+				return
+			}
+		}
+		switch r.URL.Path {
 		case "/v1/responses/input_tokens", "/v1/chat/completions/input_tokens":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{

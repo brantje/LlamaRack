@@ -12,3 +12,11 @@ func TestEnableManagedLlamaMetrics(t *testing.T) {
 		t.Fatalf("%s=%q", managedLlamaMetricsEnv, got)
 	}
 }
+
+func TestEnableManagedLlamaSlots(t *testing.T) {
+	t.Setenv(managedLlamaSlotsEnv, "0")
+	enableManagedLlamaSlots()
+	if got := os.Getenv(managedLlamaSlotsEnv); got != "1" {
+		t.Fatalf("%s=%q", managedLlamaSlotsEnv, got)
+	}
+}

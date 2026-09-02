@@ -35,6 +35,7 @@ const (
 	routeGetInputItems
 	routeCancelResponse
 	routeChatControl
+	routeSlotsProxy
 )
 
 type routeSpec struct {
@@ -112,6 +113,14 @@ var classifiedRoutes = []routeDef{
 	{http.MethodPost, "/v1/audio/transcriptions", routeSpec{
 		Kind: routeMultipartProxy, Body: bodyMultipart, NeedsModel: true, NeedsAcquire: true,
 		CallType: "transcription", Metrics: metricNone,
+	}},
+	{http.MethodGet, "/v1/slots", routeSpec{
+		Kind: routeSlotsProxy, Body: bodyNone, NeedsAcquire: false,
+		CallType: "slots_list", MapNotImplemented: true,
+	}},
+	{http.MethodPost, "/v1/slots/{slot_id}", routeSpec{
+		Kind: routeSlotsProxy, Body: bodyJSON, NeedsAcquire: false,
+		CallType: "slots_action", MapNotImplemented: true,
 	}},
 }
 

@@ -94,6 +94,17 @@ Requirements:
 
 Registered Models are listed through `/api/v1/models` and the Models UI, not as inferable `/v1/models` entries unless an Instance exists.
 
+### Query-parameter Instance resolution
+
+Some llama.cpp extensions do not include an OpenAI JSON `model` field. For those routes, resolve the Instance from a required `model` query parameter whose value is the exact `instance.id`.
+
+Current routes:
+
+- `GET /v1/slots?model=<instance.id>`
+- `POST /v1/slots/{slot_id}?model=<instance.id>&action=save|restore|erase`
+
+These routes require a **READY** worker, do not autoload, and do not reserve pending-admission capacity. Rewrite `/v1/slots` to worker `/slots` before proxying and drop `model` from the forwarded query.
+
 ## 7. Request pipeline
 
 ```text

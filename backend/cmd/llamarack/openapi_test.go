@@ -36,6 +36,8 @@ func TestRuntimeOpenAPIDocumentCoversCorePublicRoutes(t *testing.T) {
 		{http.MethodPost, "/v1/chat/completions/control"},
 		{http.MethodPost, "/v1/rerank"},
 		{http.MethodPost, "/v1/reranking"},
+		{http.MethodGet, "/v1/slots"},
+		{http.MethodPost, "/v1/slots/{slot_id}"},
 		{http.MethodPost, "/v1/audio/transcriptions"},
 	}
 	for _, route := range required {

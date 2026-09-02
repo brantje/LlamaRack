@@ -15,6 +15,9 @@ func TestValidateOptionsRejectsManagerOwnedWorkerSecurityOptions(t *testing.T) {
 		"no-cors-credentials",
 		"api-key",
 		"api-key-file",
+		"slots",
+		"no-slots",
+		"slot-save-path",
 	} {
 		t.Run(key, func(t *testing.T) {
 			_, err := ValidateOptions(profile, map[string]string{key: "unsafe"})

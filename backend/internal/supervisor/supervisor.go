@@ -74,10 +74,10 @@ func New(binary, host string, portStart int, startupTimeout time.Duration) *Supe
 }
 
 func (s *Supervisor) Start(ctx context.Context, instanceID, modelID, modelPath string, args []string) (Runtime, error) {
-	return s.StartWithEnv(ctx, instanceID, modelID, modelPath, args, nil)
+	return s.StartWithEnv(ctx, instanceID, modelID, modelPath, args, nil, "")
 }
 
-func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, modelPath string, args, env []string) (Runtime, error) {
+func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, modelPath string, args, env []string, slotSavePath string) (Runtime, error) {
 	s.mu.Lock()
 	if w := s.workers[instanceID]; w != nil && w.runtime.State != Unloaded && w.runtime.State != Failed {
 		rt := w.runtime
@@ -100,6 +100,9 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	// Managed workers are internal backend targets, not browser-facing APIs.
 	// The manager owns worker CORS/auth configuration and applies it exactly once.
 	workerArgs = append(workerArgs, "--cors-origins", "localhost")
+	if strings.TrimSpace(slotSavePath) != "" {
+		workerArgs = append(workerArgs, "--slot-save-path", slotSavePath)
+	}
 	cmd := exec.Command(s.binary, workerArgs...)
 	if len(env) > 0 {
 		cmd.Env = workerEnviron(env)
@@ -458,11 +461,14 @@ var workerOwnedValueOptions = map[string]bool{
 	"cors-headers": true,
 	"api-key":      true,
 	"api-key-file": true,
+	"slot-save-path": true,
 }
 
 var workerOwnedBooleanOptions = map[string]bool{
 	"cors-credentials":    true,
 	"no-cors-credentials": true,
+	"slots":               true,
+	"no-slots":            true,
 }
 
 func sanitizeWorkerOwnedArgs(args []string) []string {
