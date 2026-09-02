@@ -285,8 +285,16 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 			if _, err := s.db.ExecContext(ctx, `UPDATE instances SET enabled=1,updated_at=unixepoch() WHERE id=?`, item.instanceID); err != nil {
 				return err
 			}
-			if _, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error='',updated_at=unixepoch() WHERE id=?`, StateCompleted, item.id); err != nil {
+			result, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error='',updated_at=unixepoch() WHERE id=? AND state=?`, StateCompleted, item.id, StateDownloading)
+			if err != nil {
 				return err
+			}
+			claimed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if claimed > 0 {
+				s.instances.NotifyChange(ctx, item.instanceID)
 			}
 			if item.startWhenReady && !item.startAttempted && s.starter != nil {
 				_, startErr := s.starter.StartInstance(context.Background(), item.instanceID)

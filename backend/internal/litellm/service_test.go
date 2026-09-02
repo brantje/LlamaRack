@@ -12,8 +12,10 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
@@ -345,6 +347,46 @@ func TestServiceReconcileIgnoresUnmanagedModels(t *testing.T) {
 	defer fake.mu.Unlock()
 	if _, ok := fake.models["foreign"]; !ok {
 		t.Fatal("unmanaged model should remain untouched")
+	}
+}
+
+func TestServiceReconcileSkipsDownloadingImport(t *testing.T) {
+	service, fake, _, db := newLiteLLMTestEnv(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO models(id,name,gguf_path,total_bytes) VALUES(?,?,?,?)`, "model-1", "Model", "/tmp/model.gguf", 1); err != nil {
+		t.Fatal(err)
+	}
+	store := instances.New(db)
+	enabled := true
+	instance, err := store.Create(context.Background(), instances.CreateInput{ModelID: "model-1", Name: "Downloading", Slug: "downloading", Enabled: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+VALUES('job-1','huggingface','acme/demo','rev','artifact','demo.gguf','Q4_K_M',?,0,0,0,'',unixepoch(),unixepoch())`, downloads.StateDownloading); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO provider_imports(id,job_id,model_id,instance_id,owns_model,start_when_ready,state,error,start_attempted,created_at,updated_at)
+VALUES('import-1','job-1','model-1',?,0,0,?,'',0,unixepoch(),unixepoch())`, instance.ID, modelimports.StateDownloading); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.setSetting(context.Background(), SettingProxyURL, serviceMustURL(t, service)); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.secrets.SetSecretWithPrefix(context.Background(), SecretProxyAPIKey, "sk-proxy-test-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.snapshotModels()) != 0 {
+		t.Fatalf("downloading instance should not be published, got %#v", fake.snapshotModels())
+	}
+	if _, err := db.ExecContext(context.Background(), `UPDATE provider_imports SET state=?,updated_at=unixepoch() WHERE id=?`, modelimports.StateCompleted, "import-1"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Reconcile(context.Background())
+	if err != nil || !result.OK || result.Published != 1 {
+		t.Fatalf("reconcile=%+v err=%v models=%#v", result, err, fake.snapshotModels())
 	}
 }
 

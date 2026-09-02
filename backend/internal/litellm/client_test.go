@@ -2,6 +2,7 @@ package litellm
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,8 +51,27 @@ func newFakeLiteLLMServer(t *testing.T) *fakeLiteLLMServer {
 				http.Error(w, "create failed", http.StatusBadGateway)
 				return
 			}
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if modelInfoRaw, ok := payload["model_info"]; ok {
+				var modelInfo map[string]json.RawMessage
+				if err := json.Unmarshal(modelInfoRaw, &modelInfo); err == nil {
+					if idRaw, hasID := modelInfo["id"]; hasID && string(idRaw) == `""` {
+						http.Error(w, "empty model_info.id rejected", http.StatusBadRequest)
+						return
+					}
+				}
+			}
 			var entry ModelEntry
-			if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+			if err := json.Unmarshal(raw, &entry); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -224,5 +244,51 @@ func TestEntryDriftedDetectsFieldChanges(t *testing.T) {
 	entry.ModelInfo.LlamaRackInstanceID = "stale"
 	if !entryDrifted(entry, "alpha", "http://llamarack/v1", "sk-one") {
 		t.Fatal("expected instance id drift")
+	}
+}
+
+func TestBuildModelEntryOmitsEmptyID(t *testing.T) {
+	entry := BuildModelEntry("alpha", "http://llamarack/v1", "sk-testsecret", "")
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"id":""`) || strings.Contains(string(raw), `"id": ""`) {
+		t.Fatalf("create payload must omit empty id, got %s", raw)
+	}
+	update := BuildModelEntry("alpha", "http://llamarack/v1", "sk-testsecret", "litellm-alpha")
+	raw, err = json.Marshal(update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"id":"litellm-alpha"`) && !strings.Contains(string(raw), `"id": "litellm-alpha"`) {
+		t.Fatalf("update payload must include id, got %s", raw)
+	}
+}
+
+func TestCreateModelRejectsExplicitEmptyID(t *testing.T) {
+	fake := newFakeLiteLLMServer(t)
+	client, err := NewClient(fake.server.URL, "proxy-key", fake.server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"model_name":"alpha","litellm_params":{"model":"openai/alpha","api_base":"http://llamarack/v1","api_key":"sk-test"},"model_info":{"id":"","llamarack_managed":true,"llamarack_instance_id":"alpha"}}`
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fake.server.URL+"/model/new", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer proxy-key")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for explicit empty id, got %d", resp.StatusCode)
+	}
+	entry := BuildModelEntry("alpha", "http://llamarack/v1", "sk-testsecret", "")
+	if err := client.CreateModel(t.Context(), entry); err != nil {
+		t.Fatal(err)
 	}
 }
