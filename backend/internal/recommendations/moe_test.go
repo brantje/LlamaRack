@@ -62,6 +62,9 @@ func TestRecommendMoEOffloadMovesKVOnlyAtCliff(t *testing.T) {
 	if len(got.Devices) != 2 {
 		t.Fatalf("KV cliff changed device set: %v", got.Devices)
 	}
+	if got.NCPUMoe != metadata.BlockCount {
+		t.Fatalf("KV cliff must retain full expert spill, n_cpu_moe=%d want %d", got.NCPUMoe, metadata.BlockCount)
+	}
 	if !strings.Contains(got.Reason, "KV cache") {
 		t.Fatalf("reason does not explain KV placement: %q", got.Reason)
 	}
