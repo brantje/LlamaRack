@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
@@ -18,14 +19,20 @@ const (
 )
 
 type Metadata struct {
-	Architecture  string `json:"architecture,omitempty"`
-	ContextLength int64  `json:"context_length,omitempty"`
-	BlockCount    int64  `json:"block_count,omitempty"`
-	Embedding     int64  `json:"embedding_length,omitempty"`
-	HeadCount     int64  `json:"head_count,omitempty"`
-	KVHeadCount   int64  `json:"kv_head_count,omitempty"`
-	KeyLength     int64  `json:"key_length,omitempty"`
-	ValueLength   int64  `json:"value_length,omitempty"`
+	Architecture    string `json:"architecture,omitempty"`
+	ContextLength   int64  `json:"context_length,omitempty"`
+	BlockCount      int64  `json:"block_count,omitempty"`
+	Embedding       int64  `json:"embedding_length,omitempty"`
+	HeadCount       int64  `json:"head_count,omitempty"`
+	KVHeadCount     int64  `json:"kv_head_count,omitempty"`
+	KeyLength       int64  `json:"key_length,omitempty"`
+	ValueLength     int64  `json:"value_length,omitempty"`
+	ExpertCount     int64  `json:"expert_count,omitempty"`
+	ExpertUsedCount int64  `json:"expert_used_count,omitempty"`
+}
+
+type Capabilities struct {
+	NCPUMoe bool `json:"n_cpu_moe"`
 }
 
 type QuantizationInfo struct {
@@ -45,6 +52,7 @@ type MemoryEstimate struct {
 type Offload struct {
 	Mode        string   `json:"mode"`
 	GPULayers   int64    `json:"gpu_layers,omitempty"`
+	NCPUMoe     int64    `json:"n_cpu_moe,omitempty"`
 	Devices     []string `json:"devices,omitempty"`
 	TensorSplit string   `json:"tensor_split,omitempty"`
 	KVOnGPU     bool     `json:"kv_on_gpu"`
@@ -70,6 +78,10 @@ type Recommendation struct {
 }
 
 func Analyze(model models.Model, path string, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error) Recommendation {
+	return AnalyzeWithCapabilities(model, path, snapshot, requestedContext, hardwareErr, Capabilities{})
+}
+
+func AnalyzeWithCapabilities(model models.Model, path string, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error, capabilities Capabilities) Recommendation {
 	metadata, metadataErr := ReadMetadata(path)
 	contextLength, assumed := chooseContext(requestedContext)
 	capability := int64(model.ContextLength)
@@ -88,11 +100,14 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 		result.HardwareWarning = hardwareErr.Error()
 	}
 	result.Confidence = confidence(metadata, metadataErr)
+	if metadata.ExpertCount > 0 && result.Confidence == "high" {
+		result.Confidence = "medium"
+	}
 	result.CPUFit = fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes)
-	classified := classifyOffload(snapshot, model.TotalBytes, contextLength, metadata)
+	classified := classifyOffloadWithCapabilities(snapshot, model.TotalBytes, contextLength, metadata, capabilities)
 	result.CurrentFit, result.Offload = classified.Fit, classified.Offload
-	result.TotalHardwareFit = totalHardwareFit(snapshot, model.TotalBytes, contextLength, metadata)
-	result.PlacementRanges = ComputePlacementRanges(snapshot, model.TotalBytes, metadata, capability)
+	result.TotalHardwareFit = totalHardwareFitWithCapabilities(snapshot, model.TotalBytes, contextLength, metadata, capabilities)
+	result.PlacementRanges = ComputePlacementRangesWithCapabilities(snapshot, model.TotalBytes, metadata, capability, capabilities)
 	return result
 }
 
@@ -130,7 +145,7 @@ func estimateMemory(weights, context int64, metadata Metadata) MemoryEstimate {
 		Metadata: scheduler.KVMetadata{
 			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
 			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
-			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength,
+			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength, ExpertCount: metadata.ExpertCount,
 		},
 	})
 	total := demand.WeightsBytes + demand.KVCacheBytes + demand.RuntimeOverheadBytes
@@ -144,11 +159,15 @@ func estimateKV(context int64, m Metadata) int64 {
 	return scheduler.EstimateDemand(scheduler.DemandInput{Context: context, Metadata: scheduler.KVMetadata{
 		Architecture: m.Architecture, ContextLength: m.ContextLength, BlockCount: m.BlockCount,
 		Embedding: m.Embedding, HeadCount: m.HeadCount, KVHeadCount: m.KVHeadCount,
-		KeyLength: m.KeyLength, ValueLength: m.ValueLength,
+		KeyLength: m.KeyLength, ValueLength: m.ValueLength, ExpertCount: m.ExpertCount,
 	}}).KVCacheBytes
 }
 
 func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata) (bool, Offload) {
+	return recommendOffloadWithCapabilities(snapshot, memory, metadata, Capabilities{})
+}
+
+func recommendOffloadWithCapabilities(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata, capabilities Capabilities) (bool, Offload) {
 	if len(snapshot.GPUs) == 0 {
 		return false, Offload{}
 	}
@@ -163,6 +182,17 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 		return true, Offload{Mode: mode, GPULayers: metadata.BlockCount, Devices: placement.Devices, TensorSplit: placement.TensorSplit, KVOnGPU: true, Reason: reason}
 	}
 
+	moeFallbackPrefix := ""
+	if metadata.ExpertCount > 0 {
+		if capabilities.NCPUMoe {
+			if fit, offload := recommendMoEOffload(snapshot, memory, metadata); fit {
+				return true, offload
+			}
+		} else {
+			moeFallbackPrefix = "MoE metadata was detected, but the active llama.cpp profile does not advertise --n-cpu-moe; using the standard dense fallback. "
+		}
+	}
+
 	bestID := ""
 	var best int64
 	for _, gpu := range snapshot.GPUs {
@@ -173,9 +203,9 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 	}
 	if best <= 0 || memory.WeightsBytes <= 0 {
 		if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
-			return true, Offload{Mode: "cpu", Reason: "GPU headroom is too small for useful offload, but the estimate fits in currently available system RAM."}
+			return true, Offload{Mode: "cpu", Reason: moeFallbackPrefix + "GPU headroom is too small for useful offload, but the estimate fits in currently available system RAM."}
 		}
-		return false, Offload{Mode: "cpu", Reason: "Current GPU headroom is too small for useful offload and available system RAM is below the conservative estimate."}
+		return false, Offload{Mode: "cpu", Reason: moeFallbackPrefix + "Current GPU headroom is too small for useful offload and available system RAM is below the conservative estimate."}
 	}
 
 	fixedGPU := memory.KVCacheBytes + memory.RuntimeOverheadBytes
@@ -186,7 +216,7 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 			cpuNeeded := memory.WeightsBytes - offloadedWeights
 			if fitsRAM(snapshot.RAMAvailableBytes, cpuNeeded) {
 				layers := recommendedLayers(metadata.BlockCount, fraction)
-				return true, Offload{Mode: "partial", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: true, Reason: "Full offload does not fit currently; keep the KV cache on GPU and offload the largest useful share of model layers to the best single GPU."}
+				return true, Offload{Mode: "partial", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: true, Reason: moeFallbackPrefix + "Full offload does not fit currently; keep the KV cache on GPU and offload the largest useful share of model layers to the best single GPU."}
 			}
 		}
 	}
@@ -198,15 +228,114 @@ func recommendOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadat
 			cpuNeeded := memory.KVCacheBytes + (memory.WeightsBytes - offloadedWeights)
 			if fitsRAM(snapshot.RAMAvailableBytes, cpuNeeded) {
 				layers := recommendedLayers(metadata.BlockCount, fraction)
-				return true, Offload{Mode: "hybrid", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: false, Reason: "The selected context makes an all-GPU KV cache too large. Keep KV in system RAM and use the available GPU for model-layer offload instead of falling back to CPU-only loading."}
+				return true, Offload{Mode: "hybrid", GPULayers: layers, Devices: []string{bestID}, KVOnGPU: false, Reason: moeFallbackPrefix + "The selected context makes an all-GPU KV cache too large. Keep KV in system RAM and use the available GPU for model-layer offload instead of falling back to CPU-only loading."}
 			}
 		}
 	}
 
 	if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
-		return true, Offload{Mode: "cpu", Reason: "The current GPU/RAM combination cannot satisfy a conservative offload plan, but CPU-only loading fits available system RAM."}
+		return true, Offload{Mode: "cpu", Reason: moeFallbackPrefix + "The current GPU/RAM combination cannot satisfy a conservative offload plan, but CPU-only loading fits available system RAM."}
 	}
-	return false, Offload{Mode: "cpu", Reason: "Current free GPU and system memory are below the conservative estimate for this context size."}
+	return false, Offload{Mode: "cpu", Reason: moeFallbackPrefix + "Current free GPU and system memory are below the conservative estimate for this context size."}
+}
+
+func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata) (bool, Offload) {
+	if metadata.ExpertCount <= 0 || metadata.BlockCount <= 0 || memory.WeightsBytes <= 0 {
+		return false, Offload{}
+	}
+	type usableGPU struct {
+		id    string
+		bytes int64
+	}
+	usable := make([]usableGPU, 0, len(snapshot.GPUs))
+	var pooled int64
+	for _, gpu := range snapshot.GPUs {
+		available := gpu.FreeBytes - defaultVRAMReserve
+		if available <= 0 {
+			continue
+		}
+		usable = append(usable, usableGPU{id: gpu.ID, bytes: available})
+		pooled += available
+	}
+	if len(usable) == 0 || pooled <= 0 {
+		return false, Offload{}
+	}
+	sort.SliceStable(usable, func(i, j int) bool {
+		if usable[i].bytes != usable[j].bytes {
+			return usable[i].bytes > usable[j].bytes
+		}
+		return usable[i].id < usable[j].id
+	})
+	devices := make([]string, 0, len(usable))
+	weights := make([]int64, 0, len(usable))
+	for _, gpu := range usable {
+		devices = append(devices, gpu.id)
+		weights = append(weights, gpu.bytes)
+	}
+	tensorSplit := moeTensorSplit(weights)
+
+	findMinimum := func(kvOnGPU bool) (int64, bool) {
+		fixed := memory.RuntimeOverheadBytes
+		if kvOnGPU {
+			fixed += memory.KVCacheBytes
+		}
+		fits := func(blocks int64) bool {
+			gpuWeights, hostWeights := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, blocks, metadata.ExpertCount)
+			if gpuWeights+fixed > pooled {
+				return false
+			}
+			hostNeeded := hostWeights
+			if !kvOnGPU {
+				hostNeeded += memory.KVCacheBytes
+			}
+			return fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
+		}
+		if !fits(metadata.BlockCount) {
+			return 0, false
+		}
+		lo, hi := int64(0), metadata.BlockCount
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			if fits(mid) {
+				hi = mid
+			} else {
+				lo = mid + 1
+			}
+		}
+		return lo, true
+	}
+
+	if blocks, ok := findMinimum(true); ok {
+		return true, Offload{
+			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: blocks,
+			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: true,
+			Reason: "Full GPU offload does not fit. Keep all transformer layers and the KV cache on the currently free GPUs while placing only the routed expert weights required to fit in system RAM. Expert weight size is conservatively estimated from GGUF size.",
+		}
+	}
+	if blocks, ok := findMinimum(false); ok {
+		return true, Offload{
+			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: blocks,
+			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: false,
+			Reason: "Full GPU offload does not fit. Keep all transformer layers on the currently free GPUs, place routed experts in system RAM, and move the KV cache to system RAM because it no longer fits within current VRAM headroom. Expert weight size is conservatively estimated from GGUF size.",
+		}
+	}
+	return false, Offload{}
+}
+
+func moeTensorSplit(bytes []int64) string {
+	if len(bytes) < 2 {
+		return ""
+	}
+	parts := make([]string, 0, len(bytes))
+	const unit = int64(256 * mib)
+	for _, value := range bytes {
+		weight := value / unit
+		if weight < 1 {
+			weight = 1
+		}
+		parts = append(parts, itoa(weight))
+	}
+	return strings.Join(parts, ",")
 }
 
 func recommendedLayers(blockCount int64, fraction float64) int64 {
@@ -269,9 +398,36 @@ func ReadMetadata(path string) (Metadata, error) {
 		return Metadata{}, err
 	}
 	d := inspection.Derived
-	return Metadata{
+	metadata := Metadata{
 		Architecture: d.Architecture, ContextLength: d.ContextLength, BlockCount: d.BlockCount,
 		Embedding: d.Embedding, HeadCount: d.HeadCount, KVHeadCount: d.KVHeadCount,
 		KeyLength: d.KeyLength, ValueLength: d.ValueLength,
-	}, nil
+	}
+	for _, entry := range inspection.Metadata {
+		if entry.Key == d.Architecture+".expert_count" {
+			metadata.ExpertCount = parseMetadataInt(entry.Value)
+		}
+		if entry.Key == d.Architecture+".expert_used_count" {
+			metadata.ExpertUsedCount = parseMetadataInt(entry.Value)
+		}
+	}
+	return metadata, nil
+}
+
+func parseMetadataInt(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	var result int64
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		if result > (math.MaxInt64-int64(r-'0'))/10 {
+			return 0
+		}
+		result = result*10 + int64(r-'0')
+	}
+	return result
 }
