@@ -137,10 +137,12 @@ func TestEvictionPlanUsesRuntimeDemand(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
+	s.hardware = abundantSingleGPUHardware()
 	if _, err := s.StartInstance(ctx, items[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	exec("UPDATE models SET total_bytes=? WHERE id=?", 2*testGiB, m.ID)
+	s.hardware = insufficientGPUHardware()
 	plan, err := s.EvictionPlan(ctx, testGiB)
 	if err != nil || !plan.Fits || len(plan.Evict) != 1 {
 		t.Fatalf("plan=%+v err=%v", plan, err)

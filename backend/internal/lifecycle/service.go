@@ -23,7 +23,7 @@ import (
 )
 
 const resourcePressureReason = "resource_pressure"
-const maxEvictionPlanAttempts = 2
+const maxEvictionPlanAttempts = 8
 
 var (
 	errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
@@ -361,31 +361,87 @@ func (s *Service) Activity(id string) Activity {
 }
 
 func (s *Service) EvictionPlan(ctx context.Context, requiredBytes int64) (scheduler.Plan, error) {
-	items, err := s.instances.List(ctx)
+	snapshot, _ := s.hardwareSnapshot(ctx)
+	return s.planEvictions(ctx, snapshot, scheduler.PlacementRequest{RequiredBytes: requiredBytes}, "", nil)
+}
+
+func (s *Service) hardwareSnapshot(ctx context.Context) (hardware.Snapshot, error) {
+	if s == nil || s.hardware == nil {
+		return hardware.Snapshot{}, nil
+	}
+	return s.hardware.Snapshot(ctx)
+}
+
+func (s *Service) planEvictions(ctx context.Context, snapshot hardware.Snapshot, request scheduler.PlacementRequest, excludeInstance string, skip map[string]bool) (scheduler.Plan, error) {
+	candidates, err := s.evictionCandidates(ctx, snapshot, excludeInstance, skip)
 	if err != nil {
 		return scheduler.Plan{}, err
 	}
+	return scheduler.PlanEvictions(candidates, snapshot, request), nil
+}
+
+func (s *Service) evictionCandidates(ctx context.Context, snapshot hardware.Snapshot, excludeInstance string, skip map[string]bool) ([]scheduler.Candidate, error) {
+	items, err := s.instances.List(ctx)
+	if err != nil {
+		return nil, err
+	}
 	candidates := make([]scheduler.Candidate, 0, len(items))
 	for _, i := range items {
+		if i.ID == excludeInstance || skip[i.ID] {
+			continue
+		}
 		m, err := s.models.GetByID(ctx, i.ModelID)
 		if err != nil {
-			return scheduler.Plan{}, err
+			return nil, err
 		}
 		activity := s.Activity(i.ID)
 		estimated := m.TotalBytes
+		hostRAM := int64(0)
 		if path, err := s.models.ModelAbsolutePath(m); err == nil {
 			options, optErr := s.resolveLaunchOptions(ctx, m.ID, i.ID)
 			if optErr == nil {
-				estimated = s.estimateDemand(m, path, options).VRAMBytes()
+				demand := s.estimateDemand(m, path, options)
+				estimated = demand.VRAMBytes()
+				hostRAM = demand.HostRAMBytes
 			}
+		}
+		runtime := s.sup.Status(i.ID)
+		var leaseGPUs []scheduler.GPUReservation
+		if s.reservations != nil {
+			if lease, ok := s.reservations.GetByInstance(i.ID); ok {
+				leaseGPUs = lease.GPUs
+			}
+		}
+		resources := scheduler.AttributeResources(scheduler.ResourceAttribution{
+			EstimatedBytes: estimated,
+			HostRAMBytes:   hostRAM,
+			Devices:        i.GPUDevices,
+			TensorSplit:    i.TensorSplit,
+			LeaseGPUs:      leaseGPUs,
+			PID:            runtime.PID,
+			Processes:      snapshot.Processes,
+			SnapshotGPUs:   snapshot.GPUs,
+		})
+		if attributed := candidateResourceBytes(resources); attributed > 0 {
+			estimated = attributed
 		}
 		candidates = append(candidates, scheduler.Candidate{
 			ModelID: i.ModelID, InstanceID: i.ID, Priority: i.Priority, AlwaysOn: i.AlwaysOn,
 			EvictionEnabled: i.EvictionEnabled, ActiveRequests: activity.demand(), LastUsed: activity.LastUsed,
-			EstimatedBytes: estimated, Ready: s.sup.Status(i.ID).State == supervisor.Ready,
+			EstimatedBytes: estimated, Resources: resources, Ready: runtime.State == supervisor.Ready,
 		})
 	}
-	return scheduler.PlanEvictions(candidates, requiredBytes), nil
+	return candidates, nil
+}
+
+func candidateResourceBytes(resources scheduler.CandidateResources) int64 {
+	total := int64(0)
+	for _, gpu := range resources.GPU {
+		if gpu.Bytes > 0 {
+			total += gpu.Bytes
+		}
+	}
+	return total
 }
 
 func (s *Service) Logs(id string) []string { return s.sup.Logs(id) }
@@ -1055,71 +1111,119 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 	if shortfall < 1 {
 		shortfall = requiredBytes
 	}
-	plan, err := s.EvictionPlan(ctx, shortfall)
-	if err != nil {
-		return scheduler.Placement{}, err
+	insufficient := func(plan scheduler.Plan) error {
+		return fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
 	}
-	if !plan.Fits {
-		return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
-	}
+
+	var stopped []scheduler.Candidate
+	skip := map[string]bool{}
 	for attempt := 0; attempt < maxEvictionPlanAttempts; attempt++ {
-		if attempt > 0 {
-			plan, err = s.EvictionPlan(ctx, shortfall)
-			if err != nil {
-				return scheduler.Placement{}, err
-			}
-			if !plan.Fits {
-				return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
-			}
+		planning := scheduler.ApplyCandidateCredits(snapshot, stopped)
+		plan, err := s.planEvictions(ctx, planning, request, i.ID, skip)
+		if err != nil {
+			return scheduler.Placement{}, err
 		}
-		credits := make([]scheduler.Credit, 0, len(plan.Evict))
-		for _, candidate := range plan.Evict {
-			if candidate.InstanceID == i.ID {
-				continue
-			}
-			credits = append(credits, scheduler.Credit{InstanceID: candidate.InstanceID, Bytes: candidate.EstimatedBytes})
+		if !plan.Fits {
+			return scheduler.Placement{}, insufficient(plan)
 		}
+
+		credits := append(scheduler.CreditsFromCandidates(stopped), scheduler.CreditsFromCandidates(plan.Evict)...)
 		lease, err = s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, Credits: credits, HostRAM: demand.HostRAMBytes})
 		if err != nil {
 			return scheduler.Placement{}, err
 		}
 		if !lease.Placement.Fits {
-			return scheduler.Placement{}, fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
+			return scheduler.Placement{}, insufficient(plan)
 		}
 		s.logReservation("reserved", i.ID, lease)
 
-		stale := false
+		var victim scheduler.Candidate
 		for _, candidate := range plan.Evict {
 			if candidate.InstanceID == i.ID {
 				continue
 			}
-			if err := s.evictInstance(ctx, candidate.InstanceID); err != nil {
-				if errors.Is(err, errEvictionIneligible) {
-					s.releaseReservation(i.ID)
-					stale = true
-					break
-				}
-				s.releaseReservation(i.ID)
-				return scheduler.Placement{}, fmt.Errorf("evict %s: %w", candidate.InstanceID, err)
-			}
+			victim = candidate
+			break
 		}
-		if !stale {
-			refreshed, err := s.hardware.Snapshot(ctx)
-			if err != nil {
-				s.releaseReservation(i.ID)
-				return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
-			}
-			if err := placementDevicesPresent(refreshed, lease.Placement.Devices); err != nil {
+		if victim.InstanceID == "" {
+			if err := placementDevicesPresent(snapshot, lease.Placement.Devices); err != nil {
 				s.releaseReservation(i.ID)
 				return scheduler.Placement{}, err
 			}
 			return lease.Placement, nil
 		}
-		if attempt == maxEvictionPlanAttempts-1 {
-			return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
+
+		if !s.victimPlacementCurrent(victim, snapshot) {
+			s.releaseReservation(i.ID)
+			skip[victim.InstanceID] = true
+			continue
+		}
+		if err := s.evictInstance(ctx, victim.InstanceID); err != nil {
+			if errors.Is(err, errEvictionIneligible) {
+				s.releaseReservation(i.ID)
+				skip[victim.InstanceID] = true
+				continue
+			}
+			s.releaseReservation(i.ID)
+			return scheduler.Placement{}, fmt.Errorf("evict %s: %w", victim.InstanceID, err)
+		}
+		stopped = append(stopped, victim)
+
+		snapshot, err = s.hardware.Snapshot(ctx)
+		if err != nil {
+			s.releaseReservation(i.ID)
+			return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
+		}
+		if err := placementDevicesPresent(snapshot, lease.Placement.Devices); err != nil {
+			s.releaseReservation(i.ID)
+			return scheduler.Placement{}, err
+		}
+
+		ghost, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, Credits: scheduler.CreditsFromCandidates(stopped), HostRAM: demand.HostRAMBytes})
+		if err != nil {
+			return scheduler.Placement{}, err
+		}
+		if ghost.Placement.Fits {
+			s.logReservation("reserved", i.ID, ghost)
+			return ghost.Placement, nil
 		}
 	}
 	return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
+}
+
+func (s *Service) victimPlacementCurrent(candidate scheduler.Candidate, snapshot hardware.Snapshot) bool {
+	planned := map[string]bool{}
+	for _, gpu := range candidate.Resources.GPU {
+		id := strings.TrimSpace(gpu.DeviceID)
+		if id != "" {
+			planned[id] = true
+		}
+	}
+	if len(planned) == 0 {
+		return true
+	}
+	pid := 0
+	if s != nil && s.sup != nil {
+		pid = s.sup.Status(candidate.InstanceID).PID
+	}
+	if pid <= 0 {
+		return true
+	}
+	matched := false
+	onPlanned := false
+	for _, process := range snapshot.Processes {
+		if process.PID != pid {
+			continue
+		}
+		matched = true
+		if planned[strings.TrimSpace(process.DeviceID)] {
+			onPlanned = true
+		}
+	}
+	if !matched {
+		return true
+	}
+	return onPlanned
 }
 
 func placementDevicesPresent(snapshot hardware.Snapshot, devices []string) error {
