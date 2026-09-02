@@ -142,28 +142,28 @@ describe('models page', () => {
 })
 
 describe('API page', () => {
-  it('creates, copies and requests retained-history revocation', async () => {
+  it('creates, copies and rotates keys without revoke', async () => {
     resetState()
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/api-keys' && options?.method === 'POST') return { key: { id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, secret: 'secret-value' }
-      if (path === '/api/v1/api-keys') return [{ id: 'k1', name: 'sdk', prefix: 'abc', enabled: true, created_at: 1 }, { id: 'old', name: 'history', prefix: 'old', enabled: false, created_at: 1, revoked_at: 2 }]
-      if (path.endsWith('/revoke')) return {}
+      if (path === '/api/v1/api-keys' && options?.method === 'POST') return { key: { id: 'k1', name: 'sdk', prefix: 'sk-abc12345', enabled: true, key_type: 'inference', owner_kind: 'user', owner_id: 1, owner_name: 'admin', owner_enabled: true, created_at: 1 }, secret: 'secret-value' }
+      if (path === '/api/v1/api-keys') return [{ id: 'k1', name: 'sdk', prefix: 'sk-abc12345', enabled: true, key_type: 'inference', owner_kind: 'user', owner_id: 1, owner_name: 'admin', owner_enabled: true, created_at: 1 }]
+      if (path === '/api/v1/users') return [{ id: 1, username: 'admin', enabled: true }]
+      if (path === '/api/v1/admin/service-accounts') return []
       return []
     })
     const wrapper = await mountSuspended(APIPage, { route: false })
     await flushPromises()
-    expect(wrapper.text()).toContain('Revoked')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Revoke')).toBe(false)
 
-    await wrapper.find('input[placeholder="Key name"]').setValue('sdk')
-    await wrapper.findAll('button').find(button => button.text() === 'Create key')!.trigger('click')
+    await wrapper.get('[data-testid="create-key"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('secret-value')
-    await wrapper.findAll('button').find(button => button.text() === 'Copy')!.trigger('click')
+    const save = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="api-key-save"]')].at(-1)
+    save?.click()
+    await flushPromises()
+    expect(document.body.textContent).toContain('secret-value')
+    const copy = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="copy-key"]')].at(-1)
+    copy?.click()
     await flushPromises()
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('secret-value')
-
-    await wrapper.findAll('button').find(button => button.text() === 'Revoke')!.trigger('click')
-    await clickConfirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/api-keys/k1/revoke', { method: 'POST' })
   })
 })

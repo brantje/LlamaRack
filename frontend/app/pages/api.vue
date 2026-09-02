@@ -1,49 +1,62 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { APIKey } from '~/composables/useManager'
+import type { APIKey, ServiceAccount, User } from '~/composables/useManager'
+import APIKeyModal from '~/components/APIKeyModal.vue'
+import type { APIKeyDraft } from '~/utils/apiKeys'
+import {
+  apiKeyStatus,
+  apiKeyTypeLabel,
+  formatAPIKeyPrefix,
+  formatAPIKeyTimestamp
+} from '~/utils/apiKeys'
 
-type ManagedAPIKey = APIKey & { revoked_at?: number }
+type AdminUser = User & { created_at?: number; last_login_at?: number }
 
 const manager = useManager()
 const { apiBase } = manager
-const keys = ref<ManagedAPIKey[]>([])
-const name = ref('default')
-const secret = ref('')
+const keys = ref<APIKey[]>([])
+const users = ref<AdminUser[]>([])
+const serviceAccounts = ref<ServiceAccount[]>([])
 const error = ref('')
-const pending = reactive<Record<string, 'toggle' | 'revoke' | 'rotate' | undefined>>({})
+const pending = reactive<Record<string, 'toggle' | 'rotate' | 'edit' | undefined>>({})
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
+const modalOpen = ref(false)
+const modalPhase = ref<'form' | 'secret'>('form')
+const editingKey = ref<APIKey | null>(null)
+const secret = ref('')
+const submitting = ref(false)
 
-const columns: TableColumn<ManagedAPIKey>[] = [
+const columns: TableColumn<APIKey>[] = [
   { accessorKey: 'name', header: 'Name' },
+  { accessorKey: 'owner_name', header: 'Owner' },
+  { accessorKey: 'key_type', header: 'Type' },
   { accessorKey: 'prefix', header: 'Prefix' },
   { id: 'status', header: 'Status' },
-  { accessorKey: 'created_at', header: 'Created' },
+  { accessorKey: 'expires_on', header: 'Expires' },
   { accessorKey: 'last_used_at', header: 'Last used' },
   { id: 'actions', header: 'Actions' }
 ]
 
-function formatTimestamp(value?: number) {
-  if (!value) return '—'
-  const date = new Date(value * 1000)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
-}
-
-function statusVariant(key: ManagedAPIKey) {
-  if (key.revoked_at) return 'failed' as const
-  return key.enabled ? 'ready' as const : 'neutral' as const
-}
-
-function statusLabel(key: ManagedAPIKey) {
-  if (key.revoked_at) return 'Revoked'
-  return key.enabled ? 'Enabled' : 'Disabled'
-}
-
 async function load() {
   if (!manager.user.value) return
+  error.value = ''
   try {
-    keys.value = (await manager.request<ManagedAPIKey[]>('/api/v1/api-keys')) || []
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to load API keys'
+    keys.value = (await manager.request<APIKey[]>('/api/v1/api-keys')) || []
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to load API keys'
+  }
+}
+
+async function loadOwners() {
+  try {
+    users.value = (await manager.request<AdminUser[]>('/api/v1/users')) || []
+  } catch {
+    users.value = manager.user.value ? [manager.user.value] : []
+  }
+  try {
+    serviceAccounts.value = (await manager.request<ServiceAccount[]>('/api/v1/admin/service-accounts')) || []
+  } catch {
+    serviceAccounts.value = []
   }
 }
 
@@ -51,54 +64,101 @@ watch(manager.user, user => {
   if (user) void load()
 }, { immediate: true })
 
-async function createKey() {
+async function openCreate() {
   error.value = ''
+  secret.value = ''
+  editingKey.value = null
+  modalPhase.value = 'form'
+  await loadOwners()
+  modalOpen.value = true
+}
+
+async function openEdit(key: APIKey) {
+  error.value = ''
+  secret.value = ''
+  editingKey.value = key
+  modalPhase.value = 'form'
+  await loadOwners()
+  modalOpen.value = true
+}
+
+function closeModal() {
+  modalOpen.value = false
+  modalPhase.value = 'form'
+  editingKey.value = null
+  submitting.value = false
+}
+
+function createBody(draft: APIKeyDraft) {
+  const body: Record<string, unknown> = { name: draft.name, key_type: draft.key_type }
+  if (draft.owner_user_id != null) body.owner_user_id = draft.owner_user_id
+  if (draft.owner_service_account_id) body.owner_service_account_id = draft.owner_service_account_id
+  if (draft.key_type === 'inference' && draft.instance_ids?.length) body.instance_ids = draft.instance_ids
+  if (draft.expires_on) body.expires_on = draft.expires_on
+  return body
+}
+
+function patchBody(draft: APIKeyDraft) {
+  const body: Record<string, unknown> = {
+    name: draft.name,
+    owner_user_id: draft.owner_user_id ?? null,
+    owner_service_account_id: draft.owner_service_account_id ?? null,
+    expires_on: draft.expires_on ?? null
+  }
+  if (editingKey.value?.key_type === 'inference') body.instance_ids = draft.instance_ids || []
+  return body
+}
+
+async function saveKey(draft: APIKeyDraft) {
+  const editingId = editingKey.value?.id
+  submitting.value = true
+  error.value = ''
+  if (editingId) pending[editingId] = 'edit'
   try {
-    const result = await manager.request<{ key: ManagedAPIKey; secret: string }>('/api/v1/api-keys', { method: 'POST', body: { name: name.value } })
+    if (editingId) {
+      await manager.request(`/api/v1/api-keys/${editingId}`, { method: 'PATCH', body: patchBody(draft) })
+      closeModal()
+      await load()
+      return
+    }
+    const result = await manager.request<{ key: APIKey; secret: string }>('/api/v1/api-keys', { method: 'POST', body: createBody(draft) })
     secret.value = result.secret
+    modalPhase.value = 'secret'
     await load()
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to create API key'
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || (editingId ? 'Unable to update API key' : 'Unable to create API key')
+  } finally {
+    submitting.value = false
+    if (editingId) pending[editingId] = undefined
   }
 }
 
-async function setEnabled(key: ManagedAPIKey) {
+async function setEnabled(key: APIKey) {
+  if (key.enabled) {
+    const confirmed = await confirmation.value?.request({
+      title: 'Disable API key',
+      description: `Disable “${key.name}”? Clients using this key will fail until it is enabled again.`,
+      confirmLabel: 'Disable key',
+      confirmTone: 'destructive'
+    })
+    if (!confirmed) return
+  }
   pending[key.id] = 'toggle'
   error.value = ''
   try {
     await manager.request(`/api/v1/api-keys/${key.id}`, { method: 'PATCH', body: { enabled: !key.enabled } })
     await load()
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to update API key'
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to update API key'
   } finally {
     pending[key.id] = undefined
   }
 }
 
-async function revoke(key: ManagedAPIKey) {
-  const confirmed = await confirmation.value?.request({
-    title: 'Revoke API key',
-    description: `Revoke API key “${key.name}”? Existing clients using it will fail immediately. Revoked metadata is retained for history.`,
-    confirmLabel: 'Revoke key',
-    confirmTone: 'destructive'
-  })
-  if (!confirmed) return
-  pending[key.id] = 'revoke'
-  error.value = ''
-  try {
-    await manager.request(`/api/v1/api-keys/${key.id}/revoke`, { method: 'POST' })
-    await load()
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to revoke API key'
-  } finally {
-    pending[key.id] = undefined
-  }
-}
-
-async function rotate(key: ManagedAPIKey) {
+async function rotate(key: APIKey) {
   const confirmed = await confirmation.value?.request({
     title: 'Rotate API key',
-    description: `Rotate “${key.name}”? The current secret will be revoked immediately and a replacement secret will be shown once.`,
+    description: `Rotate “${key.name}”? The current secret will stop working immediately and a replacement secret will be shown once.`,
     confirmLabel: 'Rotate key',
     confirmTone: 'destructive'
   })
@@ -106,11 +166,14 @@ async function rotate(key: ManagedAPIKey) {
   pending[key.id] = 'rotate'
   error.value = ''
   try {
-    const result = await manager.request<{ key: ManagedAPIKey; secret: string }>(`/api/v1/api-keys/${key.id}/rotate`, { method: 'POST' })
+    const result = await manager.request<{ key: APIKey; secret: string }>(`/api/v1/api-keys/${key.id}/rotate`, { method: 'POST' })
     secret.value = result.secret
+    editingKey.value = null
+    modalPhase.value = 'secret'
+    modalOpen.value = true
     await load()
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Unable to rotate API key'
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to rotate API key'
   } finally {
     pending[key.id] = undefined
   }
@@ -131,64 +194,66 @@ async function rotate(key: ManagedAPIKey) {
       <p class="text-sm leading-6 text-[var(--neutral-700)]">Supported routes: models, chat completions, completions, Responses and embeddings.</p>
     </Frame>
 
+    <Frame v-if="error" class="p-3" data-testid="api-key-error">
+      <div class="flex items-start gap-2">
+        <StatusTag variant="failed">Error</StatusTag>
+        <p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
+    </Frame>
+
     <Frame class="p-5" data-testid="api-keys-card">
       <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CREDENTIALS</p>
-          <h2 class="mt-1 text-base font-semibold">Inference API keys</h2>
+          <h2 class="mt-1 text-base font-semibold">API keys</h2>
+          <p class="mt-2 text-sm text-[var(--neutral-700)]">Keys are owned by a user or service account. Disable keeps a key for later. Rotation replaces the secret in place and shows it once.</p>
         </div>
-        <UFieldGroup class="w-full rounded-none md:w-auto">
-          <UInput v-model="name" data-testid="key-name" class="min-w-0 flex-1 md:w-48" placeholder="Key name" />
-          <AppButton data-testid="create-key" intent="primary" size="sm" @click="createKey">Create key</AppButton>
-        </UFieldGroup>
+        <AppButton data-testid="create-key" intent="primary" size="sm" @click="openCreate">Create key</AppButton>
       </div>
 
-      <p class="mt-4 text-sm text-[var(--neutral-700)]">Disable keeps a key for later. Revoke invalidates it permanently while retaining safe metadata. Rotation returns replacement plaintext once. Keys authenticate clients, not users.</p>
-      <Frame v-if="error" class="mt-4 border-[var(--accent-800)] p-3" data-testid="api-key-error">
-        <p class="text-sm font-semibold text-[var(--accent-900)]">API key operation failed</p>
-        <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
-      </Frame>
-
-      <section v-if="secret" class="mt-4 border-y border-[var(--color-divider)] py-4" data-testid="fresh-api-key">
-        <div class="space-y-3">
-          <strong class="text-sm font-semibold">Copy this key now. It will not be shown again.</strong>
-          <code class="block break-all font-mono text-[length:var(--font-size-table-body)] text-[var(--accent-700)]">{{ secret }}</code>
-          <AppCopyButton
-            :text="secret"
-            color="neutral"
-            variant="soft"
-            size="sm"
-            error-message="Unable to copy API key. Select the key and copy it manually."
-            data-testid="copy-key"
-            @copied="error = ''"
-            @error="message => error = message"
-          />
-        </div>
-      </section>
-
-      <p v-if="keys.length" class="mt-4 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for key status, timestamps and actions.</p>
-      <div v-if="keys.length" class="mt-2 overflow-x-auto border border-[var(--color-divider)]" data-testid="api-keys-table" role="region" tabindex="0" aria-label="API keys. Scroll horizontally for status, timestamps and actions.">
-        <UTable class="min-w-[760px]" :data="keys" :columns="columns">
+      <p v-if="keys.length" class="mt-4 text-xs text-[var(--neutral-700)] md:hidden">Scroll horizontally for owner, type, status, expiry and actions.</p>
+      <div v-if="keys.length" class="mt-2 overflow-x-auto border border-[var(--color-divider)]" data-testid="api-keys-table" role="region" tabindex="0" aria-label="API keys. Scroll horizontally for owner, type, status, expiry and actions.">
+        <UTable class="min-w-[960px]" :data="keys" :columns="columns">
           <template #name-cell="{ row }"><span class="text-[length:var(--font-size-table-body)] font-semibold">{{ row.original.name }}</span></template>
-          <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ row.original.prefix }}…</span></template>
-          <template #status-cell="{ row }"><StatusTag :variant="statusVariant(row.original)">{{ statusLabel(row.original) }}</StatusTag></template>
-          <template #created_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.created_at) }}</span></template>
-          <template #last_used_at-cell="{ row }"><span class="text-xs text-[var(--neutral-700)]">{{ formatTimestamp(row.original.last_used_at) }}</span></template>
+          <template #owner_name-cell="{ row }"><span class="text-[length:var(--font-size-table-body)]">{{ row.original.owner_name || '—' }}</span></template>
+          <template #key_type-cell="{ row }"><span class="text-[length:var(--font-size-table-body)]">{{ apiKeyTypeLabel(row.original.key_type) }}</span></template>
+          <template #prefix-cell="{ row }"><span class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ formatAPIKeyPrefix(row.original.prefix) }}</span></template>
+          <template #status-cell="{ row }"><StatusTag :variant="apiKeyStatus(row.original).variant">{{ apiKeyStatus(row.original).label }}</StatusTag></template>
+          <template #expires_on-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ row.original.expires_on || '—' }}</span></template>
+          <template #last_used_at-cell="{ row }"><span class="font-mono text-xs tabular-nums text-[var(--neutral-700)]">{{ formatAPIKeyTimestamp(row.original.last_used_at) }}</span></template>
           <template #actions-cell="{ row }">
-            <div v-if="!row.original.revoked_at" class="flex justify-end gap-1">
+            <div class="flex justify-end gap-1">
+              <AppButton intent="ghost" size="xs" :disabled="!!pending[row.original.id]" @click="openEdit(row.original)">Edit</AppButton>
               <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'toggle'" :disabled="!!pending[row.original.id]" @click="setEnabled(row.original)">{{ row.original.enabled ? 'Disable' : 'Enable' }}</AppButton>
               <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'rotate'" :disabled="!!pending[row.original.id]" @click="rotate(row.original)">Rotate</AppButton>
-              <AppButton intent="ghost" size="xs" :loading="pending[row.original.id] === 'revoke'" :disabled="!!pending[row.original.id]" @click="revoke(row.original)">Revoke</AppButton>
             </div>
           </template>
         </UTable>
       </div>
 
-      <div v-else class="mt-4 border border-[var(--color-divider)] px-4 py-8 text-center" data-testid="api-keys-empty">
-        <p class="text-sm font-semibold">No API keys created yet.</p>
-        <p class="mt-1 text-xs text-[var(--neutral-700)]">Create a key to authenticate OpenAI-compatible clients.</p>
+      <div v-else data-testid="api-keys-empty">
+        <UEmpty
+          variant="naked"
+          title="No API keys created yet."
+          description="Create a key to authenticate OpenAI-compatible clients or management automation."
+        />
       </div>
     </Frame>
+
+    <APIKeyModal
+      v-model:open="modalOpen"
+      :phase="modalPhase"
+      :editing="!!editingKey"
+      :submitting="submitting"
+      :secret="secret"
+      :users="users"
+      :service-accounts="serviceAccounts"
+      :instances="manager.instances.value"
+      :current-user-id="manager.user.value?.id"
+      :initial-key="editingKey"
+      @save="saveKey"
+      @close="closeModal"
+    />
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>

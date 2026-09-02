@@ -48,22 +48,22 @@ func TestAdminAuthAndAPIKeyClosedDatabaseErrors(t *testing.T) {
 	}
 
 	w = adminRequest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKeys.collection(w, r, actor)
+		apiKeys.collection(w, r, managementAuthContext{User: &actor})
 	}), http.MethodGet, "/api/v1/api-keys", nil, nil, nil)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("api-key list closed-db status=%d body=%s", w.Code, w.Body.String())
 	}
 	w = adminRequest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKeys.collection(w, r, actor)
-	}), http.MethodPost, "/api/v1/api-keys", map[string]string{"name": "test-key"}, nil, nil)
+		apiKeys.collection(w, r, managementAuthContext{User: &actor})
+	}), http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "test-key", "owner_user_id": actor.ID}, nil, nil)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("api-key create closed-db status=%d body=%s", w.Code, w.Body.String())
 	}
 	w = adminRequest(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiKeys.item(w, r, actor, "key-id")
-	}), http.MethodPatch, "/api/v1/api-keys/key-id", map[string]any{}, nil, nil)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("api-key missing enabled status=%d body=%s", w.Code, w.Body.String())
+		apiKeys.item(w, r, managementAuthContext{User: &actor}, "key-id")
+	}), http.MethodPatch, "/api/v1/api-keys/key-id", map[string]any{"enabled": true}, nil, nil)
+	if w.Code != http.StatusInternalServerError && w.Code != http.StatusNotFound {
+		t.Fatalf("api-key patch closed-db status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

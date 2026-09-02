@@ -18,8 +18,9 @@ const (
 )
 
 type managementAuthContext struct {
-	User    auth.User
-	Session auth.Session
+	User    *auth.User
+	Session *auth.Session
+	APIKey  *auth.APIKey
 }
 
 type managementAuthContextKey struct{}
@@ -69,40 +70,123 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 			return
 		}
 
-		var (
-			user    auth.User
-			session auth.Session
-			err     error
-		)
-		token := bearerToken(r.Header.Get("Authorization"))
-		switch {
-		case token != "":
-			user, session, err = a.AuthenticateBearer(r.Context(), token)
-		case browserStreamTicketRequest(path, r.Method):
-			// Native EventSource and WebSocket cannot attach an Authorization
-			// header. Reuse the same short-lived, one-time ticket mechanism as
-			// the runtime WebSocket so bearer credentials never have to be
-			// placed in the stream URL.
-			user, session, err = a.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"))
-		default:
-			err = auth.ErrSessionInvalid
-		}
+		principal, err := authenticateManagementPrincipal(a, r, path)
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			status := http.StatusUnauthorized
+			message := "authentication required"
+			if forbidden, ok := err.(*managementForbiddenError); ok {
+				status = http.StatusForbidden
+				message = forbidden.message
+			}
+			writeJSON(w, status, map[string]string{"error": message})
 			return
 		}
-		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, managementAuthContext{User: user, Session: session})
+		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, principal)
 		request := r.WithContext(ctx)
 		if instanceID, action, ok := lifecycleAction(path, r.Method); ok {
 			recorder := &managementStatusRecorder{ResponseWriter: w}
 			next.ServeHTTP(recorder, request)
 			if recorder.StatusCode() < http.StatusBadRequest {
-				systemlog.Log(systemlog.Info, "manager", fmt.Sprintf("user %s %s %s", user.Username, action, instanceID))
+				systemlog.Log(systemlog.Info, "manager", fmt.Sprintf("%s %s %s", principal.ActorLabel(), action, instanceID))
 			}
 			return
 		}
 		next.ServeHTTP(w, request)
 	})
+}
+
+type managementForbiddenError struct{ message string }
+
+func (e *managementForbiddenError) Error() string { return e.message }
+
+func authenticateManagementPrincipal(a *auth.Service, r *http.Request, path string) (managementAuthContext, error) {
+	token := bearerToken(r.Header.Get("Authorization"))
+	switch {
+	case strings.HasPrefix(token, "sk-"):
+		key, err := a.AuthenticateAPIKeyInfo(r.Context(), token)
+		if err != nil {
+			return managementAuthContext{}, err
+		}
+		if key.KeyType == auth.APIKeyTypeInference {
+			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot access the management API"}
+		}
+		if apiKeySessionDenied(path) {
+			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot access this endpoint"}
+		}
+		if serviceAccountAdminPath(path) && key.KeyType != auth.APIKeyTypeFull {
+			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot manage service accounts"}
+		}
+		return managementAuthContext{APIKey: &key}, nil
+	case token != "":
+		user, session, err := a.AuthenticateBearer(r.Context(), token)
+		if err != nil {
+			return managementAuthContext{}, err
+		}
+		return managementAuthContext{User: &user, Session: &session}, nil
+	case browserStreamTicketRequest(path, r.Method):
+		// Native EventSource and WebSocket cannot attach an Authorization
+		// header. Reuse the same short-lived, one-time ticket mechanism as
+		// the runtime WebSocket so bearer credentials never have to be
+		// placed in the stream URL.
+		user, session, err := a.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"))
+		if err != nil {
+			return managementAuthContext{}, err
+		}
+		return managementAuthContext{User: &user, Session: &session}, nil
+	default:
+		return managementAuthContext{}, auth.ErrSessionInvalid
+	}
+}
+
+func (c managementAuthContext) ActorLabel() string {
+	if c.User != nil {
+		return "user " + c.User.Username
+	}
+	if c.APIKey != nil {
+		return "api_key:" + c.APIKey.ID
+	}
+	return "unknown"
+}
+
+func (c managementAuthContext) CreatedByUserID() int64 {
+	if c.User != nil {
+		return c.User.ID
+	}
+	return 0
+}
+
+func (c managementAuthContext) UserSession() (auth.User, auth.Session, bool) {
+	if c.User == nil || c.Session == nil {
+		return auth.User{}, auth.Session{}, false
+	}
+	return *c.User, *c.Session, true
+}
+
+func actorLogAttrs(principal managementAuthContext) []any {
+	if principal.User != nil {
+		return []any{"actor_user_id", principal.User.ID}
+	}
+	if principal.APIKey != nil {
+		return []any{"actor_api_key_id", principal.APIKey.ID}
+	}
+	return nil
+}
+
+func apiKeySessionDenied(path string) bool {
+	if path == "/api/v1/me" || strings.HasPrefix(path, "/api/v1/me/") {
+		return true
+	}
+	if path == "/api/v1/auth/logout" || path == "/api/v1/auth/ws-ticket" {
+		return true
+	}
+	if path == "/api/v1/logs/stream" || path == "/api/v1/downloads/ws" {
+		return true
+	}
+	return path == "/api/v1/playground" || strings.HasPrefix(path, "/api/v1/playground/")
+}
+
+func serviceAccountAdminPath(path string) bool {
+	return path == "/api/v1/admin/service-accounts" || strings.HasPrefix(path, "/api/v1/admin/service-accounts/")
 }
 
 func lifecycleAction(path, method string) (instanceID, action string, ok bool) {
@@ -159,9 +243,17 @@ func bearerToken(value string) string {
 	return parts[1]
 }
 
-func managementAuthFromRequest(r *http.Request) (auth.User, auth.Session, bool) {
+func managementAuthFromRequest(r *http.Request) (managementAuthContext, bool) {
 	value, ok := r.Context().Value(managementAuthContextKey{}).(managementAuthContext)
-	return value.User, value.Session, ok
+	return value, ok
+}
+
+func managementUserFromRequest(r *http.Request) (auth.User, auth.Session, bool) {
+	principal, ok := managementAuthFromRequest(r)
+	if !ok || principal.User == nil || principal.Session == nil {
+		return auth.User{}, auth.Session{}, false
+	}
+	return *principal.User, *principal.Session, true
 }
 
 func sessionCookieValue(r *http.Request) string {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,18 +197,21 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AuthenticateAPIKey(ctx, ""); err == nil {
+	if err := s.AuthenticateAPIKey(ctx, ""); !errors.Is(err, ErrAPIKeyMissing) {
 		t.Fatal("expected missing key error")
 	}
-	if err := s.AuthenticateAPIKey(ctx, "invalid"); err == nil {
+	if err := s.AuthenticateAPIKey(ctx, "invalid"); !errors.Is(err, ErrAPIKeyInvalid) {
 		t.Fatal("expected invalid key error")
 	}
 
-	key, secret, err := s.CreateAPIKeyForUser(ctx, "", admin.ID)
+	if _, _, err := s.CreateAPIKeyForUser(ctx, "", admin.ID); !errors.Is(err, ErrAPIKeyNameRequired) {
+		t.Fatalf("blank name=%v", err)
+	}
+	key, secret, err := s.CreateAPIKeyForUser(ctx, "default", admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if key.Name != "default" || !key.Enabled || key.ID == "" || key.Prefix == "" || secret == "" || key.CreatedByUserID == nil || *key.CreatedByUserID != admin.ID {
+	if key.Name != "default" || key.KeyType != APIKeyTypeInference || !key.Enabled || key.ID == "" || !strings.HasPrefix(key.Prefix, "sk-") || !strings.HasPrefix(secret, "sk-") || key.CreatedByUserID == nil || *key.CreatedByUserID != admin.ID {
 		t.Fatalf("unexpected key: %+v secret=%q", key, secret)
 	}
 	if err := s.AuthenticateAPIKey(ctx, secret); err != nil {
@@ -217,7 +221,7 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 		t.Fatal("throttled repeat use should still authenticate")
 	}
 	keys, err := s.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 1 || keys[0].LastUsedAt == nil {
+	if err != nil || len(keys) != 1 || keys[0].LastUsedAt == nil || keys[0].Status != APIKeyStatusEnabled {
 		t.Fatalf("keys=%+v err=%v", keys, err)
 	}
 
@@ -231,8 +235,8 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	replacement, replacementSecret, err := s.RotateAPIKey(ctx, key.ID, admin.ID)
-	if err != nil || replacement.ID == key.ID || replacementSecret == "" {
+	replacement, replacementSecret, err := s.RotateAPIKey(ctx, key.ID)
+	if err != nil || replacement.ID != key.ID || replacementSecret == "" || replacementSecret == secret {
 		t.Fatalf("replacement=%+v secret=%q err=%v", replacement, replacementSecret, err)
 	}
 	if err := s.AuthenticateAPIKey(ctx, secret); err == nil {
@@ -242,38 +246,8 @@ func TestAPIKeyLifecycleAndRotation(t *testing.T) {
 		t.Fatalf("replacement should authenticate: %v", err)
 	}
 	keys, err = s.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 2 {
-		t.Fatalf("rotation history=%+v err=%v", keys, err)
-	}
-	var originalEntry, replacementEntry *APIKey
-	for i := range keys {
-		switch keys[i].ID {
-		case key.ID:
-			originalEntry = &keys[i]
-		case replacement.ID:
-			replacementEntry = &keys[i]
-		}
-	}
-	if originalEntry == nil || originalEntry.RevokedAt == nil || originalEntry.Enabled || replacementEntry == nil || replacementEntry.RevokedAt != nil || !replacementEntry.Enabled {
-		t.Fatalf("rotation state=%+v", keys)
-	}
-	if err := s.SetAPIKeyEnabled(ctx, key.ID, true); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("revoked key cannot be enabled: %v", err)
-	}
-	if err := s.RevokeAPIKey(ctx, replacement.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.AuthenticateAPIKey(ctx, replacementSecret); err == nil {
-		t.Fatal("revoked replacement should fail")
-	}
-	keys, err = s.ListAPIKeys(ctx)
-	if err != nil || len(keys) != 2 {
-		t.Fatalf("revoked history should remain: %+v err=%v", keys, err)
-	}
-	for _, item := range keys {
-		if item.RevokedAt == nil || item.Enabled {
-			t.Fatalf("all historical keys should be revoked: %+v", keys)
-		}
+	if err != nil || len(keys) != 1 || keys[0].ID != key.ID {
+		t.Fatalf("in-place rotation should keep one row: %+v err=%v", keys, err)
 	}
 }
 

@@ -8,6 +8,7 @@ const navigation = [
   { label: 'llama.cpp', description: 'Binary capabilities and global defaults', to: '/admin/llamacpp' },
   { label: 'Hugging Face', description: 'Provider credential', to: '/admin/huggingface' },
   { label: 'Users', description: 'Local management accounts', to: '/admin/users' },
+  { label: 'Service accounts', description: 'Non-user API key owners', to: '/admin/service-accounts' },
   { label: 'System', description: 'Read-only diagnostics', to: '/admin/system' },
   { label: 'Logs', description: 'Manager, gateway and Instance diagnostics', to: '/admin/system-logs' }
 ]

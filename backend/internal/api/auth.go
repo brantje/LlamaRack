@@ -112,11 +112,11 @@ func (h *loginHandler) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 func (h *loginHandler) logout(w http.ResponseWriter, r *http.Request) {
-	user, session, ok := managementAuthFromRequest(r)
+	user, session, ok := managementUserFromRequest(r)
 	if ok && session.ID != "" {
 		_ = h.auth.RevokeSession(r.Context(), session.ID)
 	}
-	if user.ID != 0 {
+	if ok && user.ID != 0 {
 		slog.Info("security event", "event", "session.revoked", "user_id", user.ID, "current", true)
 	}
 	w.WriteHeader(http.StatusNoContent)

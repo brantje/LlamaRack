@@ -112,14 +112,34 @@ func TestDatabaseErrors(t *testing.T) {
 	if err := s.SetAPIKeyEnabled(ctx, "id", false); err == nil {
 		t.Fatal("expected set key enabled DB error")
 	}
-	if err := s.RevokeAPIKey(ctx, "id"); err == nil {
-		t.Fatal("expected revoke DB error")
+	if err := s.UpdateAPIKey(ctx, "id", UpdateAPIKeyInput{}); err == nil {
+		t.Fatal("expected update DB error")
 	}
-	if _, _, err := s.RotateAPIKey(ctx, "id", 1); err == nil {
+	if _, _, err := s.RotateAPIKey(ctx, "id"); err == nil {
 		t.Fatal("expected rotate DB error")
 	}
-	if err := s.AuthenticateAPIKey(ctx, "token"); err == nil {
+	if err := s.AuthenticateAPIKey(ctx, "sk-token"); err == nil {
 		t.Fatal("expected authenticate DB error")
+	}
+	if _, err := s.ListServiceAccounts(ctx); err == nil {
+		t.Fatal("expected list service accounts DB error")
+	}
+	if _, err := s.CreateServiceAccount(ctx, "bots", 1); err == nil {
+		t.Fatal("expected create service account DB error")
+	}
+	if _, err := s.GetServiceAccount(ctx, "id"); err == nil {
+		t.Fatal("expected get service account DB error")
+	}
+	name := "bots"
+	enabled := true
+	if err := s.UpdateServiceAccount(ctx, "id", &name, &enabled); err == nil {
+		t.Fatal("expected update service account DB error")
+	}
+	if err := s.DeleteServiceAccount(ctx, "id"); err == nil {
+		t.Fatal("expected delete service account DB error")
+	}
+	if _, err := s.ListAPIKeysForServiceAccount(ctx, "id"); err == nil {
+		t.Fatal("expected list SA keys DB error")
 	}
 }
 

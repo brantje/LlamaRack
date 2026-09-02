@@ -20,6 +20,22 @@ const (
 	wsTicketLifetime  = 30 * time.Second
 )
 
+const (
+	APIKeyTypeInference  = "inference"
+	APIKeyTypeManagement = "management"
+	APIKeyTypeFull       = "full"
+
+	OwnerKindUser           = "user"
+	OwnerKindServiceAccount = "service_account"
+
+	APIKeyStatusEnabled       = "enabled"
+	APIKeyStatusDisabled      = "disabled"
+	APIKeyStatusOwnerDisabled = "owner_disabled"
+	APIKeyStatusExpired       = "expired"
+
+	apiKeySecretPrefix = "sk-"
+)
+
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrLastEnabledUser    = errors.New("cannot disable or delete the last enabled management user")
@@ -29,6 +45,19 @@ var (
 	ErrOIDCLinkRequired   = errors.New("external identity is not linked to a management user")
 	ErrOIDCUsernameTaken  = errors.New("OIDC username matches an existing account; explicit linking is required")
 	ErrAuthLockoutRisk    = errors.New("operation would leave no usable management login method")
+
+	ErrAPIKeyMissing              = errors.New("missing api key")
+	ErrAPIKeyInvalid              = errors.New("invalid api key")
+	ErrAPIKeyNameRequired         = errors.New("name is required")
+	ErrAPIKeyTypeInvalid          = errors.New("key_type must be inference, management, or full")
+	ErrAPIKeyOwnerRequired        = errors.New("exactly one of owner_user_id or owner_service_account_id is required")
+	ErrAPIKeyOwnerDisabled        = errors.New("owner is disabled")
+	ErrAPIKeyOwnerNotFound        = errors.New("owner not found")
+	ErrAPIKeyInstancesNotAllowed  = errors.New("instance_ids are only valid for inference keys")
+	ErrUnknownInstanceID          = errors.New("unknown instance id")
+	ErrAPIKeyExpiresOnInvalid     = errors.New("expires_on must be a YYYY-MM-DD date")
+	ErrAPIKeyExpiresOnPast        = errors.New("expires_on must not be in the past")
+	ErrServiceAccountNameRequired = errors.New("name is required")
 )
 
 type User struct {
@@ -59,14 +88,52 @@ type LoginResult struct {
 }
 
 type APIKey struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Prefix          string `json:"prefix"`
-	Enabled         bool   `json:"enabled"`
-	CreatedByUserID *int64 `json:"created_by_user_id,omitempty"`
-	CreatedAt       int64  `json:"created_at"`
-	LastUsedAt      *int64 `json:"last_used_at,omitempty"`
-	RevokedAt       *int64 `json:"revoked_at,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Prefix             string   `json:"prefix"`
+	KeyType            string   `json:"key_type"`
+	OwnerKind          string   `json:"owner_kind"`
+	OwnerID            string   `json:"owner_id"`
+	OwnerName          string   `json:"owner_name"`
+	OwnerEnabled       bool     `json:"owner_enabled"`
+	Enabled            bool     `json:"enabled"`
+	Status             string   `json:"status"`
+	InstanceIDs        []string `json:"instance_ids"`
+	MissingInstanceIDs []string `json:"missing_instance_ids,omitempty"`
+	ExpiresOn          *string  `json:"expires_on,omitempty"`
+	CreatedByUserID    *int64   `json:"created_by_user_id,omitempty"`
+	CreatedAt          int64    `json:"created_at"`
+	LastUsedAt         *int64   `json:"last_used_at,omitempty"`
+}
+
+type CreateAPIKeyInput struct {
+	Name                  string
+	KeyType               string
+	OwnerUserID           *int64
+	OwnerServiceAccountID string
+	InstanceIDs           []string
+	ExpiresOn             string
+	ClearExpiresOn        bool
+	CreatedByUserID       *int64
+}
+
+type UpdateAPIKeyInput struct {
+	Name                  *string
+	OwnerUserID           *int64
+	OwnerServiceAccountID *string
+	InstanceIDs           *[]string
+	ExpiresOn             *string
+	ClearExpiresOn        bool
+	Enabled               *bool
+}
+
+type ServiceAccount struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Enabled         bool     `json:"enabled"`
+	CreatedAt       int64    `json:"created_at"`
+	CreatedByUserID *int64   `json:"created_by_user_id,omitempty"`
+	Keys            []APIKey `json:"-"`
 }
 
 type wsTicket struct {

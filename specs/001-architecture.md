@@ -13,7 +13,7 @@ The architecture separates **registered Models** from **runtime Instances**:
 - a **Model** is management-plane configuration for a GGUF artifact plus reusable llama.cpp defaults;
 - an **Instance** is one durable configured `llama-server` process definition and is the unit of lifecycle, routing, scheduling and inference identity.
 
-Workers remain private. The UI talks to `/api/v1/*`; inference clients talk only to `/v1/*`.
+Workers remain private. The UI talks to `/api/v1/*` with a management JWT. Inference clients talk only to `/v1/*` with an inference or Full Access API key. Management and Full Access API keys may call `/api/v1/*` as non-user principals, except session/Playground routes. Service-account administration is allowed for a management JWT or a Full Access key (any owner); management keys cannot.
 
 ## 2. Product goals
 
@@ -37,7 +37,7 @@ The architecture must support:
 - Hugging Face and direct URL model downloads;
 - OpenAI-compatible inference endpoints;
 - LiteLLM interoperability;
-- local management authentication and inference API keys;
+- local management authentication and typed owner-bound API keys;
 - Prometheus metrics and per-instance logs.
 
 ## 3. Non-goals for v1
@@ -198,7 +198,8 @@ Owns:
 
 Responsibilities:
 
-- authenticate inference API keys;
+- authenticate typed API keys (`sk-`); management keys are rejected on `/v1/*`;
+- enforce the inference instance allowlist (Full Access keys are not allowlisted);
 - read the OpenAI `model` field;
 - resolve it directly to `instance.id`;
 - request autoload of that exact Instance when allowed;
@@ -289,6 +290,7 @@ Conceptual resource groups:
 - `/api/v1/llamacpp`;
 - `/api/v1/users`;
 - `/api/v1/api-keys`;
+- `/api/v1/admin/service-accounts`;
 - `/api/v1/settings`.
 
 ## 9. OpenAI API boundary

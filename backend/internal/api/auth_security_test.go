@@ -41,12 +41,12 @@ func newAuthSecurityFixture(t *testing.T) *authSecurityFixture {
 	mux.Handle("/api/v1/auth/", authHandler)
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("/api/v1/protected", func(w http.ResponseWriter, r *http.Request) {
-		user, session, ok := managementAuthFromRequest(r)
-		if !ok {
+		principal, ok := managementAuthFromRequest(r)
+		if !ok || principal.User == nil || principal.Session == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "missing management auth context"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"user_id": user.ID, "session_id": session.ID})
+		writeJSON(w, http.StatusOK, map[string]any{"user_id": principal.User.ID, "session_id": principal.Session.ID})
 	})
 	return &authSecurityFixture{handler: ManagementSecurity(authService, network, mux), auth: authService, settings: managerSettings, network: network, protector: protector}
 }

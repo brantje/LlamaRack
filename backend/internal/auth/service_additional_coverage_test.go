@@ -30,7 +30,11 @@ func TestSetAPIKeyEnabledClosedDatabase(t *testing.T) {
 func TestListAPIKeysReturnsScanError(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,enabled,created_at) VALUES('bad','Bad','bad','hash',1,'not-a-number')`)
+	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,key_type,owner_user_id,enabled,created_at) VALUES('bad','Bad','sk-bad','hash','inference',?,1,'not-a-number')`, admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

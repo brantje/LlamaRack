@@ -57,13 +57,16 @@ func TestAdminHandlerDatabaseFailures(t *testing.T) {
 		h.listSessions(w, request(http.MethodGet, "/api/v1/me/sessions"), 1, "")
 	})
 	assertInternal("list users", func(w http.ResponseWriter) {
-		h.users(w, request(http.MethodGet, "/api/v1/users"), auth.User{ID: 1})
+		user := auth.User{ID: 1}
+		h.users(w, request(http.MethodGet, "/api/v1/users"), managementAuthContext{User: &user})
 	})
 	assertInternal("session revoke", func(w http.ResponseWriter) {
-		h.sessionRoute(w, request(http.MethodDelete, "/api/v1/sessions/dead"), auth.User{ID: 1}, "dead")
+		user := auth.User{ID: 1}
+		h.sessionRoute(w, request(http.MethodDelete, "/api/v1/sessions/dead"), managementAuthContext{User: &user}, "dead")
 	})
 	assertInternal("general settings", func(w http.ResponseWriter) {
-		h.generalSettings(w, request(http.MethodGet, "/api/v1/settings/general"), auth.User{ID: 1})
+		user := auth.User{ID: 1}
+		h.generalSettings(w, request(http.MethodGet, "/api/v1/settings/general"), managementAuthContext{User: &user})
 	})
 
 	w := httptest.NewRecorder()

@@ -130,6 +130,7 @@ describe('Administration dashboard and navigation', () => {
     expect(sidebar.text()).toContain('llama.cpp')
     expect(sidebar.text()).toContain('Hugging Face')
     expect(sidebar.text()).toContain('Users')
+    expect(sidebar.text()).toContain('Service accounts')
     expect(sidebar.text()).toContain('System')
     expect(sidebar.text()).toContain('Logs')
     expect(sidebar.text()).not.toContain('Back to manager')
@@ -324,7 +325,7 @@ describe('Users', () => {
     expect(headers).toEqual(['Username', 'Status', 'Created', 'Last login', 'Actions'])
     expect(wrapper.text()).toContain('operator')
     expect(wrapper.text()).toContain('Never')
-    expect(wrapper.text()).toContain('Inference API keys are managed separately under API')
+    expect(wrapper.text()).toContain('API keys are owned by a user or service account')
 
     await button(wrapper, 'Add user').trigger('click')
     await flushPromises()

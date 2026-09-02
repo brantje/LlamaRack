@@ -136,9 +136,12 @@ const requests = [
 ]
 
 const apiKeys = [
-  { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12', enabled: true, created_at: nowSeconds - 86400 * 21, last_used_at: nowSeconds - 18 },
-  { id: 'key-ci', name: 'Evaluation', prefix: 'lcm_sk_cd34', enabled: false, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 },
-  { id: 'key-revoked', name: 'Retired integration', prefix: 'lcm_sk_ef56', enabled: false, revoked_at: nowSeconds - 7200, created_at: nowSeconds - 86400 * 45, last_used_at: nowSeconds - 10800 }
+  { id: 'key-default', name: 'Open WebUI', prefix: 'sk-abcd1234', enabled: true, key_type: 'inference', owner_kind: 'user', owner_id: 1, owner_name: 'admin', owner_enabled: true, created_at: nowSeconds - 86400 * 21, last_used_at: nowSeconds - 18, expires_on: '2027-01-01' },
+  { id: 'key-ci', name: 'Evaluation', prefix: 'sk-efgh5678', enabled: false, key_type: 'management', owner_kind: 'service_account', owner_id: 'sa-1', owner_name: 'CI bot', owner_enabled: true, created_at: nowSeconds - 86400 * 8, last_used_at: nowSeconds - 3600 },
+  { id: 'key-expired', name: 'Retired integration', prefix: 'sk-ijkl9012', enabled: true, key_type: 'full', owner_kind: 'user', owner_id: 1, owner_name: 'admin', owner_enabled: true, expires_on: '2020-01-01', created_at: nowSeconds - 86400 * 45, last_used_at: nowSeconds - 10800 }
+]
+const serviceAccounts = [
+  { id: 'sa-1', name: 'CI bot', description: 'Evaluation jobs', enabled: true, created_at: nowSeconds - 86400 * 40, updated_at: nowSeconds - 3600, keys: [apiKeys[1]] }
 ]
 
 const user = { id: 1, username: 'admin', enabled: true, created_at: nowSeconds - 86400 * 120, last_login_at: nowSeconds - 300 }
@@ -305,7 +308,9 @@ function responseFor(pathname: string, method: string): unknown {
   if (pathname === '/api/v1/observability/timeseries') return { metric: 'fixture', bucket_seconds: 60, items: [{ timestamp: now - 120_000, value: 18 }, { timestamp: now - 60_000, value: 31 }, { timestamp: now, value: 24 }] }
   if (pathname === '/api/v1/hardware' || pathname === '/api/v1/hardware/snapshot') return hardware
   if (pathname === '/api/v1/api-keys' && method === 'GET') return apiKeys
-  if (pathname === '/api/v1/api-keys' && method === 'POST') return { key: { id: 'key-visual', name: 'Visual QA', prefix: 'lcm_sk_vis', enabled: true, created_at: nowSeconds, last_used_at: 0 }, secret: 'lcm_sk_visual_fixture_secret' }
+  if (pathname === '/api/v1/api-keys' && method === 'POST') return { key: { id: 'key-visual', name: 'Visual QA', prefix: 'sk-visual01', enabled: true, key_type: 'inference', owner_kind: 'user', owner_id: 1, owner_name: 'admin', owner_enabled: true, created_at: nowSeconds, last_used_at: 0 }, secret: 'sk-visual_fixture_secret' }
+  if (pathname === '/api/v1/admin/service-accounts' && method === 'GET') return serviceAccounts
+  if (pathname.startsWith('/api/v1/admin/service-accounts/')) return serviceAccounts[0]
   if (pathname === '/api/v1/system') return {
     manager: { uptime_seconds: 104_822, runtime: { go_version: 'go1.25.0', os: 'linux', arch: 'amd64' } },
     network: { effective_scheme: 'http', secure_cookie: false, allowed_origins: 'http://127.0.0.1:3000', trusted_proxies: '127.0.0.1/32', external_url: 'http://127.0.0.1:8888' },
@@ -822,18 +827,19 @@ authenticatedShot('request-log-detail', '/logs?request_id=req_a1b2c3&session_id=
 authenticatedShot('request-logs-trace', '/logs?trace_id=trace_fixture')
 authenticatedShot('api-keys', '/api')
 
-test('api key secret and revoke confirmation screenshots', async ({ page }, testInfo) => {
+test('api key secret and rotate confirmation screenshots', async ({ page }, testInfo) => {
   await openAuthenticated(page, '/api')
   await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Retired integration')
-  await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Revoked')
-  await page.locator('[data-testid="key-name"]').fill('Visual QA')
+  await expect(page.locator('[data-testid="api-keys-card"]')).toContainText('Expired')
   await page.locator('[data-testid="create-key"]').click()
-  await expect(page.locator('[data-testid="fresh-api-key"]')).toContainText('lcm_sk_visual_fixture_secret')
+  await page.locator('[data-testid="api-key-save"]').click()
+  await expect(page.locator('[data-testid="fresh-api-key"]')).toContainText('sk-visual_fixture_secret')
   await captureScreenshot(page, testInfo, 'api-key-fresh-secret')
 
-  await page.getByRole('button', { name: 'Revoke', exact: true }).first().click()
-  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Revoke key')
-  await captureScreenshot(page, testInfo, 'api-key-revoke-confirmation')
+  await page.locator('[data-testid="api-key-secret-done"]').click()
+  await page.getByRole('button', { name: 'Rotate', exact: true }).first().click()
+  await expect(page.locator('[data-testid="confirmation-confirm"]')).toContainText('Rotate key')
+  await captureScreenshot(page, testInfo, 'api-key-rotate-confirmation')
 })
 
 authenticatedShot('profile-account', '/profile/account', async (page) => {

@@ -194,6 +194,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	apiKeys := api.NewAPIKeysHandler(authService)
 	managementAPI.Handle("/api/v1/api-keys", apiKeys)
 	managementAPI.Handle("/api/v1/api-keys/", apiKeys)
+	serviceAccounts := api.NewServiceAccountsHandler(authService)
+	managementAPI.Handle("/api/v1/admin/service-accounts", serviceAccounts)
+	managementAPI.Handle("/api/v1/admin/service-accounts/", serviceAccounts)
 	managementAPI.Handle("/", apiServer)
 
 	securedManagement := api.ManagementSecurity(authService, network, managementAPI)

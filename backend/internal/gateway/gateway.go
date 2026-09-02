@@ -35,6 +35,13 @@ const (
 
 var requestIDFallback atomic.Uint64
 
+type gatewayAllowlistKey struct{}
+
+type gatewayAllowlist struct {
+	all bool
+	ids map[string]struct{}
+}
+
 type Gateway struct {
 	auth          *auth.Service
 	lifecycle     *lifecycle.Service
@@ -159,7 +166,22 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(observed, http.StatusUnauthorized, "authentication_error", "invalid_api_key", "Invalid API key")
 		return
 	}
+	if key.KeyType == auth.APIKeyTypeManagement {
+		writeError(observed, http.StatusForbidden, "permission_error", "management_key_not_allowed", "This API key cannot access the inference API")
+		return
+	}
 	record.APIKey = &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix}
+
+	allowAll, allowedIDs, allStale, allowErr := g.inferenceAllowlist(r.Context(), key)
+	if allowErr != nil {
+		writeError(observed, http.StatusInternalServerError, "server_error", "database_error", "Unable to list models")
+		return
+	}
+	if allStale {
+		writeError(observed, http.StatusForbidden, "permission_error", "api_key_instances_unavailable", "None of this API key's allowed instances still exist")
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), gatewayAllowlistKey{}, gatewayAllowlist{all: allowAll, ids: allowedIDs}))
 
 	// Authentication succeeded. Read the remainder up to one byte beyond the
 	// normal limit so oversized bodies are rejected instead of truncated.
@@ -213,8 +235,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch spec.Kind {
 	case routeListModels:
-		g.listModels(observed, r)
+		g.listModels(observed, r, allowAll, allowedIDs)
 	case routeGetModel:
+		if !g.instanceAllowed(strings.TrimSpace(params["model"]), allowAll, allowedIDs) {
+			writeError(observed, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+			return
+		}
 		g.getModel(observed, r, params["model"])
 	case routeGetResponse:
 		g.getStoredResponse(observed, r, params["response_id"])
@@ -299,7 +325,7 @@ func (g *Gateway) authenticateKey(ctx context.Context, header string) (auth.APIK
 	return g.auth.AuthenticateAPIKeyInfo(ctx, strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
 }
 
-func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bool, allowedIDs map[string]struct{}) {
 	items, err := g.lifecycle.Instances().List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "server_error", "database_error", "Unable to list models")
@@ -307,7 +333,7 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, instance := range items {
-		if instance.Enabled {
+		if instance.Enabled && g.instanceAllowed(instance.ID, allowAll, allowedIDs) {
 			out = append(out, openaiModelObject(instance.ID))
 		}
 	}
@@ -387,6 +413,10 @@ func (g *Gateway) proxyChatControl(observed *responseObserver, r *http.Request, 
 }
 
 func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, record *observability.RequestRecord, instanceID string) (instances.Instance, bool) {
+	if !requestInstanceAllowed(r, instanceID) {
+		writeError(observed, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+		return instances.Instance{}, false
+	}
 	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
 	if err != nil {
 		record.Error = sanitizeError(err.Error())
@@ -394,6 +424,54 @@ func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, r
 		return instances.Instance{}, false
 	}
 	return instance, true
+}
+
+func (g *Gateway) inferenceAllowlist(ctx context.Context, key auth.APIKey) (allowAll bool, allowed map[string]struct{}, allStale bool, err error) {
+	if key.KeyType != auth.APIKeyTypeInference || len(key.InstanceIDs) == 0 {
+		return true, nil, false, nil
+	}
+	items, err := g.lifecycle.Instances().List(ctx)
+	if err != nil {
+		return false, nil, false, err
+	}
+	live := map[string]struct{}{}
+	for _, item := range items {
+		live[item.ID] = struct{}{}
+	}
+	allowed = map[string]struct{}{}
+	for _, id := range key.InstanceIDs {
+		if _, ok := live[id]; ok {
+			allowed[id] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return false, allowed, true, nil
+	}
+	return false, allowed, false, nil
+}
+
+func (g *Gateway) instanceAllowed(instanceID string, allowAll bool, allowedIDs map[string]struct{}) bool {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return false
+	}
+	if allowAll {
+		return true
+	}
+	_, ok := allowedIDs[instanceID]
+	return ok
+}
+
+func requestInstanceAllowed(r *http.Request, instanceID string) bool {
+	value, ok := r.Context().Value(gatewayAllowlistKey{}).(gatewayAllowlist)
+	if !ok {
+		return true
+	}
+	if value.all {
+		return true
+	}
+	_, allowed := value.ids[strings.TrimSpace(instanceID)]
+	return allowed
 }
 
 func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any) {
@@ -653,6 +731,10 @@ func (s *idCaptureStream) Read(p []byte) (int, error) {
 func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	responseID = strings.TrimSpace(responseID)
 	if inFlight := g.active.getByUpstream(responseID); inFlight != nil && strings.HasPrefix(inFlight.endpoint, "/v1/responses") {
+		if !requestInstanceAllowed(r, inFlight.model) {
+			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": responseID, "object": "response", "status": "in_progress",
 			"model": inFlight.model, "created_at": inFlight.startedAt / 1000,
@@ -662,6 +744,10 @@ func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, resp
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted || stored.ResponseBody == nil || strings.TrimSpace(*stored.ResponseBody) == "" {
 		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	if !requestInstanceAllowed(r, stored.InstanceID) {
+		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
 		return
 	}
 	payload, ok := parseFinalResponseJSON([]byte(*stored.ResponseBody))
@@ -682,6 +768,15 @@ func (g *Gateway) deleteStoredResponse(w http.ResponseWriter, r *http.Request, r
 		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
 		return
 	}
+	stored, err := g.lookupStoredResponse(r.Context(), responseID)
+	if err != nil || stored.Deleted {
+		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	if !requestInstanceAllowed(r, stored.InstanceID) {
+		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+		return
+	}
 	if err := g.observability.MarkOpenAIResponseDeleted(r.Context(), responseID); err != nil {
 		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
 		return
@@ -695,12 +790,20 @@ func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
 		return
 	}
+	if !requestInstanceAllowed(r, stored.InstanceID) {
+		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+		return
+	}
 	items := normalizeInputItems([]byte(*stored.RequestBody))
 	writeJSON(w, http.StatusOK, inputItemsList(items, r.URL.Query().Get("after"), parseLimitQuery(r.URL.Query().Get("limit"))))
 }
 
 func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	responseID = strings.TrimSpace(responseID)
+	if preview := g.active.getByUpstream(responseID); preview != nil && !requestInstanceAllowed(r, preview.model) {
+		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+		return
+	}
 	if entry, ok := g.active.cancelByUpstream(responseID); ok {
 		_ = g.active.waitRemoved(entry.managerRequestID, 2*time.Second)
 		if stored, err := g.lookupStoredResponse(r.Context(), responseID); err == nil && stored.ResponseBody != nil {
@@ -718,12 +821,20 @@ func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if entry := g.active.getByUpstream(responseID); entry != nil && entry.cancelled {
+		if !requestInstanceAllowed(r, entry.model) {
+			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is already cancelled")
 		return
 	}
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted {
 		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		return
+	}
+	if !requestInstanceAllowed(r, stored.InstanceID) {
+		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
 		return
 	}
 	writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is not cancellable")

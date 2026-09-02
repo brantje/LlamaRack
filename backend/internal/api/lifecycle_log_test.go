@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 func TestLifecycleActionRoutes(t *testing.T) {
@@ -49,5 +51,24 @@ func TestManagementStatusRecorderCapturesImplicitAndExplicitStatus(t *testing.T)
 	}
 	if writer.StatusCode() != http.StatusOK || base.Body.String() != "ok" {
 		t.Fatalf("write status=%d body=%q", writer.StatusCode(), base.Body.String())
+	}
+}
+
+func TestManagementAuthContextActorMetadata(t *testing.T) {
+	if (managementAuthContext{}).ActorLabel() != "unknown" {
+		t.Fatal("empty principal should be unknown")
+	}
+	user := auth.User{ID: 3, Username: "admin"}
+	principal := managementAuthContext{User: &user}
+	if principal.ActorLabel() != "user admin" || principal.CreatedByUserID() != 3 {
+		t.Fatalf("user principal=%s id=%d", principal.ActorLabel(), principal.CreatedByUserID())
+	}
+	key := auth.APIKey{ID: "abc"}
+	principal = managementAuthContext{APIKey: &key}
+	if principal.ActorLabel() != "api_key:abc" || principal.CreatedByUserID() != 0 {
+		t.Fatalf("key principal=%s id=%d", principal.ActorLabel(), principal.CreatedByUserID())
+	}
+	if attrs := actorLogAttrs(principal); len(attrs) != 2 || attrs[1] != "abc" {
+		t.Fatalf("key attrs=%v", attrs)
 	}
 }
