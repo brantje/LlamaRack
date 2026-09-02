@@ -9,6 +9,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
@@ -18,6 +19,7 @@ type discoverRecommendationHandler struct {
 	hf       *huggingface.Client
 	hardware hardware.Snapshotter
 	settings *settings.Service
+	profile  func() (llamacpp.Profile, error)
 }
 
 type discoverSettingsHandler struct {
@@ -25,8 +27,12 @@ type discoverSettingsHandler struct {
 	settings *settings.Service
 }
 
-func NewDiscoverRecommendationHandler(a *auth.Service, hf *huggingface.Client, detector hardware.Snapshotter, managerSettings *settings.Service) http.Handler {
-	return &discoverRecommendationHandler{auth: a, hf: hf, hardware: detector, settings: managerSettings}
+func NewDiscoverRecommendationHandler(a *auth.Service, hf *huggingface.Client, detector hardware.Snapshotter, managerSettings *settings.Service, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	var profile func() (llamacpp.Profile, error)
+	if len(profileGetters) > 0 {
+		profile = profileGetters[0]
+	}
+	return &discoverRecommendationHandler{auth: a, hf: hf, hardware: detector, settings: managerSettings, profile: profile}
 }
 
 func NewDiscoverSettingsHandler(a *auth.Service, managerSettings *settings.Service) http.Handler {
@@ -84,20 +90,22 @@ func (h *discoverRecommendationHandler) ServeHTTP(w http.ResponseWriter, r *http
 			ID: artifact.ID, Quantization: artifact.ProfileQuantization(), WeightsBytes: artifact.ModelBytes, Complete: artifact.Complete,
 		})
 	}
-	result := recommendations.AnalyzeDiscover(inputs, recommendationMetadata(derived), metadataErr, snapshot, contextLength, hardwareErr, allowHybrid, assumeIdle)
+	result := recommendations.AnalyzeDiscoverWithCapabilities(inputs, recommendationMetadata(derived), metadataErr, snapshot, contextLength, hardwareErr, allowHybrid, assumeIdle, recommendationCapabilities(h.profile))
 	writeJSON(w, http.StatusOK, result)
 }
 
 func recommendationMetadata(value ggufmeta.Derived) recommendations.Metadata {
 	return recommendations.Metadata{
-		Architecture:  value.Architecture,
-		ContextLength: value.ContextLength,
-		BlockCount:    value.BlockCount,
-		Embedding:     value.Embedding,
-		HeadCount:     value.HeadCount,
-		KVHeadCount:   value.KVHeadCount,
-		KeyLength:     value.KeyLength,
-		ValueLength:   value.ValueLength,
+		Architecture:    value.Architecture,
+		ContextLength:   value.ContextLength,
+		BlockCount:      value.BlockCount,
+		Embedding:       value.Embedding,
+		HeadCount:       value.HeadCount,
+		KVHeadCount:     value.KVHeadCount,
+		KeyLength:       value.KeyLength,
+		ValueLength:     value.ValueLength,
+		ExpertCount:     value.ExpertCount,
+		ExpertUsedCount: value.ExpertUsedCount,
 	}
 }
 
