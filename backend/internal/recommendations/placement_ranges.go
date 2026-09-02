@@ -20,6 +20,7 @@ type PlacementZone struct {
 	Devices          []string `json:"devices,omitempty"`
 	KVOnGPU          bool     `json:"kv_on_gpu"`
 	GPULayers        int64    `json:"gpu_layers,omitempty"`
+	NCPUMoe          int64    `json:"n_cpu_moe,omitempty"`
 	TensorSplit      string   `json:"tensor_split,omitempty"`
 	CurrentFit       bool     `json:"current_fit"`
 	TotalHardwareFit bool     `json:"total_hardware_fit"`
@@ -41,6 +42,10 @@ type classifiedPlacement struct {
 }
 
 func ComputePlacementRanges(snapshot hardware.Snapshot, weights int64, metadata Metadata, capability int64) PlacementRanges {
+	return ComputePlacementRangesWithCapabilities(snapshot, weights, metadata, capability, Capabilities{})
+}
+
+func ComputePlacementRangesWithCapabilities(snapshot hardware.Snapshot, weights int64, metadata Metadata, capability int64, capabilities Capabilities) PlacementRanges {
 	ranges := PlacementRanges{
 		MinimumContext: placementMinContext,
 		ContextStep:    placementContextStep,
@@ -67,11 +72,11 @@ func ComputePlacementRanges(snapshot hardware.Snapshot, weights int64, metadata 
 
 	start := placementMinContext
 	for start <= maximum {
-		current := classifyOffload(snapshot, weights, start, metadata)
+		current := classifyOffloadWithCapabilities(snapshot, weights, start, metadata, capabilities)
 		identity := placementIdentity(current)
-		end := lastMatchingContext(snapshot, weights, metadata, start, maximum, identity)
+		end := lastMatchingContext(snapshot, weights, metadata, start, maximum, identity, capabilities)
 		zone := placementZoneFrom(start, end, current)
-		zone.TotalHardwareFit = totalHardwareFit(snapshot, weights, start, metadata)
+		zone.TotalHardwareFit = totalHardwareFitWithCapabilities(snapshot, weights, start, metadata, capabilities)
 		ranges.Zones = append(ranges.Zones, zone)
 		if zone.Kind == "gpu" {
 			ranges.GPUOnlyMaxContext = zone.EndContext
@@ -86,6 +91,10 @@ func ComputePlacementRanges(snapshot hardware.Snapshot, weights int64, metadata 
 }
 
 func classifyOffload(snapshot hardware.Snapshot, weights, context int64, metadata Metadata) classifiedPlacement {
+	return classifyOffloadWithCapabilities(snapshot, weights, context, metadata, Capabilities{})
+}
+
+func classifyOffloadWithCapabilities(snapshot hardware.Snapshot, weights, context int64, metadata Metadata, capabilities Capabilities) classifiedPlacement {
 	memory := estimateMemory(weights, context, metadata)
 	if len(snapshot.GPUs) == 0 {
 		if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
@@ -93,20 +102,24 @@ func classifyOffload(snapshot hardware.Snapshot, weights, context int64, metadat
 		}
 		return classifiedPlacement{Fit: false, Offload: Offload{Mode: "cpu", Reason: "No GPU was detected and currently available system RAM is below the conservative estimate."}}
 	}
-	fit, offload := recommendOffload(snapshot, memory, metadata)
+	fit, offload := recommendOffloadWithCapabilities(snapshot, memory, metadata, capabilities)
 	return classifiedPlacement{Fit: fit, Offload: offload}
 }
 
 func totalHardwareFit(snapshot hardware.Snapshot, weights, context int64, metadata Metadata) bool {
+	return totalHardwareFitWithCapabilities(snapshot, weights, context, metadata, Capabilities{})
+}
+
+func totalHardwareFitWithCapabilities(snapshot hardware.Snapshot, weights, context int64, metadata Metadata, capabilities Capabilities) bool {
 	memory := estimateMemory(weights, context, metadata)
 	idle := assumeIdleSnapshot(snapshot)
 	if len(idle.GPUs) == 0 {
 		return fitsRAM(snapshot.RAMTotalBytes, memory.CPUOnlyRAMBytes)
 	}
-	return classifyOffload(idle, weights, context, metadata).Fit
+	return classifyOffloadWithCapabilities(idle, weights, context, metadata, capabilities).Fit
 }
 
-func lastMatchingContext(snapshot hardware.Snapshot, weights int64, metadata Metadata, start, maximum int64, identity string) int64 {
+func lastMatchingContext(snapshot hardware.Snapshot, weights int64, metadata Metadata, start, maximum int64, identity string, capabilities Capabilities) int64 {
 	low, high := start, maximum
 	last := start
 	for low <= high {
@@ -120,7 +133,7 @@ func lastMatchingContext(snapshot hardware.Snapshot, weights int64, metadata Met
 				break
 			}
 		}
-		if placementIdentity(classifyOffload(snapshot, weights, mid, metadata)) == identity {
+		if placementIdentity(classifyOffloadWithCapabilities(snapshot, weights, mid, metadata, capabilities)) == identity {
 			last = mid
 			low = mid + placementContextStep
 			continue
@@ -142,6 +155,7 @@ func placementZoneFrom(start, end int64, current classifiedPlacement) PlacementZ
 		Devices:      devices,
 		KVOnGPU:      current.Offload.KVOnGPU,
 		GPULayers:    current.Offload.GPULayers,
+		NCPUMoe:      current.Offload.NCPUMoe,
 		TensorSplit:  current.Offload.TensorSplit,
 		CurrentFit:   current.Fit,
 	}
@@ -161,6 +175,8 @@ func placementKind(current classifiedPlacement) (string, int) {
 		return "partial", len(current.Offload.Devices)
 	case "hybrid":
 		return "hybrid", len(current.Offload.Devices)
+	case "moe":
+		return "moe", len(current.Offload.Devices)
 	default:
 		if current.Fit {
 			return "cpu", 0
@@ -171,6 +187,8 @@ func placementKind(current classifiedPlacement) (string, int) {
 
 func placementIdentity(current classifiedPlacement) string {
 	kind, gpuCount := placementKind(current)
+	// Deliberately omit n_cpu_moe: context growth can change the minimum expert
+	// spill count every step without changing the meaningful placement zone.
 	parts := []string{kind, itoa(int64(gpuCount)), strings.Join(current.Offload.Devices, ","), offloadBool(current.Offload.KVOnGPU), offloadBool(current.Fit)}
 	return strings.Join(parts, "|")
 }
