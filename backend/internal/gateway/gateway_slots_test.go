@@ -15,6 +15,7 @@ func TestClassifySlotsRoutes(t *testing.T) {
 	if !ok || spec.Kind != routeSlotsProxy || spec.CallType != "slots_list" || !spec.MapNotImplemented || spec.NeedsAcquire {
 		t.Fatalf("GET slots=%+v ok=%v", spec, ok)
 	}
+	var params map[string]string
 	spec, params, ok = classify(http.MethodPost, "/v1/slots/2")
 	if !ok || spec.Kind != routeSlotsProxy || spec.CallType != "slots_action" || params["slot_id"] != "2" {
 		t.Fatalf("POST slots=%+v params=%v ok=%v", spec, params, ok)
