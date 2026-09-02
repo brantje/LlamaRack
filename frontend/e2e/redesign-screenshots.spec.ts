@@ -258,6 +258,31 @@ function responseFor(pathname: string, method: string): unknown {
   }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details') return { model: models[0], gguf_version: 3, tensor_count: 291, metadata_count: 12, metadata_total: 12, metadata: [{ key: 'general.architecture', type: 'string', value: 'qwen3' }, { key: 'general.name', type: 'string', value: 'Qwen3 8B Instruct' }, { key: 'general.quantization_version', type: 'uint32', value: '2' }, { key: 'qwen3.context_length', type: 'uint32', value: '32768' }, { key: 'qwen3.embedding_length', type: 'uint32', value: '4096' }, { key: 'qwen3.block_count', type: 'uint32', value: '36' }, { key: 'qwen3.attention.head_count', type: 'uint32', value: '32' }, { key: 'qwen3.attention.head_count_kv', type: 'uint32', value: '8' }, { key: 'tokenizer.ggml.model', type: 'string', value: 'gpt2' }, { key: 'tokenizer.ggml.pre', type: 'string', value: 'qwen2' }, { key: 'tokenizer.ggml.tokens', type: 'array[string]', value: '[151936 items]', truncated: true, array_length: 151936 }, { key: 'tokenizer.chat_template', type: 'string', value: '{% for message in messages %} ... representative long template ... {% endfor %}', truncated: true }], architecture: 'qwen3', detected_context_length: 32768, offset: 0, limit: 100, warnings: ['Representative fixture warning: tokenizer metadata contains a truncated value.'] }
   if (pathname === '/api/v1/models/qwen3-8b-q4km/details/value') return { key: 'tokenizer.ggml.tokens', type: 'array[string]', items: ['<|endoftext|>', '<|im_start|>', '<|im_end|>', 'hello'], offset: 0, limit: 100, total: 4, has_more: false }
+  if (/\/api\/v1\/models\/[^/]+\/recommendation$/.test(pathname)) return {
+    model_id: 'qwen3-8b-q4km',
+    context_length: 4096,
+    context_capability: 32768,
+    context_assumed: false,
+    confidence: 'high',
+    metadata: { architecture: 'qwen3', context_length: 32768, block_count: 36, embedding_length: 4096, head_count: 32, kv_head_count: 8 },
+    quantization: { name: 'Q4_K_M', summary: 'Balanced quantization with a relatively small memory footprint.', tradeoff: 'A common general-purpose balance between memory use and retained model quality.' },
+    memory: { weights_bytes: 5_420_000_000, kv_cache_bytes: 1_200_000_000, runtime_overhead_bytes: 600_000_000, cpu_only_ram_bytes: 7_220_000_000, full_offload_vram_bytes: 7_220_000_000 },
+    current_fit: true,
+    total_hardware_fit: true,
+    cpu_fit: true,
+    offload: { mode: 'full', gpu_layers: 36, devices: ['cuda:0'], kv_on_gpu: true, reason: 'The full model, estimated KV cache and runtime headroom fit with the scheduler VRAM reserve.' },
+    placement_ranges: {
+      available: true,
+      minimum_context: 512,
+      maximum_context: 32768,
+      context_step: 512,
+      gpu_only_max_context: 16384,
+      zones: [
+        { start_context: 512, end_context: 16384, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['cuda:0'], kv_on_gpu: true, gpu_layers: 36, current_fit: true, total_hardware_fit: true },
+        { start_context: 16896, end_context: 32768, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['cuda:0'], kv_on_gpu: false, gpu_layers: 28, current_fit: true, total_hardware_fit: true }
+      ]
+    }
+  }
   if (pathname === '/api/v1/instances' && method === 'GET') return instances.slice(0, 2)
   if (pathname === '/api/v1/imports') return []
   if (/^\/api\/v1\/instances\/[^/]+\/runtime$/.test(pathname)) return runtimes[decodeURIComponent(pathname.split('/')[4] || '')] || { state: 'UNLOADED' }

@@ -3,15 +3,31 @@ import { flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import HardwarePlacementEditor from '~/components/HardwarePlacementEditor.vue'
 import { useManager } from '~/composables/useManager'
+import { contextToSliderPosition } from '~/utils/placementPresentation'
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 const hardware = {
   gpus: [
-    { id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU zero', total_bytes: 16, used_bytes: 4, free_bytes: 12, utilization_pct: 10 },
-    { id: 'CUDA1', backend: 'cuda', index: 1, name: 'GPU one', total_bytes: 16, used_bytes: 2, free_bytes: 14, utilization_pct: 5 }
+    { id: 'CUDA0', backend: 'cuda', index: 0, name: 'RTX 3090', total_bytes: 16, used_bytes: 4, free_bytes: 12, utilization_pct: 10 },
+    { id: 'CUDA1', backend: 'cuda', index: 1, name: 'NVIDIA GeForce RTX 4060 Ti', total_bytes: 16, used_bytes: 2, free_bytes: 14, utilization_pct: 5 }
   ]
+}
+
+function ranges(overrides: Record<string, any> = {}) {
+  return {
+    available: true,
+    minimum_context: 512,
+    maximum_context: 262144,
+    context_step: 512,
+    gpu_only_max_context: 14336,
+    zones: [
+      { start_context: 512, end_context: 14336, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, gpu_layers: 32, current_fit: true, total_hardware_fit: true },
+      { start_context: 14848, end_context: 262144, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, gpu_layers: 24, current_fit: true, total_hardware_fit: true }
+    ],
+    ...overrides
+  }
 }
 
 function recommendation(overrides: Record<string, any> = {}) {
@@ -27,12 +43,21 @@ function recommendation(overrides: Record<string, any> = {}) {
     total_hardware_fit: true,
     cpu_fit: true,
     offload: { mode: 'full', gpu_layers: 32, devices: ['CUDA1'], kv_on_gpu: true, reason: 'Fits one GPU.' },
+    placement_ranges: ranges(),
     ...overrides
   }
 }
 
 function isConfig(path: string) {
   return path.startsWith('/api/v1/llamacpp/config?')
+}
+
+async function openTechnical(wrapper: any) {
+  const trigger = wrapper.findAll('button').find((button: any) => button.text().includes('Technical details'))
+  if (trigger) {
+    await trigger.trigger('click')
+    await flushPromises()
+  }
 }
 
 beforeEach(() => {
@@ -54,7 +79,7 @@ describe('GPU placement cards', () => {
   it('switches to manual placement and selects exactly the clicked GPU', async () => {
     const wrapper = await mountSuspended(HardwarePlacementEditor, {
       route: false,
-      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '3,1' }
+      props: { gpuMode: 'manual', gpuDevices: [], tensorSplit: '3,1' }
     })
     await flushPromises()
 
@@ -91,15 +116,25 @@ describe('GPU placement cards', () => {
     await flushPromises()
 
     const fit = wrapper.get('[data-testid="execution-fit"]')
-    const panel = wrapper.get('[data-testid="hardware-recommendation"]')
     expect(wrapper.text()).toContain('inherited llama.cpp config')
     expect(wrapper.text()).toContain('Model capability: 262,144 tokens')
-    expect(fit.text()).toContain('GPU only')
-    expect(fit.text()).toContain('No CPU model split is needed')
-    expect(panel.text()).toContain('Fits current resources')
+    expect(wrapper.text()).toContain('How much text the model can keep in memory at once.')
+    expect(fit.text()).toContain('Runs on 1 GPU')
+    expect(fit.text()).toContain('NVIDIA GeForce RTX 4060 Ti')
+    expect(fit.text()).toContain('Model: GPU')
+    expect(fit.text()).toContain('Context cache: GPU')
+    expect(wrapper.get('[data-testid="placement-ranges"]').text()).toContain('1 GPU')
+    await wrapper.get('[data-testid="placement-zone-1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '14848')).toBe(true)
+    expect(wrapper.get('[data-testid="gpu-card-CUDA1"]').text()).toContain('Used by this placement')
+    expect(wrapper.get('[data-testid="gpu-card-CUDA0"]').text()).toContain('Not needed for this placement')
+
+    await openTechnical(wrapper)
+    const panel = wrapper.get('[data-testid="hardware-recommendation"]')
     expect(panel.text()).toContain('high confidence')
     expect(panel.text()).toContain('8,192 tokens')
-    expect(panel.text()).toContain('Recommended GPU layers: 32')
+    expect(panel.text()).toContain('GPU layers')
     expect(panel.text()).toContain('KV cache: GPU')
     expect(panel.text()).toContain('Q4_K_M')
   })
@@ -122,14 +157,14 @@ describe('GPU placement cards', () => {
       props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
     })
     await flushPromises()
-    expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
+    expect(wrapper.text()).toContain('Selected: 4,096 tokens')
 
-    const input = [
-      ...wrapper.findAllComponents({ name: 'InputNumber' }),
-      ...wrapper.findAllComponents({ name: 'UInputNumber' })
+    const slider = [
+      ...wrapper.findAllComponents({ name: 'Slider' }),
+      ...wrapper.findAllComponents({ name: 'USlider' })
     ][0]
-    expect(input).toBeTruthy()
-    input!.vm.$emit('update:modelValue', 65536)
+    expect(slider).toBeTruthy()
+    slider!.vm.$emit('update:modelValue', contextToSliderPosition(ranges().zones, 65536))
     await flushPromises()
 
     expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '65536')).toBe(true)
@@ -137,7 +172,13 @@ describe('GPU placement cards', () => {
       expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=65536')
     })
     await flushPromises()
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU + CPU split needed')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Runs on GPU + system memory')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Context cache: system RAM')
+    expect(wrapper.get('[data-testid="use-boundary-context"]').text()).toContain('Use 14,336')
+    await wrapper.get('[data-testid="use-boundary-context"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '14336')).toBe(true)
+    await openTechnical(wrapper)
     expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('hybrid')
     expect(wrapper.get('[data-testid="hardware-recommendation"]').text()).toContain('KV cache: system RAM')
   })
@@ -156,7 +197,7 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('Instance override')
-    expect(wrapper.text()).toContain('Estimate: 32,768 tokens')
+    expect(wrapper.text()).toContain('Selected: 32,768 tokens')
   })
 
   it('renders multi-GPU, partial, CPU and pressure fit states', async () => {
@@ -171,7 +212,15 @@ describe('GPU placement cards', () => {
         metadata_warning: 'Metadata fallback active',
         hardware_warning: 'GPU probe degraded',
         quantization: { summary: 'Unknown quantization.', tradeoff: 'Use actual file size.' },
-        offload: { mode: 'multi_gpu', gpu_layers: 40, devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1', kv_on_gpu: true, reason: 'Needs both GPUs.' }
+        offload: { mode: 'multi_gpu', gpu_layers: 40, devices: ['CUDA0', 'CUDA1'], tensor_split: '1,1', kv_on_gpu: true, reason: 'Needs both GPUs.' },
+        placement_ranges: ranges({
+          gpu_only_max_context: 20000,
+          zones: [
+            { start_context: 512, end_context: 8192, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+            { start_context: 8704, end_context: 20000, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 2, devices: ['CUDA0', 'CUDA1'], kv_on_gpu: true, tensor_split: '1,1', current_fit: false, total_hardware_fit: true },
+            { start_context: 20512, end_context: 262144, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, current_fit: false, total_hardware_fit: true }
+          ]
+        })
       })
       if (path.includes('/model-3/')) return recommendation({
         current_fit: false,
@@ -200,8 +249,11 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
 
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Runs fully on 2 GPUs')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Fits after freeing GPU memory')
+    expect(wrapper.get('[data-testid="gpu-card-CUDA0"]').text()).toContain('RTX 3090')
+    await openTechnical(wrapper)
     let panel = wrapper.get('[data-testid="hardware-recommendation"]')
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU only · multi-GPU')
     expect(panel.text()).toContain('Fits installed hardware after freeing resources')
     expect(panel.text()).toContain('Tensor split: 1,1')
     expect(panel.text()).toContain('Metadata fallback active')
@@ -209,19 +261,21 @@ describe('GPU placement cards', () => {
 
     await wrapper.setProps({ modelId: 'model-5' })
     await flushPromises()
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('GPU + CPU split needed')
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('remaining weights in system RAM')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Runs partly on GPU')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('remainder use system memory')
 
     await wrapper.setProps({ modelId: 'model-3' })
     await flushPromises()
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Runs on CPU')
+    await openTechnical(wrapper)
     panel = wrapper.get('[data-testid="hardware-recommendation"]')
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('CPU only')
     expect(panel.text()).toContain('CPU fallback fits current RAM')
 
     await wrapper.setProps({ modelId: 'model-4' })
     await flushPromises()
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Not enough memory')
+    await openTechnical(wrapper)
     panel = wrapper.get('[data-testid="hardware-recommendation"]')
-    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('CPU only')
     expect(panel.text()).toContain('Resource pressure expected')
   })
 
@@ -284,7 +338,7 @@ describe('GPU placement cards', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('hardware unavailable')
-    expect(wrapper.text()).toContain('Estimate: 4,096 tokens')
+    expect(wrapper.text()).toContain('Selected: 4,096 tokens')
     expect(wrapper.find('[data-testid="hardware-recommendation"]').exists()).toBe(true)
   })
 
@@ -296,7 +350,178 @@ describe('GPU placement cards', () => {
     await flushPromises()
     expect(wrapper.find('[name="gpu_mode"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Single-GPU first')
-    expect(wrapper.text()).toContain('GPU placement')
+    expect(wrapper.text()).toContain('Automatic')
     wrapper.unmount()
+  })
+
+  it('shows unavailable ranges, compact many-GPU transitions, and refresh updates', async () => {
+    let rangePayload = ranges({ available: false, unavailable_reason: 'LlamaRack could not determine reliable context boundaries for this Model.', zones: [] })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return {
+        gpus: [
+          ...hardware.gpus,
+          { id: 'CUDA2', backend: 'cuda', index: 2, name: 'RTX 4070', total_bytes: 16, used_bytes: 1, free_bytes: 15, utilization_pct: 3 },
+          { id: 'CUDA3', backend: 'cuda', index: 3, name: 'RTX 4080', total_bytes: 16, used_bytes: 1, free_bytes: 15, utilization_pct: 4 },
+          { id: 'CUDA4', backend: 'cuda', index: 4, name: 'RTX 4090', total_bytes: 24, used_bytes: 1, free_bytes: 23, utilization_pct: 5 }
+        ]
+      }
+      if (isConfig(path)) return { effective: { values: { 'ctx-size': '20000' } } }
+      if (path.includes('/recommendation')) return recommendation({
+        context_length: 20000,
+        offload: { mode: 'multi_gpu', gpu_layers: 32, devices: ['CUDA1', 'CUDA0', 'CUDA2'], kv_on_gpu: true, reason: 'Needs three GPUs.' },
+        placement_ranges: rangePayload
+      })
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="placement-ranges-unavailable"]').text()).toContain('Placement ranges unavailable')
+
+    rangePayload = ranges({
+      gpu_only_max_context: 112000,
+      zones: [
+        { start_context: 512, end_context: 8192, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 8704, end_context: 16384, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 2, devices: ['CUDA1', 'CUDA0'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 16896, end_context: 24576, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 3, devices: ['CUDA1', 'CUDA0', 'CUDA2'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 25088, end_context: 32768, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 4, devices: ['CUDA1', 'CUDA0', 'CUDA2', 'CUDA3'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 33280, end_context: 112000, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 5, devices: ['CUDA1', 'CUDA0', 'CUDA2', 'CUDA3', 'CUDA4'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 112512, end_context: 262144, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, current_fit: true, total_hardware_fit: true }
+      ]
+    })
+    await wrapper.findAll('button').find((button: any) => button.text().includes('Refresh hardware'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="placement-range-compact"]').text()).toContain('3 GPUs')
+    expect(wrapper.get('[data-testid="placement-range-compact"]').text()).toContain('Next transition')
+    await wrapper.findAll('button').find((button: any) => button.text().includes('All placement ranges'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="placement-range-all"]').text()).toContain('5 GPUs')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Runs fully on 3 GPUs')
+    expect(wrapper.get('[data-testid="execution-fit"]').text()).toContain('Using 3 of 5 GPUs')
+    expect(wrapper.text()).toContain('Why are 3 GPUs being used?')
+  })
+
+  it('lets the context slider track freely and keeps ranges visible until commit', async () => {
+    const zoneRanges = ranges({
+      gpu_only_max_context: 14336,
+      zones: [
+        { start_context: 512, end_context: 3584, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 4096, end_context: 14336, kind: 'gpu', offload_mode: 'multi_gpu', gpu_count: 2, devices: ['CUDA1', 'CUDA0'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 14848, end_context: 65536, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, current_fit: true, total_hardware_fit: true },
+        { start_context: 66048, end_context: 262144, kind: 'no_fit', offload_mode: 'none', gpu_count: 0, current_fit: false, total_hardware_fit: false }
+      ]
+    })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (isConfig(path)) return { effective: { values: {} } }
+      if (path.includes('/recommendation')) {
+        const context = Number(new URL(path, 'http://local.test').searchParams.get('context_length'))
+        return recommendation({ context_length: context || 4096, placement_ranges: zoneRanges })
+      }
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="placement-ranges"]').exists()).toBe(true)
+
+    const slider = [
+      ...wrapper.findAllComponents({ name: 'Slider' }),
+      ...wrapper.findAllComponents({ name: 'USlider' })
+    ][0]
+    expect(slider).toBeTruthy()
+    expect(slider!.props('step')).toBe(0.001)
+    expect(slider!.props('max')).toBe(4)
+    expect(wrapper.text()).toContain('65K')
+    slider!.vm.$emit('update:modelValue', 4)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 66,560 tokens')
+    expect(wrapper.get('[data-testid="placement-zone-3"]').attributes('aria-pressed')).toBe('true')
+    expect(slider!.props('size')).toBe('xl')
+    expect(String(slider!.props('ui')?.thumb || '')).toContain('size-7')
+
+    slider!.vm.$emit('update:modelValue', 1.5)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="placement-zone-1"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-testid="gpu-card-CUDA0"]').text()).toContain('Part of 2-GPU placement')
+    expect(wrapper.get('[data-testid="gpu-card-CUDA1"]').text()).toContain('Part of 2-GPU placement')
+
+    slider!.vm.$emit('update:modelValue', 1.99)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="placement-zone-1"]').attributes('aria-pressed')).toBe('true')
+
+    const twoGpuContext = 65000
+    slider!.vm.$emit('update:modelValue', contextToSliderPosition(zoneRanges.zones, twoGpuContext))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 65,000 tokens')
+    expect(wrapper.emitted('update:contextSize')?.some(args => args[0] === '65024')).toBe(true)
+    expect(wrapper.get('[data-testid="placement-zone-2"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[data-testid="placement-ranges"]').exists()).toBe(true)
+
+    await wrapper.setProps({ llamaOptions: { 'ctx-size': '65024' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 65,000 tokens')
+
+    await vi.waitFor(() => {
+      expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=65024')
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 65,024 tokens')
+    expect(wrapper.find('[data-testid="placement-ranges"]').exists()).toBe(true)
+  })
+
+  it('keeps a saved context above the no-fit slider cap', async () => {
+    const zoneRanges = ranges({
+      gpu_only_max_context: 14336,
+      zones: [
+        { start_context: 512, end_context: 14336, kind: 'gpu', offload_mode: 'full', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true },
+        { start_context: 14848, end_context: 65536, kind: 'hybrid', offload_mode: 'hybrid', gpu_count: 1, devices: ['CUDA1'], kv_on_gpu: false, current_fit: true, total_hardware_fit: true },
+        { start_context: 66048, end_context: 262144, kind: 'no_fit', offload_mode: 'none', gpu_count: 0, current_fit: false, total_hardware_fit: false }
+      ]
+    })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path === '/api/v1/models/model-1/recommendation?context_length=131072') {
+        return recommendation({ context_length: 131072, current_fit: false, placement_ranges: zoneRanges })
+      }
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: { 'ctx-size': '131072' } }
+    })
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=131072')
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Selected: 131,072 tokens')
+    expect(wrapper.text()).toContain('Instance override')
+    expect(wrapper.emitted('update:contextSize') || []).toEqual([])
+  })
+
+  it('does not treat automatic GPU cards as placement toggles', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (isConfig(path)) return { effective: { values: {} } }
+      if (path.includes('/recommendation')) return recommendation()
+      return {}
+    })
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: { gpuMode: 'auto', gpuDevices: [], tensorSplit: '', modelId: 'model-1', llamaOptions: {} }
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="gpu-card-CUDA1"]').element.tagName.toLowerCase()).toBe('div')
+    await wrapper.get('[data-testid="gpu-card-CUDA1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:gpuMode') || []).toEqual([])
   })
 })

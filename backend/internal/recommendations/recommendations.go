@@ -66,6 +66,7 @@ type Recommendation struct {
 	TotalHardwareFit  bool             `json:"total_hardware_fit"`
 	CPUFit            bool             `json:"cpu_fit"`
 	Offload           Offload          `json:"offload"`
+	PlacementRanges   PlacementRanges  `json:"placement_ranges"`
 }
 
 func Analyze(model models.Model, path string, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error) Recommendation {
@@ -88,21 +89,10 @@ func Analyze(model models.Model, path string, snapshot hardware.Snapshot, reques
 	}
 	result.Confidence = confidence(metadata, metadataErr)
 	result.CPUFit = fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes)
-	result.CurrentFit, result.Offload = recommendOffload(snapshot, memory, metadata)
-	total := assumeIdleSnapshot(snapshot)
-	if len(total.GPUs) > 0 {
-		result.TotalHardwareFit, _ = recommendOffload(total, memory, metadata)
-	} else {
-		result.TotalHardwareFit = fitsRAM(snapshot.RAMTotalBytes, memory.CPUOnlyRAMBytes)
-	}
-	if len(snapshot.GPUs) == 0 {
-		result.CurrentFit = result.CPUFit
-		if result.CPUFit {
-			result.Offload = Offload{Mode: "cpu", Reason: "No GPU was detected; the estimated model and KV cache fit in currently available system RAM."}
-		} else {
-			result.Offload = Offload{Mode: "cpu", Reason: "No GPU was detected and currently available system RAM is below the conservative estimate."}
-		}
-	}
+	classified := classifyOffload(snapshot, model.TotalBytes, contextLength, metadata)
+	result.CurrentFit, result.Offload = classified.Fit, classified.Offload
+	result.TotalHardwareFit = totalHardwareFit(snapshot, model.TotalBytes, contextLength, metadata)
+	result.PlacementRanges = ComputePlacementRanges(snapshot, model.TotalBytes, metadata, capability)
 	return result
 }
 

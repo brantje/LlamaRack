@@ -255,7 +255,7 @@ describe('Hardware placement editor', () => {
 
     await wrapper.setProps({ gpuMode: 'auto' })
     await flushPromises()
-    expect(wrapper.text()).toContain('Single-GPU first')
+    expect(wrapper.text()).toContain('LlamaRack chooses the smallest GPU set that safely fits the model.')
     await wrapper.setProps({ gpuMode: 'manual' })
     await flushPromises()
 

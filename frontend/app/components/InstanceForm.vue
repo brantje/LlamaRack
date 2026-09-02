@@ -350,7 +350,7 @@ onMounted(() => {
           <UButton type="button" size="sm" :color="form.gpu_mode === 'auto' ? 'primary' : 'neutral'" :variant="form.gpu_mode === 'auto' ? 'solid' : 'ghost'" class="border-r border-[var(--color-divider)]" :aria-pressed="form.gpu_mode === 'auto'" data-testid="placement-mode-auto" @click="setPlacementMode('auto')">Auto</UButton>
           <UButton type="button" size="sm" :color="form.gpu_mode === 'manual' ? 'primary' : 'neutral'" :variant="form.gpu_mode === 'manual' ? 'solid' : 'ghost'" :aria-pressed="form.gpu_mode === 'manual'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</UButton>
         </div>
-        <p v-if="form.gpu_mode === 'auto'" class="mb-4 text-xs text-[var(--neutral-700)]">The scheduler picks devices from fresh VRAM state at launch time.</p>
+        <p v-if="form.gpu_mode === 'auto'" class="mb-4 text-xs text-[var(--neutral-700)]">LlamaRack chooses the smallest GPU set that safely fits the model. It keeps the model on one GPU when possible and adds GPUs only when needed.</p>
         <div v-else class="mb-5 space-y-4" data-testid="manual-placement-controls">
           <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <label v-for="gpu in hardwareGPUs" :key="gpu.id" class="flex cursor-pointer items-center gap-3 border p-3" :class="gpuSelected(gpu.id) ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'">

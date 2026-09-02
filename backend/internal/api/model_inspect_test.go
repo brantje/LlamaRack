@@ -28,7 +28,7 @@ func TestRecommendationHandler(t *testing.T) {
 		t.Fatalf("unauthenticated=%d", w.Code)
 	}
 	w := doRequest(t, handler, http.MethodGet, path, nil, cookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"context_length":2048`) || !strings.Contains(w.Body.String(), `"quantization"`) || !strings.Contains(w.Body.String(), `"CUDA0"`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"context_length":2048`) || !strings.Contains(w.Body.String(), `"quantization"`) || !strings.Contains(w.Body.String(), `"CUDA0"`) || !strings.Contains(w.Body.String(), `"placement_ranges"`) {
 		t.Fatalf("recommendation=%d body=%s", w.Code, w.Body.String())
 	}
 	if w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?context_length=bad", nil, cookie); w.Code != http.StatusBadRequest {

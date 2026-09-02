@@ -211,7 +211,7 @@ describe('shared Instance form redesign', () => {
     expect(state.gpu_devices).toEqual([])
     expect(state.tensor_split).toBe('')
     expect(wrapper.find('[data-testid="manual-placement-controls"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('The scheduler picks devices from fresh VRAM state at launch time.')
+    expect(wrapper.text()).toContain('LlamaRack chooses the smallest GPU set that safely fits the model.')
     await wrapper.get('[data-testid="placement-mode-manual"]').trigger('click')
     expect(state.gpu_mode).toBe('manual')
     expect(wrapper.get('[data-testid="placement-mode-manual"]').attributes('aria-pressed')).toBe('true')
