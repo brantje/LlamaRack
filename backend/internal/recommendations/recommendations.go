@@ -274,49 +274,39 @@ func recommendMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, meta
 	}
 	tensorSplit := moeTensorSplit(weights)
 
-	findMinimum := func(kvOnGPU bool) (int64, bool) {
-		fixed := memory.RuntimeOverheadBytes
+	fits := func(blocks int64, kvOnGPU bool) bool {
+		gpuWeights, hostWeights := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, blocks, metadata.ExpertCount)
+		gpuNeeded := gpuWeights + memory.RuntimeOverheadBytes
+		hostNeeded := hostWeights
 		if kvOnGPU {
-			fixed += memory.KVCacheBytes
+			gpuNeeded += memory.KVCacheBytes
+		} else {
+			hostNeeded += memory.KVCacheBytes
 		}
-		fits := func(blocks int64) bool {
-			gpuWeights, hostWeights := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, blocks, metadata.ExpertCount)
-			if gpuWeights+fixed > pooled {
-				return false
-			}
-			hostNeeded := hostWeights
-			if !kvOnGPU {
-				hostNeeded += memory.KVCacheBytes
-			}
-			return fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
-		}
-		if !fits(metadata.BlockCount) {
-			return 0, false
-		}
+		return gpuNeeded <= pooled && fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
+	}
+
+	if fits(metadata.BlockCount, true) {
 		lo, hi := int64(0), metadata.BlockCount
 		for lo < hi {
 			mid := lo + (hi-lo)/2
-			if fits(mid) {
+			if fits(mid, true) {
 				hi = mid
 			} else {
 				lo = mid + 1
 			}
 		}
-		return lo, true
-	}
-
-	if blocks, ok := findMinimum(true); ok {
 		return true, Offload{
-			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: blocks,
+			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: lo,
 			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: true,
 			Reason: "Full GPU offload does not fit. Keep all transformer layers and the KV cache on the currently free GPUs while placing only the routed expert weights required to fit in system RAM. Expert weight size is conservatively estimated from GGUF size.",
 		}
 	}
-	if blocks, ok := findMinimum(false); ok {
+	if fits(metadata.BlockCount, false) {
 		return true, Offload{
-			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: blocks,
+			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: metadata.BlockCount,
 			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: false,
-			Reason: "Full GPU offload does not fit. Keep all transformer layers on the currently free GPUs, place routed experts in system RAM, and move the KV cache to system RAM because it no longer fits within current VRAM headroom. Expert weight size is conservatively estimated from GGUF size.",
+			Reason: "Even with all routed experts in system RAM, the KV cache does not fit within current VRAM headroom. Keep the same GPU set and full expert spill, then move the KV cache to system RAM. Expert weight size is conservatively estimated from GGUF size.",
 		}
 	}
 	return false, Offload{}
