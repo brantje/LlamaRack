@@ -9,6 +9,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
 )
@@ -17,6 +18,7 @@ type recommendationHandler struct {
 	auth     *auth.Service
 	models   *models.Service
 	hardware hardware.Snapshotter
+	profile  func() (llamacpp.Profile, error)
 }
 
 type modelInspectHandler struct {
@@ -29,8 +31,12 @@ type modelDetailsHandler struct {
 	models *models.Service
 }
 
-func NewRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter) http.Handler {
-	return &recommendationHandler{auth: a, models: modelService, hardware: detector}
+func NewRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	var profile func() (llamacpp.Profile, error)
+	if len(profileGetters) > 0 {
+		profile = profileGetters[0]
+	}
+	return &recommendationHandler{auth: a, models: modelService, hardware: detector, profile: profile}
 }
 
 func NewModelInspectHandler(a *auth.Service, modelService *models.Service) http.Handler {
@@ -76,7 +82,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	snapshot, hardwareErr := h.hardware.Snapshot(r.Context())
-	result := recommendations.Analyze(model, path, snapshot, contextLength, hardwareErr)
+	result := recommendations.AnalyzeWithCapabilities(model, path, snapshot, contextLength, hardwareErr, recommendationCapabilities(h.profile))
 	writeJSON(w, http.StatusOK, result)
 }
 
