@@ -55,6 +55,13 @@ function moeRecommendation() {
   }
 }
 
+async function clickButtonContaining(wrapper: any, label: string) {
+  const button = wrapper.findAll('button').find((item: any) => item.text().includes(label))
+  expect(button, `button containing ${label}`).toBeTruthy()
+  await button!.trigger('click')
+  await flushPromises()
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   localStorage.clear()
@@ -84,10 +91,12 @@ describe('MoE placement UI', () => {
     expect(wrapper.text()).toContain('every currently free GPU')
     expect(wrapper.text()).toContain('routed experts in system RAM')
     expect(wrapper.text()).toContain('2 GPUs + experts in RAM')
-    expect(wrapper.text()).toContain('CPU expert blocks')
-    expect(wrapper.text()).toContain('17')
     expect(wrapper.text()).toContain('Context cache: GPU')
     expect(wrapper.text()).not.toContain('chooses the smallest GPU set that safely fits the model')
+
+    await clickButtonContaining(wrapper, 'Technical details')
+    expect(wrapper.text()).toContain('CPU expert blocks')
+    expect(wrapper.text()).toContain('17')
   })
 
   it('renders Discover MoE as a warning placement with expert details', async () => {
@@ -129,12 +138,14 @@ describe('MoE placement UI', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('2 GPUs + experts in RAM')
-    expect(wrapper.text()).toContain('CPU expert blocks')
-    expect(wrapper.text()).toContain('17')
-    expect(wrapper.text()).toContain('CUDA0, CUDA1')
     const tag = wrapper.findAllComponents({ name: 'StatusTag' }).find(component => component.attributes('data-testid') === 'artifact-hardware-fit')
     expect(tag).toBeTruthy()
     expect(tag!.props('variant')).toBe('pending')
+
+    await clickButtonContaining(wrapper, 'Advanced details')
+    expect(wrapper.text()).toContain('CPU expert blocks')
+    expect(wrapper.text()).toContain('17')
+    expect(wrapper.text()).toContain('CUDA0, CUDA1')
   })
 
   it('keeps n-cpu-moe and cpu-moe editable in the basic llama.cpp view', async () => {
