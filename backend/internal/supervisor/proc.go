@@ -75,3 +75,75 @@ func parsePortEnv(environ map[string]string) int {
 	}
 	return port
 }
+
+// LinuxProcScanner reads the manager PID namespace via a /proc root.
+type LinuxProcScanner struct {
+	Root string
+}
+
+func (s LinuxProcScanner) root() string {
+	if strings.TrimSpace(s.Root) == "" {
+		return "/proc"
+	}
+	return s.Root
+}
+
+func (s LinuxProcScanner) List() ([]Proc, error) {
+	entries, err := os.ReadDir(s.root())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Proc, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		proc, err := s.Inspect(pid)
+		if err != nil {
+			continue
+		}
+		out = append(out, proc)
+	}
+	return out, nil
+}
+
+func (s LinuxProcScanner) Inspect(pid int) (Proc, error) {
+	if pid <= 0 {
+		return Proc{}, fmt.Errorf("invalid pid")
+	}
+	statData, err := os.ReadFile(fmt.Sprintf("%s/%d/stat", s.root(), pid))
+	if err != nil {
+		return Proc{}, err
+	}
+	ticks, err := parseStartTicks(string(statData))
+	if err != nil {
+		return Proc{}, err
+	}
+	envData, err := os.ReadFile(fmt.Sprintf("%s/%d/environ", s.root(), pid))
+	if err != nil {
+		return Proc{}, err
+	}
+	return Proc{PID: pid, StartTicks: ticks, Environ: parseEnviron(envData)}, nil
+}
+
+func (s LinuxProcScanner) Signal(pid int, sig syscall.Signal) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid")
+	}
+	return syscall.Kill(pid, sig)
+}
+
+func (s LinuxProcScanner) Alive(pid int, startTicks uint64) bool {
+	proc, err := s.Inspect(pid)
+	if err != nil {
+		return false
+	}
+	if startTicks == 0 {
+		return true
+	}
+	return proc.StartTicks == startTicks
+}
