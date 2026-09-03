@@ -38,7 +38,7 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"users", "sessions", "service_accounts", "api_keys", "models", "model_options", "instances", "instance_options"} {
+	for _, table := range []string{"users", "sessions", "service_accounts", "api_keys", "models", "model_options", "instances", "instance_options", "worker_runtime"} {
 		var name string
 		if err := db.QueryRowContext(ctx, "SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name); err != nil {
 			t.Fatalf("table %s missing: %v", table, err)
@@ -60,6 +60,11 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	for _, column := range []string{"model_id", "name", "autoload_enabled", "always_on", "priority", "eviction_enabled", "idle_unload_seconds", "max_pending_requests", "gpu_mode", "gpu_devices", "tensor_split"} {
 		if !hasColumn(t, ctx, db, "instances", column) {
 			t.Fatalf("instances.%s missing", column)
+		}
+	}
+	for _, column := range []string{"instance_id", "generation", "pid", "start_ticks", "port", "updated_at"} {
+		if !hasColumn(t, ctx, db, "worker_runtime", column) {
+			t.Fatalf("worker_runtime.%s missing", column)
 		}
 	}
 	for _, forbidden := range []string{"public_id", "autoload_enabled", "always_on", "priority", "eviction_enabled", "idle_unload_seconds", "routing_policy"} {
@@ -92,6 +97,9 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO instances(id,model_id,name) VALUES('bad','missing','Bad')"); err == nil {
 		t.Fatal("expected instance model foreign key violation")
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO worker_runtime(instance_id,generation,pid,start_ticks,port) VALUES('deleted-instance','gen',1,2,10000)"); err != nil {
+		t.Fatalf("worker_runtime must not require an instances foreign key: %v", err)
 	}
 
 	var enabled int
