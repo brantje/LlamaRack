@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -39,4 +40,16 @@ func workerEnviron(extra []string) []string {
 		out = append(out, entry)
 	}
 	return append(out, extra...)
+}
+
+func identityEnv(installationID, instanceID, generation string, port int) []string {
+	if installationID == "" || instanceID == "" || generation == "" {
+		return nil
+	}
+	return []string{
+		EnvInstallationID + "=" + installationID,
+		EnvInstanceID + "=" + instanceID,
+		EnvWorkerGeneration + "=" + generation,
+		EnvWorkerPort + "=" + strconv.Itoa(port),
+	}
 }
