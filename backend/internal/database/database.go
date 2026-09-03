@@ -276,6 +276,14 @@ CREATE TABLE IF NOT EXISTS provider_imports (
 );
 CREATE INDEX IF NOT EXISTS provider_imports_job_idx ON provider_imports(job_id);
 CREATE INDEX IF NOT EXISTS provider_imports_instance_idx ON provider_imports(instance_id);
+CREATE TABLE IF NOT EXISTS worker_runtime (
+ instance_id TEXT PRIMARY KEY,
+ generation TEXT NOT NULL,
+ pid INTEGER NOT NULL,
+ start_ticks INTEGER NOT NULL,
+ port INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 `
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return err

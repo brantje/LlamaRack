@@ -373,8 +373,16 @@ On manager startup:
 5. initialize hardware collectors;
 6. load registered Models and durable Instances;
 7. treat old runtime observations as stale;
-8. start HTTP services;
-9. reconcile Always-On Instances unless temporarily suppressed only within the current session (suppression therefore does not survive restart).
+8. positively identify and terminate stale workers owned by this installation;
+9. refresh hardware/resource state after orphan cleanup;
+10. start HTTP services;
+11. reconcile Always-On Instances unless temporarily suppressed only within the current session (suppression therefore does not survive restart). Always-On and autoload launches wait until step 8 completes.
+
+Full adoption of a surviving `llama-server` into the new manager process is not required. Ownership is proven from manager-injected identity (installation ID, instance ID, worker generation) plus process start identity. Process name, executable, model path, port, or PID alone must never cause termination. Unrelated user-run `llama-server` processes are left untouched.
+
+If a positively identified stale worker cannot be terminated, that Instance must not receive a replacement launch. Other Instances may start.
+
+Normal container replacement tears down all processes in the container, so startup reconciliation is a no-op. Native or process-only manager restarts can leave children alive and must run the same identify-then-terminate path. `LLAMARACK_HOST_PROC` remains telemetry PID mapping; it is not a license to kill by host PID alone.
 
 ## 15. Capability boundaries
 

@@ -33,6 +33,7 @@ var (
 	errResourcePressureBlocked = errors.New("insufficient resources without resource-pressure eviction")
 	errEvictionIneligible      = errors.New("instance is no longer eligible for resource-pressure eviction")
 	errStartupKilled           = errors.New("startup killed")
+	errOrphanCleanup           = errors.New("stale worker cleanup failed")
 )
 
 type startupGenContextKey struct{}
@@ -67,6 +68,8 @@ type Service struct {
 	drainWaits            map[string]chan struct{}
 	startupGen            map[string]uint64
 	startupCancel         map[string]context.CancelFunc
+	startupReady          chan struct{}
+	orphanCleanupBlocked  map[string]string
 	pendingLimits         func(context.Context) (perInstance, global int)
 	holdLoad              func(id string)
 	beforeEvictionLock    func(id string)
@@ -90,7 +93,8 @@ func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, startFailures: map[string]StartFailureState{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{},
-		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{}, now: time.Now,
+		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{},
+		orphanCleanupBlocked: map[string]string{}, now: time.Now,
 	}
 }
 
@@ -134,6 +138,12 @@ func (s *Service) EnsureReady(ctx context.Context, instanceID string) (string, e
 }
 
 func (s *Service) ensureReadyInstance(ctx context.Context, i instances.Instance, inferenceRequest ...bool) (string, error) {
+	if err := s.waitStartupReady(ctx); err != nil {
+		return "", err
+	}
+	if reason := s.orphanBlockReason(i.ID); reason != "" {
+		return "", fmt.Errorf("%w: %s", errOrphanCleanup, reason)
+	}
 	if !i.Enabled {
 		return "", errors.New("instance disabled")
 	}
@@ -166,6 +176,12 @@ func (s *Service) StartInstance(ctx context.Context, id string) (string, error) 
 }
 
 func (s *Service) startInstance(ctx context.Context, id string, explicit bool) (string, error) {
+	if err := s.waitStartupReady(ctx); err != nil {
+		return "", err
+	}
+	if reason := s.orphanBlockReason(id); reason != "" {
+		return "", fmt.Errorf("%w: %s", errOrphanCleanup, reason)
+	}
 	i, err := s.instances.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -456,6 +472,9 @@ func (s *Service) SubscribeLogs(id string) ([]string, <-chan string, func()) {
 }
 
 func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
+	if err := s.waitStartupReady(ctx); err != nil {
+		return
+	}
 	items, err := s.instances.List(ctx)
 	if err != nil {
 		return
@@ -463,6 +482,10 @@ func (s *Service) ReconcileAlwaysOn(ctx context.Context) {
 	satisfied := 0
 	for _, i := range items {
 		if !i.Enabled || !i.AlwaysOn || s.isManuallyStopped(i.ID) || s.inStartBackoff(i.ID) {
+			continue
+		}
+		if reason := s.orphanBlockReason(i.ID); reason != "" {
+			slog.Error("always-on skipped until stale worker cleanup succeeds", "instance_id", i.ID, "error", reason)
 			continue
 		}
 		if _, ok := s.sup.Endpoint(i.ID); ok {
@@ -560,6 +583,9 @@ func (s *Service) ReconcileIdle(ctx context.Context, globalIdleTimeout time.Dura
 }
 
 func (s *Service) RunReconciler(ctx context.Context, interval time.Duration) {
+	if err := s.waitStartupReady(ctx); err != nil {
+		return
+	}
 	s.ReconcileAlwaysOn(ctx)
 	if interval <= 0 {
 		<-ctx.Done()
@@ -909,6 +935,14 @@ func (s *Service) startSingleFlight(ctx context.Context, i instances.Instance, a
 }
 
 func (s *Service) runLoad(id string, c *loadCall) {
+	if err := s.waitStartupReady(context.Background()); err != nil {
+		s.completeLoad(id, c, "", err)
+		return
+	}
+	if reason := s.orphanBlockReason(id); reason != "" {
+		s.completeLoad(id, c, "", fmt.Errorf("%w: %s", errOrphanCleanup, reason))
+		return
+	}
 	if s.holdLoad != nil {
 		s.holdLoad(id)
 	}
@@ -1011,6 +1045,12 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 
 	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	if err := s.waitStartupReady(ctx); err != nil {
+		return "", err
+	}
+	if reason := s.orphanBlockReason(i.ID); reason != "" {
+		return "", fmt.Errorf("%w: %s", errOrphanCleanup, reason)
 	}
 
 	m, err := s.models.GetByID(ctx, i.ModelID)

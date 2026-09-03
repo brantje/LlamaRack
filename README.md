@@ -602,6 +602,8 @@ The normal Compose service is exposed on host port `8888`.
 
 The Compose configuration mounts host `/proc` read-only at `/host/proc` and sets `LLAMARACK_HOST_PROC=/host/proc`. This lets telemetry map GPU-tool host PIDs back to managed worker processes without disabling normal container PID isolation.
 
+Replacing the container normally tears down every process in that PID namespace, so startup worker reconciliation finds nothing and is a no-op. A native or process-only manager restart can leave managed `llama-server` children running. On the next start LlamaRack proves ownership from installation/generation identity and process start time, terminates those stale owned workers, refreshes hardware state, then starts replacements. Unrelated user-run `llama-server` processes are never killed from executable name, PID, port, or model path alone. `LLAMARACK_HOST_PROC` is not used as a kill handle.
+
 For NVIDIA deployments, NVIDIA Container Toolkit supplies `nvidia-smi`, compatible driver libraries and GPU devices to the container. The application image does not install a host-specific NVIDIA driver.
 
 To verify the published NVIDIA deployment:

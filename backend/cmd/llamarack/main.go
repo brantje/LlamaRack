@@ -23,9 +23,9 @@ import (
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
-	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
@@ -89,6 +89,11 @@ func run(ctx context.Context, cfg config.Config) error {
 	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
 	defer unregisterDetectedDefaults()
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, startupTimeout)
+	installID, err := supervisor.EnsureInstallationID(ctx, db)
+	if err != nil {
+		return fmt.Errorf("installation identity: %w", err)
+	}
+	sup.SetRuntimeIdentity(installID, supervisor.NewSQLStore(db))
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -230,6 +235,10 @@ func run(ctx context.Context, cfg config.Config) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 	serveErr := make(chan error, 1)
+	lifecycleService.ArmStartupReconcile()
+	if err := lifecycleService.ReconcileStaleWorkers(ctx); err != nil {
+		slog.Error("startup worker reconciliation failed", "error", err)
+	}
 	go lifecycleService.RunReconciler(ctx, alwaysOnInterval)
 	go lifecycleService.RunIdleReconciler(ctx, idleUnloadTimeout)
 	go func() { liteLLMService.BootReconcile(ctx) }()

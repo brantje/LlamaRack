@@ -247,6 +247,16 @@ It can expose:
 
 PID, port and READY state are ephemeral and cannot be trusted after manager restart.
 
+A separate `worker_runtime` table stores only enough identity to reconcile after an abnormal manager restart:
+
+- `instance_id` (plain text, no foreign key, so a deleted Instance can still be cleaned up);
+- worker generation token;
+- PID;
+- process start identity (`start_ticks`);
+- private port.
+
+This table is not desired Instance configuration and must never override durable Instance rows. A durable `installation_id` in `manager_settings` (internal, not an admin General setting) labels workers belonging to this installation. Workers also receive `LLAMARACK_INSTALLATION_ID`, `LLAMARACK_INSTANCE_ID`, and `LLAMARACK_WORKER_GENERATION` in their environment so startup cleanup can prove ownership before terminating a process.
+
 ### 4.10 Download job / provider cache
 
 Retain the existing durable download-job model and bounded provider cache behavior.
@@ -411,7 +421,7 @@ GGUF metadata cache, when used, contains artifact metadata only and must never c
 5. `instance.id` is the slug derived from Instance name.
 6. `instance.id` is the exact OpenAI `model` identifier.
 7. There is no second public Instance alias in v1.
-8. Runtime PID/port do not prove liveness after restart.
+8. Runtime PID/port do not prove liveness after restart; stale owned workers are identified from installation/generation metadata plus start identity, then terminated before replacements launch.
 9. Model and Instance llama.cpp overrides retain inheritance semantics.
 10. Instance GPU assignments cannot silently retarget another device.
 11. Model deletion and artifact deletion are separate.
