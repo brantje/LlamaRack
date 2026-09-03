@@ -300,38 +300,57 @@ func planMoEOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata 
 		}
 		return gpuNeeded, hostNeeded
 	}
-	pooledFits := func(blocks int64, kvOnGPU bool) bool {
-		gpuNeeded, hostNeeded := demand(blocks, kvOnGPU)
-		return gpuNeeded <= pooled && fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
+	gpuFits := func(blocks int64, kvOnGPU bool) bool {
+		gpuNeeded, _ := demand(blocks, kvOnGPU)
+		return gpuNeeded <= pooled && splitFitsDevices(gpuNeeded, weights)
 	}
-	fits := func(blocks int64, kvOnGPU bool) bool {
-		gpuNeeded, hostNeeded := demand(blocks, kvOnGPU)
-		return gpuNeeded <= pooled && fitsRAM(snapshot.RAMAvailableBytes, hostNeeded) && splitFitsDevices(gpuNeeded, weights)
+	pooledGPUFits := func(blocks int64, kvOnGPU bool) bool {
+		gpuNeeded, _ := demand(blocks, kvOnGPU)
+		return gpuNeeded <= pooled
 	}
-	pooledOK := pooledFits(metadata.BlockCount, true) || pooledFits(metadata.BlockCount, false)
-	if fits(metadata.BlockCount, true) {
+	ramOK := func(blocks int64, kvOnGPU bool) bool {
+		_, hostNeeded := demand(blocks, kvOnGPU)
+		return fitsRAM(snapshot.RAMAvailableBytes, hostNeeded)
+	}
+
+	// GPU demand falls as n-cpu-moe rises; host RAM rises. Search the minimum
+	// spill from GPU constraints first, then validate RAM at that point.
+	if gpuFits(metadata.BlockCount, true) {
 		lo, hi := int64(0), metadata.BlockCount
 		for lo < hi {
 			mid := lo + (hi-lo)/2
-			if fits(mid, true) {
+			if gpuFits(mid, true) {
 				hi = mid
 			} else {
 				lo = mid + 1
 			}
 		}
-		return Offload{
-			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: lo,
-			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: true,
-			Reason: "Full GPU offload does not fit. Keep all transformer layers and the KV cache on the currently free GPUs while placing only the routed expert weights required to fit in system RAM. Expert weight size is conservatively estimated from GGUF size.",
-		}, true, true
+		if ramOK(lo, true) {
+			return Offload{
+				Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: lo,
+				Devices: devices, TensorSplit: tensorSplit, KVOnGPU: true,
+				Reason: "Full GPU offload does not fit. Keep all transformer layers and the KV cache on the currently free GPUs while placing only the routed expert weights required to fit in system RAM. Expert weight size is conservatively estimated from GGUF size.",
+			}, true, true
+		}
+		// Larger n only increases host RAM, and dropping GPUs would raise n.
+		return Offload{}, false, false
 	}
-	if fits(metadata.BlockCount, false) {
-		return Offload{
-			Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: metadata.BlockCount,
-			Devices: devices, TensorSplit: tensorSplit, KVOnGPU: false,
-			Reason: "Even with all routed experts in system RAM, the KV cache does not fit within current VRAM headroom. Keep the same GPU set and full expert spill, then move the KV cache to system RAM. Expert weight size is conservatively estimated from GGUF size.",
-		}, true, true
+
+	// KV-to-RAM cliff: only when even full expert spill cannot keep KV in VRAM.
+	if !pooledGPUFits(metadata.BlockCount, true) {
+		if gpuFits(metadata.BlockCount, false) && ramOK(metadata.BlockCount, false) {
+			return Offload{
+				Mode: "moe", GPULayers: metadata.BlockCount, NCPUMoe: metadata.BlockCount,
+				Devices: devices, TensorSplit: tensorSplit, KVOnGPU: false,
+				Reason: "Even with all routed experts in system RAM, the KV cache does not fit within current VRAM headroom. Keep the same GPU set and full expert spill, then move the KV cache to system RAM. Expert weight size is conservatively estimated from GGUF size.",
+			}, true, true
+		}
+		if pooledGPUFits(metadata.BlockCount, false) && !ramOK(metadata.BlockCount, false) {
+			return Offload{}, false, false
+		}
 	}
+
+	pooledOK := pooledGPUFits(metadata.BlockCount, true) || pooledGPUFits(metadata.BlockCount, false)
 	return Offload{}, pooledOK, false
 }
 

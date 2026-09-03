@@ -83,10 +83,9 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 	}
 	if !cpuOnly {
 		if cpuMoe, ok := cpuMoeBlocks(in.Options, in.Metadata.BlockCount); ok && in.Metadata.ExpertCount > 0 {
-			moeGPU, _ := MoEWeightDistribution(weights, in.Metadata.BlockCount, cpuMoe, in.Metadata.ExpertCount)
-			if moeGPU < weightsGPU {
-				weightsGPU = moeGPU
-			}
+			gpuLayers := gpuLayerCount(in.Metadata.BlockCount, fraction, cpuOnly)
+			_, hostWeights := CombinedMoEWeightDistribution(weights, in.Metadata.BlockCount, gpuLayers, cpuMoe, in.Metadata.ExpertCount)
+			weightsGPU = weights - hostWeights
 		}
 	}
 	kvGPUBytes, kvRAMBytes := kv, int64(0)
@@ -142,6 +141,61 @@ func MoEWeightDistribution(weights, blockCount, cpuMoeBlocks, expertCount int64)
 		hostWeights = weights
 	}
 	return weights - hostWeights, hostWeights
+}
+
+// CombinedMoEWeightDistribution estimates GPU/host weight bytes when partial
+// n-gpu-layers and n-cpu-moe overlap. Full CPU-resident layers count as whole
+// weights; routed-expert spill is added only for MoE blocks that would otherwise
+// stay on GPU.
+func CombinedMoEWeightDistribution(weights, blockCount, gpuLayers, cpuMoeBlocks, expertCount int64) (gpuWeights, hostWeights int64) {
+	if weights <= 0 {
+		return 0, 0
+	}
+	if blockCount <= 0 {
+		return weights, 0
+	}
+	if gpuLayers < 0 {
+		gpuLayers = 0
+	}
+	if gpuLayers > blockCount {
+		gpuLayers = blockCount
+	}
+	if cpuMoeBlocks < 0 {
+		cpuMoeBlocks = 0
+	}
+	if cpuMoeBlocks > blockCount {
+		cpuMoeBlocks = blockCount
+	}
+	fullCPUBlocks := blockCount - gpuLayers
+	moeExtra := cpuMoeBlocks - fullCPUBlocks
+	if moeExtra < 0 {
+		moeExtra = 0
+	}
+	hostWeights = int64(math.Round(float64(weights) * float64(fullCPUBlocks) / float64(blockCount)))
+	if moeExtra > 0 && expertCount > 0 {
+		share := ExpertWeightShare(expertCount)
+		hostWeights += int64(math.Round(float64(weights) * share * float64(moeExtra) / float64(blockCount)))
+	}
+	if hostWeights < 0 {
+		hostWeights = 0
+	}
+	if hostWeights > weights {
+		hostWeights = weights
+	}
+	return weights - hostWeights, hostWeights
+}
+
+func gpuLayerCount(blockCount int64, fraction float64, cpuOnly bool) int64 {
+	if cpuOnly || blockCount <= 0 {
+		return 0
+	}
+	if fraction >= 1 {
+		return blockCount
+	}
+	if fraction <= 0 {
+		return 0
+	}
+	return int64(math.Round(float64(blockCount) * fraction))
 }
 
 func cpuMoeBlocks(options map[string]string, blockCount int64) (int64, bool) {

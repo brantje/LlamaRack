@@ -73,6 +73,43 @@ func TestRecommendMoEOffloadExcludesGPUThatCannotHoldTensorSplitShare(t *testing
 	}
 }
 
+func TestRecommendMoEOffloadAcceptsMinimumSpillWhenFullSpillExceedsRAM(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	metadata := Metadata{BlockCount: 40, ExpertCount: 64}
+	memory := MemoryEstimate{WeightsBytes: 20 * gib, KVCacheBytes: gib, RuntimeOverheadBytes: gib}
+	snapshot := hardware.Snapshot{
+		RAMAvailableBytes: 9 * gib,
+		GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: 8 * gib},
+			{ID: "CUDA1", FreeBytes: 8 * gib},
+		},
+	}
+	fit, got := recommendMoEOffload(snapshot, memory, metadata)
+	if !fit || got.Mode != "moe" || !got.KVOnGPU {
+		t.Fatalf("expected MoE KV-on-GPU at minimum spill, fit=%v offload=%+v", fit, got)
+	}
+	if got.NCPUMoe != 17 {
+		t.Fatalf("n_cpu_moe=%d want 17", got.NCPUMoe)
+	}
+
+	pooled := (8*gib - defaultVRAMReserve) * 2
+	gpuNow, hostNow := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, got.NCPUMoe, metadata.ExpertCount)
+	if gpuNow+memory.KVCacheBytes+memory.RuntimeOverheadBytes > pooled {
+		t.Fatal("minimum spill does not fit pooled VRAM")
+	}
+	if !fitsRAM(snapshot.RAMAvailableBytes, hostNow) {
+		t.Fatal("minimum spill must fit host RAM")
+	}
+	gpuPrevious, _ := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, got.NCPUMoe-1, metadata.ExpertCount)
+	if gpuPrevious+memory.KVCacheBytes+memory.RuntimeOverheadBytes <= pooled {
+		t.Fatalf("n_cpu_moe=%d was not the GPU-capacity minimum", got.NCPUMoe)
+	}
+	_, hostFull := scheduler.MoEWeightDistribution(memory.WeightsBytes, metadata.BlockCount, metadata.BlockCount, metadata.ExpertCount)
+	if fitsRAM(snapshot.RAMAvailableBytes, hostFull) {
+		t.Fatal("full expert spill must exceed RAM so this case is distinct from unconstrained minimum-spill coverage")
+	}
+}
+
 func TestRecommendMoEOffloadMovesKVOnlyAtCliff(t *testing.T) {
 	const gib = int64(1024 * 1024 * 1024)
 	metadata := Metadata{BlockCount: 40, ExpertCount: 64}
