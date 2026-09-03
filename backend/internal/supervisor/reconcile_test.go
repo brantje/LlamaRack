@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -19,13 +20,14 @@ type fakeScanner struct {
 	mu         sync.Mutex
 	procs      map[int]Proc
 	killErr    map[int]error
+	inspectErr map[int]error
 	signaled   []int
 	ignoreTerm bool
 	listErr    error
 }
 
 func newFakeScanner(procs ...Proc) *fakeScanner {
-	s := &fakeScanner{procs: map[int]Proc{}, killErr: map[int]error{}}
+	s := &fakeScanner{procs: map[int]Proc{}, killErr: map[int]error{}, inspectErr: map[int]error{}}
 	for _, proc := range procs {
 		if proc.Environ == nil {
 			proc.Environ = map[string]string{}
@@ -42,7 +44,10 @@ func (s *fakeScanner) List() ([]Proc, error) {
 		return nil, s.listErr
 	}
 	out := make([]Proc, 0, len(s.procs))
-	for _, proc := range s.procs {
+	for pid, proc := range s.procs {
+		if s.inspectErr[pid] != nil {
+			continue
+		}
 		out = append(out, proc)
 	}
 	return out, nil
@@ -51,6 +56,9 @@ func (s *fakeScanner) List() ([]Proc, error) {
 func (s *fakeScanner) Inspect(pid int) (Proc, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.inspectErr[pid]; err != nil {
+		return Proc{}, err
+	}
 	proc, ok := s.procs[pid]
 	if !ok {
 		return Proc{}, os.ErrNotExist
@@ -539,5 +547,37 @@ func TestSQLAndMemoryStoreNilGuards(t *testing.T) {
 	}
 	if _, err := EnsureInstallationID(ctx, nil); err == nil {
 		t.Fatal("nil db should fail")
+	}
+}
+
+func TestReconcileBlocksUnreadableEnviron(t *testing.T) {
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	store := NewMemoryStore()
+	s.SetRuntimeIdentity("install-1", store)
+	proc := ownedProc(101, "install-1", "hidden", "gen", 9, "10005")
+	scanner := newFakeScanner(proc)
+	scanner.inspectErr[101] = os.ErrPermission
+	s.SetProcScanner(scanner)
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "hidden", Generation: "gen", PID: 101, StartTicks: 9, Port: 10005}); err != nil {
+		t.Fatal(err)
+	}
+	result := s.ReconcileStaleWorkers(context.Background())
+	if result.Blocked["hidden"] == "" || result.Terminated != 0 {
+		t.Fatalf("unreadable environ should block without killing: %+v", result)
+	}
+	if _, err := store.Get(context.Background(), "hidden"); err != nil {
+		t.Fatal("metadata must be kept until ownership is verified")
+	}
+}
+
+func TestStartFailsWhenWorkerIdentityCannotBeCreated(t *testing.T) {
+	orig := randomIdentity
+	t.Cleanup(func() { randomIdentity = orig })
+	randomIdentity = func() (string, error) { return "", errors.New("entropy exhausted") }
+	s := New(fakeServerScript(t), "127.0.0.1", 29000, time.Second)
+	s.SetRuntimeIdentity("install-1", NewMemoryStore())
+	_, err := s.Start(context.Background(), "x", "m", "/tmp/model.gguf", nil)
+	if err == nil || !strings.Contains(err.Error(), "worker identity") {
+		t.Fatalf("err=%v", err)
 	}
 }

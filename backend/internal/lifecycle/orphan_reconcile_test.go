@@ -255,3 +255,42 @@ func TestWaitStartupReadyCanceledAndHardwareRefreshError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOrphanBlockClearedAfterSuccessfulReconcile(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	s, _, m, sup, _ := setupLifecycle(t, true, false)
+	id := instanceID(t, s, m.ID)
+	store := supervisor.NewMemoryStore()
+	sup.SetRuntimeIdentity("install-1", store)
+	proc := supervisor.Proc{
+		PID:        78,
+		StartTicks: 4,
+		Environ: map[string]string{
+			supervisor.EnvInstallationID:   "install-1",
+			supervisor.EnvInstanceID:       id,
+			supervisor.EnvWorkerGeneration: "stale",
+			supervisor.EnvWorkerPort:       "10001",
+		},
+	}
+	sup.SetProcScanner(newBlockingScanner(proc))
+	if err := store.Upsert(ctx, supervisor.WorkerRecord{InstanceID: id, Generation: "stale", PID: 78, StartTicks: 4, Port: 10001}); err != nil {
+		t.Fatal(err)
+	}
+	s.hardware = abundantSingleGPUHardware()
+	s.ArmStartupReconcile()
+	if err := s.ReconcileStaleWorkers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartInstance(ctx, id); err == nil || !errors.Is(err, errOrphanCleanup) {
+		t.Fatalf("expected block, err=%v", err)
+	}
+	sup.SetProcScanner(newBlockingScanner(supervisor.Proc{}))
+	s.ArmStartupReconcile()
+	if err := s.ReconcileStaleWorkers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartInstance(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -127,9 +127,12 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	}
 	generation := ""
 	if s.installationID != "" {
-		if id, err := randomIdentity(); err == nil {
-			generation = id
+		id, err := randomIdentity()
+		if err != nil {
+			s.mu.Unlock()
+			return Runtime{}, fmt.Errorf("worker identity: %w", err)
 		}
+		generation = id
 	}
 	identity := identityEnv(s.installationID, instanceID, generation, port)
 	cmd := exec.Command(s.binary, workerArgs...)

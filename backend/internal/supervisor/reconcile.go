@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"syscall"
 	"time"
 )
@@ -112,15 +113,20 @@ func (s *Supervisor) ReconcileStaleWorkers(ctx context.Context) ReconcileResult 
 					slog.Info("startup reconciliation skipped current-generation worker", "instance_id", rec.InstanceID, "pid", rec.PID)
 					continue
 				}
-				proc, ok := byPID[rec.PID]
-				if !ok || startIdentityMismatch(rec, proc) {
+				proc, inspectErr := scanner.Inspect(rec.PID)
+				if inspectErr != nil && !isProcGone(inspectErr) {
+					result.Blocked[rec.InstanceID] = "unable to verify process ownership: " + inspectErr.Error()
+					slog.Error("reconciliation failure blocks replacement launch", "instance_id", rec.InstanceID, "pid", rec.PID, "error", inspectErr)
+					continue
+				}
+				if isProcGone(inspectErr) || startIdentityMismatch(rec, proc) {
 					slog.Info("stale runtime metadata cleanup", "instance_id", rec.InstanceID, "pid", rec.PID, "reason", "dead pid or start identity mismatch")
 					if delErr := store.Delete(ctx, rec.InstanceID); delErr != nil {
 						slog.Warn("failed to clear stale worker metadata", "instance_id", rec.InstanceID, "error", delErr)
 					} else {
 						result.CleanedMetadata++
 					}
-					if ok {
+					if inspectErr == nil {
 						result.Rejected++
 						slog.Info("ownership verification rejected", "instance_id", rec.InstanceID, "pid", rec.PID, "reason", "start identity mismatch")
 					}
@@ -310,4 +316,8 @@ func waitPortReleased(ctx context.Context, host string, port int, timeout time.D
 
 func isProcessGone(err error) bool {
 	return errors.Is(err, syscall.ESRCH)
+}
+
+func isProcGone(err error) bool {
+	return err != nil && (errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH))
 }

@@ -61,9 +61,7 @@ func (s *Service) ReconcileStaleWorkers(ctx context.Context) error {
 	defer s.markStartupReady()
 	result := s.sup.ReconcileStaleWorkers(ctx)
 	s.mu.Lock()
-	if s.orphanCleanupBlocked == nil {
-		s.orphanCleanupBlocked = map[string]string{}
-	}
+	s.orphanCleanupBlocked = map[string]string{}
 	for id, reason := range result.Blocked {
 		s.orphanCleanupBlocked[id] = reason
 	}

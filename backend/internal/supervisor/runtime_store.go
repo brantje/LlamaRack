@@ -218,7 +218,7 @@ func EnsureInstallationID(ctx context.Context, db *sql.DB) (string, error) {
 	return existing, nil
 }
 
-func randomIdentity() (string, error) {
+var randomIdentity = func() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
