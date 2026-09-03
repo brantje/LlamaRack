@@ -171,8 +171,6 @@ function removeOverride(key: string) {
 }
 function sourceVariant(source: string): StatusVariant {
   if (source === 'instance') return 'ready'
-  if (source === 'model') return 'pending'
-  if (source === 'global') return 'pending'
   return 'neutral'
 }
 </script>
@@ -218,7 +216,7 @@ function sourceVariant(source: string): StatusVariant {
                   <code class="font-mono text-sm font-semibold">--{{ option.key }}</code>
                   <StatusTag :variant="sourceVariant(effectiveSource(option))">{{ effectiveSource(option) }}</StatusTag>
                   <StatusTag v-if="isProtected(option)" variant="neutral">Manager controlled</StatusTag>
-                  <StatusTag v-if="option.unsupported" variant="failed">Unsupported · retained</StatusTag>
+                  <StatusTag v-if="option.unsupported" variant="pending">Unsupported · retained</StatusTag>
                 </div>
                 <p v-if="option.description" class="mt-1 text-xs text-muted">{{ option.description }}</p>
                 <p v-if="!isOverridden(option.key) && effectiveValue(option.key) !== undefined" class="mt-1 text-xs text-dimmed">Effective inherited value: <code>{{ effectiveValue(option.key) }}</code></p>

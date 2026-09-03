@@ -22,8 +22,8 @@ describe('remaining redesign surfaces', () => {
     const header = readFileSync(resolve(process.cwd(), 'app/components/ModelsDiscoverRepositoryHeader.vue'), 'utf8')
 
     expect(header).toContain('<Frame class="p-5" data-testid="discover-repository-header">')
-    expect(header).toContain('<StatusTag v-if="model.private" variant="pending">Private</StatusTag>')
-    expect(header).toContain('<StatusTag v-if="model.gated" variant="pending">Gated</StatusTag>')
+    expect(header).toContain('<StatusTag v-if="model.private" variant="neutral">Private</StatusTag>')
+    expect(header).toContain('<StatusTag v-if="model.gated" variant="neutral">Gated</StatusTag>')
     expect(header).not.toContain('<UCard')
     expect(header).not.toContain('<UBadge')
     expect(header).not.toMatch(/rounded-|bg-gradient-|linear-gradient|radial-gradient|conic-gradient/)

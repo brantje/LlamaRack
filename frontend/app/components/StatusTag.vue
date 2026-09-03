@@ -4,10 +4,10 @@ const props = withDefaults(defineProps<{
 }>(), { variant: 'neutral' })
 
 const classes = computed(() => ({
-  ready: 'border border-transparent bg-[var(--accent-100)] text-[var(--accent-800)]',
-  pending: 'border border-[var(--color-accent)] bg-transparent text-[var(--accent-700)]',
+  ready: 'border border-transparent bg-[var(--success-100)] text-[var(--success-700)]',
+  pending: 'border border-[var(--neutral-700)] bg-transparent text-[var(--neutral-800)]',
   neutral: 'border border-transparent bg-[var(--neutral-300)] text-[var(--neutral-900)]',
-  failed: 'border border-[var(--accent-800)] bg-transparent text-[var(--accent-800)]'
+  failed: 'border border-[var(--danger-700)] bg-[var(--danger-100)] text-[var(--danger-700)]'
 }[props.variant]))
 </script>
 

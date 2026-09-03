@@ -464,7 +464,7 @@ watch(liveRequestFingerprint, (next, previous) => {
       <div v-else class="overflow-x-auto" role="region" aria-label="Request history table. Scroll horizontally to view all columns on small screens." tabindex="0">
         <UTable :data="displayRequests" :columns="columns" class="min-w-[1580px]" :ui="{ tbody: '[&>tr]:cursor-pointer' }" @select="onRequestRowSelect">
           <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatTime(row.original.started_at) }}</span></template>
-          <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'neutral' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>
+          <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'pending' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>
           <template #model_name-cell="{ row }"><span class="text-xs font-semibold">{{ requestModelName(row.original) }}</span></template>
           <template #instance_id-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.instance_id || '—' }}</span></template>
           <template #api_key-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ requestKeyAlias(row.original) }}</span></template>
@@ -515,7 +515,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                 >
                   <div class="flex items-center gap-2">
                     <span class="min-w-0 flex-1 truncate text-xs font-medium">{{ item.call_type || 'request' }}</span>
-                    <StatusTag :variant="isPending(item) ? 'neutral' : item.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(item) }}</StatusTag>
+                    <StatusTag :variant="isPending(item) ? 'pending' : item.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(item) }}</StatusTag>
                   </div>
                   <p class="mt-1 truncate font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ shortID(item.request_id, 26) }}</p>
                   <p class="mt-1 truncate text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">{{ requestModelName(item) }}</p>
@@ -539,7 +539,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                 <section data-testid="request-detail-overview" class="border-b border-[var(--color-divider)] py-5">
                   <div class="mb-4 flex items-center justify-between gap-3">
                     <div><p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">REQUEST</p><h3 class="mt-1 font-heading text-lg font-semibold text-[var(--color-text)]">Request Details</h3></div>
-                    <StatusTag :variant="isPending(detail) ? 'neutral' : detail.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(detail) }}</StatusTag>
+                    <StatusTag :variant="isPending(detail) ? 'pending' : detail.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(detail) }}</StatusTag>
                   </div>
                   <p v-if="isPending(detail)" class="mb-3 text-xs text-[var(--neutral-800)]">The request is still in progress.</p>
                   <div data-testid="request-detail-overview-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
