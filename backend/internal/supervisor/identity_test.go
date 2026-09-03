@@ -2,9 +2,11 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -83,5 +85,116 @@ func TestParseStartTicksAndEnviron(t *testing.T) {
 	}
 	if len(identityEnv("", "i", "g", 1)) != 0 || len(identityEnv("inst", "i", "g", 9)) != 4 {
 		t.Fatal("identity env should require installation id")
+	}
+}
+
+type upsertFailStore struct {
+	inner RuntimeStore
+	err   error
+}
+
+func (s *upsertFailStore) Upsert(context.Context, WorkerRecord) error { return s.err }
+func (s *upsertFailStore) Get(ctx context.Context, instanceID string) (WorkerRecord, error) {
+	return s.inner.Get(ctx, instanceID)
+}
+func (s *upsertFailStore) Delete(ctx context.Context, instanceID string) error {
+	return s.inner.Delete(ctx, instanceID)
+}
+func (s *upsertFailStore) List(ctx context.Context) ([]WorkerRecord, error) {
+	return s.inner.List(ctx)
+}
+
+type inspectFailScanner struct {
+	err   error
+	ticks uint64
+}
+
+func (s inspectFailScanner) List() ([]Proc, error) { return nil, nil }
+func (s inspectFailScanner) Inspect(pid int) (Proc, error) {
+	if s.err != nil {
+		return Proc{}, s.err
+	}
+	return Proc{PID: pid, StartTicks: s.ticks}, nil
+}
+func (inspectFailScanner) Signal(int, syscall.Signal) error { return nil }
+func (inspectFailScanner) Alive(int, uint64) bool           { return true }
+
+func TestStartFailsWhenRuntimeRecordCannotBePersisted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store := &upsertFailStore{inner: NewMemoryStore(), err: errors.New("disk full")}
+	s := New(fakeServerScript(t), "127.0.0.1", 28100, 2*time.Second)
+	s.SetRuntimeIdentity("install-1", store)
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopCancel()
+		s.Shutdown(stopCtx)
+	})
+	rt, err := s.Start(ctx, "persist-fail", "model-1", "/tmp/model.gguf", nil)
+	if err == nil {
+		t.Fatal("expected persist failure")
+	}
+	if rt.PID != 0 && syscall.Kill(rt.PID, 0) == nil {
+		t.Fatalf("worker pid %d still alive after persist failure", rt.PID)
+	}
+	if _, getErr := store.Get(ctx, "persist-fail"); !errors.Is(getErr, ErrRuntimeNotFound) {
+		t.Fatalf("failed persist left runtime record: %v", getErr)
+	}
+	if s.Status("persist-fail").State != Failed {
+		t.Fatalf("status=%+v", s.Status("persist-fail"))
+	}
+}
+
+func TestStartFailsWhenProcScannerCannotProvideStartIdentity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store := NewMemoryStore()
+	s := New(fakeServerScript(t), "127.0.0.1", 28200, 2*time.Second)
+	s.SetRuntimeIdentity("install-1", store)
+	s.SetProcScanner(inspectFailScanner{err: os.ErrPermission})
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopCancel()
+		s.Shutdown(stopCtx)
+	})
+	rt, err := s.Start(ctx, "scanner-fail", "model-1", "/tmp/model.gguf", nil)
+	if err == nil {
+		t.Fatal("expected start-identity failure")
+	}
+	if rt.PID != 0 && syscall.Kill(rt.PID, 0) == nil {
+		t.Fatalf("worker pid %d still alive after scanner failure", rt.PID)
+	}
+	if _, getErr := store.Get(ctx, "scanner-fail"); !errors.Is(getErr, ErrRuntimeNotFound) {
+		t.Fatalf("failed identity lookup left runtime record: %v", getErr)
+	}
+}
+
+func TestStartFailsWhenStartTicksAreZero(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store := NewMemoryStore()
+	s := New(fakeServerScript(t), "127.0.0.1", 28300, 2*time.Second)
+	s.SetRuntimeIdentity("install-1", store)
+	s.SetProcScanner(inspectFailScanner{})
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopCancel()
+		s.Shutdown(stopCtx)
+	})
+	if _, err := s.Start(ctx, "zero-ticks", "model-1", "/tmp/model.gguf", nil); err == nil {
+		t.Fatal("expected zero start-ticks to fail launch")
+	}
+	if _, getErr := store.Get(ctx, "zero-ticks"); !errors.Is(getErr, ErrRuntimeNotFound) {
+		t.Fatalf("zero ticks left runtime record: %v", getErr)
+	}
+}
+
+func TestPersistWorkerNoopsWithoutIdentity(t *testing.T) {
+	s := New("unused", "127.0.0.1", 28400, time.Second)
+	if err := s.persistWorker("x", "g", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if ticks, err := s.lookupStartTicks(1 << 30); err == nil || ticks != 0 {
+		t.Fatalf("missing pid should fail lookup ticks=%d err=%v", ticks, err)
 	}
 }

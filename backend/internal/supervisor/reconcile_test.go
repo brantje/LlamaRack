@@ -514,7 +514,7 @@ func TestClearRuntimeRecordIgnoresOtherGeneration(t *testing.T) {
 	if _, err := store.Get(ctx, "x"); err != nil {
 		t.Fatal("newer generation metadata must be kept")
 	}
-	s.lookupStartTicks(1)
+	_, _ = s.lookupStartTicks(1)
 }
 
 func TestSQLAndMemoryStoreNilGuards(t *testing.T) {

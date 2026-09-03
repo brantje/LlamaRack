@@ -179,12 +179,15 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 	w.startCancel = cancel
 	done := w.done
 	s.mu.Unlock()
-	s.persistWorker(instanceID, generation, pid, port)
-	slog.Info("llama-server process started", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port)
 	go copyLogs(w.logs, instanceID, modelID, "stdout", stdout)
 	go copyLogs(w.logs, instanceID, modelID, "stderr", stderr)
 	go s.wait(w)
 	defer cancel()
+	if err := s.persistWorker(instanceID, generation, pid, port); err != nil {
+		slog.Error("failed to persist llama-server worker identity", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port, "error", err)
+		return s.abortStartedWorker(instanceID, done, err)
+	}
+	slog.Info("llama-server process started", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port)
 
 	if err := s.waitReady(readyCtx, w, port, done); err != nil {
 		slog.Error("llama-server worker readiness failed", "instance_id", instanceID, "model_id", modelID, "pid", pid, "port", port, "error", err)
@@ -455,11 +458,17 @@ func (s *Supervisor) waitReady(ctx context.Context, w *worker, port int, done <-
 	}
 }
 
-func (s *Supervisor) persistWorker(instanceID, generation string, pid, port int) {
+func (s *Supervisor) persistWorker(instanceID, generation string, pid, port int) error {
 	if s == nil || s.store == nil || instanceID == "" || generation == "" || pid <= 0 {
-		return
+		return nil
 	}
-	ticks := s.lookupStartTicks(pid)
+	ticks, err := s.lookupStartTicks(pid)
+	if err != nil {
+		return fmt.Errorf("worker start identity: %w", err)
+	}
+	if ticks == 0 {
+		return errors.New("worker start identity is unavailable")
+	}
 	s.mu.Lock()
 	if w := s.workers[instanceID]; w != nil && w.generation == generation {
 		w.startTicks = ticks
@@ -467,8 +476,19 @@ func (s *Supervisor) persistWorker(instanceID, generation string, pid, port int)
 	s.mu.Unlock()
 	rec := WorkerRecord{InstanceID: instanceID, Generation: generation, PID: pid, StartTicks: ticks, Port: port}
 	if err := s.store.Upsert(context.Background(), rec); err != nil {
-		slog.Warn("failed to persist worker runtime metadata", "instance_id", instanceID, "pid", pid, "port", port, "error", err)
+		return fmt.Errorf("persist worker runtime metadata: %w", err)
 	}
+	return nil
+}
+
+func (s *Supervisor) abortStartedWorker(instanceID string, done <-chan struct{}, cause error) (Runtime, error) {
+	_ = s.Kill(instanceID)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+	s.setState(instanceID, Failed, cause.Error())
+	return s.Status(instanceID), cause
 }
 
 func (s *Supervisor) clearRuntimeRecord(instanceID, generation string) {
@@ -492,17 +512,22 @@ func (s *Supervisor) clearRuntimeRecord(instanceID, generation string) {
 	}
 }
 
-func (s *Supervisor) lookupStartTicks(pid int) uint64 {
+func (s *Supervisor) lookupStartTicks(pid int) (uint64, error) {
 	s.mu.RLock()
 	scanner := s.scanner
 	s.mu.RUnlock()
 	if scanner != nil {
 		proc, err := scanner.Inspect(pid)
-		if err == nil {
-			return proc.StartTicks
+		if err != nil {
+			return 0, err
 		}
+		return proc.StartTicks, nil
 	}
-	return readStartTicks(pid)
+	ticks := readStartTicks(pid)
+	if ticks == 0 {
+		return 0, errors.New("process start identity is unavailable")
+	}
+	return ticks, nil
 }
 
 func (s *Supervisor) allocatePortLocked() (int, error) {

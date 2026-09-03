@@ -290,6 +290,7 @@ func TestOrphanBlockClearedAfterSuccessfulReconcile(t *testing.T) {
 	if err := s.ReconcileStaleWorkers(ctx); err != nil {
 		t.Fatal(err)
 	}
+	sup.SetProcScanner(nil)
 	if _, err := s.StartInstance(ctx, id); err != nil {
 		t.Fatal(err)
 	}
