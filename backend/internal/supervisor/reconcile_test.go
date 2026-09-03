@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"testing"
@@ -62,6 +63,9 @@ func (s *fakeScanner) Signal(pid int, sig syscall.Signal) error {
 	defer s.mu.Unlock()
 	s.signaled = append(s.signaled, pid)
 	if err := s.killErr[pid]; err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			delete(s.procs, pid)
+		}
 		return err
 	}
 	if s.ignoreTerm && sig == syscall.SIGTERM {
@@ -398,5 +402,142 @@ func TestWaitPortReleasedAndParseEdges(t *testing.T) {
 	}
 	if (LinuxProcScanner{Root: " "}).root() != "/proc" {
 		t.Fatal("empty root should default to /proc")
+	}
+	if (LinuxProcScanner{Root: "/custom"}).root() != "/custom" {
+		t.Fatal("custom root should be preserved")
+	}
+	if _, err := (LinuxProcScanner{}).Inspect(0); err == nil {
+		t.Fatal("pid 0 should fail inspect")
+	}
+	if _, ok := ownedByInstallation(Proc{}, "install"); ok {
+		t.Fatal("nil environ is not owned")
+	}
+	if _, ok := ownedByInstallation(Proc{Environ: map[string]string{EnvInstallationID: "install"}}, "install"); ok {
+		t.Fatal("incomplete identity is not owned")
+	}
+	if recordOwnsProcess(WorkerRecord{InstanceID: "a", Generation: "g"}, Proc{Environ: map[string]string{EnvInstallationID: "other"}}, "install") {
+		t.Fatal("foreign installation is not owned")
+	}
+	if recordOwnsProcess(WorkerRecord{InstanceID: "a", Generation: "g"}, Proc{Environ: map[string]string{EnvInstallationID: "install", EnvInstanceID: "b", EnvWorkerGeneration: "g"}}, "install") {
+		t.Fatal("wrong instance is not owned")
+	}
+	if err := waitPortReleased(context.Background(), "127.0.0.1", 0, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTerminateOwnedESRCHAndPortTimeoutAndImmortal(t *testing.T) {
+	staleTermTimeout = 30 * time.Millisecond
+	staleKillTimeout = 20 * time.Millisecond
+	stalePortTimeout = 40 * time.Millisecond
+	t.Cleanup(func() {
+		staleTermTimeout = 15 * time.Second
+		staleKillTimeout = 5 * time.Second
+		stalePortTimeout = 5 * time.Second
+	})
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	store := NewMemoryStore()
+	s.SetRuntimeIdentity("install-1", store)
+
+	gone := ownedProc(91, "install-1", "gone", "g", 1, "0")
+	scanner := newFakeScanner(gone)
+	scanner.killErr[91] = syscall.ESRCH
+	s.SetProcScanner(scanner)
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "gone", Generation: "g", PID: 91, StartTicks: 1, Port: 0}); err != nil {
+		t.Fatal(err)
+	}
+	result := s.ReconcileStaleWorkers(context.Background())
+	if result.Terminated != 1 {
+		t.Fatalf("ESRCH should count as terminated: %+v", result)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+	held := ownedProc(92, "install-1", "held", "g", 2, strconv.Itoa(port))
+	holdScanner := newFakeScanner(held)
+	s.SetProcScanner(holdScanner)
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "held", Generation: "g", PID: 92, StartTicks: 2, Port: port}); err != nil {
+		t.Fatal(err)
+	}
+	result = s.ReconcileStaleWorkers(context.Background())
+	if result.Blocked["held"] == "" {
+		t.Fatalf("occupied port should block: %+v", result)
+	}
+
+	immortal := ownedProc(93, "install-1", "immortal", "g", 3, "0")
+	imm := &immortalScanner{proc: immortal}
+	s.SetProcScanner(imm)
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "immortal", Generation: "g", PID: 93, StartTicks: 3, Port: 0}); err != nil {
+		t.Fatal(err)
+	}
+	result = s.ReconcileStaleWorkers(context.Background())
+	if result.Blocked["immortal"] == "" {
+		t.Fatalf("immortal process should block: %+v", result)
+	}
+}
+
+type immortalScanner struct {
+	proc Proc
+}
+
+func (s *immortalScanner) List() ([]Proc, error) { return []Proc{s.proc}, nil }
+func (s *immortalScanner) Inspect(pid int) (Proc, error) {
+	if pid != s.proc.PID {
+		return Proc{}, os.ErrNotExist
+	}
+	return s.proc, nil
+}
+func (s *immortalScanner) Signal(int, syscall.Signal) error { return nil }
+func (s *immortalScanner) Alive(int, uint64) bool           { return true }
+
+func TestClearRuntimeRecordIgnoresOtherGeneration(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	s.SetRuntimeIdentity("install", store)
+	if err := store.Upsert(ctx, WorkerRecord{InstanceID: "x", Generation: "new", PID: 1, StartTicks: 1, Port: 1}); err != nil {
+		t.Fatal(err)
+	}
+	s.clearRuntimeRecord("x", "old")
+	if _, err := store.Get(ctx, "x"); err != nil {
+		t.Fatal("newer generation metadata must be kept")
+	}
+	s.lookupStartTicks(1)
+}
+
+func TestSQLAndMemoryStoreNilGuards(t *testing.T) {
+	ctx := context.Background()
+	var sqlStore *SQLStore
+	if err := sqlStore.Upsert(ctx, WorkerRecord{}); err == nil {
+		t.Fatal("nil sql upsert")
+	}
+	if _, err := sqlStore.Get(ctx, "x"); err == nil {
+		t.Fatal("nil sql get")
+	}
+	if err := sqlStore.Delete(ctx, "x"); err == nil {
+		t.Fatal("nil sql delete")
+	}
+	if _, err := sqlStore.List(ctx); err == nil {
+		t.Fatal("nil sql list")
+	}
+	var mem *MemoryStore
+	if err := mem.Upsert(ctx, WorkerRecord{}); err == nil {
+		t.Fatal("nil memory upsert")
+	}
+	if _, err := mem.Get(ctx, "x"); err == nil {
+		t.Fatal("nil memory get")
+	}
+	if err := mem.Delete(ctx, "x"); err == nil {
+		t.Fatal("nil memory delete")
+	}
+	if _, err := mem.List(ctx); err == nil {
+		t.Fatal("nil memory list")
+	}
+	if _, err := EnsureInstallationID(ctx, nil); err == nil {
+		t.Fatal("nil db should fail")
 	}
 }

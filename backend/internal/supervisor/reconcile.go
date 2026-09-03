@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const (
+var (
 	staleTermTimeout = 15 * time.Second
 	staleKillTimeout = 5 * time.Second
 	stalePortTimeout = 5 * time.Second
@@ -142,6 +142,7 @@ func (s *Supervisor) ReconcileStaleWorkers(ctx context.Context) ReconcileResult 
 				if err := s.terminateOwned(ctx, scanner, rec, proc); err != nil {
 					result.Blocked[rec.InstanceID] = err.Error()
 					slog.Error("reconciliation failure blocks replacement launch", "instance_id", rec.InstanceID, "error", err)
+					handled[rec.InstanceID+"/"+rec.Generation] = true
 					continue
 				}
 				if delErr := store.Delete(ctx, rec.InstanceID); delErr != nil {

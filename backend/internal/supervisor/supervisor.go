@@ -535,14 +535,14 @@ func (s *Supervisor) setState(id string, state State, msg string) {
 }
 
 var workerOwnedValueOptions = map[string]bool{
-	"model":        true,
-	"host":         true,
-	"port":         true,
-	"cors-origins": true,
-	"cors-methods": true,
-	"cors-headers": true,
-	"api-key":      true,
-	"api-key-file": true,
+	"model":          true,
+	"host":           true,
+	"port":           true,
+	"cors-origins":   true,
+	"cors-methods":   true,
+	"cors-headers":   true,
+	"api-key":        true,
+	"api-key-file":   true,
 	"slot-save-path": true,
 }
 
