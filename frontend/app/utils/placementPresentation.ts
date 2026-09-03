@@ -1,4 +1,4 @@
-export type PlacementKind = 'gpu' | 'hybrid' | 'partial' | 'cpu' | 'no_fit'
+export type PlacementKind = 'gpu' | 'moe' | 'hybrid' | 'partial' | 'cpu' | 'no_fit'
 
 export type PlacementZone = {
   start_context: number
@@ -9,6 +9,7 @@ export type PlacementZone = {
   devices?: string[]
   kv_on_gpu?: boolean
   gpu_layers?: number
+  n_cpu_moe?: number
   tensor_split?: string
   current_fit: boolean
   total_hardware_fit: boolean
@@ -27,6 +28,7 @@ export type PlacementRanges = {
 export type PlacementOffload = {
   mode: string
   gpu_layers?: number
+  n_cpu_moe?: number
   devices?: string[]
   tensor_split?: string
   kv_on_gpu?: boolean
@@ -71,6 +73,8 @@ export function zoneShortLabel(zone: Pick<PlacementZone, 'kind' | 'gpu_count'>) 
   switch (zone.kind) {
     case 'gpu':
       return zone.gpu_count === 1 ? '1 GPU' : `${zone.gpu_count} GPUs`
+    case 'moe':
+      return zone.gpu_count === 1 ? '1 GPU + experts in RAM' : `${zone.gpu_count} GPUs + experts in RAM`
     case 'hybrid':
       return 'GPU + RAM'
     case 'partial':
@@ -162,6 +166,9 @@ export function modelCacheLocations(offload: PlacementOffload) {
   if (offload.mode === 'hybrid') {
     return { model: 'GPU', cache: 'system RAM' }
   }
+  if (offload.mode === 'moe') {
+    return { model: 'GPU + expert weights in system RAM', cache: offload.kv_on_gpu === false ? 'system RAM' : 'GPU' }
+  }
   return { model: 'GPU', cache: offload.kv_on_gpu === false ? 'system RAM' : 'GPU' }
 }
 
@@ -189,6 +196,17 @@ export function primaryPlacementResult(
       title: `Runs fully on ${count} GPUs`,
       description: `The model and context stay in GPU memory across ${count === 2 ? 'two' : String(count)} GPUs.`,
       variant: 'ready' as StatusVariant,
+      locations
+    }
+  }
+  if (offload.mode === 'moe') {
+    const count = gpuCount || 1
+    return {
+      title: count === 1 ? 'Runs on GPU + experts in RAM' : `Runs on ${count} GPUs + experts in RAM`,
+      description: offload.kv_on_gpu === false
+        ? 'Attention stays GPU accelerated while routed expert weights and the context cache use system RAM.'
+        : 'Attention and the context cache stay on GPU while only the routed expert weights needed to fit use system RAM.',
+      variant: 'pending' as StatusVariant,
       locations
     }
   }
@@ -238,6 +256,14 @@ export function whyPlacement(offload: PlacementOffload, currentFit: boolean) {
       body: 'The model and context fit safely on a single GPU, so additional GPUs are not required.'
     }
   }
+  if (offload.mode === 'moe') {
+    return {
+      title: 'Why are experts using system memory?',
+      body: offload.kv_on_gpu === false
+        ? 'Full GPU offload does not fit. LlamaRack keeps attention on the available GPUs, moves routed experts to system RAM, and also moves the context cache to RAM at this context size.'
+        : 'Full GPU offload does not fit. LlamaRack keeps attention and the context cache on the available GPUs and moves only the routed expert weights required to fit into system RAM.'
+    }
+  }
   if (offload.mode === 'hybrid') {
     return {
       title: 'Why is system memory being used?',
@@ -270,14 +296,14 @@ export function nearbyTransitionCopy(ranges: PlacementRanges | undefined, contex
   const next = index >= 0 && index < zones.length - 1 ? zones[index + 1] : undefined
   const gpuOnlyMax = ranges?.gpu_only_max_context || 0
   const step = ranges?.context_step || 512
-  const usesSystem = current?.kind === 'hybrid' || current?.kind === 'partial' || current?.kind === 'cpu' || current?.kind === 'no_fit'
+  const usesSystem = current?.kind === 'moe' || current?.kind === 'hybrid' || current?.kind === 'partial' || current?.kind === 'cpu' || current?.kind === 'no_fit'
   const actionContext = usesSystem && gpuOnlyMax > 0 && gpuOnlyMax < context ? gpuOnlyMax : 0
   let headline = ''
   let body = ''
   if (actionContext) {
-    headline = current?.kind === 'hybrid' || current?.kind === 'partial' ? 'Uses system memory' : current?.kind === 'no_fit' ? 'Not enough memory' : 'Runs on CPU'
+    headline = current?.kind === 'moe' ? 'Experts use system memory' : current?.kind === 'hybrid' || current?.kind === 'partial' ? 'Uses system memory' : current?.kind === 'no_fit' ? 'Not enough memory' : 'Runs on CPU'
     body = `Full GPU placement is available up to ${actionContext.toLocaleString()} tokens.`
-  } else if (next && next.start_context === context + step && (next.kind === 'hybrid' || next.kind === 'partial' || next.kind === 'cpu' || next.kind === 'no_fit')) {
+  } else if (next && next.start_context === context + step && (next.kind === 'moe' || next.kind === 'hybrid' || next.kind === 'partial' || next.kind === 'cpu' || next.kind === 'no_fit')) {
     headline = 'Near GPU memory limit'
     body = 'The next 512-token step will require system memory.'
   }

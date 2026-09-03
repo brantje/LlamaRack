@@ -13,6 +13,7 @@ const (
 	FitGPU      = "gpu"
 	FitMultiGPU = "multi_gpu"
 	FitHybrid   = "hybrid"
+	FitMoe      = "moe"
 	FitCPU      = "cpu"
 	FitNo       = "no_fit"
 	FitUnknown  = "unknown"
@@ -76,6 +77,10 @@ type DiscoverAnalysis struct {
 // When assumeIdle is true, fit and speed use installed VRAM/RAM capacity rather
 // than currently free memory.
 func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr error, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error, allowHybrid bool, assumeIdle bool) DiscoverAnalysis {
+	return AnalyzeDiscoverWithCapabilities(inputs, metadata, metadataErr, snapshot, requestedContext, hardwareErr, allowHybrid, assumeIdle, Capabilities{})
+}
+
+func AnalyzeDiscoverWithCapabilities(inputs []ArtifactInput, metadata Metadata, metadataErr error, snapshot hardware.Snapshot, requestedContext int64, hardwareErr error, allowHybrid bool, assumeIdle bool, capabilities Capabilities) DiscoverAnalysis {
 	contextLength, assumed := chooseContext(requestedContext)
 	placement := snapshot
 	if assumeIdle {
@@ -111,6 +116,9 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			weightsBytes:             input.WeightsBytes,
 			complete:                 input.Complete,
 		}
+		if metadata.ExpertCount > 0 && artifact.Confidence == "high" {
+			artifact.Confidence = "medium"
+		}
 		if guide.Warning != "" {
 			artifact.Warnings = append(artifact.Warnings, guide.Warning)
 		}
@@ -130,7 +138,7 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 			artifact.Reason = "The artifact size is unavailable, so a reliable memory estimate cannot be produced."
 		default:
 			artifact.Memory = estimateMemory(input.WeightsBytes, contextLength, metadata)
-			artifact.Runnable, artifact.Offload = discoverOffload(placement, artifact.Memory, metadata)
+			artifact.Runnable, artifact.Offload = discoverOffloadWithCapabilities(placement, artifact.Memory, metadata, capabilities)
 			artifact.Fit, artifact.FitLabel = discoverFit(artifact.Runnable, artifact.Offload)
 			artifact.Reason = artifact.Offload.Reason
 			if artifact.Runnable {
@@ -161,8 +169,12 @@ func AnalyzeDiscover(inputs []ArtifactInput, metadata Metadata, metadataErr erro
 }
 
 func discoverOffload(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata) (bool, Offload) {
+	return discoverOffloadWithCapabilities(snapshot, memory, metadata, Capabilities{})
+}
+
+func discoverOffloadWithCapabilities(snapshot hardware.Snapshot, memory MemoryEstimate, metadata Metadata, capabilities Capabilities) (bool, Offload) {
 	if len(snapshot.GPUs) > 0 {
-		return recommendOffload(snapshot, memory, metadata)
+		return recommendOffloadWithCapabilities(snapshot, memory, metadata, capabilities)
 	}
 	if fitsRAM(snapshot.RAMAvailableBytes, memory.CPUOnlyRAMBytes) {
 		return true, Offload{Mode: "cpu", Reason: "No GPU was detected; the model, selected context and conservative runtime headroom fit in currently available system RAM."}
@@ -179,6 +191,11 @@ func discoverFit(runnable bool, offload Offload) (string, string) {
 		return FitGPU, "Fits on GPU"
 	case "multi_gpu":
 		return FitMultiGPU, "Fits across GPUs"
+	case "moe":
+		if len(offload.Devices) > 1 {
+			return FitMoe, strconv.Itoa(len(offload.Devices)) + " GPUs + experts in RAM"
+		}
+		return FitMoe, "GPU + experts in RAM"
 	case "partial", "hybrid":
 		return FitHybrid, "GPU + CPU"
 	case "cpu":

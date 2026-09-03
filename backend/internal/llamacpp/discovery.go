@@ -25,6 +25,19 @@ type Profile struct {
 	Options     []Option `json:"options"`
 }
 
+func (p Profile) Has(key string) bool {
+	key = strings.TrimPrefix(strings.TrimSpace(key), "--")
+	if key == "" {
+		return false
+	}
+	for _, option := range p.Options {
+		if strings.TrimPrefix(strings.TrimSpace(option.Key), "--") == key {
+			return true
+		}
+	}
+	return false
+}
+
 func Discover(ctx context.Context, path string) (Profile, error) {
 	versionOut, _ := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	help, err := exec.CommandContext(ctx, path, "--help").CombinedOutput()

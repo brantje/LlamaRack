@@ -1028,19 +1028,34 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	launchOptions := effective.Values
+	var liveProfile llamacpp.Profile
 	if s.profile != nil {
 		if profile, profileErr := s.profile(); profileErr == nil {
+			liveProfile = profile
 			launchOptions, _, err = store.LaunchOptions(ctx, profile, m.ID, i.ID)
 			if err != nil {
 				return "", err
 			}
 		}
 	}
+	moePlan := s.prepareAutoMoELaunch(ctx, i, m, path, launchOptions, effective.Values)
+	launchOptions = applyCPUMoeLoadMode(moePlan.Options, liveProfile)
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
 
-	demand := s.estimateDemand(m, path, effective.Values)
-	placement, placementErr := s.preparePlacementWithDemand(ctx, i, demand, allowEviction)
+	// Demand must reflect the exact launch options, including any Auto-generated
+	// MoE expert spill and KV placement, before resources are reserved.
+	demand := s.estimateDemand(m, path, launchOptions)
+	placementInstance := i
+	if moePlan.Applied {
+		placementInstance.GPUMode = "manual"
+		placementInstance.GPUDevices = append([]string(nil), moePlan.Devices...)
+		placementInstance.TensorSplit = moePlan.TensorSplit
+		if hasTensorSplitOverride {
+			placementInstance.TensorSplit = launchOptions["tensor-split"]
+		}
+	}
+	placement, placementErr := s.preparePlacementWithDemand(ctx, placementInstance, demand, allowEviction)
 	if placementErr != nil {
 		return "", placementErr
 	}
@@ -1330,7 +1345,7 @@ func (s *Service) estimateDemand(m models.Model, path string, options map[string
 		Metadata: scheduler.KVMetadata{
 			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
 			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
-			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength,
+			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength, ExpertCount: metadata.ExpertCount,
 		},
 		MetadataErr: metaErr,
 		Options:     options,

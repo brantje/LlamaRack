@@ -60,7 +60,7 @@ func readSummary(r io.Reader) (Summary, error) {
 		return Summary{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
 	}
 
-	values := make(map[string]string, 12)
+	values := make(map[string]string, 14)
 	for i := uint64(0); i < metadataCount; i++ {
 		key, err := readKey(r)
 		if err != nil {
@@ -115,6 +115,8 @@ func summaryMetadataKey(key string) bool {
 		".attention.head_count_kv",
 		".attention.key_length",
 		".attention.value_length",
+		".expert_count",
+		".expert_used_count",
 		".nextn_predict_layers",
 	} {
 		if strings.HasSuffix(key, suffix) {

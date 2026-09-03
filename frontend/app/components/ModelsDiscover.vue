@@ -7,10 +7,10 @@ type HFDetail = HFModel & { description?: string; revision: string; artifacts: H
 type HFSearchPage = { items: HFModel[]; next_cursor?: string }
 type QuantizationGuide = { name?: string; tier: string; quality: string; memory: string; speed: string; summary: string; tradeoff: string; warning?: string; known: boolean }
 type MemoryEstimate = { weights_bytes: number; kv_cache_bytes: number; runtime_overhead_bytes: number; cpu_only_ram_bytes: number; full_offload_vram_bytes: number }
-type Offload = { mode: string; gpu_layers?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
+type Offload = { mode: string; gpu_layers?: number; n_cpu_moe?: number; devices?: string[]; tensor_split?: string; kv_on_gpu: boolean; reason: string }
 type EstimatedGenerationSpeed = { estimated: boolean; min_tokens_per_second?: number; max_tokens_per_second?: number; label: string; reason: string }
-type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
-type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; assume_idle?: boolean; artifacts: ArtifactAdvice[] }
+type ArtifactAdvice = { artifact_id: string; quantization: QuantizationGuide; recommended: boolean; runnable: boolean; fit: 'gpu' | 'multi_gpu' | 'moe' | 'hybrid' | 'cpu' | 'no_fit' | 'unknown'; fit_label: string; reason: string; memory: MemoryEstimate; offload: Offload; estimated_generation_speed?: EstimatedGenerationSpeed; confidence: string; warnings?: string[] }
+type DiscoverRecommendations = { context_length: number; context_capability: number; context_assumed: boolean; metadata: { architecture?: string; context_length?: number; block_count?: number; embedding_length?: number; head_count?: number; kv_head_count?: number; expert_count?: number; expert_used_count?: number }; metadata_warning?: string; hardware_warning?: string; hardware_available: boolean; hybrid_recommendations_enabled: boolean; assume_idle?: boolean; artifacts: ArtifactAdvice[] }
 
 const ASSUME_IDLE_STORAGE_KEY = 'llamarack-discover-assume-idle'
 
@@ -145,7 +145,7 @@ function artifactAdvice(artifact: HFArtifact) {
 function fitColor(advice: ArtifactAdvice | null): 'success' | 'warning' | 'error' | 'neutral' {
   if (!advice) return 'neutral'
   if (advice.fit === 'gpu' || advice.fit === 'multi_gpu') return 'success'
-  if (advice.fit === 'hybrid') return 'warning'
+  if (advice.fit === 'moe' || advice.fit === 'hybrid') return 'warning'
   if (advice.fit === 'no_fit') return 'error'
   return 'neutral'
 }
@@ -614,7 +614,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div>
                   <dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Hardware</dt>
-                  <dd class="mt-1"><UTooltip :text="fitReason(artifactAdvice(artifact))"><StatusTag :variant="artifactAdvice(artifact)!.fit === 'gpu' || artifactAdvice(artifact)!.fit === 'multi_gpu' ? 'ready' : artifactAdvice(artifact)!.fit === 'no_fit' ? 'failed' : artifactAdvice(artifact)!.fit === 'hybrid' ? 'pending' : 'neutral'" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</StatusTag></UTooltip></dd>
+                  <dd class="mt-1"><UTooltip :text="fitReason(artifactAdvice(artifact))"><StatusTag :variant="artifactAdvice(artifact)!.fit === 'gpu' || artifactAdvice(artifact)!.fit === 'multi_gpu' ? 'ready' : artifactAdvice(artifact)!.fit === 'no_fit' ? 'failed' : artifactAdvice(artifact)!.fit === 'moe' || artifactAdvice(artifact)!.fit === 'hybrid' ? 'pending' : 'neutral'" data-testid="artifact-hardware-fit">{{ fitLabel(artifactAdvice(artifact)) }}</StatusTag></UTooltip></dd>
                 </div>
                 <div><dt class="text-[length:var(--font-size-kicker)] font-medium uppercase tracking-[.08em] text-[var(--neutral-700)]">Context</dt><dd class="mt-1 font-mono font-semibold tabular-nums">{{ formatContext(recommendations?.context_length || selectedContext) }}</dd></div>
               </dl>
@@ -644,6 +644,7 @@ onBeforeUnmount(() => {
                     <div><dt class="text-[var(--neutral-700)]">Confidence</dt><dd class="mt-0.5 capitalize">{{ artifactAdvice(artifact)!.confidence }}</dd></div>
                     <div><dt class="text-[var(--neutral-700)]">Placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.mode || 'Unknown' }}</dd></div>
                     <div><dt class="text-[var(--neutral-700)]">GPU layers</dt><dd class="mt-0.5 font-mono tabular-nums">{{ artifactAdvice(artifact)!.offload.gpu_layers || '—' }}</dd></div>
+                    <div v-if="artifactAdvice(artifact)!.offload.n_cpu_moe"><dt class="text-[var(--neutral-700)]">CPU expert blocks</dt><dd class="mt-0.5 font-mono tabular-nums">{{ artifactAdvice(artifact)!.offload.n_cpu_moe }}</dd></div>
                     <div><dt class="text-[var(--neutral-700)]">KV placement</dt><dd class="mt-0.5">{{ artifactAdvice(artifact)!.offload.kv_on_gpu ? 'GPU' : artifactAdvice(artifact)!.offload.mode ? 'System RAM' : 'Unknown' }}</dd></div>
                     <div v-if="artifactAdvice(artifact)!.offload.devices?.length"><dt class="text-[var(--neutral-700)]">Devices</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.devices!.join(', ') }}</dd></div>
                     <div v-if="artifactAdvice(artifact)!.offload.tensor_split"><dt class="text-[var(--neutral-700)]">Tensor split</dt><dd class="mt-0.5 font-mono">{{ artifactAdvice(artifact)!.offload.tensor_split }}</dd></div>

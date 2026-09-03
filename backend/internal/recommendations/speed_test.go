@@ -71,6 +71,11 @@ func TestEstimateGenerationSpeedHybridPlacements(t *testing.T) {
 	if hybrid.MaxTokensPerSecond >= partial.MaxTokensPerSecond {
 		t.Fatalf("moving KV traffic from VRAM to host RAM should reduce the estimate: partial=%+v hybrid=%+v", partial, hybrid)
 	}
+
+	moe := estimateGenerationSpeed(snapshot, memory, Offload{Mode: "moe", Devices: []string{"CUDA0"}, GPULayers: 32, NCPUMoe: 16, KVOnGPU: true}, guide, Metadata{BlockCount: 32, Embedding: 4096, HeadCount: 32, KVHeadCount: 8, ExpertCount: 64})
+	if !moe.Estimated || !strings.Contains(moe.Reason, "model weight bytes stay on GPU") || !strings.Contains(moe.Reason, "served from system RAM as routed-expert weights") {
+		t.Fatalf("moe=%+v", moe)
+	}
 }
 
 func TestEstimateGenerationSpeedHybridRequiresHostAndPCIeTelemetry(t *testing.T) {

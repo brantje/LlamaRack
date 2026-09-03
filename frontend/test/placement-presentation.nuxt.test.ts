@@ -66,6 +66,8 @@ describe('placementPresentation', () => {
     expect(formatContextRange(512, 8192)).toBe('512 – 8K')
     expect(zoneShortLabel({ kind: 'gpu', gpu_count: 1 })).toBe('1 GPU')
     expect(zoneShortLabel({ kind: 'gpu', gpu_count: 6 })).toBe('6 GPUs')
+    expect(zoneShortLabel({ kind: 'moe', gpu_count: 1 })).toBe('1 GPU + experts in RAM')
+    expect(zoneShortLabel({ kind: 'moe', gpu_count: 4 })).toBe('4 GPUs + experts in RAM')
     expect(zoneShortLabel({ kind: 'hybrid', gpu_count: 1 })).toBe('GPU + RAM')
     expect(zoneShortLabel({ kind: 'partial', gpu_count: 1 })).toBe('Partial GPU')
     expect(zoneShortLabel({ kind: 'cpu', gpu_count: 0 })).toBe('CPU')
@@ -116,6 +118,14 @@ describe('placementPresentation', () => {
     expect(namedDeviceList(['CUDA0', 'CUDA1'], gpus)).toBe('NVIDIA GeForce RTX 4060 Ti, RTX 3090')
     expect(primaryPlacementResult({ mode: 'full', devices: ['CUDA0'], reason: '' }, true, gpus).title).toBe('Runs on 1 GPU')
     expect(primaryPlacementResult({ mode: 'multi_gpu', devices: ['CUDA0', 'CUDA1', 'CUDA2'], reason: '' }, true).title).toBe('Runs fully on 3 GPUs')
+    const moeGPU = primaryPlacementResult({ mode: 'moe', devices: ['CUDA0', 'CUDA1'], n_cpu_moe: 12, kv_on_gpu: true, reason: '' }, true)
+    expect(moeGPU.title).toBe('Runs on 2 GPUs + experts in RAM')
+    expect(moeGPU.description).toContain('context cache stay on GPU')
+    expect(moeGPU.locations).toEqual({ model: 'GPU + expert weights in system RAM', cache: 'GPU' })
+    const moeKVInRAM = primaryPlacementResult({ mode: 'moe', devices: ['CUDA0'], n_cpu_moe: 24, kv_on_gpu: false, reason: '' }, true)
+    expect(moeKVInRAM.title).toBe('Runs on GPU + experts in RAM')
+    expect(moeKVInRAM.description).toContain('context cache use system RAM')
+    expect(moeKVInRAM.locations.cache).toBe('system RAM')
     expect(primaryPlacementResult({ mode: 'hybrid', devices: ['CUDA0'], kv_on_gpu: false, reason: '' }, true).title).toBe('Runs on GPU + system memory')
     expect(primaryPlacementResult({ mode: 'partial', devices: ['CUDA0'], kv_on_gpu: true, reason: '' }, true).title).toBe('Runs partly on GPU')
     expect(primaryPlacementResult({ mode: 'cpu', reason: '' }, false, undefined, true).title).toBe('Runs on CPU')
@@ -125,6 +135,8 @@ describe('placementPresentation', () => {
     expect(whyPlacement({ mode: 'multi_gpu', devices: ['a', 'b', 'c'], reason: '' }, true).title).toContain('3 GPUs')
     expect(whyPlacement({ mode: 'multi_gpu', devices: ['a', 'b'], reason: '' }, true).body).toContain('two')
     expect(whyPlacement({ mode: 'full', devices: ['CUDA0'], reason: '' }, true).title).toContain('1 GPU')
+    expect(whyPlacement({ mode: 'moe', devices: ['CUDA0', 'CUDA1'], kv_on_gpu: true, reason: '' }, true).title).toContain('experts')
+    expect(whyPlacement({ mode: 'moe', devices: ['CUDA0'], kv_on_gpu: false, reason: '' }, true).body).toContain('context cache to RAM')
     expect(whyPlacement({ mode: 'partial', reason: '' }, true).title).toContain('split')
     expect(whyPlacement({ mode: 'cpu', reason: '' }, true).title).toContain('CPU')
     expect(whyPlacement({ mode: 'cpu', reason: '' }, false).title).toContain('enough memory')
@@ -157,6 +169,19 @@ describe('placementPresentation', () => {
     const near = nearbyTransitionCopy(ranges, 14336)
     expect(near.headline).toBe('Near GPU memory limit')
     expect(near.nextLabel).toContain('14.5K')
+
+    const moeRanges = {
+      available: true,
+      context_step: 512,
+      gpu_only_max_context: 8192,
+      zones: [
+        zone({ start_context: 512, end_context: 8192, kind: 'gpu', gpu_count: 2, devices: ['CUDA0', 'CUDA1'] }),
+        zone({ start_context: 8704, end_context: 32768, kind: 'moe', offload_mode: 'moe', gpu_count: 2, devices: ['CUDA0', 'CUDA1'], n_cpu_moe: 10 })
+      ]
+    }
+    const moe = nearbyTransitionCopy(moeRanges, 8704)
+    expect(moe.headline).toBe('Experts use system memory')
+    expect(moe.previousLabel).toContain('2 GPUs → 2 GPUs + experts in RAM')
     expect(nearbyTransitionCopy({ available: false }, 4096).current).toBeUndefined()
   })
 })
