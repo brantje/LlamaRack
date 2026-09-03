@@ -15,10 +15,12 @@ import (
 )
 
 type fakeScanner struct {
-	mu       sync.Mutex
-	procs    map[int]Proc
-	killErr  map[int]error
-	signaled []int
+	mu         sync.Mutex
+	procs      map[int]Proc
+	killErr    map[int]error
+	signaled   []int
+	ignoreTerm bool
+	listErr    error
 }
 
 func newFakeScanner(procs ...Proc) *fakeScanner {
@@ -35,6 +37,9 @@ func newFakeScanner(procs ...Proc) *fakeScanner {
 func (s *fakeScanner) List() ([]Proc, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	out := make([]Proc, 0, len(s.procs))
 	for _, proc := range s.procs {
 		out = append(out, proc)
@@ -58,6 +63,9 @@ func (s *fakeScanner) Signal(pid int, sig syscall.Signal) error {
 	s.signaled = append(s.signaled, pid)
 	if err := s.killErr[pid]; err != nil {
 		return err
+	}
+	if s.ignoreTerm && sig == syscall.SIGTERM {
+		return nil
 	}
 	if sig == syscall.SIGTERM || sig == syscall.SIGKILL {
 		delete(s.procs, pid)
@@ -302,4 +310,93 @@ func TestReconcileRestartsSurvivingOwnedWorker(t *testing.T) {
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stopCancel()
 	restarted.Shutdown(stopCtx)
+}
+
+func TestReconcileSkipsWithoutInstallationID(t *testing.T) {
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	result := s.ReconcileStaleWorkers(context.Background())
+	if result.Detected != 0 || result.Terminated != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestReconcileScanFailureBlocksPersistedInstances(t *testing.T) {
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	store := NewMemoryStore()
+	s.SetRuntimeIdentity("install-1", store)
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "blocked", Generation: "g", PID: 1, StartTicks: 1, Port: 2}); err != nil {
+		t.Fatal(err)
+	}
+	scanner := newFakeScanner()
+	scanner.listErr = errors.New("proc unavailable")
+	s.SetProcScanner(scanner)
+	result := s.ReconcileStaleWorkers(context.Background())
+	if result.Blocked["blocked"] == "" {
+		t.Fatalf("expected scan failure to block instance: %+v", result)
+	}
+}
+
+func TestReconcileTerminatesProcOnlyOwnedWorkerAndSIGKILLFallback(t *testing.T) {
+	s := New("unused", "127.0.0.1", 30000, time.Second)
+	store := NewMemoryStore()
+	s.SetRuntimeIdentity("install-1", store)
+	proc := ownedProc(88, "install-1", "scan-only", "gen", 4, "0")
+	scanner := newFakeScanner(proc)
+	scanner.ignoreTerm = true
+	s.SetProcScanner(scanner)
+	result := s.ReconcileStaleWorkers(context.Background())
+	if result.Terminated != 1 {
+		t.Fatalf("result=%+v signaled=%v", result, scanner.signaled)
+	}
+	if _, alive := scanner.procs[88]; alive {
+		t.Fatal("SIGKILL fallback left the process")
+	}
+}
+
+func TestLinuxProcScannerInspectsCurrentProcess(t *testing.T) {
+	scanner := LinuxProcScanner{}
+	pid := os.Getpid()
+	proc, err := scanner.Inspect(pid)
+	if err != nil || proc.PID != pid || proc.StartTicks == 0 {
+		t.Fatalf("inspect self=%+v err=%v", proc, err)
+	}
+	if !scanner.Alive(pid, proc.StartTicks) {
+		t.Fatal("current process should be alive")
+	}
+	if scanner.Alive(pid, proc.StartTicks+1) {
+		t.Fatal("start-tick mismatch should not look alive")
+	}
+	listed, err := scanner.List()
+	if err != nil || len(listed) == 0 {
+		t.Fatalf("list err=%v n=%d", err, len(listed))
+	}
+	if err := scanner.Signal(-1, syscall.SIGTERM); err == nil {
+		t.Fatal("invalid pid should fail")
+	}
+}
+
+func TestWaitPortReleasedAndParseEdges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = ln.Close()
+	}()
+	if err := waitPortReleased(ctx, "127.0.0.1", port, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if parsePortEnv(nil) != 0 || parsePortEnv(map[string]string{EnvWorkerPort: "nope"}) != 0 {
+		t.Fatal("invalid port env should be zero")
+	}
+	if readStartTicks(-1) != 0 || readStartTicks(1<<30) != 0 {
+		t.Fatal("missing pid should not report start ticks")
+	}
+	if (LinuxProcScanner{Root: " "}).root() != "/proc" {
+		t.Fatal("empty root should default to /proc")
+	}
 }
