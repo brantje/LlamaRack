@@ -449,8 +449,8 @@ onBeforeUnmount(() => {
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <span class="truncate font-mono text-[length:var(--font-size-h5)] font-semibold text-[var(--color-text)]">{{ item.id }}</span>
-              <StatusTag v-if="item.private" variant="pending">Private</StatusTag>
-              <StatusTag v-if="item.gated" variant="pending">Gated</StatusTag>
+              <StatusTag v-if="item.private" variant="neutral">Private</StatusTag>
+              <StatusTag v-if="item.gated" variant="neutral">Gated</StatusTag>
               <StatusTag variant="neutral">GGUF</StatusTag>
             </div>
             <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">
@@ -516,7 +516,7 @@ onBeforeUnmount(() => {
             <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">CONTEXT + RECOMMENDATION</p>
             <div class="mt-1 flex flex-wrap items-center gap-2">
               <h2 class="font-heading text-xl font-semibold text-[var(--color-text)]">Hardware guidance</h2>
-              <StatusTag v-if="recommendations" :variant="recommendations.hardware_available ? 'ready' : 'neutral'">{{ recommendations.hardware_available ? 'Hardware aware' : 'Telemetry limited' }}</StatusTag>
+              <StatusTag v-if="recommendations" :variant="recommendations.hardware_available ? 'ready' : 'pending'">{{ recommendations.hardware_available ? 'Hardware aware' : 'Telemetry limited' }}</StatusTag>
               <StatusTag v-if="recommendationLoading" variant="pending">Recalculating</StatusTag>
             </div>
           </div>

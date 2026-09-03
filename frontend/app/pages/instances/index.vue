@@ -421,7 +421,10 @@ onBeforeUnmount(() => {
               <p v-if="importFor(instance)?.state === 'DOWNLOADING'" class="mt-1 max-w-[180px] text-[length:var(--font-size-kicker)] leading-snug text-[var(--neutral-700)]">Model is downloading. {{ importFor(instance)?.start_when_ready ? 'This Instance will launch automatically when ready.' : 'Open Downloads to monitor progress.' }}</p>
               <p v-else-if="importFor(instance)?.state === 'FAILED' || importFor(instance)?.state === 'CANCELLED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ importFor(instance)?.error || 'Open Downloads to retry or inspect this import.' }}</p>
               <template v-else>
-                <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 max-w-[220px] border border-[var(--accent-600)] bg-[var(--accent-100)] px-2 py-1 text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]"><span class="font-semibold">Import warning</span> · {{ importFor(instance)?.error }}</div>
+                <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="mt-1 flex max-w-[220px] items-start gap-2 border border-[var(--color-divider)] px-2 py-1">
+                  <StatusTag variant="pending">Import warning</StatusTag>
+                  <p class="min-w-0 text-[length:var(--font-size-kicker)] leading-snug text-[var(--neutral-800)]">{{ importFor(instance)?.error }}</p>
+                </div>
                 <p v-if="startupBackoffMessage(runtimeFor(instance))" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]" data-testid="instance-startup-backoff">{{ startupBackoffMessage(runtimeFor(instance)) }}</p>
                 <p v-else-if="instanceState(instance) === 'FAILED'" class="mt-1 max-w-[180px] font-mono text-[length:var(--font-size-kicker)] leading-snug text-[var(--accent-800)]">{{ runtimeFor(instance).last_error || 'llama-server exited unexpectedly.' }}</p>
               </template>
@@ -478,7 +481,10 @@ onBeforeUnmount(() => {
             <StatusTag :variant="statusVariant(instanceState(instance))">{{ instanceState(instance) }}</StatusTag>
           </div>
 
-          <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="border border-[var(--accent-600)] bg-[var(--accent-100)] px-3 py-2 text-[length:var(--font-size-table-header)] text-[var(--accent-800)]"><div class="font-semibold">Import warning</div><div class="mt-1">{{ importFor(instance)?.error }}</div></div>
+          <div v-if="importFor(instance)?.state === 'COMPLETED' && importFor(instance)?.error" data-testid="import-metadata-warning" class="flex items-start gap-2 border border-[var(--color-divider)] px-3 py-2">
+            <StatusTag variant="pending">Import warning</StatusTag>
+            <p class="min-w-0 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]">{{ importFor(instance)?.error }}</p>
+          </div>
 
           <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">
             <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>

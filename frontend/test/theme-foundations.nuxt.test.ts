@@ -175,14 +175,14 @@ describe('redesign theme foundations', () => {
       slots: { default: 'READY' }
     })
     expect(wrapper.text()).toContain('READY')
-    expect(wrapper.attributes('class')).toContain('accent-100')
+    expect(wrapper.attributes('class')).toContain('success-100')
 
     await wrapper.setProps({ variant: 'pending' })
-    expect(wrapper.attributes('class')).toContain('color-accent')
+    expect(wrapper.attributes('class')).toContain('neutral-700')
     await wrapper.setProps({ variant: 'neutral' })
     expect(wrapper.attributes('class')).toContain('neutral-300')
     await wrapper.setProps({ variant: 'failed' })
-    expect(wrapper.attributes('class')).toContain('accent-800')
+    expect(wrapper.attributes('class')).toContain('danger-700')
   })
 
   it('renders the shared action hierarchy and forwards normal button attributes', async () => {

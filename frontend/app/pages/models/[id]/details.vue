@@ -184,9 +184,11 @@ onMounted(() => void load())
       </div>
     </div>
 
-    <Frame v-if="error" class="border-[var(--accent-800)] p-3" data-testid="model-details-error">
-      <p class="text-sm font-semibold text-[var(--accent-900)]">Unable to load GGUF metadata</p>
-      <p class="mt-1 text-xs text-[var(--neutral-800)]">{{ error }}</p>
+    <Frame v-if="error" class="p-3" data-testid="model-details-error">
+      <div class="flex flex-wrap items-start gap-3">
+        <StatusTag variant="failed">Unable to load GGUF metadata</StatusTag>
+        <p class="min-w-0 flex-1 text-sm text-[var(--neutral-800)]">{{ error }}</p>
+      </div>
     </Frame>
 
     <Frame

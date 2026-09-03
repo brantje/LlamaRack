@@ -282,6 +282,12 @@ function formatBytes(value: number) {
   return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`
 }
 
+function recommendationFitVariant(recommendation: Recommendation): 'ready' | 'pending' | 'failed' {
+  if (recommendation.current_fit) return 'ready'
+  if (recommendation.total_hardware_fit || recommendation.cpu_fit) return 'pending'
+  return 'failed'
+}
+
 function updateDevices(value: unknown) {
   emit('update:gpuDevices', Array.isArray(value) ? value.map(String) : [])
 }
@@ -379,7 +385,7 @@ onBeforeUnmount(() => {
 
     <div v-if="modelId && placementRanges && !placementRanges.available" data-testid="placement-ranges-unavailable" class="border border-[var(--color-divider)] p-3">
       <div class="flex items-start gap-2">
-        <StatusTag variant="neutral">Placement ranges unavailable</StatusTag>
+        <StatusTag variant="pending">Placement ranges unavailable</StatusTag>
         <p class="text-xs leading-5 text-[var(--neutral-800)]">{{ placementRanges.unavailable_reason || 'LlamaRack could not determine reliable context boundaries for this Model.' }}</p>
       </div>
     </div>
@@ -473,7 +479,7 @@ onBeforeUnmount(() => {
               <StatusTag :variant="recommendation.current_fit ? 'ready' : recommendation.total_hardware_fit ? 'pending' : 'neutral'">{{ recommendation.confidence }} confidence</StatusTag>
               <StatusTag v-if="recommendation.quantization.name" variant="neutral">{{ recommendation.quantization.name }}</StatusTag>
               <StatusTag variant="pending">{{ recommendation.offload.mode.replaceAll('_', ' ') }}</StatusTag>
-              <StatusTag :variant="recommendation.current_fit ? 'ready' : 'neutral'">{{ recommendation.current_fit ? 'Fits current resources' : recommendation.total_hardware_fit ? 'Fits installed hardware after freeing resources' : recommendation.cpu_fit ? 'CPU fallback fits current RAM' : 'Resource pressure expected' }}</StatusTag>
+              <StatusTag :variant="recommendationFitVariant(recommendation)">{{ recommendation.current_fit ? 'Fits current resources' : recommendation.total_hardware_fit ? 'Fits installed hardware after freeing resources' : recommendation.cpu_fit ? 'CPU fallback fits current RAM' : 'Resource pressure expected' }}</StatusTag>
             </div>
             <p class="text-xs text-muted">{{ recommendation.offload.reason }}</p>
             <dl class="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
@@ -493,7 +499,7 @@ onBeforeUnmount(() => {
             </div>
             <p class="text-xs text-muted"><strong>{{ recommendation.quantization.summary }}</strong> {{ recommendation.quantization.tradeoff }}</p>
             <div v-if="recommendation.metadata_warning" class="border border-[var(--color-divider)] p-3">
-              <div class="flex items-start gap-2"><StatusTag variant="neutral">Metadata estimate fallback</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.metadata_warning }}</p></div>
+              <div class="flex items-start gap-2"><StatusTag variant="pending">Metadata estimate fallback</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.metadata_warning }}</p></div>
             </div>
             <div v-if="recommendation.hardware_warning" class="border border-[var(--color-divider)] p-3">
               <div class="flex items-start gap-2"><StatusTag variant="pending">Hardware probe warning</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ recommendation.hardware_warning }}</p></div>

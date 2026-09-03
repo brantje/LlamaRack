@@ -92,8 +92,8 @@ function formatUpdated(value?: string) {
           <p v-if="model.author" class="mt-1 text-sm text-[var(--neutral-800)]">Published by {{ model.author }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <StatusTag v-if="model.private" variant="pending">Private</StatusTag>
-          <StatusTag v-if="model.gated" variant="pending">Gated</StatusTag>
+          <StatusTag v-if="model.private" variant="neutral">Private</StatusTag>
+          <StatusTag v-if="model.gated" variant="neutral">Gated</StatusTag>
           <StatusTag variant="neutral">GGUF</StatusTag>
         </div>
       </div>

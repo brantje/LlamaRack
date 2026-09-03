@@ -219,7 +219,7 @@ export function primaryPlacementResult(
   return {
     title: 'Not enough memory',
     description: 'Current available RAM and VRAM are below the conservative estimate.',
-    variant: 'neutral' as StatusVariant,
+    variant: 'failed' as StatusVariant,
     locations
   }
 }

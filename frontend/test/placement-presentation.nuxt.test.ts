@@ -120,6 +120,7 @@ describe('placementPresentation', () => {
     expect(primaryPlacementResult({ mode: 'partial', devices: ['CUDA0'], kv_on_gpu: true, reason: '' }, true).title).toBe('Runs partly on GPU')
     expect(primaryPlacementResult({ mode: 'cpu', reason: '' }, false, undefined, true).title).toBe('Runs on CPU')
     expect(primaryPlacementResult({ mode: 'cpu', reason: '' }, false).title).toBe('Not enough memory')
+    expect(primaryPlacementResult({ mode: 'cpu', reason: '' }, false).variant).toBe('failed')
     expect(modelCacheLocations({ mode: 'hybrid', kv_on_gpu: false, reason: '' })).toEqual({ model: 'GPU', cache: 'system RAM' })
     expect(whyPlacement({ mode: 'multi_gpu', devices: ['a', 'b', 'c'], reason: '' }, true).title).toContain('3 GPUs')
     expect(whyPlacement({ mode: 'multi_gpu', devices: ['a', 'b'], reason: '' }, true).body).toContain('two')

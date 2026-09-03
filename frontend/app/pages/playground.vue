@@ -898,13 +898,18 @@ onBeforeUnmount(() => {
               >
                 {{ emptyContentFallback(message) }}
               </p>
-              <p
+              <div
                 v-if="messageTruncated(message.id)"
-                class="mt-2 text-xs leading-5 text-[var(--neutral-800)]"
-                data-testid="playground-truncation-warning"
+                class="mt-2 flex items-start gap-2"
               >
-                {{ PLAYGROUND_TRUNCATION_WARNING }}
-              </p>
+                <StatusTag variant="pending">Truncated</StatusTag>
+                <p
+                  class="min-w-0 text-xs leading-5 text-[var(--neutral-800)]"
+                  data-testid="playground-truncation-warning"
+                >
+                  {{ PLAYGROUND_TRUNCATION_WARNING }}
+                </p>
+              </div>
               <p
                 v-if="message.role === 'assistant' && messageStats(message.id)"
                 class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]"
