@@ -355,11 +355,30 @@ Persisted PID/port/READY values are stale after restart unless re-observed.
 On startup:
 
 - discard stale liveness assumptions;
-- safely clean manager-owned orphan workers where ownership can be proven;
-- reconstruct observed state;
+- discover candidate processes and prove they belong to this LlamaRack installation;
+- compare persisted worker generation and start identity so PID reuse cannot cause an unrelated process to be killed;
+- terminate stale owned workers (SIGTERM, then SIGKILL) and wait for process exit and port release;
+- clean stale persisted worker runtime metadata;
+- refresh hardware/resource state;
 - mark ordinary Instances UNLOADED;
-- reconcile Always-On Instances;
+- reconcile Always-On Instances only after the cleanup phase has finished;
 - manual-stop suppression is cleared because it is session-local.
+
+The 1.0-safe policy is identify-then-terminate, not process adoption. A cleanup failure for a proven orphan is observable and blocks a second worker for that Instance.
+
+End-to-end restart verification:
+
+```text
+create/start Instance
+→ verify exactly one managed worker
+→ terminate manager abnormally while worker survives
+→ restart manager
+→ detect and positively identify stale worker
+→ terminate stale worker
+→ refresh resources
+→ reconcile desired Instance state
+→ verify exactly one managed worker exists
+```
 
 ## 20. Resource eviction lifecycle
 
