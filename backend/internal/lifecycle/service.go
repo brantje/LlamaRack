@@ -1025,8 +1025,10 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	launchOptions := effective.Values
+	var liveProfile llamacpp.Profile
 	if s.profile != nil {
 		if profile, profileErr := s.profile(); profileErr == nil {
+			liveProfile = profile
 			launchOptions, _, err = store.LaunchOptions(ctx, profile, m.ID, i.ID)
 			if err != nil {
 				return "", err
@@ -1034,7 +1036,7 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		}
 	}
 	moePlan := s.prepareAutoMoELaunch(ctx, i, m, path, launchOptions, effective.Values)
-	launchOptions = moePlan.Options
+	launchOptions = applyCPUMoeLoadMode(moePlan.Options, liveProfile)
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
 
