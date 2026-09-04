@@ -69,8 +69,8 @@ jobs:
       - name: Define candidate image tags
         id: candidate-tags
         run: |
-          echo "cpu_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "cuda_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-cuda" >> "$GITHUB_OUTPUT"
+          echo "cpu_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "cuda_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-cuda" >> "$GITHUB_OUTPUT"
 
       - name: Build CPU candidate locally
         uses: docker/build-push-action@v6
