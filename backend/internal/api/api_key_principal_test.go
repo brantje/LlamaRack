@@ -24,6 +24,12 @@ func TestManagementSecurityAPIKeyPlanesAndDenylist(t *testing.T) {
 	mux.Handle("/api/v1/api-keys/", NewAPIKeysHandler(fixture.auth))
 	mux.Handle("/api/v1/admin/service-accounts", NewServiceAccountsHandler(fixture.auth))
 	mux.Handle("/api/v1/admin/service-accounts/", NewServiceAccountsHandler(fixture.auth))
+	mux.HandleFunc("/api/v1/users", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/v1/admin/auth/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/v1/litellm", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/v1/litellm/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/v1/me", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/v1/playground/chat/completions", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/v1/auth/logout", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -63,93 +69,86 @@ func TestManagementSecurityAPIKeyPlanesAndDenylist(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("inference on management=%d body=%s", w.Code, w.Body.String())
 	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts", nil, nil, map[string]string{"Authorization": "Bearer " + inferenceSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("inference on SA admin=%d body=%s", w.Code, w.Body.String())
-	}
 	w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), inference.ID) || !strings.Contains(w.Body.String(), management.ID) {
 		t.Fatalf("management key list=%d body=%s", w.Code, w.Body.String())
 	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/me", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("key on /me=%d body=%s", w.Code, w.Body.String())
+
+	securityPlane := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"service accounts list", http.MethodGet, "/api/v1/admin/service-accounts", nil},
+		{"service accounts create", http.MethodPost, "/api/v1/admin/service-accounts", map[string]string{"name": "forbidden"}},
+		{"api key create", http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "escalated", "key_type": auth.APIKeyTypeFull, "owner_user_id": admin.ID}},
+		{"api key patch", http.MethodPatch, "/api/v1/api-keys/" + management.ID, map[string]any{"enabled": false}},
+		{"api key rotate", http.MethodPost, "/api/v1/api-keys/" + management.ID + "/rotate", nil},
+		{"users list", http.MethodGet, "/api/v1/users", nil},
+		{"users create", http.MethodPost, "/api/v1/users", map[string]string{"username": "attacker", "password": "correct-horse-battery"}},
+		{"session revoke", http.MethodDelete, "/api/v1/sessions/example", nil},
+		{"oidc settings", http.MethodPut, "/api/v1/admin/auth/settings", map[string]any{"oidc_jit_provisioning_enabled": true}},
+		{"oidc providers", http.MethodPost, "/api/v1/admin/auth/providers", map[string]any{"name": "attacker"}},
+		{"litellm save", http.MethodPut, "/api/v1/litellm", map[string]any{"proxy_url": "http://example.test"}},
+		{"litellm sync", http.MethodPost, "/api/v1/litellm/sync", nil},
+		{"litellm rotate", http.MethodPost, "/api/v1/litellm/rotate", nil},
 	}
-	w = adminRequest(t, handler, http.MethodPost, "/api/v1/auth/logout", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("key on logout=%d body=%s", w.Code, w.Body.String())
+	for _, principal := range []struct {
+		name   string
+		secret string
+	}{
+		{"management", managementSecret},
+		{"full", fullSecret},
+		{"service-account management", saMgmtSecret},
+		{"service-account full", saSecret},
+	} {
+		for _, operation := range securityPlane {
+			w = adminRequest(t, handler, operation.method, operation.path, operation.body, nil, map[string]string{"Authorization": "Bearer " + principal.secret})
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("%s on %s=%d body=%s", principal.name, operation.name, w.Code, w.Body.String())
+			}
+		}
 	}
-	w = adminRequest(t, handler, http.MethodPost, "/api/v1/auth/ws-ticket", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("key on ws-ticket=%d body=%s", w.Code, w.Body.String())
+
+	for _, secret := range []string{managementSecret, fullSecret, saMgmtSecret, saSecret} {
+		w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer " + secret})
+		if w.Code != http.StatusOK {
+			t.Fatalf("API key inventory read=%d body=%s", w.Code, w.Body.String())
+		}
+		w = adminRequest(t, handler, http.MethodGet, "/api/v1/litellm", nil, nil, map[string]string{"Authorization": "Bearer " + secret})
+		if w.Code != http.StatusOK {
+			t.Fatalf("LiteLLM status read=%d body=%s", w.Code, w.Body.String())
+		}
+		w = adminRequest(t, handler, http.MethodPost, "/api/v1/litellm/test", nil, nil, map[string]string{"Authorization": "Bearer " + secret})
+		if w.Code != http.StatusOK {
+			t.Fatalf("LiteLLM test=%d body=%s", w.Code, w.Body.String())
+		}
 	}
-	w = adminRequest(t, handler, http.MethodPost, "/api/v1/playground/chat/completions", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("key on playground=%d body=%s", w.Code, w.Body.String())
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/me"},
+		{http.MethodPost, "/api/v1/auth/logout"},
+		{http.MethodPost, "/api/v1/auth/ws-ticket"},
+		{http.MethodPost, "/api/v1/playground/chat/completions"},
+		{http.MethodGet, "/api/v1/logs/stream"},
+	} {
+		w = adminRequest(t, handler, tc.method, tc.path, nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("key on session-bound %s=%d body=%s", tc.path, w.Code, w.Body.String())
+		}
 	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/logs/stream", nil, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("key on logs stream=%d body=%s", w.Code, w.Body.String())
+
+	w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts", nil, nil, map[string]string{"Authorization": "Bearer " + login.AccessToken})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), account.ID) {
+		t.Fatalf("JWT on SA admin=%d body=%s", w.Code, w.Body.String())
 	}
 	w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer sk-bogusvalue"})
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unknown sk- key=%d body=%s", w.Code, w.Body.String())
-	}
-	for _, secret := range []string{managementSecret, saMgmtSecret} {
-		w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts", nil, nil, map[string]string{"Authorization": "Bearer " + secret})
-		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "this API key cannot manage service accounts") {
-			t.Fatalf("management key on SA admin=%d body=%s", w.Code, w.Body.String())
-		}
-		w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts/"+account.ID, nil, nil, map[string]string{"Authorization": "Bearer " + secret})
-		if w.Code != http.StatusForbidden {
-			t.Fatalf("management key on SA item=%d body=%s", w.Code, w.Body.String())
-		}
-	}
-	createdSA := adminRequest(t, handler, http.MethodPost, "/api/v1/admin/service-accounts", map[string]string{"name": "from-mgmt-key"}, nil, map[string]string{"Authorization": "Bearer " + managementSecret})
-	if createdSA.Code != http.StatusForbidden {
-		t.Fatalf("management key create SA=%d body=%s", createdSA.Code, createdSA.Body.String())
-	}
-	for _, tc := range []struct{ name, secret string }{{"user-owned full", fullSecret}, {"SA-owned full", saSecret}} {
-		w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts", nil, nil, map[string]string{"Authorization": "Bearer " + tc.secret})
-		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), account.ID) {
-			t.Fatalf("%s on SA admin=%d body=%s", tc.name, w.Code, w.Body.String())
-		}
-		w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts/"+account.ID, nil, nil, map[string]string{"Authorization": "Bearer " + tc.secret})
-		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"keys"`) {
-			t.Fatalf("%s on SA item=%d body=%s", tc.name, w.Code, w.Body.String())
-		}
-	}
-	createdFull := adminRequest(t, handler, http.MethodPost, "/api/v1/admin/service-accounts", map[string]string{"name": "from-full-key"}, nil, map[string]string{"Authorization": "Bearer " + fullSecret})
-	if createdFull.Code != http.StatusCreated || !strings.Contains(createdFull.Body.String(), "from-full-key") {
-		t.Fatalf("user-owned full key create SA=%d body=%s", createdFull.Code, createdFull.Body.String())
-	}
-	createdSAOwned := adminRequest(t, handler, http.MethodPost, "/api/v1/admin/service-accounts", map[string]string{"name": "from-sa-full-key"}, nil, map[string]string{"Authorization": "Bearer " + saSecret})
-	if createdSAOwned.Code != http.StatusCreated || !strings.Contains(createdSAOwned.Body.String(), "from-sa-full-key") {
-		t.Fatalf("SA-owned full key create SA=%d body=%s", createdSAOwned.Code, createdSAOwned.Body.String())
-	}
-	var createdFullAccount auth.ServiceAccount
-	decodeAPIJSON(t, createdFull, &createdFullAccount)
-	patchedFull := adminRequest(t, handler, http.MethodPatch, "/api/v1/admin/service-accounts/"+createdFullAccount.ID, map[string]any{"name": "from-full-key-renamed"}, nil, map[string]string{"Authorization": "Bearer " + fullSecret})
-	if patchedFull.Code != http.StatusNoContent {
-		t.Fatalf("user-owned full key patch SA=%d body=%s", patchedFull.Code, patchedFull.Body.String())
-	}
-	var createdSAOwnedAccount auth.ServiceAccount
-	decodeAPIJSON(t, createdSAOwned, &createdSAOwnedAccount)
-	deletedSAOwned := adminRequest(t, handler, http.MethodDelete, "/api/v1/admin/service-accounts/"+createdSAOwnedAccount.ID, nil, nil, map[string]string{"Authorization": "Bearer " + saSecret})
-	if deletedSAOwned.Code != http.StatusNoContent {
-		t.Fatalf("SA-owned full key delete SA=%d body=%s", deletedSAOwned.Code, deletedSAOwned.Body.String())
-	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer " + saSecret})
-	if w.Code != http.StatusOK {
-		t.Fatalf("SA key on api-keys=%d body=%s", w.Code, w.Body.String())
-	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer " + fullSecret})
-	if w.Code != http.StatusOK {
-		t.Fatalf("user-owned full key on api-keys=%d body=%s", w.Code, w.Body.String())
-	}
-	w = adminRequest(t, handler, http.MethodGet, "/api/v1/admin/service-accounts", nil, nil, map[string]string{"Authorization": "Bearer " + login.AccessToken})
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), account.ID) {
-		t.Fatalf("JWT on SA admin=%d body=%s", w.Code, w.Body.String())
 	}
 	w = adminRequest(t, handler, http.MethodGet, "/api/v1/api-keys", nil, nil, map[string]string{"Authorization": "Bearer not-a-key"})
 	if w.Code != http.StatusUnauthorized {
