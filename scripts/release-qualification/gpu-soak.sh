@@ -152,10 +152,13 @@ wait_state_through_failure() {
 
 worker_count() {
   local instance_id="$1"
-  docker exec -u 0 "$container_name" sh -c '
+  # The managed worker runs as the image's USER (1000). Linux ptrace/procfs
+  # access rules may deny /proc/<pid>/environ to a root docker-exec process
+  # without CAP_SYS_PTRACE, while the same-UID runtime user can read its child.
+  docker exec "$container_name" sh -c '
     instance="$1"; count=0
     for env in /proc/[0-9]*/environ; do
-      if tr "\000" "\n" <"$env" 2>/dev/null | grep -qx "LLAMARACK_INSTANCE_ID=$instance"; then
+      if (tr "\000" "\n" <"$env") 2>/dev/null | grep -qx "LLAMARACK_INSTANCE_ID=$instance"; then
         count=$((count + 1))
       fi
     done
@@ -171,9 +174,9 @@ assert_single_worker() {
 
 assert_worker_identity() {
   local pid="$1" instance_id="$2"
-  docker exec -u 0 "$container_name" sh -c '
+  docker exec "$container_name" sh -c '
     pid="$1"; instance="$2"
-    tr "\000" "\n" <"/proc/${pid}/environ" 2>/dev/null \
+    (tr "\000" "\n" <"/proc/${pid}/environ") 2>/dev/null \
       | grep -qx "LLAMARACK_INSTANCE_ID=$instance"
   ' sh "$pid" "$instance_id"
 }
@@ -430,7 +433,7 @@ index = args.index("--device")
 assert index + 1 < len(args), args
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
-docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/environ" \
+docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${moe_worker_pid}/environ) 2>/dev/null" \
   >"$artifact_dir/moe-worker-environ.txt"
 grep -qx "LLAMARACK_INSTANCE_ID=${moe_instance_id}" "$artifact_dir/moe-worker-environ.txt"
 auth_request POST "/api/v1/instances/${moe_instance_id}/stop" >/dev/null
