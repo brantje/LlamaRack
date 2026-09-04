@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -250,6 +251,9 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	writeMetricHelp(w, "manager_goroutines", "Current number of goroutines in the LlamaRack manager process.")
+	writeMetricType(w, "manager_goroutines", "gauge")
+	writeMetricSample(w, "manager_goroutines", "", strconv.Itoa(runtime.NumGoroutine()))
 	writeMetricHelp(w, "gateway_requests_total", "OpenAI-compatible gateway requests.")
 	writeMetricType(w, "gateway_requests_total", "counter")
 	declaredMetric := map[string]bool{}
