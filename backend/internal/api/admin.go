@@ -450,6 +450,7 @@ func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
 			if status.LastSync != nil {
 				liteLLM["last_sync_ok"] = status.LastSyncOK
 			}
+		}
 	}
 	profile, profileErr := h.profile()
 	llama := map[string]any{"available": profileErr == nil}
