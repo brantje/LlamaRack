@@ -58,6 +58,38 @@ func TestNetworkTrustsForwardingOnlyFromConfiguredProxy(t *testing.T) {
 	}
 }
 
+func TestRequestForwardingDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	s := testSecuritySettings(t)
+	_, _ = s.Set(ctx, settings.TrustedProxies, "10.0.0.0/8")
+	network := NewNetwork(s)
+
+	direct := httptest.NewRequest(http.MethodGet, "http://manager.local/api/v1/system", nil)
+	direct.RemoteAddr = "203.0.113.9:5555"
+	got := network.RequestForwardingDiagnostics(direct)
+	if got.PeerAddress != "203.0.113.9" || got.PeerTrusted || len(got.ForwardedHeader) != 0 || len(got.XForwardedFor) != 0 || got.EffectiveRemoteAddress != "203.0.113.9" {
+		t.Fatalf("direct diagnostics=%+v", got)
+	}
+
+	proxied := httptest.NewRequest(http.MethodGet, "http://manager.local/api/v1/system", nil)
+	proxied.RemoteAddr = "10.0.0.2:1234"
+	proxied.Header.Set("Forwarded", `for=198.51.100.8;proto=https, for=10.0.0.1`)
+	proxied.Header.Set("X-Forwarded-For", "198.51.100.20, 10.0.0.3")
+	got = network.RequestForwardingDiagnostics(proxied)
+	if got.PeerAddress != "10.0.0.2" || !got.PeerTrusted {
+		t.Fatalf("peer diagnostics=%+v", got)
+	}
+	if len(got.ForwardedHeader) != 2 || got.ForwardedHeader[0] != "198.51.100.8" || got.ForwardedHeader[1] != "10.0.0.1" {
+		t.Fatalf("forwarded header=%v", got.ForwardedHeader)
+	}
+	if len(got.XForwardedFor) != 2 || got.XForwardedFor[0] != "198.51.100.20" || got.XForwardedFor[1] != "10.0.0.3" {
+		t.Fatalf("x-forwarded-for=%v", got.XForwardedFor)
+	}
+	if got.EffectiveRemoteAddress != "198.51.100.8" {
+		t.Fatalf("effective remote=%q", got.EffectiveRemoteAddress)
+	}
+}
+
 func TestForwardedHeaderExternalURLAndOrigins(t *testing.T) {
 	ctx := context.Background()
 	s := testSecuritySettings(t)
