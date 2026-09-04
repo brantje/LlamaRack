@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/buildinfo"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/litellm"
@@ -482,6 +483,7 @@ func (h *adminHandler) system(w http.ResponseWriter, r *http.Request) {
 		llama["options"] = len(profile.Options)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"identity": buildinfo.Current(),
 		"manager":  map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
 		"network":  map[string]any{"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r), "allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL},
 		"llamacpp": llama,
