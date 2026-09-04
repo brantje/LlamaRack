@@ -156,6 +156,7 @@ jobs:
       cpu_image: ${{ needs.build-candidates.outputs.cpu_image }}
       cuda_image: ${{ needs.build-candidates.outputs.cuda_image }}
       run_gpu: ${{ github.event_name == 'release' || github.ref == 'refs/heads/feat/issue-120-release-qualification' }}
+      run_compat: ${{ github.event_name == 'release' }}
       gpu_models_dir: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
       gpu_cycles: 8
     secrets: inherit

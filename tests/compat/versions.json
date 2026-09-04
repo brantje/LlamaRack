@@ -1,0 +1,7 @@
+{
+  "python": "3.13",
+  "node": "24",
+  "openai_python": "3.8.0",
+  "openai_node": "7.9.0",
+  "litellm": "1.99.0"
+}

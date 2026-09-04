@@ -16,8 +16,13 @@ on:
         required: false
         default: false
         type: boolean
+      run_compat:
+        description: Run live OpenAI/LiteLLM compatibility qualification
+        required: false
+        default: false
+        type: boolean
       gpu_models_dir:
-        description: Directory on the GPU runner host containing the four qualification GGUFs
+        description: Directory on the GPU runner host containing the qualification GGUFs
         required: false
         default: /home/node/github-runners/models
         type: string
@@ -41,8 +46,13 @@ on:
         required: false
         default: false
         type: boolean
+      run_compat:
+        description: Run live OpenAI/LiteLLM compatibility qualification
+        required: false
+        default: false
+        type: boolean
       gpu_models_dir:
-        description: Directory on the GPU runner host containing the four qualification GGUFs
+        description: Directory on the GPU runner host containing the qualification GGUFs
         required: false
         default: /home/node/github-runners/models
         type: string
@@ -127,6 +137,57 @@ jobs:
         with:
           name: container-qualification-${{ github.run_id }}
           path: artifacts/release-qualification/containers
+          if-no-files-found: error
+
+  compatibility:
+    name: OpenAI / LiteLLM compatibility
+    if: ${{ inputs.run_compat }}
+    runs-on: [self-hosted, gpu-runner]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify compatibility runner prerequisites
+        env:
+          CUDA_IMAGE: ${{ inputs.cuda_image }}
+          GPU_MODELS_DIR: ${{ inputs.gpu_models_dir }}
+        run: |
+          set -euo pipefail
+          [[ "$CUDA_IMAGE" =~ ^ghcr\.io/brantje/llamarack@sha256:[0-9a-f]{64}$ ]] || {
+            echo "CUDA candidate must be an immutable ghcr.io/brantje/llamarack digest reference" >&2
+            exit 2
+          }
+          for command in docker curl python3 node npm nvidia-smi; do
+            command -v "$command" >/dev/null || { echo "missing command on gpu-runner: $command" >&2; exit 1; }
+          done
+          docker info >/dev/null
+          nvidia-smi -L
+          test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
+      - name: Run real-client compatibility suite
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/compatibility
+          CUDA_IMAGE: ${{ inputs.cuda_image }}
+          GPU_MODELS_DIR: ${{ inputs.gpu_models_dir }}
+        run: bash scripts/release-qualification/compat-gpu.sh "$CUDA_IMAGE" "$GPU_MODELS_DIR"
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-qualification-${{ github.run_id }}
+          path: artifacts/release-qualification/compatibility
           if-no-files-found: error
 
   gpu:

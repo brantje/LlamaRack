@@ -1,0 +1,11 @@
+{
+  "name": "llamarack-openai-compat",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "openai": "7.9.0"
+  }
+}
