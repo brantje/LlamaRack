@@ -91,6 +91,8 @@ DROP TABLE release_upgrade_probe;
 			{`SELECT name FROM service_accounts WHERE id='sa-1'`, "Upgrade Service"},
 			{`SELECT key_type FROM api_keys WHERE id='key-1'`, "full"},
 			{`SELECT prefix FROM provider_secrets WHERE name='huggingface'`, "hf_"},
+			{`SELECT hex(ciphertext) FROM provider_secrets WHERE name='huggingface'`, "0102"},
+			{`SELECT hex(nonce) FROM provider_secrets WHERE name='huggingface'`, "0304"},
 			{`SELECT gguf_path FROM models WHERE id='model-1'`, "upgrade/model.gguf"},
 			{`SELECT option_value FROM model_options WHERE model_id='model-1' AND option_key='ctx-size'`, "8192"},
 			{`SELECT name FROM instances WHERE id='instance-1'`, "Upgrade Instance"},
