@@ -317,15 +317,66 @@ type generalSettingsInput struct {
 	PrometheusAuthToken        *string `json:"prometheus_auth_token"`
 }
 
-func generalSettingsRequireUserPrincipal(in generalSettingsInput) bool {
-	return in.SessionLifetimeSeconds != nil ||
-		in.LoginProtectionEnabled != nil ||
-		in.LoginFailureThreshold != nil ||
-		in.LoginLockoutSeconds != nil ||
-		in.TrustedProxies != nil ||
-		in.AllowedOrigins != nil ||
-		in.ExternalURL != nil ||
-		in.PrometheusAuthToken != nil
+type generalSettingUpdate struct {
+	key       string
+	value     any
+	sensitive bool
+}
+
+func generalSettingsUpdates(in generalSettingsInput) []generalSettingUpdate {
+	updates := make([]generalSettingUpdate, 0, 14)
+	if in.SessionLifetimeSeconds != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.SessionLifetimeSeconds, value: *in.SessionLifetimeSeconds, sensitive: true})
+	}
+	if in.LoginProtectionEnabled != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.LoginProtectionEnabled, value: *in.LoginProtectionEnabled, sensitive: true})
+	}
+	if in.LoginFailureThreshold != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.LoginFailureThreshold, value: *in.LoginFailureThreshold, sensitive: true})
+	}
+	if in.LoginLockoutSeconds != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.LoginLockoutSeconds, value: *in.LoginLockoutSeconds, sensitive: true})
+	}
+	if in.TrustedProxies != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.TrustedProxies, value: *in.TrustedProxies, sensitive: true})
+	}
+	if in.AllowedOrigins != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.AllowedOrigins, value: *in.AllowedOrigins, sensitive: true})
+	}
+	if in.ExternalURL != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.ExternalURL, value: *in.ExternalURL, sensitive: true})
+	}
+	if in.StartupTimeoutSeconds != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.StartupTimeoutSeconds, value: *in.StartupTimeoutSeconds})
+	}
+	if in.IdleUnloadSeconds != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.IdleUnloadSeconds, value: *in.IdleUnloadSeconds})
+	}
+	if in.AlwaysOnReconcileSeconds != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.AlwaysOnReconcileSeconds, value: *in.AlwaysOnReconcileSeconds})
+	}
+	if in.MaxPendingPerInstance != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.MaxPendingRequestsPerInstance, value: *in.MaxPendingPerInstance})
+	}
+	if in.MaxPendingGlobal != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.MaxPendingRequestsGlobal, value: *in.MaxPendingGlobal})
+	}
+	if in.ObservabilityRetentionDays != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.ObservabilityRetentionDays, value: *in.ObservabilityRetentionDays})
+	}
+	if in.PrometheusAuthToken != nil {
+		updates = append(updates, generalSettingUpdate{key: settings.PrometheusAuthToken, value: *in.PrometheusAuthToken, sensitive: true})
+	}
+	return updates
+}
+
+func generalSettingsRequireUserPrincipal(updates []generalSettingUpdate) bool {
+	for _, update := range updates {
+		if update.sensitive {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
@@ -346,63 +397,21 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 	if !decode(w, r, &in) {
 		return
 	}
-	if generalSettingsRequireUserPrincipal(in) && !requireManagementUserPrincipal(w, principal) {
+	updates := generalSettingsUpdates(in)
+	if generalSettingsRequireUserPrincipal(updates) && !requireManagementUserPrincipal(w, principal) {
 		return
 	}
-	updates := map[string]any{}
-	if in.SessionLifetimeSeconds != nil {
-		updates[settings.SessionLifetimeSeconds] = *in.SessionLifetimeSeconds
-	}
-	if in.LoginProtectionEnabled != nil {
-		updates[settings.LoginProtectionEnabled] = *in.LoginProtectionEnabled
-	}
-	if in.LoginFailureThreshold != nil {
-		updates[settings.LoginFailureThreshold] = *in.LoginFailureThreshold
-	}
-	if in.LoginLockoutSeconds != nil {
-		updates[settings.LoginLockoutSeconds] = *in.LoginLockoutSeconds
-	}
-	if in.TrustedProxies != nil {
-		updates[settings.TrustedProxies] = *in.TrustedProxies
-	}
-	if in.AllowedOrigins != nil {
-		updates[settings.AllowedOrigins] = *in.AllowedOrigins
-	}
-	if in.ExternalURL != nil {
-		updates[settings.ExternalURL] = *in.ExternalURL
-	}
-	if in.StartupTimeoutSeconds != nil {
-		updates[settings.StartupTimeoutSeconds] = *in.StartupTimeoutSeconds
-	}
-	if in.IdleUnloadSeconds != nil {
-		updates[settings.IdleUnloadSeconds] = *in.IdleUnloadSeconds
-	}
-	if in.AlwaysOnReconcileSeconds != nil {
-		updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds
-	}
-	if in.MaxPendingPerInstance != nil {
-		updates[settings.MaxPendingRequestsPerInstance] = *in.MaxPendingPerInstance
-	}
-	if in.MaxPendingGlobal != nil {
-		updates[settings.MaxPendingRequestsGlobal] = *in.MaxPendingGlobal
-	}
-	if in.ObservabilityRetentionDays != nil {
-		updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays
-	}
-	if in.PrometheusAuthToken != nil {
-		updates[settings.PrometheusAuthToken] = *in.PrometheusAuthToken
-	}
-	for key, value := range updates {
-		if _, err := h.settings.Set(r.Context(), key, value); err != nil {
+	for _, update := range updates {
+		if _, err := h.settings.Set(r.Context(), update.key, update.value); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		if key == settings.SessionLifetimeSeconds {
-			if seconds, ok := value.(int); ok {
+		if update.key == settings.SessionLifetimeSeconds {
+			if seconds, ok := update.value.(int); ok {
 				h.auth.SetSessionLifetime(time.Duration(seconds) * time.Second)
 			}
 		}
-		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", key)...)
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", update.key)...)
 	}
 	general, err := h.settings.General(r.Context())
 	if err != nil {
