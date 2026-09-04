@@ -1,0 +1,148 @@
+name: Release qualification
+
+on:
+  workflow_call:
+    inputs:
+      cpu_image:
+        description: CPU candidate image to qualify
+        required: true
+        type: string
+      cuda_image:
+        description: CUDA candidate image to qualify
+        required: true
+        type: string
+      run_gpu:
+        description: Run the self-hosted GPU qualification job
+        required: false
+        default: false
+        type: boolean
+      gpu_model_path:
+        description: Dense GGUF path on the GPU runner host
+        required: false
+        default: /models/qualification.gguf
+        type: string
+      gpu_moe_model_path:
+        description: MoE GGUF path on the GPU runner host
+        required: false
+        default: /models/qualification-moe.gguf
+        type: string
+      gpu_cycles:
+        description: Number of dense lifecycle soak cycles
+        required: false
+        default: 8
+        type: number
+  workflow_dispatch:
+    inputs:
+      cpu_image:
+        description: CPU candidate image to qualify
+        required: true
+        type: string
+      cuda_image:
+        description: CUDA candidate image to qualify
+        required: true
+        type: string
+      run_gpu:
+        description: Run the self-hosted GPU qualification job
+        required: false
+        default: false
+        type: boolean
+      gpu_model_path:
+        description: Dense GGUF path on the GPU runner host
+        required: false
+        default: /models/qualification.gguf
+        type: string
+      gpu_moe_model_path:
+        description: MoE GGUF path on the GPU runner host
+        required: false
+        default: /models/qualification-moe.gguf
+        type: string
+      gpu_cycles:
+        description: Number of dense lifecycle soak cycles
+        required: false
+        default: 8
+        type: number
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  software:
+    name: Software qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Run deterministic release scenarios
+        run: bash scripts/release-qualification/software.sh artifacts/release-qualification/software
+      - name: Upload software qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: software-qualification-${{ github.run_id }}
+          path: artifacts/release-qualification/software
+          if-no-files-found: error
+
+  containers:
+    name: Candidate container qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull exact candidate images
+        run: |
+          docker pull '${{ inputs.cpu_image }}'
+          docker pull '${{ inputs.cuda_image }}'
+      - name: Qualify CPU candidate
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/containers
+        run: bash scripts/release-qualification/container-smoke.sh '${{ inputs.cpu_image }}' cpu
+      - name: Qualify CUDA packaging without a GPU
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/containers
+        run: bash scripts/release-qualification/container-smoke.sh '${{ inputs.cuda_image }}' cuda
+      - name: Upload container qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-qualification-${{ github.run_id }}
+          path: artifacts/release-qualification/containers
+          if-no-files-found: error
+
+  gpu:
+    name: GPU lifecycle qualification
+    if: ${{ inputs.run_gpu }}
+    runs-on: [self-hosted, gpu-runner]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run real-hardware lifecycle soak
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
+        run: >-
+          bash scripts/release-qualification/gpu-soak.sh
+          '${{ inputs.cuda_image }}'
+          '${{ inputs.gpu_model_path }}'
+          '${{ inputs.gpu_moe_model_path }}'
+          '${{ inputs.gpu_cycles }}'
+      - name: Upload GPU qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-qualification-${{ github.run_id }}
+          path: artifacts/release-qualification/gpu
+          if-no-files-found: error
