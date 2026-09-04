@@ -16,18 +16,17 @@ The core separation is:
 
 SQLite is the durable store for configuration that must survive manager restarts.
 
-## 2. Development schema policy
+## 2. Release schema policy
 
-The project is still in active development.
+LlamaRack uses embedded Goose migrations for SQLite schema evolution. See [014 — Database Migrations](014-database-migrations.md).
 
-For Model/Instance control-plane separation, GGUF metadata work and related schema restructuring:
+For active development on unreleased schema:
 
-- change the current schema directly;
-- update fixtures/seeds/tests directly;
-- development databases may be recreated;
-- **do not create database migration files for this development work**.
+- add a new immutable Goose migration for every schema change after the 1.0 baseline;
+- update fixtures/seeds/tests in the same change;
+- do not add runtime `ensure*Schema`, `PRAGMA table_info`, or guarded `ALTER TABLE` compatibility helpers to application code.
 
-A production/release migration policy can be introduced before schema backward compatibility becomes a requirement.
+Before `1.0.0`, supported pre-goose development databases may be upgraded through the bounded bootstrap described in spec 014. Unsupported legacy databases must be recreated from backup or fresh install.
 
 ## 3. Design principles
 

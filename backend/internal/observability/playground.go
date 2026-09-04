@@ -30,47 +30,6 @@ func (s *Service) ensurePlaygroundSchema(ctx context.Context) error {
 	if _, ok := playgroundSchemaReady.Load(s.db); ok {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS playground_lifecycle_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		event TEXT NOT NULL,
-		instance_id TEXT NOT NULL,
-		correlation_id TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		return err
-	}
-
-	// The Playground diagnostics table was introduced on the redesign branch.
-	// Keep branch-local databases created by the earlier draft compatible rather
-	// than requiring a manual reset.
-	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(playground_lifecycle_events)`)
-	if err != nil {
-		return err
-	}
-	hasCorrelation := false
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == "correlation_id" {
-			hasCorrelation = true
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if !hasCorrelation {
-		if _, err := s.db.ExecContext(ctx, `ALTER TABLE playground_lifecycle_events ADD COLUMN correlation_id TEXT NOT NULL DEFAULT ''`); err != nil {
-			return err
-		}
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS playground_lifecycle_events_correlation_idx ON playground_lifecycle_events(correlation_id,event,id)`); err != nil {
-		return err
-	}
 	playgroundSchemaReady.Store(s.db, struct{}{})
 	return nil
 }

@@ -62,11 +62,6 @@ func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*
 	g := &Gateway{auth: a, lifecycle: l, active: newActiveRegistry()}
 	if len(services) > 0 {
 		g.observability = services[0]
-		if g.observability != nil {
-			if err := g.observability.EnsureCorrelationSchema(context.Background()); err != nil {
-				slog.Warn("initialize inference request correlation schema failed", "error", err)
-			}
-		}
 	}
 	return g
 }

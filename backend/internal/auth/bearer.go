@@ -28,41 +28,6 @@ type managementClaims struct {
 	SessionID string `json:"sid"`
 }
 
-func ensureAuthSchema(db *sql.DB) error {
-	const schema = `
-CREATE TABLE IF NOT EXISTS oidc_providers (
- id TEXT PRIMARY KEY,
- name TEXT NOT NULL,
- enabled INTEGER NOT NULL DEFAULT 1,
- issuer TEXT NOT NULL,
- discovery_url TEXT NOT NULL DEFAULT '',
- client_id TEXT NOT NULL,
- scopes TEXT NOT NULL DEFAULT '["openid"]',
- username_claim TEXT NOT NULL DEFAULT 'preferred_username',
- authorization_endpoint TEXT NOT NULL DEFAULT '',
- token_endpoint TEXT NOT NULL DEFAULT '',
- jwks_url TEXT NOT NULL DEFAULT '',
- last_tested_at INTEGER,
- last_test_succeeded INTEGER NOT NULL DEFAULT 0,
- created_at INTEGER NOT NULL DEFAULT (unixepoch()),
- updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-CREATE TABLE IF NOT EXISTS external_identities (
- id TEXT PRIMARY KEY,
- provider_id TEXT NOT NULL REFERENCES oidc_providers(id) ON DELETE CASCADE,
- issuer TEXT NOT NULL,
- subject TEXT NOT NULL,
- user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
- created_at INTEGER NOT NULL DEFAULT (unixepoch()),
- UNIQUE(provider_id,issuer,subject),
- UNIQUE(provider_id,user_id)
-);
-CREATE INDEX IF NOT EXISTS external_identities_user_idx ON external_identities(user_id);
-`
-	_, err := db.ExecContext(context.Background(), schema)
-	return err
-}
-
 func (s *Service) UsePersistentSigningKey(dataDir string) error {
 	if s.schemaErr != nil {
 		return s.schemaErr
