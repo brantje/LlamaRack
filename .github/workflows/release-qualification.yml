@@ -172,6 +172,10 @@ jobs:
             "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
           python3 scripts/release-qualification/verify-moe-evidence.py \
             "$QUALIFICATION_ARTIFACT_DIR/moe-large-worker-args.txt" 1
+          if [[ -f "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt" ]]; then
+            python3 scripts/release-qualification/verify-dense-multi-evidence.py \
+              "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
+          fi
           wait "$monitor_pid"
           python3 scripts/release-qualification/analyze-manager-growth.py \
             "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \

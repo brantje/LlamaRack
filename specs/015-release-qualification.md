@@ -71,8 +71,8 @@ Four representative GGUFs must already exist on the runner host under one models
 Required role files (symlinks allowed):
 
 ```text
-qualification-llama-8B.gguf      # dense lifecycle soak (or qualification.gguf)
-qualification-12B.gguf           # dense single-GPU pressure/eviction
+qualification-llama-8B.gguf      # dense lifecycle + single-GPU pressure (or qualification.gguf)
+qualification-12B.gguf           # multi-GPU dense placement (≥2 GPUs)
 qualification-moe-4ba1b.gguf     # MoE CPU expert offload (or qualification-moe.gguf)
 qualification-moe-26b-a4b.gguf   # multi-GPU MoE placement
 ```
@@ -83,13 +83,13 @@ Repositories may override the directory with the Actions variable:
 GPU_QUALIFICATION_MODELS_DIR
 ```
 
-Individual absolute path overrides are also supported by the soak harness via `GPU_QUALIFICATION_DENSE_LIFECYCLE`, `GPU_QUALIFICATION_DENSE_PRESSURE`, `GPU_QUALIFICATION_MOE_SMALL`, and `GPU_QUALIFICATION_MOE_LARGE`.
+Individual absolute path overrides are also supported by the soak harness via `GPU_QUALIFICATION_DENSE_LIFECYCLE`, `GPU_QUALIFICATION_DENSE_MULTI`, `GPU_QUALIFICATION_MOE_SMALL`, and `GPU_QUALIFICATION_MOE_LARGE`. Overrides outside the models directory are bind-mounted into the candidate container.
 
-Missing qualification models or zero visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix: when two or more GPUs are visible, multi-GPU placement must be exercised and must not be skipped. The dense pressure model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised.
+Missing qualification models or zero visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix: when two or more GPUs are visible, multi-GPU placement must be exercised for both the 12B dense GGUF and the large MoE GGUF, and must not be skipped. The 8B dense pressure path must raise context until a small number of workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised. The 12B GGUF is not a single-GPU model on 16 GB-class cards; a one-GPU host still requires the file on disk but skips the 12B start.
 
 ## Real-hardware soak
 
-The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs are mounted from one host models directory beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager, smoke-loads every matrix member, then exercises repeated combinations of:
+The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs are mounted from one host models directory beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager, registers all four GGUFs, smoke-loads the models that fit the visible GPU count, then exercises repeated combinations of:
 
 - model registration and Instance creation;
 - real non-streaming inference;
@@ -100,15 +100,16 @@ The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs ar
 - per-Instance idle unload and subsequent autoload recovery;
 - Always-On automatic start, Kill recovery and manual-Stop suppression;
 - repeated stop and restart cycles;
-- real single-GPU resource pressure, active-request protection, and eviction (dense pressure GGUF);
+- real single-GPU resource pressure, active-request protection, and eviction (8B dense GGUF);
 - manager termination while inference is active;
 - manager termination while a worker start is in progress;
 - stale-worker reconciliation and replacement;
-- multi-GPU placement (large MoE GGUF when two or more GPUs are visible);
+- multi-GPU dense placement (12B GGUF when two or more GPUs are visible);
+- multi-GPU MoE placement (large MoE GGUF when two or more GPUs are visible);
 - MoE CPU expert offload using `n-cpu-moe` (small and large MoE GGUFs);
 - persistent settings and authentication across manager restart.
 
-Dense lifecycle scenarios use the 8B dense GGUF. Single-GPU pressure/eviction uses the larger dense pressure GGUF so VRAM demand is deterministic on 16 GB-class cards without spawning a large worker fan-out.
+Dense lifecycle and single-GPU pressure/eviction use the 8B dense GGUF. The 12B dense GGUF is reserved for multi-GPU placement: it is started with both visible devices so the comma-separated `--device` and generated `--tensor-split` launch path is proven. It is not pinned to one 16 GB-class card.
 
 The process-only crash scenario deliberately keeps the container alive while SIGKILLing the manager so a managed `llama-server` child can survive long enough for the next manager process to prove ownership and reconcile it.
 
