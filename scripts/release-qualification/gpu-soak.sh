@@ -423,6 +423,9 @@ import sys
 args = [line.rstrip("\n") for line in open(sys.argv[1], encoding="utf-8")]
 expected_devices = sys.argv[2]
 assert "--n-cpu-moe" in args, args
+cpu_moe_index = args.index("--n-cpu-moe")
+assert cpu_moe_index + 1 < len(args), args
+assert args[cpu_moe_index + 1] == "1", args
 index = args.index("--device")
 assert index + 1 < len(args), args
 assert args[index + 1] == expected_devices, (args, expected_devices)
