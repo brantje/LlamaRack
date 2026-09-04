@@ -62,41 +62,39 @@ gpu-runner
 
 The runner is expected to provide Docker with NVIDIA container GPU access, `nvidia-smi`, and at least one visible GPU. Stable release qualification on the project GPU runner is expected to expose two or more GPUs so multi-GPU placement is exercised; a single-GPU host still runs the single-device lifecycle, pressure/eviction, and MoE CPU-offload paths.
 
-Two representative GGUFs must already exist on the runner host. Default paths are:
+Four representative GGUFs must already exist on the runner host under one models directory. Default directory:
 
 ```text
-/models/qualification.gguf
-/models/qualification-moe.gguf
+/home/node/github-runners/models
 ```
 
-Repositories may override these with the Actions variables:
+Required role files (symlinks allowed):
 
 ```text
-GPU_QUALIFICATION_MODEL_PATH
-GPU_QUALIFICATION_MOE_MODEL_PATH
+qualification-llama-8B.gguf      # dense lifecycle soak (or qualification.gguf)
+qualification-12B.gguf           # dense single-GPU pressure/eviction
+qualification-moe-4ba1b.gguf     # MoE CPU expert offload (or qualification-moe.gguf)
+qualification-moe-26b-a4b.gguf   # multi-GPU MoE placement
 ```
 
-Missing qualification models or zero visible GPUs are release-gate failures. The dense model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised. Multi-GPU placement is required when two or more GPUs are visible and must not be silently skipped on those hosts.
+Repositories may override the directory with the Actions variable:
+
+```text
+GPU_QUALIFICATION_MODELS_DIR
+```
+
+Individual absolute path overrides are also supported by the soak harness via `GPU_QUALIFICATION_DENSE_LIFECYCLE`, `GPU_QUALIFICATION_DENSE_PRESSURE`, `GPU_QUALIFICATION_MOE_SMALL`, and `GPU_QUALIFICATION_MOE_LARGE`.
+
+Missing qualification models or zero visible GPUs are release-gate failures. The dense pressure model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised. Multi-GPU placement is required when two or more GPUs are visible and must not be silently skipped on those hosts.
 
 ## Real-hardware soak
 
-The CUDA candidate is run with all GPUs exposed. Qualification models are mounted beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager and exercises repeated combinations of:
+The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs are mounted from one host models directory beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager, smoke-loads every matrix member, then exercises role-specific scenarios:
 
-- model registration and Instance creation;
-- real non-streaming inference;
-- streaming inference and explicit client cancellation;
-- concurrent inference;
-- concurrent starts with the single-worker invariant;
-- inference-triggered autoload;
-- per-Instance idle unload and subsequent autoload recovery;
-- Always-On automatic start, Kill recovery and manual-Stop suppression;
-- repeated stop and restart cycles;
-- real single-GPU resource pressure and eviction;
-- manager termination while inference is active;
-- manager termination while a worker start is in progress;
-- stale-worker reconciliation and replacement;
-- multi-GPU placement;
-- MoE CPU expert offload using `n-cpu-moe`;
+- dense lifecycle (8B): repeated inference, streaming, cancellation, crash recovery, autoload, idle unload, Always-On;
+- dense pressure (12B): real single-GPU resource pressure, active-request protection, and eviction;
+- small MoE: `n-cpu-moe` CPU expert offload;
+- large MoE: multi-GPU placement (when ≥2 GPUs) plus `n-cpu-moe`;
 - persistent settings and authentication across manager restart.
 
 The process-only crash scenario deliberately keeps the container alive while SIGKILLing the manager so a managed `llama-server` child can survive long enough for the next manager process to prove ownership and reconcile it.

@@ -16,15 +16,10 @@ on:
         required: false
         default: false
         type: boolean
-      gpu_model_path:
-        description: Dense GGUF path on the GPU runner host
+      gpu_models_dir:
+        description: Directory on the GPU runner host containing the four qualification GGUFs
         required: false
-        default: /models/qualification.gguf
-        type: string
-      gpu_moe_model_path:
-        description: MoE GGUF path on the GPU runner host
-        required: false
-        default: /models/qualification-moe.gguf
+        default: /home/node/github-runners/models
         type: string
       gpu_cycles:
         description: Number of dense lifecycle soak cycles
@@ -46,15 +41,10 @@ on:
         required: false
         default: false
         type: boolean
-      gpu_model_path:
-        description: Dense GGUF path on the GPU runner host
+      gpu_models_dir:
+        description: Directory on the GPU runner host containing the four qualification GGUFs
         required: false
-        default: /models/qualification.gguf
-        type: string
-      gpu_moe_model_path:
-        description: MoE GGUF path on the GPU runner host
-        required: false
-        default: /models/qualification-moe.gguf
+        default: /home/node/github-runners/models
         type: string
       gpu_cycles:
         description: Number of dense lifecycle soak cycles
@@ -158,8 +148,7 @@ jobs:
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
           CUDA_IMAGE: ${{ inputs.cuda_image }}
-          GPU_MODEL_PATH: ${{ inputs.gpu_model_path }}
-          GPU_MOE_MODEL_PATH: ${{ inputs.gpu_moe_model_path }}
+          GPU_MODELS_DIR: ${{ inputs.gpu_models_dir }}
           GPU_CYCLES: ${{ inputs.gpu_cycles }}
         run: |
           set -euo pipefail
@@ -171,16 +160,18 @@ jobs:
             echo "gpu_cycles must be a positive integer" >&2
             exit 2
           }
+          test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
           bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
           monitor_pid=$!
           trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
           bash scripts/release-qualification/gpu-soak.sh \
             "$CUDA_IMAGE" \
-            "$GPU_MODEL_PATH" \
-            "$GPU_MOE_MODEL_PATH" \
+            "$GPU_MODELS_DIR" \
             "$GPU_CYCLES"
           python3 scripts/release-qualification/verify-moe-evidence.py \
             "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
+          python3 scripts/release-qualification/verify-moe-evidence.py \
+            "$QUALIFICATION_ARTIFACT_DIR/moe-large-worker-args.txt" 1
           wait "$monitor_pid"
           python3 scripts/release-qualification/analyze-manager-growth.py \
             "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \

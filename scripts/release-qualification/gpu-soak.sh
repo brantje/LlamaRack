@@ -1,16 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image="${1:?usage: gpu-soak.sh <cuda-image> <dense-gguf> <moe-gguf> [cycles]}"
-dense_host="${2:?dense GGUF path is required}"
-moe_host="${3:?MoE GGUF path is required}"
-cycles="${4:-8}"
+# Usage:
+#   gpu-soak.sh <cuda-image> <models-dir> [cycles]
+#
+# models-dir must contain the four role-specific GGUFs (symlinks allowed):
+#   qualification-llama-8B.gguf     dense lifecycle (or qualification.gguf)
+#   qualification-12B.gguf          dense single-GPU pressure/eviction
+#   qualification-moe-4ba1b.gguf    MoE CPU offload (or qualification-moe.gguf)
+#   qualification-moe-26b-a4b.gguf  multi-GPU MoE placement (required when ≥2 GPUs)
+#
+# Optional absolute-path overrides:
+#   GPU_QUALIFICATION_DENSE_LIFECYCLE
+#   GPU_QUALIFICATION_DENSE_PRESSURE
+#   GPU_QUALIFICATION_MOE_SMALL
+#   GPU_QUALIFICATION_MOE_LARGE
+
+image="${1:?usage: gpu-soak.sh <cuda-image> <models-dir> [cycles]}"
+models_dir_arg="${2:?models directory is required}"
+cycles="${3:-8}"
 
 for command in docker curl python3 nvidia-smi; do
   command -v "$command" >/dev/null || { echo "missing command: $command" >&2; exit 1; }
 done
-[[ -f "$dense_host" ]] || { echo "dense qualification model not found: $dense_host" >&2; exit 1; }
-[[ -f "$moe_host" ]] || { echo "MoE qualification model not found: $moe_host" >&2; exit 1; }
+[[ -d "$models_dir_arg" ]] || { echo "models directory not found: $models_dir_arg" >&2; exit 1; }
+models_dir="$(cd "$models_dir_arg" && pwd)"
+
+pick_model() {
+  local override="$1"; shift
+  if [[ -n "$override" ]]; then
+    [[ -f "$override" ]] || { echo "qualification model not found: $override" >&2; exit 1; }
+    printf '%s\n' "$override"
+    return 0
+  fi
+  local name
+  for name in "$@"; do
+    if [[ -f "$models_dir/$name" ]]; then
+      printf '%s\n' "$models_dir/$name"
+      return 0
+    fi
+  done
+  echo "none of [$*] found under $models_dir" >&2
+  exit 1
+}
+
+dense_lifecycle_host="$(pick_model "${GPU_QUALIFICATION_DENSE_LIFECYCLE:-}" qualification-llama-8B.gguf qualification.gguf)"
+dense_pressure_host="$(pick_model "${GPU_QUALIFICATION_DENSE_PRESSURE:-}" qualification-12B.gguf)"
+moe_small_host="$(pick_model "${GPU_QUALIFICATION_MOE_SMALL:-}" qualification-moe-4ba1b.gguf qualification-moe.gguf)"
+moe_large_host="$(pick_model "${GPU_QUALIFICATION_MOE_LARGE:-}" qualification-moe-26b-a4b.gguf)"
 
 artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$(pwd)/artifacts/release-qualification/gpu}"
 mkdir -p "$artifact_dir"
@@ -18,12 +55,20 @@ config_dir="$(mktemp -d)"
 chmod 0777 "$config_dir"
 container_name="llamarack-gpu-qualification-$$"
 base_url=""
-dense_dir="$(cd "$(dirname "$dense_host")" && pwd)"
-moe_dir="$(cd "$(dirname "$moe_host")" && pwd)"
-dense_path="/models/qualification/dense/$(basename "$dense_host")"
-moe_path="/models/qualification/moe/$(basename "$moe_host")"
+dense_lifecycle_path="/models/qualification/$(basename "$dense_lifecycle_host")"
+dense_pressure_path="/models/qualification/$(basename "$dense_pressure_host")"
+moe_small_path="/models/qualification/$(basename "$moe_small_host")"
+moe_large_path="/models/qualification/$(basename "$moe_large_host")"
 docker_probe_host="${GPU_DOCKER_HOST:-127.0.0.1}"
 docker_publish_host="127.0.0.1"
+
+{
+  printf 'models_dir=%s\n' "$models_dir"
+  printf 'dense_lifecycle=%s\n' "$dense_lifecycle_host"
+  printf 'dense_pressure=%s\n' "$dense_pressure_host"
+  printf 'moe_small=%s\n' "$moe_small_host"
+  printf 'moe_large=%s\n' "$moe_large_host"
+} | tee "$artifact_dir/model-matrix.txt"
 
 if [[ -f /.dockerenv && "$docker_probe_host" == "127.0.0.1" ]]; then
   docker_probe_host="$(python3 - <<'PY'
@@ -96,8 +141,7 @@ docker run -d --gpus all --name "$container_name" \
   --entrypoint sh \
   -p "${docker_publish_host}::8000" \
   -v "$config_dir:/config" \
-  -v "$dense_dir:/models/qualification/dense:ro" \
-  -v "$moe_dir:/models/qualification/moe:ro" \
+  -v "$models_dir:/models/qualification:ro" \
   "$image" -c 'while :; do sleep 3600; done' >/dev/null
 port="$(docker port "$container_name" 8000/tcp | awk -F: 'NR == 1 { print $NF }')"
 [[ "$port" =~ ^[0-9]+$ ]] || { echo "unable to resolve Docker-published manager port" >&2; exit 1; }
@@ -280,6 +324,48 @@ create_instance() {
     | json_value 'data["id"]'
 }
 
+model_total_bytes() {
+  local model_id="$1"
+  auth_request GET "/api/v1/models/${model_id}" | python3 -c 'import json,sys; d=json.load(sys.stdin); m=d.get("data", d); print(int(m.get("total_bytes") or 0))'
+}
+
+# Quick load + infer + stop for every matrix member so each GGUF is proven on
+# this runner before the longer lifecycle / pressure / MoE scenarios.
+smoke_model() {
+  local label="$1" model_id="$2" slug="$3"
+  local extra="${4:-,\"gpu_mode\":\"auto\"}"
+  local instance_id
+  instance_id="$(create_instance "$model_id" "Smoke ${label}" "$slug" "$extra")"
+  auth_request POST "/api/v1/instances/${instance_id}/start" >/dev/null
+  wait_state "$instance_id" READY
+  assert_single_worker "$instance_id"
+  infer "$instance_id"
+  auth_request POST "/api/v1/instances/${instance_id}/stop" >/dev/null
+  wait_state "$instance_id" UNLOADED
+}
+
+verify_moe_launch() {
+  local instance_id="$1" expected_devices="$2" args_file="$3" environ_file="$4"
+  local worker_pid
+  worker_pid="$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["pid"]')"
+  assert_worker_identity "$worker_pid" "$instance_id"
+  docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${worker_pid}/cmdline" >"$args_file"
+  python3 - "$args_file" "$expected_devices" <<'PY'
+import sys
+args = [line.rstrip("\n") for line in open(sys.argv[1], encoding="utf-8")]
+expected_devices = sys.argv[2]
+assert "--n-cpu-moe" in args, args
+cpu_moe_index = args.index("--n-cpu-moe")
+assert cpu_moe_index + 1 < len(args), args
+assert args[cpu_moe_index + 1] == "1", args
+index = args.index("--device")
+assert index + 1 < len(args), args
+assert args[index + 1] == expected_devices, (args, expected_devices)
+PY
+  docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${worker_pid}/environ) 2>/dev/null" >"$environ_file"
+  grep -qx "LLAMARACK_INSTANCE_ID=${instance_id}" "$environ_file"
+}
+
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 start_manager
 
@@ -302,12 +388,28 @@ printf '%s\n' "$hardware" >"$artifact_dir/hardware.json"
 mapfile -t gpu_ids < <(printf '%s' "$hardware" | python3 -c 'import json,sys; [print(g["id"]) for g in json.load(sys.stdin)["gpus"]]')
 [[ ${#gpu_ids[@]} -ge 1 ]] || { echo "release qualification requires at least one visible GPU" >&2; exit 1; }
 
-dense_model_id="$(create_model 'Qualification Dense' "$dense_path")"
-dense_bytes="$(auth_request GET "/api/v1/models/${dense_model_id}" | python3 -c 'import json,sys; d=json.load(sys.stdin); m=d.get("data", d); print(int(m.get("total_bytes") or 0))')"
-[[ "$dense_bytes" =~ ^[0-9]+$ && "$dense_bytes" -gt 0 ]] || {
-  echo "dense qualification model total_bytes is missing or zero" >&2
+dense_lifecycle_model_id="$(create_model 'Qualification Dense Lifecycle' "$dense_lifecycle_path")"
+dense_pressure_model_id="$(create_model 'Qualification Dense Pressure' "$dense_pressure_path")"
+moe_small_model_id="$(create_model 'Qualification MoE Small' "$moe_small_path")"
+moe_large_model_id="$(create_model 'Qualification MoE Large' "$moe_large_path")"
+pressure_bytes="$(model_total_bytes "$dense_pressure_model_id")"
+[[ "$pressure_bytes" =~ ^[0-9]+$ && "$pressure_bytes" -gt 0 ]] || {
+  echo "dense pressure model total_bytes is missing or zero" >&2
   exit 1
 }
+
+smoke_model 'Dense Lifecycle' "$dense_lifecycle_model_id" 'qualification-smoke-dense-lifecycle'
+smoke_model 'Dense Pressure' "$dense_pressure_model_id" 'qualification-smoke-dense-pressure'
+smoke_model 'MoE Small' "$moe_small_model_id" 'qualification-smoke-moe-small'
+if (( ${#gpu_ids[@]} >= 2 )); then
+  smoke_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+  smoke_model 'MoE Large' "$moe_large_model_id" 'qualification-smoke-moe-large' \
+    ",\"gpu_mode\":\"manual\",\"gpu_devices\":${smoke_gpu_json}"
+else
+  smoke_model 'MoE Large' "$moe_large_model_id" 'qualification-smoke-moe-large'
+fi
+
+dense_model_id="$dense_lifecycle_model_id"
 dense_instance_id="$(create_instance "$dense_model_id" 'Qualification Dense' 'qualification-dense' ',"gpu_mode":"auto"')"
 auth_request POST "/api/v1/instances/${dense_instance_id}/start" >/dev/null
 wait_state "$dense_instance_id" READY
@@ -426,18 +528,17 @@ wait_state "$always_instance_id" UNLOADED
 sleep 3
 [[ "$(runtime_state "$always_instance_id")" == "UNLOADED" ]] || { echo "manual Stop did not suppress Always-On reconcile" >&2; exit 1; }
 
-# Resource-pressure eviction is always pinned to one target GPU so the scenario
-# behaves the same on 1-GPU and multi-GPU hosts. Additional GPUs must not absorb
-# copies and hide missing eviction. Raise per-worker VRAM demand (large ctx,
-# parallel=1) instead of spawning a dozen small workers.
+# Resource-pressure eviction uses the larger dense GGUF and is always pinned to
+# one target GPU so the scenario behaves the same on 1-GPU and multi-GPU hosts.
+# Raise per-worker VRAM demand via ctx-size instead of spawning many workers.
 target_gpu="${gpu_ids[0]}"
 target_gpu_total="$(printf '%s' "$hardware" | python3 -c 'import json,sys; gpus=json.load(sys.stdin)["gpus"]; print(int(gpus[0]["total_bytes"]))')"
 reserve_bytes=$((512 * 1024 * 1024))
 usable_bytes=$((target_gpu_total > reserve_bytes ? target_gpu_total - reserve_bytes : 0))
-overhead_bytes=$((dense_bytes / 20))
+overhead_bytes=$((pressure_bytes / 20))
 min_overhead=$((256 * 1024 * 1024))
 (( overhead_bytes < min_overhead )) && overhead_bytes=$min_overhead
-base_demand_bytes=$((dense_bytes + overhead_bytes))
+base_demand_bytes=$((pressure_bytes + overhead_bytes))
 pressure_ctx="$(python3 - "$base_demand_bytes" "$usable_bytes" <<'PY'
 import sys
 base = int(sys.argv[1])
@@ -459,15 +560,15 @@ print(0)
 PY
 )"
 if [[ "$pressure_ctx" == "0" ]]; then
-  echo "dense model (${dense_bytes} bytes) cannot create single-GPU scheduler pressure on ${target_gpu} (${target_gpu_total} bytes usable≈${usable_bytes}); provision a larger dense qualification model or a smaller GPU for this gate" >&2
+  echo "dense pressure model (${pressure_bytes} bytes) cannot create single-GPU scheduler pressure on ${target_gpu} (${target_gpu_total} bytes usable≈${usable_bytes}); provision a larger dense pressure GGUF or a smaller GPU for this gate" >&2
   exit 1
 fi
-pressure_opts="\"options\":{\"ctx-size\":\"${pressure_ctx}\",\"parallel\":\"1\"}"
+pressure_opts="\"options\":{\"ctx-size\":\"${pressure_ctx}\"}"
 pressure_common=",\"gpu_mode\":\"manual\",\"gpu_devices\":[\"${target_gpu}\"],\"eviction_enabled\":true,${pressure_opts}"
 
 # Active-request protection: the only resident worker with in-flight work must
 # not be evicted to admit another copy on the same GPU.
-protected_id="$(create_instance "$dense_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common")"
+protected_id="$(create_instance "$dense_pressure_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common")"
 auth_request POST "/api/v1/instances/${protected_id}/start" >/dev/null
 wait_state "$protected_id" READY
 assert_single_worker "$protected_id"
@@ -483,7 +584,7 @@ kill -0 "$protected_stream_pid" 2>/dev/null || {
   echo "protected pressure stream ended before the eviction challenge could run" >&2
   exit 1
 }
-blocked_id="$(create_instance "$dense_model_id" 'Qualification Pressure Blocked' 'qualification-pressure-blocked' "$pressure_common")"
+blocked_id="$(create_instance "$dense_pressure_model_id" 'Qualification Pressure Blocked' 'qualification-pressure-blocked' "$pressure_common")"
 if auth_request POST "/api/v1/instances/${blocked_id}/start" >"$artifact_dir/pressure-blocked-start.json" 2>"$artifact_dir/pressure-blocked-start.err"; then
   # Start may enqueue while eviction is attempted; the protected resident must
   # remain READY and the challenger must not become the sole survivor.
@@ -515,14 +616,14 @@ pressure_ids=()
 eviction_observed=0
 max_pressure_workers=4
 for index in $(seq 1 "$max_pressure_workers"); do
-  pressure_id="$(create_instance "$dense_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common")"
+  pressure_id="$(create_instance "$dense_pressure_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common")"
   pressure_ids+=("$pressure_id")
   if ! auth_request POST "/api/v1/instances/${pressure_id}/start" >"$artifact_dir/pressure-start-${index}.json" 2>"$artifact_dir/pressure-start-${index}.err"; then
     echo "pressure worker ${index} failed to start on ${target_gpu} (ctx-size=${pressure_ctx}); see pressure-start-${index}.err" >&2
     exit 1
   fi
   if ! wait_state "$pressure_id" READY; then
-    echo "pressure worker ${index} failed readiness on ${target_gpu} (ctx-size=${pressure_ctx}); provision a dense model that can load cleanly under single-GPU pressure" >&2
+    echo "pressure worker ${index} failed readiness on ${target_gpu} (ctx-size=${pressure_ctx}); provision a dense pressure model that can load cleanly under single-GPU pressure" >&2
     exit 1
   fi
   assert_single_worker "$pressure_id"
@@ -536,52 +637,48 @@ for index in $(seq 1 "$max_pressure_workers"); do
   fi
 done
 [[ "$eviction_observed" == "1" ]] || {
-  echo "GPU pressure was not reached after ${max_pressure_workers} workers on ${target_gpu} (model=${dense_bytes} bytes, ctx-size=${pressure_ctx}, gpu=${target_gpu_total} bytes); provision a larger dense qualification model" >&2
+  echo "GPU pressure was not reached after ${max_pressure_workers} workers on ${target_gpu} (model=${pressure_bytes} bytes, ctx-size=${pressure_ctx}, gpu=${target_gpu_total} bytes); provision a larger dense pressure qualification model" >&2
   exit 1
 }
 for pressure_id in "${pressure_ids[@]}"; do
   auth_request POST "/api/v1/instances/${pressure_id}/stop" >/dev/null 2>&1 || true
 done
 
-# MoE qualification always exercises n-cpu-moe. On multi-GPU hosts it also pins
-# both devices so the comma-separated --device launch path is covered. On a
-# single-GPU host the same offload flag is verified against that one device.
-moe_model_id="$(create_model 'Qualification MoE' "$moe_path")"
-if (( ${#gpu_ids[@]} >= 2 )); then
-  gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
-  expected_moe_devices="${gpu_ids[0]},${gpu_ids[1]}"
-else
-  gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
-  expected_moe_devices="${gpu_ids[0]}"
-fi
-moe_instance_id="$(auth_request POST /api/v1/instances \
-  "{\"model_id\":\"$moe_model_id\",\"name\":\"Qualification MoE\",\"slug\":\"qualification-moe\",\"gpu_mode\":\"manual\",\"gpu_devices\":$gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
+# Small MoE: always exercise n-cpu-moe on the first GPU.
+moe_small_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+moe_small_instance_id="$(auth_request POST /api/v1/instances \
+  "{\"model_id\":\"$moe_small_model_id\",\"name\":\"Qualification MoE Small\",\"slug\":\"qualification-moe-small\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
   | json_value 'data["id"]')"
-auth_request POST "/api/v1/instances/${moe_instance_id}/start" >/dev/null
-wait_state "$moe_instance_id" READY
-assert_single_worker "$moe_instance_id"
-infer "$moe_instance_id"
-moe_worker_pid="$(auth_request GET "/api/v1/instances/${moe_instance_id}/runtime" | json_value 'data["pid"]')"
-assert_worker_identity "$moe_worker_pid" "$moe_instance_id"
-docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/cmdline" \
-  >"$artifact_dir/moe-worker-args.txt"
-python3 - "$artifact_dir/moe-worker-args.txt" "$expected_moe_devices" <<'PY'
-import sys
-args = [line.rstrip("\n") for line in open(sys.argv[1], encoding="utf-8")]
-expected_devices = sys.argv[2]
-assert "--n-cpu-moe" in args, args
-cpu_moe_index = args.index("--n-cpu-moe")
-assert cpu_moe_index + 1 < len(args), args
-assert args[cpu_moe_index + 1] == "1", args
-index = args.index("--device")
-assert index + 1 < len(args), args
-assert args[index + 1] == expected_devices, (args, expected_devices)
-PY
-docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${moe_worker_pid}/environ) 2>/dev/null" \
-  >"$artifact_dir/moe-worker-environ.txt"
-grep -qx "LLAMARACK_INSTANCE_ID=${moe_instance_id}" "$artifact_dir/moe-worker-environ.txt"
-auth_request POST "/api/v1/instances/${moe_instance_id}/stop" >/dev/null
-wait_state "$moe_instance_id" UNLOADED
+auth_request POST "/api/v1/instances/${moe_small_instance_id}/start" >/dev/null
+wait_state "$moe_small_instance_id" READY
+assert_single_worker "$moe_small_instance_id"
+infer "$moe_small_instance_id"
+verify_moe_launch "$moe_small_instance_id" "${gpu_ids[0]}" \
+  "$artifact_dir/moe-worker-args.txt" "$artifact_dir/moe-worker-environ.txt"
+auth_request POST "/api/v1/instances/${moe_small_instance_id}/stop" >/dev/null
+wait_state "$moe_small_instance_id" UNLOADED
+
+# Large MoE: on multi-GPU hosts pin both devices so the comma-separated --device
+# launch path is covered. On a single-GPU host still prove n-cpu-moe works.
+if (( ${#gpu_ids[@]} >= 2 )); then
+  moe_large_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+  expected_moe_large_devices="${gpu_ids[0]},${gpu_ids[1]}"
+else
+  moe_large_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+  expected_moe_large_devices="${gpu_ids[0]}"
+fi
+moe_large_instance_id="$(auth_request POST /api/v1/instances \
+  "{\"model_id\":\"$moe_large_model_id\",\"name\":\"Qualification MoE Large\",\"slug\":\"qualification-moe-large\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_large_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
+  | json_value 'data["id"]')"
+auth_request POST "/api/v1/instances/${moe_large_instance_id}/start" >/dev/null
+wait_state "$moe_large_instance_id" READY
+assert_single_worker "$moe_large_instance_id"
+infer "$moe_large_instance_id"
+verify_moe_launch "$moe_large_instance_id" "$expected_moe_large_devices" \
+  "$artifact_dir/moe-large-worker-args.txt" "$artifact_dir/moe-large-worker-environ.txt"
+auth_request POST "/api/v1/instances/${moe_large_instance_id}/stop" >/dev/null
+wait_state "$moe_large_instance_id" UNLOADED
+gpu_json="$moe_large_gpu_json"
 
 rss_final="$(docker stats --no-stream --format '{{.MemUsage}}' "$container_name")"
 docker exec "$container_name" cat /config/manager.log >"$artifact_dir/manager.log" 2>/dev/null || true
@@ -589,6 +686,7 @@ finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 python3 - "$artifact_dir/manifest.json" <<PY
 import json, os, sys
 checks = [
+    "model-matrix-smoke",
     "fresh-install-and-settings-persistence",
     "real-inference-and-streaming",
     "client-cancellation",
@@ -604,6 +702,7 @@ checks = [
     "start-crash-recovery",
     "single-worker-invariant",
     "moe-cpu-expert-offload",
+    "moe-large-cpu-expert-offload",
 ]
 if ${#gpu_ids[@]} >= 2:
     checks.append("multi-gpu-placement")
@@ -615,11 +714,14 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
         "started_at": "${started_at}",
         "finished_at": "${finished_at}",
         "cycles": int("${cycles}"),
-        "dense_model": "$(basename "$dense_host")",
-        "dense_bytes": int("${dense_bytes}"),
+        "models_dir": "${models_dir}",
+        "dense_lifecycle_model": "$(basename "$dense_lifecycle_host")",
+        "dense_pressure_model": "$(basename "$dense_pressure_host")",
+        "dense_pressure_bytes": int("${pressure_bytes}"),
         "pressure_ctx_size": int("${pressure_ctx}"),
         "pressure_target_gpu": "${target_gpu}",
-        "moe_model": "$(basename "$moe_host")",
+        "moe_small_model": "$(basename "$moe_small_host")",
+        "moe_large_model": "$(basename "$moe_large_host")",
         "gpu_ids": ${gpu_json},
         "rss_baseline": "${rss_baseline}",
         "rss_final": "${rss_final}",
