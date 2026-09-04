@@ -110,11 +110,8 @@ func authenticateManagementPrincipal(a *auth.Service, r *http.Request, path stri
 		if key.KeyType == auth.APIKeyTypeInference {
 			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot access the management API"}
 		}
-		if apiKeySessionDenied(path) {
+		if apiKeySessionDenied(path) || apiKeyUserPrincipalRequired(path, r.Method) {
 			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot access this endpoint"}
-		}
-		if serviceAccountAdminPath(path) && key.KeyType != auth.APIKeyTypeFull {
-			return managementAuthContext{}, &managementForbiddenError{message: "this API key cannot manage service accounts"}
 		}
 		return managementAuthContext{APIKey: &key}, nil
 	case token != "":
@@ -172,6 +169,14 @@ func actorLogAttrs(principal managementAuthContext) []any {
 	return nil
 }
 
+func requireManagementUserPrincipal(w http.ResponseWriter, principal managementAuthContext) bool {
+	if principal.User != nil {
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "this API key cannot access this endpoint"})
+	return false
+}
+
 func apiKeySessionDenied(path string) bool {
 	if path == "/api/v1/me" || strings.HasPrefix(path, "/api/v1/me/") {
 		return true
@@ -185,8 +190,29 @@ func apiKeySessionDenied(path string) bool {
 	return path == "/api/v1/playground" || strings.HasPrefix(path, "/api/v1/playground/")
 }
 
-func serviceAccountAdminPath(path string) bool {
-	return path == "/api/v1/admin/service-accounts" || strings.HasPrefix(path, "/api/v1/admin/service-accounts/")
+func apiKeyUserPrincipalRequired(path, method string) bool {
+	if path == "/api/v1/users" || strings.HasPrefix(path, "/api/v1/users/") {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/v1/sessions/") {
+		return true
+	}
+	if path == "/api/v1/admin/service-accounts" || strings.HasPrefix(path, "/api/v1/admin/service-accounts/") {
+		return true
+	}
+	if path == "/api/v1/admin/auth" || strings.HasPrefix(path, "/api/v1/admin/auth/") {
+		return true
+	}
+	if path == "/api/v1/api-keys" || strings.HasPrefix(path, "/api/v1/api-keys/") {
+		return isStateChanging(method)
+	}
+	if path == "/api/v1/litellm" || strings.HasPrefix(path, "/api/v1/litellm/") {
+		if path == "/api/v1/litellm/test" && method == http.MethodPost {
+			return false
+		}
+		return isStateChanging(method)
+	}
+	return false
 }
 
 func lifecycleAction(path, method string) (instanceID, action string, ok bool) {
