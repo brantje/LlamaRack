@@ -16,7 +16,7 @@ Security fixes may be released as compatible patch releases and may require upgr
 
 Please do not open a public issue for a vulnerability that could put users at risk.
 
-Use GitHub's private vulnerability reporting / Security Advisory flow for this repository. In GitHub, open the repository's **Security** tab and choose **Report a vulnerability**. If that option is unavailable, contact a repository maintainer privately before publishing technical details.
+Use GitHub's private vulnerability reporting / Security Advisory flow for this repository. In GitHub, open the repository's **Security** tab and choose **Report a vulnerability**. If that option is unavailable, contact repository maintainer **@brantje** privately using a contact method listed on their GitHub profile before publishing technical details.
 
 A useful report includes:
 
