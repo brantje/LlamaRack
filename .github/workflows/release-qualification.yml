@@ -72,12 +72,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
           cache-dependency-path: backend/go.sum
       - name: Run deterministic release scenarios
-        run: bash scripts/release-qualification/software.sh artifacts/release-qualification/software
+        run: |
+          mkdir -p artifacts/release-qualification/software
+          go version > artifacts/release-qualification/software/go-version.txt
+          go env GOVERSION > artifacts/release-qualification/software/go-env-version.txt
+          bash scripts/release-qualification/software.sh artifacts/release-qualification/software
       - name: Upload software qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -91,6 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -98,17 +106,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull exact candidate images
+        env:
+          CPU_IMAGE: ${{ inputs.cpu_image }}
+          CUDA_IMAGE: ${{ inputs.cuda_image }}
         run: |
-          docker pull '${{ inputs.cpu_image }}'
-          docker pull '${{ inputs.cuda_image }}'
+          set -euo pipefail
+          validate_image_ref() {
+            [[ "$1" =~ ^ghcr\.io/brantje/llamarack@sha256:[0-9a-f]{64}$ ]] || {
+              echo "candidate image must be an immutable ghcr.io/brantje/llamarack digest reference" >&2
+              exit 2
+            }
+          }
+          validate_image_ref "$CPU_IMAGE"
+          validate_image_ref "$CUDA_IMAGE"
+          docker pull "$CPU_IMAGE"
+          docker pull "$CUDA_IMAGE"
       - name: Qualify CPU candidate
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/containers
-        run: bash scripts/release-qualification/container-smoke.sh '${{ inputs.cpu_image }}' cpu
+          CPU_IMAGE: ${{ inputs.cpu_image }}
+        run: bash scripts/release-qualification/container-smoke.sh "$CPU_IMAGE" cpu
       - name: Qualify CUDA packaging without a GPU
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/containers
-        run: bash scripts/release-qualification/container-smoke.sh '${{ inputs.cuda_image }}' cuda
+          CUDA_IMAGE: ${{ inputs.cuda_image }}
+        run: bash scripts/release-qualification/container-smoke.sh "$CUDA_IMAGE" cuda
       - name: Upload container qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -124,6 +146,8 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -133,16 +157,28 @@ jobs:
       - name: Run real-hardware lifecycle soak
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
+          CUDA_IMAGE: ${{ inputs.cuda_image }}
+          GPU_MODEL_PATH: ${{ inputs.gpu_model_path }}
+          GPU_MOE_MODEL_PATH: ${{ inputs.gpu_moe_model_path }}
+          GPU_CYCLES: ${{ inputs.gpu_cycles }}
         run: |
           set -euo pipefail
+          [[ "$CUDA_IMAGE" =~ ^ghcr\.io/brantje/llamarack@sha256:[0-9a-f]{64}$ ]] || {
+            echo "CUDA candidate must be an immutable ghcr.io/brantje/llamarack digest reference" >&2
+            exit 2
+          }
+          [[ "$GPU_CYCLES" =~ ^[1-9][0-9]*$ ]] || {
+            echo "gpu_cycles must be a positive integer" >&2
+            exit 2
+          }
           bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
           monitor_pid=$!
           trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
           bash scripts/release-qualification/gpu-soak.sh \
-            '${{ inputs.cuda_image }}' \
-            '${{ inputs.gpu_model_path }}' \
-            '${{ inputs.gpu_moe_model_path }}' \
-            '${{ inputs.gpu_cycles }}'
+            "$CUDA_IMAGE" \
+            "$GPU_MODEL_PATH" \
+            "$GPU_MOE_MODEL_PATH" \
+            "$GPU_CYCLES"
           wait "$monitor_pid"
           python3 scripts/release-qualification/analyze-manager-growth.py \
             "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
