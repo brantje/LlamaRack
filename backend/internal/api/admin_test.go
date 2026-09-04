@@ -291,7 +291,7 @@ func TestAdminGeneralSettingsSummaryAndSystem(t *testing.T) {
 		t.Fatalf("summary=%d body=%s", w.Code, w.Body.String())
 	}
 	w = doRequest(t, f.handler, http.MethodGet, "/api/v1/system", nil, f.cookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"uptime_seconds"`) || !strings.Contains(w.Body.String(), `"secure_cookie":true`) || !strings.Contains(w.Body.String(), `"options":1`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"uptime_seconds"`) || !strings.Contains(w.Body.String(), `"secure_cookie":true`) || !strings.Contains(w.Body.String(), `"options":1`) || !strings.Contains(w.Body.String(), `"request_forwarding"`) || !strings.Contains(w.Body.String(), `"effective_remote_address"`) {
 		t.Fatalf("system=%d body=%s", w.Code, w.Body.String())
 	}
 }

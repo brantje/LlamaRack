@@ -38,7 +38,14 @@ function systemResponse() {
       secure_cookie: true,
       allowed_origins: { value: ['https://manager.test', 'https://admin.test'], source: 'database', editable: true },
       trusted_proxies: { value: [{ cidr: '10.0.0.0/8', name: 'internal' }, '192.168.1.1'], source: 'database', editable: true },
-      external_url: { value: 'https://manager.test' }
+      external_url: { value: 'https://manager.test' },
+      request_forwarding: {
+        peer_address: '10.0.0.2',
+        peer_trusted: true,
+        forwarded_header: ['198.51.100.8', '10.0.0.1'],
+        x_forwarded_for: ['198.51.100.20', '10.0.0.3'],
+        effective_remote_address: '198.51.100.8'
+      }
     },
     llamacpp: { available: true, path: '/app/llama-server', version: 'b9999', options: 123 }
   }
@@ -114,6 +121,12 @@ describe('Administration System UX feedback', () => {
     expect(wrapper.text()).toContain('Models directory')
     expect(wrapper.text()).toContain('Listen address')
     expect(wrapper.findAll('[data-testid="allowed-origin-value"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="forwarded-ip-value"]')).toHaveLength(6)
+    expect(wrapper.text()).toContain('Forwarded IPs')
+    expect(wrapper.text()).toContain('Peer: 10.0.0.2 (trusted)')
+    expect(wrapper.text()).toContain('Forwarded: 198.51.100.8')
+    expect(wrapper.text()).toContain('X-Forwarded-For: 198.51.100.20')
+    expect(wrapper.text()).toContain('Effective remote: 198.51.100.8')
     expect(wrapper.findAll('[data-testid="trusted-proxy-value"]')).toHaveLength(3)
     expect(wrapper.text()).toContain('42s')
     expect(wrapper.text()).toContain('42 s')

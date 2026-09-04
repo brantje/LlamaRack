@@ -481,9 +481,18 @@ func (h *adminHandler) system(w http.ResponseWriter, r *http.Request) {
 		llama["fingerprint"] = profile.Fingerprint
 		llama["options"] = len(profile.Options)
 	}
+	forwarding := h.network.RequestForwardingDiagnostics(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"manager":  map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
-		"network":  map[string]any{"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r), "allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL},
+		"manager": map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
+		"network": map[string]any{
+			"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r),
+			"allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL,
+			"request_forwarding": map[string]any{
+				"peer_address": forwarding.PeerAddress, "peer_trusted": forwarding.PeerTrusted,
+				"forwarded_header": forwarding.ForwardedHeader, "x_forwarded_for": forwarding.XForwardedFor,
+				"effective_remote_address": forwarding.EffectiveRemoteAddress,
+			},
+		},
 		"llamacpp": llama,
 	})
 }
