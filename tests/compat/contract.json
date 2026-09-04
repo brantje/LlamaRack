@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "release_contract": "1.0",
+  "issue": 121,
+  "pinned_clients": {
+    "python": "3.13",
+    "node": "24",
+    "openai_python": "3.8.0",
+    "openai_node": "7.9.0",
+    "litellm": "1.99.0"
+  },
+  "status_values": ["supported", "conditional", "extension", "unsupported"],
+  "surfaces": [
+    {
+      "id": "models.list",
+      "method": "GET",
+      "path": "/v1/models",
+      "status": "supported",
+      "required_probe": true,
+      "notes": "Returns enabled/addressable LlamaRack Instances using exact durable instance.id values."
+    },
+    {
+      "id": "models.retrieve",
+      "method": "GET",
+      "path": "/v1/models/{model}",
+      "status": "supported",
+      "required_probe": true,
+      "notes": "Exact Instance-ID lookup; manager-local and must not autoload."
+    },
+    {
+      "id": "chat.completions",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "chat"
+    },
+    {
+      "id": "chat.completions.streaming",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "chat",
+      "wire_assertions": ["content_type", "sse_framing", "delta_order", "clean_termination"]
+    },
+    {
+      "id": "completions",
+      "method": "POST",
+      "path": "/v1/completions",
+      "status": "supported",
+      "required_probe": false,
+      "capability": "completion"
+    },
+    {
+      "id": "responses.create",
+      "method": "POST",
+      "path": "/v1/responses",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "responses"
+    },
+    {
+      "id": "responses.lifecycle",
+      "method": "GET/DELETE/POST",
+      "path": "/v1/responses/{response_id}[/input_items|/cancel]",
+      "status": "supported",
+      "required_probe": false,
+      "notes": "Manager-local retrieval semantics depend on request_log_mode and intentionally differ from OpenAI server-side storage parity."
+    },
+    {
+      "id": "embeddings",
+      "method": "POST",
+      "path": "/v1/embeddings",
+      "status": "conditional",
+      "required_probe": false,
+      "capability": "embeddings"
+    },
+    {
+      "id": "audio.transcriptions",
+      "method": "POST",
+      "path": "/v1/audio/transcriptions",
+      "status": "conditional",
+      "required_probe": false,
+      "capability": "transcription"
+    },
+    {
+      "id": "multimodal.image_input",
+      "method": "POST",
+      "path": "/v1/chat/completions or /v1/responses",
+      "status": "conditional",
+      "required_probe": false,
+      "capability": "vision"
+    },
+    {
+      "id": "tools.function_calling",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "conditional",
+      "required_probe": false,
+      "capability": "tools"
+    },
+    {
+      "id": "structured_output.json_schema",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "conditional",
+      "required_probe": false,
+      "capability": "structured_output"
+    },
+    {
+      "id": "client_disconnect",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "chat"
+    },
+    {
+      "id": "lifecycle.ready",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "lifecycle_ready"
+    },
+    {
+      "id": "lifecycle.cold_autoload",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "lifecycle_autoload"
+    },
+    {
+      "id": "lifecycle.autoload_disabled",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "lifecycle_no_autoload"
+    },
+    {
+      "id": "lifecycle.concurrent_cold_start",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "status": "supported",
+      "required_probe": true,
+      "capability": "lifecycle_autoload"
+    },
+    {
+      "id": "llamacpp.extensions",
+      "method": "mixed",
+      "path": "/v1/* extension routes",
+      "status": "extension",
+      "required_probe": false,
+      "notes": "Token-count, rerank, chat-control and slots routes are LlamaRack/llama.cpp extensions, not OpenAI compatibility claims."
+    }
+  ],
+  "unsupported_examples": [
+    "realtime API",
+    "assistants/threads",
+    "batches",
+    "files/vector stores",
+    "image generation",
+    "speech synthesis",
+    "fine-tuning"
+  ],
+  "required_error_cases": [
+    {"id": "invalid_auth", "status": 401},
+    {"id": "unknown_model", "status": 404},
+    {"id": "invalid_request", "status": 400},
+    {"id": "autoload_disabled", "status": 503}
+  ],
+  "forbidden_public_fields": [
+    "worker_url",
+    "worker_host",
+    "worker_port",
+    "pid",
+    "gguf_path",
+    "api_key_hash"
+  ]
+}
