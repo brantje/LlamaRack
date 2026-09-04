@@ -68,6 +68,15 @@ jobs:
       - name: Vulnerability scan
         run: govulncheck ./...
 
+  qualification-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release qualification scripts
+        run: |
+          bash -n scripts/release-qualification/*.sh
+          python3 -m py_compile scripts/release-qualification/analyze-manager-growth.py
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
