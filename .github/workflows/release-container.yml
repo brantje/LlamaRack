@@ -41,7 +41,6 @@ jobs:
         with:
           images: |
             ghcr.io/brantje/llamarack
-            ghcr.io/brantje/llamacpp-manager
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -56,7 +55,6 @@ jobs:
         with:
           images: |
             ghcr.io/brantje/llamarack
-            ghcr.io/brantje/llamacpp-manager
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}}-cuda
@@ -82,7 +80,6 @@ jobs:
           labels: |
             ${{ steps.meta.outputs.labels }}
             io.llamarack.build.reason=release
-            io.llamacpp-manager.build.reason=release
           cache-from: type=gha,scope=cpu
           cache-to: type=gha,mode=max,scope=cpu
 
@@ -98,7 +95,6 @@ jobs:
           labels: |
             ${{ steps.meta-cuda.outputs.labels }}
             io.llamarack.build.reason=release
-            io.llamacpp-manager.build.reason=release
           cache-from: type=gha,scope=cuda
           cache-to: type=gha,mode=max,scope=cuda
 
@@ -183,7 +179,6 @@ jobs:
         with:
           images: |
             ghcr.io/brantje/llamarack
-            ghcr.io/brantje/llamacpp-manager
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -198,7 +193,6 @@ jobs:
         with:
           images: |
             ghcr.io/brantje/llamarack
-            ghcr.io/brantje/llamacpp-manager
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}}-cuda

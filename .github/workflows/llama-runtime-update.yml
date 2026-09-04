@@ -171,18 +171,12 @@ jobs:
           tags: |
             ghcr.io/brantje/llamarack:${{ needs.detect.outputs.image_tag }}
             ghcr.io/brantje/llamarack:llama.cpp-latest
-            ghcr.io/brantje/llamacpp-manager:${{ needs.detect.outputs.image_tag }}
-            ghcr.io/brantje/llamacpp-manager:llama.cpp-latest
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}
             io.llamarack.build.reason=llama.cpp-update
             io.llamarack.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
             io.llamarack.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
             io.llamarack.llama.cpp.image=${{ needs.detect.outputs.cpu_image }}
-            io.llamacpp-manager.build.reason=llama.cpp-update
-            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
-            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
-            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cpu_image }}
           cache-from: type=gha,scope=llama.cpp-update-cpu
           cache-to: type=gha,mode=max,scope=llama.cpp-update-cpu
 
@@ -197,18 +191,12 @@ jobs:
           tags: |
             ghcr.io/brantje/llamarack:${{ needs.detect.outputs.image_tag }}-cuda
             ghcr.io/brantje/llamarack:llama.cpp-latest-cuda
-            ghcr.io/brantje/llamacpp-manager:${{ needs.detect.outputs.image_tag }}-cuda
-            ghcr.io/brantje/llamacpp-manager:llama.cpp-latest-cuda
           labels: |
             org.opencontainers.image.version=${{ needs.detect.outputs.image_tag }}-cuda
             io.llamarack.build.reason=llama.cpp-update
             io.llamarack.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
             io.llamarack.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
             io.llamarack.llama.cpp.image=${{ needs.detect.outputs.cuda_image }}
-            io.llamacpp-manager.build.reason=llama.cpp-update
-            io.llamacpp-manager.llama.cpp.release=${{ needs.detect.outputs.release_tag }}
-            io.llamacpp-manager.llama.cpp.build=${{ needs.detect.outputs.build_tag }}
-            io.llamacpp-manager.llama.cpp.image=${{ needs.detect.outputs.cuda_image }}
           cache-from: type=gha,scope=llama.cpp-update-cuda
           cache-to: type=gha,mode=max,scope=llama.cpp-update-cuda
 
