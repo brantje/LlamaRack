@@ -78,7 +78,7 @@ jobs:
           context: .
           file: ./Dockerfile
           load: true
-          tags: llamrack-candidate-cpu:${{ github.sha }}
+          tags: llamarack-candidate-cpu:${{ github.sha }}
           labels: |
             ${{ steps.meta.outputs.labels }}
             io.llamarack.build.reason=release
@@ -94,7 +94,7 @@ jobs:
           load: true
           build-args: |
             LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
-          tags: llamrack-candidate-cuda:${{ github.sha }}
+          tags: llamarack-candidate-cuda:${{ github.sha }}
           labels: |
             ${{ steps.meta-cuda.outputs.labels }}
             io.llamarack.build.reason=release
