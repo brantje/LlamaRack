@@ -1,0 +1,38 @@
+name: Compatibility suite validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/compat/node/package-lock.json
+      - name: Validate compatibility contract and Python probes
+        run: |
+          python3 tests/compat/validate_contract.py
+          python3 -m py_compile tests/compat/*.py
+      - name: Validate qualification shell runners
+        run: |
+          bash -n scripts/release-qualification/compat.sh
+          bash -n scripts/release-qualification/compat-gpu.sh
+      - name: Validate pinned OpenAI Node client
+        working-directory: tests/compat/node
+        run: |
+          npm ci --ignore-scripts
+          node --check openai-probe.mjs
+          node -e "const p=require('./node_modules/openai/package.json'); if (p.version !== '7.9.0') throw new Error('unexpected OpenAI Node version '+p.version)"
