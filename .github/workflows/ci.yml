@@ -18,7 +18,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-      - run: go mod tidy
+          cache-dependency-path: backend/go.sum
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+          cp go.mod /tmp/go.mod.before
+          cp go.sum /tmp/go.sum.before
+          go mod tidy
+          cmp -s go.mod /tmp/go.mod.before || { echo 'go.mod is not tidy'; diff -u /tmp/go.mod.before go.mod; exit 1; }
+          cmp -s go.sum /tmp/go.sum.before || { echo 'go.sum is not tidy'; diff -u /tmp/go.sum.before go.sum; exit 1; }
       - name: Test with coverage
         run: |
           go test ./... -covermode=atomic -coverprofile=coverage.out
@@ -26,7 +35,38 @@ jobs:
           coverage="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $3); print $3}')"
           echo "Total backend coverage: ${coverage}%"
           awk -v coverage="$coverage" 'BEGIN { if ((coverage + 0) < 90.0) { printf "Coverage %.1f%% is below required 90.0%%\n", coverage; exit 1 } }'
-      - run: go vet ./...
+      - name: Vet
+        run: go vet ./...
+
+  backend-race:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Race detector
+        run: go test -race ./...
+
+  backend-vulnerability:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Vulnerability scan
+        run: govulncheck ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -38,6 +78,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
       - run: npm run test:coverage
       - run: npm run build
