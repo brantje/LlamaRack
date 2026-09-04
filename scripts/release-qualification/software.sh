@@ -6,6 +6,7 @@ artifact_dir="${1:-$repo_root/artifacts/release-qualification/software}"
 mkdir -p "$artifact_dir"
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+artifact_dir="$(cd "$artifact_dir" && pwd)"
 cd "$repo_root/backend"
 
 run_group() {
