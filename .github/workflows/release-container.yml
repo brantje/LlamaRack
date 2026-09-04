@@ -2,7 +2,9 @@ name: Release container
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - feat/issue-120-release-qualification
   release:
     types: [published]
 
@@ -45,8 +47,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Docker metadata (CUDA)
         id: meta-cuda
@@ -61,8 +63,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}-cuda
             type=semver,pattern={{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Define candidate image tags
         id: candidate-tags
@@ -157,7 +159,7 @@ jobs:
     with:
       cpu_image: ${{ needs.build-candidates.outputs.cpu_image }}
       cuda_image: ${{ needs.build-candidates.outputs.cuda_image }}
-      run_gpu: ${{ github.event_name == 'release' }}
+      run_gpu: ${{ github.event_name == 'release' || github.ref == 'refs/heads/feat/issue-120-release-qualification' }}
       gpu_model_path: ${{ vars.GPU_QUALIFICATION_MODEL_PATH || '/models/qualification.gguf' }}
       gpu_moe_model_path: ${{ vars.GPU_QUALIFICATION_MOE_MODEL_PATH || '/models/qualification-moe.gguf' }}
       gpu_cycles: 8
@@ -165,6 +167,7 @@ jobs:
 
   publish:
     name: Publish qualified tags
+    if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
     needs: [build-candidates, qualify]
     runs-on: ubuntu-latest
     steps:
@@ -187,8 +190,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Docker metadata (CUDA)
         id: meta-cuda
@@ -203,8 +206,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}-cuda
             type=semver,pattern={{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Pull qualified candidate images
         env:
