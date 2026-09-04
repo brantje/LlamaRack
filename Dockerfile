@@ -3,19 +3,17 @@ ARG LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server
 
 FROM node:24-bookworm-slim AS frontend-build
 WORKDIR /src/frontend
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 COPY frontend/ ./
 RUN npm run generate
 
 FROM golang:1.27-bookworm AS backend-build
 WORKDIR /src/backend
-COPY backend/go.mod ./
-RUN go mod download
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download && go mod verify
 COPY backend/ ./
-RUN go mod tidy && \
-    go mod verify && \
-    CGO_ENABLED=0 go build -trimpath -o /out/llamarack ./cmd/llamarack
+RUN CGO_ENABLED=0 go build -trimpath -o /out/llamarack ./cmd/llamarack
 
 FROM ${LLAMA_IMAGE}
 COPY --from=backend-build /out/llamarack /usr/local/bin/llamarack
