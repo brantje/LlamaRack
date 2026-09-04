@@ -18,8 +18,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/llamarack ./cmd/llamarack
 FROM ${LLAMA_IMAGE}
 COPY --from=backend-build /out/llamarack /usr/local/bin/llamarack
 COPY --from=frontend-build /src/frontend/.output/public /app/frontend
-RUN ln -s /usr/local/bin/llamarack /usr/local/bin/llamacpp-manager && \
-    mkdir -p /config /models && \
+RUN mkdir -p /config /models && \
     chown -R 1000:1000 /config /models
 ENV LLAMARACK_LISTEN_ADDR=:8000 \
     LLAMARACK_DATA_DIR=/config \

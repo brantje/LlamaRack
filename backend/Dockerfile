@@ -12,8 +12,7 @@ RUN go mod tidy && \
 
 FROM ${LLAMA_IMAGE}
 COPY --from=build /out/llamarack /usr/local/bin/llamarack
-RUN ln -s /usr/local/bin/llamarack /usr/local/bin/llamacpp-manager && \
-    mkdir -p /config /models
+RUN mkdir -p /config /models
 ENV LLAMARACK_LISTEN_ADDR=:8000 \
     LLAMARACK_DATA_DIR=/config \
     LLAMARACK_MODELS_DIR=/models \
