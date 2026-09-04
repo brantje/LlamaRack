@@ -21,6 +21,11 @@ var migrationFS fs.FS = embeddedMigrations
 // that were not created through embedded Goose migrations.
 var ErrUnsupportedDatabaseSchema = errors.New("unsupported database schema: recreate the database or restore a Goose-managed backup")
 
+const (
+	schemaOwnerSettingKey   = "schema_owner"
+	schemaOwnerSettingValue = "llamarack"
+)
+
 type dbClass int
 
 const (
@@ -82,6 +87,13 @@ func classifyDatabase(ctx context.Context, db *sql.DB) (dbClass, error) {
 		return dbClassUnsupported, err
 	}
 	if hasGoose {
+		owned, err := hasSchemaOwnership(ctx, db)
+		if err != nil {
+			return dbClassUnsupported, err
+		}
+		if !owned {
+			return dbClassUnsupported, nil
+		}
 		return dbClassManaged, nil
 	}
 
@@ -93,6 +105,29 @@ func classifyDatabase(ctx context.Context, db *sql.DB) (dbClass, error) {
 		return dbClassEmpty, nil
 	}
 	return dbClassUnsupported, nil
+}
+
+func hasSchemaOwnership(ctx context.Context, db *sql.DB) (bool, error) {
+	exists, err := tableExists(ctx, db, "manager_settings")
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	var value string
+	err = db.QueryRowContext(ctx, `
+SELECT setting_value
+FROM manager_settings
+WHERE setting_key = ?
+`, schemaOwnerSettingKey).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return value == schemaOwnerSettingValue, nil
 }
 
 func tableExists(ctx context.Context, db *sql.DB, name string) (bool, error) {

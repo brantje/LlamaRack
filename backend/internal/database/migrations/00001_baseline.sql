@@ -346,4 +346,7 @@ CREATE TABLE playground_lifecycle_events (
 
 CREATE INDEX playground_lifecycle_events_correlation_idx ON playground_lifecycle_events(correlation_id,event,id);
 
+INSERT INTO manager_settings(setting_key, setting_value, updated_at)
+VALUES ('schema_owner', 'llamarack', unixepoch());
+
 -- +goose Down

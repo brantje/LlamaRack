@@ -76,6 +76,34 @@ func TestRepeatedOpenAfterSuccessIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestForeignGooseHistoryRejected(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "foreign-goose.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `
+CREATE TABLE goose_db_version (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ version_id INTEGER NOT NULL,
+ is_applied INTEGER NOT NULL,
+ tstamp TIMESTAMP DEFAULT (datetime('now'))
+);
+INSERT INTO goose_db_version(version_id, is_applied) VALUES (1, 1);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(ctx, path)
+	if !errors.Is(err, ErrUnsupportedDatabaseSchema) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestUnmanagedDatabaseRejected(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "unmanaged.db")
