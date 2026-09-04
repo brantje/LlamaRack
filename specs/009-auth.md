@@ -10,20 +10,37 @@ SAML and RBAC are explicitly out of scope for v1.
 
 LlamaRack has two independent credential domains:
 
-- **Management JWT** — the Nuxt UI uses manager-issued JWT bearer credentials backed by server-side sessions. JWTs authenticate `/api/v1/*` including `/me`, WebSocket tickets, Playground, and service-account administration. A management JWT MUST NOT authenticate `/v1/*`.
+- **Management JWT** — the Nuxt UI uses manager-issued JWT bearer credentials backed by server-side sessions. JWTs authenticate `/api/v1/*`, including the identity/security administration plane, `/me`, WebSocket tickets and Playground. A management JWT MUST NOT authenticate `/v1/*`.
 - **API keys** — `sk-` secrets owned by a user or a service account. Tokens that do not start with `sk-` are not API keys. Invalid, expired, disabled, or owner-disabled keys return 401.
 
 Typed API key access:
 
 - **Inference** — `/v1/*` only, with an optional instance allowlist. **403** on all `/api/v1/*`.
-- **Management** — `/api/v1/*` except session/Playground routes and except `/api/v1/admin/service-accounts` including `/{id}`. **403** on `/v1/*`.
-- **Full Access** — `/v1/*` with no instance allowlist, and `/api/v1/*` except session/Playground routes. Full Access keys of any owner, including service-account-owned keys, can CRUD `/api/v1/admin/service-accounts`.
+- **Management** — operational `/api/v1/*` management functionality, excluding session/Playground routes and the JWT-only identity/security administration plane. **403** on `/v1/*`.
+- **Full Access** — unrestricted `/v1/*` plus the same operational management plane as Management keys. Full Access does **not** grant access to JWT-only identity/security administration.
 
-JWT users and Full Access API keys can administer service accounts. Management and inference keys cannot.
+The central authorization invariant is:
+
+> **Identity and security administration is JWT-only. API keys operate LlamaRack, but cannot administer LlamaRack's credential or identity plane.**
+
+JWT-only identity/security administration includes at minimum:
+
+- API-key creation, update/enable/disable and rotation;
+- management-user listing/creation, password reset, enable/disable, deletion and session administration;
+- service-account listing and CRUD;
+- OIDC provider, identity and authentication/JIT/linking administration;
+- security/trust-boundary manager settings such as session lifetime, login protection, trusted proxies, allowed origins and external URL;
+- secret-bearing security settings such as the Prometheus authentication token;
+- LiteLLM operations that create, rotate, publish or remove managed credentials (`PUT`/`DELETE`, sync and rotate);
+- future endpoints capable of creating, acquiring, delegating or materially changing a LlamaRack authentication credential or human identity.
+
+Operational API-key access remains intentional. For example, Management/Full keys may continue to use models, Instances, downloads/imports, lifecycle controls, logs/observability, hardware, llama.cpp configuration and non-security resource/lifecycle settings. `GET /api/v1/api-keys` remains available for credential inventory/observability, but API-key mutation is JWT-only. `GET /api/v1/litellm` and the non-mutating connection test may remain operational; credential-bearing LiteLLM mutations are JWT-only.
+
+`PUT /api/v1/settings/general` is authorized by the fields being changed. If an API-key request contains any security/trust-boundary field, the entire update returns **403 before any setting is written**. Pure operational updates may proceed. A mixed operational+security request must never partially apply the operational subset.
 
 Session-bound denylist for any API key (403): `/api/v1/me`, `/api/v1/me/*`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/ws-ticket`, ticket streams, `/api/v1/playground/*`. Playground trusted-inference bypass stays JWT-only.
 
-OIDC provider tokens are never management API credentials; successful OIDC authentication always terminates in the same manager session/JWT model used by local login.
+OIDC provider tokens are never management API credentials; successful OIDC authentication always terminates in the same manager session/JWT model used by local login. API keys cannot create/configure an OIDC provider or change JIT/authentication policy in order to bootstrap a management JWT.
 
 API key secrets are `sk-` plus base64url(32 random bytes). The stored prefix is `sk-` plus the first eight characters of the random part. Rotate replaces `token_hash` and `prefix` in place (same `id`); there is no revoke/delete. `expires_on` is `YYYY-MM-DD` and is valid through the end of that UTC day. `last_used_at` updates on any successful authentication. Deleting a user or service account cascades and deletes that owner's keys.
 
@@ -33,14 +50,14 @@ LiteLLM integration uses one hidden service account named `LiteLLM` and one mana
 
 - `service_accounts.hidden = 1` rows are omitted from `GET /api/v1/admin/service-accounts` and from owner pickers. Direct `GET`, `PATCH`, and `DELETE` of a hidden service account return **404**.
 - The managed inference key **does** appear on `GET /api/v1/api-keys` and the `/api` table (prefix only). There is no `hidden` flag on `api_keys`.
-- Creating an API key owned by a hidden service account through public routes returns **404**.
-- The managed key's name and owner are immutable through public routes (**400**). Its inference `instance_ids` allowlist remains editable.
-- Public `POST /api/v1/api-keys/{id}/rotate` of the managed key returns **404**. Only `/api/v1/litellm/rotate` may rotate it; the new secret is stored encrypted and republished on owned LiteLLM models.
-- Disconnecting LiteLLM deletes the hidden account (keys cascade) and both LiteLLM-related stored secrets.
+- Creating an API key owned by a hidden service account through generic public key creation remains rejected; public API-key mutation itself requires a management JWT.
+- The managed key's name and owner are immutable through public routes (**400**). Its inference `instance_ids` allowlist remains editable by an authorized JWT administrator.
+- Generic `POST /api/v1/api-keys/{id}/rotate` does not rotate the managed LiteLLM key. Only `/api/v1/litellm/rotate` may rotate it; that operation is JWT-only, stores the new secret encrypted and republishes it on owned LiteLLM models.
+- Disconnecting LiteLLM is JWT-only and deletes the hidden account (keys cascade) and both LiteLLM-related stored secrets.
 
 Management requests authenticated by an API key carry an API-key principal. They MUST NOT invent a synthetic `User`. Lifecycle actor logs use `user.Username` or `api_key:<id>`. `created_by_user_id` is set only for JWT creates.
 
-Wrong plane, allowlist miss, all-stale allowlist, session/Playground denylist, and service-account admin blocks return **403**. Invalid/expired/disabled keys return **401**.
+Wrong plane, allowlist miss, all-stale allowlist, session/Playground denylist and JWT-only security-plane blocks return **403**. Invalid/expired/disabled keys return **401**.
 
 ## Management JWTs
 
@@ -193,17 +210,20 @@ Public/pre-auth endpoints:
 - `GET /api/v1/auth/oidc/{provider}/callback`
 - `POST /api/v1/auth/oidc/exchange`
 
-Bearer-protected endpoints include:
+JWT-only identity/security endpoints include:
 
 - `POST /api/v1/auth/logout`
 - `POST /api/v1/auth/ws-ticket`
 - `/api/v1/me` and session/password management
+- `/api/v1/users` and user/session administration
 - `/api/v1/admin/auth/settings`
 - `/api/v1/admin/auth/providers` and provider CRUD/test routes
 - `/api/v1/admin/auth/identities` and unlink routes
-- `/api/v1/api-keys` (JWT or management/full API key; no GET by id; PATCH 204; in-place rotate; no revoke)
-- `/api/v1/admin/service-accounts` (management JWT or Full Access API key, any owner; management and inference keys receive 403)
-- `/api/v1/litellm` and LiteLLM subroutes (management JWT or management/full API key; hidden principals are managed only through these routes)
-- all other protected management APIs.
+- API-key mutation: `POST /api/v1/api-keys`, `PATCH /api/v1/api-keys/{id}`, `POST /api/v1/api-keys/{id}/rotate`
+- `/api/v1/admin/service-accounts` and item routes
+- credential-bearing LiteLLM mutation: `PUT`/`DELETE /api/v1/litellm`, `POST /api/v1/litellm/sync`, `POST /api/v1/litellm/rotate`
+- security/trust-boundary fields in `PUT /api/v1/settings/general`.
 
-The v1 product intentionally remains flat-authorized: no roles, group mapping or provider-driven permission mapping are introduced by OIDC.
+Management/Full API keys may access the explicitly retained operational management surface, including `GET /api/v1/api-keys`, `GET /api/v1/litellm`, `POST /api/v1/litellm/test`, models, Instances, downloads/imports, lifecycle controls, logs/observability, hardware, llama.cpp configuration and non-security general settings. Inference keys receive 403 on all management routes.
+
+The v1 product intentionally remains flat-authorized for human management users: no roles, group mapping or provider-driven permission mapping are introduced by OIDC. API-key type boundaries and the JWT-only identity/security plane are credential-domain boundaries, not RBAC roles.
