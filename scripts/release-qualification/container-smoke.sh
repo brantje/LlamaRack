@@ -18,6 +18,7 @@ chmod 0777 "$config_dir" "$models_dir"
 container_name="llamarack-qualification-${variant}-$$"
 base_url=""
 log_file="$artifact_dir/${variant}-manager.log"
+identity_file="$artifact_dir/${variant}-identity.json"
 
 cleanup() {
   docker logs "$container_name" >"$log_file" 2>&1 || true
@@ -87,6 +88,47 @@ login_response="$(curl -fsS -X POST -H 'Content-Type: application/json' \
 management_token="$(printf '%s' "$login_response" | json_value 'data["access_token"]')"
 [[ -n "$management_token" ]]
 
+identity_response="$(auth_request GET /api/v1/system)"
+printf '%s\n' "$identity_response" > "$identity_file"
+python3 - "$identity_file" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+identity = payload.get("identity") or {}
+llama = identity.get("llama_cpp") or {}
+
+for field in ("version", "channel", "variant"):
+    if not identity.get(field):
+        raise SystemExit(f"system identity is missing {field}")
+
+checks = {
+    "EXPECTED_LLAMARACK_VERSION": identity.get("version", ""),
+    "EXPECTED_LLAMARACK_COMMIT": identity.get("commit", ""),
+    "EXPECTED_LLAMARACK_CHANNEL": identity.get("channel", ""),
+    "EXPECTED_RUNTIME_VARIANT": identity.get("variant", ""),
+    "EXPECTED_LLAMA_CPP_RELEASE": llama.get("release", ""),
+    "EXPECTED_LLAMA_CPP_BUILD": llama.get("build", ""),
+    "EXPECTED_LLAMA_CPP_IMAGE": llama.get("image", ""),
+}
+for env_name, actual in checks.items():
+    expected = os.environ.get(env_name, "")
+    if expected and actual != expected:
+        raise SystemExit(f"{env_name} mismatch: expected {expected!r}, got {actual!r}")
+
+if os.environ.get("EXPECTED_RELEASE_BUILD") == "true":
+    if identity.get("version") == "development":
+        raise SystemExit("official release build reports development version")
+    if identity.get("channel") != "release":
+        raise SystemExit("official release build does not report release channel")
+    if not identity.get("commit"):
+        raise SystemExit("official release build is missing commit")
+    if not llama.get("release") or not llama.get("build"):
+        raise SystemExit("official release build is missing llama.cpp release/build identity")
+PY
+
 auth_request PUT /api/v1/settings/general '{"idle_unload_seconds":17}' >/dev/null
 setting_value="$(auth_request GET /api/v1/settings/general | json_value 'data["idle_unload_seconds"]["value"]')"
 [[ "$setting_value" == "17" ]] || { echo "setting write did not persist in-process" >&2; exit 1; }
@@ -136,8 +178,10 @@ assert any(item["id"] == os.environ["API_KEY_ID"] for item in items)
 
 docker logs "$container_name" >"$log_file" 2>&1 || true
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-python3 - "$artifact_dir/${variant}-manifest.json" <<PY
+IDENTITY_FILE="$identity_file" python3 - "$artifact_dir/${variant}-manifest.json" <<PY
 import json, os, sys
+with open(os.environ["IDENTITY_FILE"], encoding="utf-8") as identity_handle:
+    identity = json.load(identity_handle).get("identity", {})
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump({
         "scenario": "container-smoke",
@@ -145,11 +189,13 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
         "image": "${image}",
         "image_id": "${image_id}",
         "commit": os.environ.get("GITHUB_SHA", ""),
+        "identity": identity,
         "started_at": "${started_at}",
         "finished_at": "${finished_at}",
         "checks": [
             "health",
             "static_frontend",
+            "build_identity",
             "fresh_bootstrap_and_login",
             "sqlite_migrations",
             "settings_persistence",
