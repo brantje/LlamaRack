@@ -49,19 +49,26 @@ if [[ ! "$build_tag" =~ ^b[0-9]+$ ]]; then
   exit 1
 fi
 
-cpu_image="ghcr.io/ggml-org/llama.cpp:server-${build_tag}"
-if ! docker buildx imagetools inspect "$cpu_image" >/dev/null 2>&1; then
-  echo "Missing llama.cpp CPU runtime image: ${cpu_image}" >&2
+pin_digest() {
+  local ref="$1" digest
+  digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')" || return 1
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  printf '%s@%s' "${ref%:*}" "$digest"
+}
+
+cpu_tag="ghcr.io/ggml-org/llama.cpp:server-${build_tag}"
+cpu_image="$(pin_digest "$cpu_tag")" || {
+  echo "Missing or unresolved llama.cpp CPU runtime image: ${cpu_tag}" >&2
   exit 1
-fi
+}
 
 cuda_image=''
 for candidate in \
   "ghcr.io/ggml-org/llama.cpp:server-cuda-${build_tag}" \
   "ghcr.io/ggml-org/llama.cpp:server-cuda13-${build_tag}" \
   "ghcr.io/ggml-org/llama.cpp:server-cuda12-${build_tag}"; do
-  if docker buildx imagetools inspect "$candidate" >/dev/null 2>&1; then
-    cuda_image="$candidate"
+  if resolved="$(pin_digest "$candidate")"; then
+    cuda_image="$resolved"
     break
   fi
 done
