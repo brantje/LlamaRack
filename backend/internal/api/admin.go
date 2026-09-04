@@ -317,62 +317,67 @@ type generalSettingsInput struct {
 	PrometheusAuthToken        *string `json:"prometheus_auth_token"`
 }
 
+type generalSettingClass uint8
+
+const (
+	generalSettingSensitive generalSettingClass = iota
+	generalSettingOperational
+)
+
+type generalSettingDefinition struct {
+	key   string
+	class generalSettingClass
+	read  func() (any, bool)
+}
+
 type generalSettingUpdate struct {
-	key       string
-	value     any
-	sensitive bool
+	key   string
+	value any
+	class generalSettingClass
+}
+
+func generalSettingValue[T any](value *T) func() (any, bool) {
+	return func() (any, bool) {
+		if value == nil {
+			return nil, false
+		}
+		return *value, true
+	}
 }
 
 func generalSettingsUpdates(in generalSettingsInput) []generalSettingUpdate {
-	updates := make([]generalSettingUpdate, 0, 14)
-	if in.SessionLifetimeSeconds != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.SessionLifetimeSeconds, value: *in.SessionLifetimeSeconds, sensitive: true})
+	definitions := []generalSettingDefinition{
+		{key: settings.SessionLifetimeSeconds, class: generalSettingSensitive, read: generalSettingValue(in.SessionLifetimeSeconds)},
+		{key: settings.LoginProtectionEnabled, class: generalSettingSensitive, read: generalSettingValue(in.LoginProtectionEnabled)},
+		{key: settings.LoginFailureThreshold, class: generalSettingSensitive, read: generalSettingValue(in.LoginFailureThreshold)},
+		{key: settings.LoginLockoutSeconds, class: generalSettingSensitive, read: generalSettingValue(in.LoginLockoutSeconds)},
+		{key: settings.TrustedProxies, class: generalSettingSensitive, read: generalSettingValue(in.TrustedProxies)},
+		{key: settings.AllowedOrigins, class: generalSettingSensitive, read: generalSettingValue(in.AllowedOrigins)},
+		{key: settings.ExternalURL, class: generalSettingSensitive, read: generalSettingValue(in.ExternalURL)},
+		{key: settings.StartupTimeoutSeconds, class: generalSettingOperational, read: generalSettingValue(in.StartupTimeoutSeconds)},
+		{key: settings.IdleUnloadSeconds, class: generalSettingOperational, read: generalSettingValue(in.IdleUnloadSeconds)},
+		{key: settings.AlwaysOnReconcileSeconds, class: generalSettingOperational, read: generalSettingValue(in.AlwaysOnReconcileSeconds)},
+		{key: settings.MaxPendingRequestsPerInstance, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingPerInstance)},
+		{key: settings.MaxPendingRequestsGlobal, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingGlobal)},
+		{key: settings.ObservabilityRetentionDays, class: generalSettingOperational, read: generalSettingValue(in.ObservabilityRetentionDays)},
+		{key: settings.PrometheusAuthToken, class: generalSettingSensitive, read: generalSettingValue(in.PrometheusAuthToken)},
 	}
-	if in.LoginProtectionEnabled != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.LoginProtectionEnabled, value: *in.LoginProtectionEnabled, sensitive: true})
-	}
-	if in.LoginFailureThreshold != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.LoginFailureThreshold, value: *in.LoginFailureThreshold, sensitive: true})
-	}
-	if in.LoginLockoutSeconds != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.LoginLockoutSeconds, value: *in.LoginLockoutSeconds, sensitive: true})
-	}
-	if in.TrustedProxies != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.TrustedProxies, value: *in.TrustedProxies, sensitive: true})
-	}
-	if in.AllowedOrigins != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.AllowedOrigins, value: *in.AllowedOrigins, sensitive: true})
-	}
-	if in.ExternalURL != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.ExternalURL, value: *in.ExternalURL, sensitive: true})
-	}
-	if in.StartupTimeoutSeconds != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.StartupTimeoutSeconds, value: *in.StartupTimeoutSeconds})
-	}
-	if in.IdleUnloadSeconds != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.IdleUnloadSeconds, value: *in.IdleUnloadSeconds})
-	}
-	if in.AlwaysOnReconcileSeconds != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.AlwaysOnReconcileSeconds, value: *in.AlwaysOnReconcileSeconds})
-	}
-	if in.MaxPendingPerInstance != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.MaxPendingRequestsPerInstance, value: *in.MaxPendingPerInstance})
-	}
-	if in.MaxPendingGlobal != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.MaxPendingRequestsGlobal, value: *in.MaxPendingGlobal})
-	}
-	if in.ObservabilityRetentionDays != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.ObservabilityRetentionDays, value: *in.ObservabilityRetentionDays})
-	}
-	if in.PrometheusAuthToken != nil {
-		updates = append(updates, generalSettingUpdate{key: settings.PrometheusAuthToken, value: *in.PrometheusAuthToken, sensitive: true})
+
+	updates := make([]generalSettingUpdate, 0, len(definitions))
+	for _, definition := range definitions {
+		value, present := definition.read()
+		if !present {
+			continue
+		}
+		updates = append(updates, generalSettingUpdate{key: definition.key, value: value, class: definition.class})
 	}
 	return updates
 }
 
 func generalSettingsRequireUserPrincipal(updates []generalSettingUpdate) bool {
 	for _, update := range updates {
-		if update.sensitive {
+		// Unknown/zero-value classifications are security-sensitive by default.
+		if update.class != generalSettingOperational {
 			return true
 		}
 	}
@@ -445,7 +450,6 @@ func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
 			if status.LastSync != nil {
 				liteLLM["last_sync_ok"] = status.LastSyncOK
 			}
-		}
 	}
 	profile, profileErr := h.profile()
 	llama := map[string]any{"available": profileErr == nil}
