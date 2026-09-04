@@ -204,6 +204,10 @@ json_value() {
   python3 -c "import json,sys; data=json.load(sys.stdin); print(${expression})"
 }
 
+log_step() {
+  printf '\n=== %s  %s ===\n' "$(date -u +%H:%M:%SZ)" "$*"
+}
+
 auth_request() {
   local method="$1" path="$2" body="${3:-}" tmp status
   tmp="$(mktemp)"
@@ -231,14 +235,22 @@ runtime_state() {
 }
 
 wait_state() {
-  local instance_id="$1" wanted="$2"
-  for _ in $(seq 1 180); do
+  local instance_id="$1" wanted="$2" i
+  printf 'waiting %s -> %s\n' "$instance_id" "$wanted"
+  for i in $(seq 1 180); do
     state="$(runtime_state "$instance_id")"
-    [[ "$state" == "$wanted" ]] && return 0
+    if [[ "$state" == "$wanted" ]]; then
+      printf '  %s reached %s after %ss\n' "$instance_id" "$wanted" "$i"
+      return 0
+    fi
     [[ "$state" == "FAILED" ]] && {
+      echo "instance ${instance_id} FAILED while waiting for ${wanted}" >&2
       auth_request GET "/api/v1/instances/${instance_id}/runtime" >&2 || true
       return 1
     }
+    if (( i % 15 == 0 )); then
+      printf '  still waiting %s -> %s (%ss, last=%s)\n' "$instance_id" "$wanted" "$i" "$state"
+    fi
     sleep 1
   done
   echo "instance ${instance_id} did not reach ${wanted}" >&2
@@ -366,13 +378,16 @@ smoke_model() {
   local label="$1" model_id="$2" slug="$3"
   local extra="${4:-,\"gpu_mode\":\"auto\"}"
   local instance_id
+  log_step "smoke ${label}"
   instance_id="$(create_instance "$model_id" "Smoke ${label}" "$slug" "$extra")"
+  printf 'starting smoke instance %s (%s)\n' "$instance_id" "$slug"
   auth_request POST "/api/v1/instances/${instance_id}/start" >/dev/null
   wait_state "$instance_id" READY
   assert_single_worker "$instance_id"
   infer "$instance_id"
   auth_request POST "/api/v1/instances/${instance_id}/stop" >/dev/null
   wait_state "$instance_id" UNLOADED
+  printf 'smoke %s passed\n' "$label"
 }
 
 verify_moe_launch() {
@@ -436,6 +451,12 @@ hardware="$(auth_request GET /api/v1/hardware)"
 printf '%s\n' "$hardware" >"$artifact_dir/hardware.json"
 mapfile -t gpu_ids < <(printf '%s' "$hardware" | python3 -c 'import json,sys; [print(g["id"]) for g in json.load(sys.stdin)["gpus"]]')
 [[ ${#gpu_ids[@]} -ge 1 ]] || { echo "release qualification requires at least one visible GPU" >&2; exit 1; }
+log_step "register models (${#gpu_ids[@]} GPU(s))"
+printf '8B=%s  12B=%s  moe-small=%s  moe-large=%s\n' \
+  "$(basename "$dense_lifecycle_host")" \
+  "$(basename "$dense_multi_host")" \
+  "$(basename "$moe_small_host")" \
+  "$(basename "$moe_large_host")"
 
 dense_lifecycle_model_id="$(create_model 'Qualification Dense Lifecycle' "$dense_lifecycle_path")"
 dense_multi_model_id="$(create_model 'Qualification Dense Multi' "$dense_multi_path")"
@@ -458,6 +479,7 @@ else
   smoke_model 'MoE Large' "$moe_large_model_id" 'qualification-smoke-moe-large'
 fi
 
+log_step "dense lifecycle soak (${cycles} cycles, 8B)"
 dense_model_id="$dense_lifecycle_model_id"
 dense_instance_id="$(create_instance "$dense_model_id" 'Qualification Dense' 'qualification-dense' ',"gpu_mode":"auto"')"
 auth_request POST "/api/v1/instances/${dense_instance_id}/start" >/dev/null
@@ -466,6 +488,7 @@ assert_single_worker "$dense_instance_id"
 
 rss_baseline="$(docker stats --no-stream --format '{{.MemUsage}}' "$container_name")"
 for cycle in $(seq 1 "$cycles"); do
+  log_step "dense lifecycle cycle ${cycle}/${cycles}"
   infer "$dense_instance_id"
   stream_infer "$dense_instance_id" "$artifact_dir/dense-stream-${cycle}.txt"
   assert_single_worker "$dense_instance_id"
@@ -485,6 +508,7 @@ done
 # Crash the manager while a streamed inference is active. The container shell
 # remains PID 1 so the owned llama-server survives long enough for startup
 # reconciliation to prove ownership and terminate it.
+log_step "ready-crash recovery"
 curl -sS -N -X POST \
   -H "Authorization: Bearer $management_token" -H 'Content-Type: application/json' \
   -d "{\"model\":\"$dense_instance_id\",\"messages\":[{\"role\":\"user\",\"content\":\"Write a long numbered list.\"}],\"max_tokens\":512,\"stream\":true}" \
@@ -508,6 +532,7 @@ assert_single_worker "$dense_instance_id"
 
 # Kill the manager during another start request to cover STARTING/LOADING
 # recovery without depending on a particular model-load duration.
+log_step "start-crash recovery"
 auth_request POST "/api/v1/instances/${dense_instance_id}/stop" >/dev/null
 wait_state "$dense_instance_id" UNLOADED
 curl -sS -X POST -H "Authorization: Bearer $management_token" \
@@ -526,6 +551,7 @@ wait_state "$dense_instance_id" UNLOADED
 
 # Autoload must start an unloaded Instance on first inference without creating
 # duplicate workers.
+log_step "autoload"
 autoload_instance_id="$(create_instance "$dense_model_id" 'Qualification Autoload' 'qualification-autoload' ',"autoload_enabled":true,"gpu_mode":"auto"')"
 infer "$autoload_instance_id"
 wait_state "$autoload_instance_id" READY
@@ -535,6 +561,7 @@ wait_state "$autoload_instance_id" UNLOADED
 
 # Concurrent explicit starts must single-flight to one worker. Then cancel a
 # real streaming request and prove the same worker remains healthy for inference.
+log_step "concurrent start + stream cancel"
 concurrent_instance_id="$(create_instance "$dense_model_id" 'Qualification Concurrent' 'qualification-concurrent' ',"gpu_mode":"auto"')"
 auth_request POST "/api/v1/instances/${concurrent_instance_id}/start" >"$artifact_dir/concurrent-start-1.json" & start_one=$!
 auth_request POST "/api/v1/instances/${concurrent_instance_id}/start" >"$artifact_dir/concurrent-start-2.json" & start_two=$!
@@ -549,6 +576,7 @@ wait_state "$concurrent_instance_id" UNLOADED
 
 # Per-Instance idle unload must stop an inactive worker after the configured
 # timeout. Autoload is enabled so a follow-up inference also proves recovery.
+log_step "idle unload and reload"
 idle_instance_id="$(create_instance "$dense_model_id" 'Qualification Idle' 'qualification-idle' ',"autoload_enabled":true,"idle_unload_seconds":1,"gpu_mode":"auto"')"
 infer "$idle_instance_id"
 wait_state "$idle_instance_id" READY
@@ -562,6 +590,7 @@ wait_state "$idle_instance_id" UNLOADED
 # recover after an unexpected worker SIGKILL, and remain suppressible by an
 # explicit Stop. Use a direct process kill here: the management Kill action is
 # an operator command, while this scenario specifically qualifies crash recovery.
+log_step "Always-On crash recovery"
 always_instance_id="$(create_instance "$dense_model_id" 'Qualification Always On' 'qualification-always-on' ',"always_on":true,"gpu_mode":"auto"')"
 wait_state "$always_instance_id" READY
 assert_single_worker "$always_instance_id"
@@ -581,6 +610,7 @@ sleep 3
 # one target GPU so the scenario behaves the same on 1-GPU and multi-GPU hosts.
 # Raise per-worker VRAM demand via ctx-size until a small number of copies must
 # evict; keep one copy inside a VRAM margin so the first worker can still load.
+log_step "8B single-GPU pressure (choose ctx-size)"
 target_gpu="${gpu_ids[0]}"
 target_gpu_total="$(printf '%s' "$hardware" | python3 -c 'import json,sys; gpus=json.load(sys.stdin)["gpus"]; print(int(gpus[0]["total_bytes"]))')"
 reserve_bytes=$((512 * 1024 * 1024))
@@ -592,7 +622,6 @@ import urllib.request
 
 base, token, model_id, usable = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 margin = int(usable * 0.85)
-picked = 0
 for ctx in (4096, 8192, 16384, 32768, 65536):
     req = urllib.request.Request(
         f"{base}/api/v1/models/{model_id}/recommendation?context_length={ctx}",
@@ -605,29 +634,36 @@ for ctx in (4096, 8192, 16384, 32768, 65536):
     vram = int(memory.get("full_offload_vram_bytes") or 0)
     devices = offload.get("devices") or []
     mode = offload.get("mode") or ""
-    if vram <= 0 or vram > margin:
+    copies = (usable // vram) if vram > 0 else 0
+    print(
+        f"pressure probe ctx={ctx} vram={vram} mode={mode} devices={','.join(devices) or '-'} copies_that_fit={copies}",
+        file=sys.stderr,
+    )
+    if vram <= 0:
         continue
     if mode == "multi_gpu" or len(devices) > 1:
         continue
-    copies = usable // vram
-    if copies < 1:
+    if vram > margin:
         continue
-    if copies + 1 <= 4:
+    # Active-request protection and 2-worker eviction need two copies to miss.
+    if vram * 2 > usable:
         print(ctx)
         raise SystemExit(0)
-    picked = ctx
-print(picked)
+print(0)
 PY
 )"
 if [[ "$pressure_ctx" == "0" ]]; then
   echo "8B dense pressure model (${pressure_bytes} bytes) cannot create single-GPU scheduler pressure on ${target_gpu} (${target_gpu_total} bytes usable≈${usable_bytes})" >&2
   exit 1
 fi
+printf 'pressure ctx-size=%s target_gpu=%s usable_bytes=%s model_bytes=%s\n' \
+  "$pressure_ctx" "$target_gpu" "$usable_bytes" "$pressure_bytes"
 pressure_opts="\"options\":{\"ctx-size\":\"${pressure_ctx}\"}"
 pressure_common=",\"gpu_mode\":\"manual\",\"gpu_devices\":[\"${target_gpu}\"],\"eviction_enabled\":true,${pressure_opts}"
 
 # Active-request protection: the only resident worker with in-flight work must
 # not be evicted to admit another copy on the same GPU.
+log_step "8B pressure: active-request protection"
 protected_id="$(create_instance "$dense_lifecycle_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common")"
 auth_request POST "/api/v1/instances/${protected_id}/start" >/dev/null
 wait_state "$protected_id" READY
@@ -672,10 +708,12 @@ wait_state "$protected_id" UNLOADED
 # Idle eviction: fill the target GPU with a few high-demand workers until the
 # scheduler must evict an idle peer. Cap attempts so a too-small model fails
 # with a provisioning error instead of thrashing dozens of GGUF loads.
+log_step "8B pressure: idle eviction"
 pressure_ids=()
 eviction_observed=0
 max_pressure_workers=4
 for index in $(seq 1 "$max_pressure_workers"); do
+  log_step "8B pressure worker ${index}/${max_pressure_workers}"
   pressure_id="$(create_instance "$dense_lifecycle_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common")"
   pressure_ids+=("$pressure_id")
   if ! auth_request POST "/api/v1/instances/${pressure_id}/start" >"$artifact_dir/pressure-start-${index}.json" 2>"$artifact_dir/pressure-start-${index}.err"; then
@@ -707,6 +745,7 @@ done
 # Dense 12B is the multi-GPU dense placement model. Pin both cards so the
 # comma-separated --device and generated --tensor-split launch path is proven.
 # A single-GPU host cannot load this GGUF without OOM, so skip the start there.
+log_step "12B multi-GPU dense placement"
 if (( ${#gpu_ids[@]} >= 2 )); then
   dense_multi_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_dense_multi_devices="${gpu_ids[0]},${gpu_ids[1]}"
@@ -725,6 +764,7 @@ else
 fi
 
 # Small MoE: always exercise n-cpu-moe on the first GPU.
+log_step "MoE small n-cpu-moe"
 moe_small_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
 moe_small_instance_id="$(auth_request POST /api/v1/instances \
   "{\"model_id\":\"$moe_small_model_id\",\"name\":\"Qualification MoE Small\",\"slug\":\"qualification-moe-small\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
@@ -740,6 +780,7 @@ wait_state "$moe_small_instance_id" UNLOADED
 
 # Large MoE: on multi-GPU hosts pin both devices so the comma-separated --device
 # launch path is covered. On a single-GPU host still prove n-cpu-moe works.
+log_step "MoE large n-cpu-moe / placement"
 if (( ${#gpu_ids[@]} >= 2 )); then
   moe_large_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_moe_large_devices="${gpu_ids[0]},${gpu_ids[1]}"
