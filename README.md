@@ -572,7 +572,7 @@ SQLite state lives at `{dataDir}/manager.db` (default `/config/manager.db` in co
 2. copy `manager.db` and any `manager.db-wal` / `manager.db-shm` sidecars from the configuration volume;
 3. restore those files before starting the upgraded build.
 
-Schema upgrades run automatically during startup through embedded Goose migrations. Unsupported legacy databases and databases created by a newer release than the running binary fail startup instead of wiping data.
+Schema upgrades run automatically during startup through embedded Goose migrations. Unmanaged databases and databases created by a newer release than the running binary fail startup instead of wiping data.
 
 ---
 

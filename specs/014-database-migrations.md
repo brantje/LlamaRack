@@ -26,8 +26,6 @@ backend/internal/database/
   migrations.go
   migrations/
     00001_baseline.sql
-  testdata/
-    pre10_current.sql
 ```
 
 Migrations are embedded into the manager binary with `//go:embed` so production containers do not require an external migrations directory.
@@ -50,40 +48,32 @@ After the baseline lands:
 - never edit an already-released migration;
 - prefer SQL migrations; use a Goose Go migration only when SQL cannot express the change safely.
 
-## 5. Supported pre-1.0 upgrade input
-
-Exactly **one** supported pre-goose snapshot is accepted:
-
-- all 21 core tables from current pre-1.0 `database.Open` schema, including typed `api_keys`, `instances.max_pending_requests`, and `service_accounts.hidden`;
-- optional absence of `oidc_providers`, `external_identities`, and `playground_lifecycle_events`.
-
-On first startup after adoption:
-
-1. classify the database as the supported legacy snapshot;
-2. create any missing optional tables with the exact baseline DDL;
-3. stamp Goose version `1` without re-running the baseline SQL;
-4. run Goose `Up` for any newer embedded migrations.
-
-Unsupported inputs fail clearly instead of guessing:
-
-- untyped/legacy `api_keys` without `key_type`;
-- missing required core tables or required columns;
-- any other historical development variant.
-
-## 6. Startup policy
+## 5. Startup policy
 
 `database.Open`:
 
 1. creates the parent directory;
 2. opens SQLite with WAL, foreign keys, and busy timeout;
-3. classifies the database (`empty`, `goose-managed`, `supported legacy`, `unsupported`);
+3. classifies the database (`empty`, `goose-managed`, or `unsupported`);
 4. refuses databases whose Goose version is newer than the embedded migration set;
 5. runs Goose `Up` before returning the connection;
 6. logs the resulting schema version.
 
+Supported inputs:
+
+- an empty SQLite file (fresh install);
+- a database already managed by embedded Goose migrations.
+
+Unsupported inputs fail clearly instead of guessing:
+
+- any SQLite file that contains application tables but no `goose_db_version` history;
+- a database newer than the running binary.
+
+There is no pre-Goose upgrade path. Operators with incompatible databases must recreate the database or restore a Goose-managed backup.
+
 Startup fails visibly when migration fails.
 
-## 7. Backup and restore
+## 6. Backup and restore
 
 Before upgrading across releases:
 
@@ -93,31 +83,29 @@ Before upgrading across releases:
 
 Automatic migrations preserve durable configuration unless a release note documents an intentional removal. Destructive resets require explicit operator action.
 
-## 8. Unsupported / newer databases
+## 7. Unsupported / newer databases
 
 - no downgrade migrations in 1.x;
 - a database newer than the running binary is refused safely;
-- unsupported legacy schemas are rejected with `ErrUnsupportedLegacySchema`.
+- unmanaged schemas are rejected with `ErrUnsupportedDatabaseSchema`.
 
-## 9. Tests
+## 8. Tests
 
 Automated migration tests live in `backend/internal/database/migrations_test.go` and run in normal backend CI. They cover:
 
 - fresh empty database migration to latest;
 - idempotent reopen;
-- supported pre-1.0 fixture upgrade with durable state preserved;
-- unsupported legacy rejection;
+- unmanaged schema rejection;
 - newer-version refusal;
 - embedded migration upgrades (`1 -> 2` via test-only migration);
 - failed migration rollback and retry.
 
-## 10. 1.0 release verification checklist
+## 9. 1.0 release verification checklist
 
 Before tagging `1.0.0`:
 
-1. start from the supported pre-1.0 fixture;
-2. boot the release candidate;
-3. verify durable users/auth/API keys/models/instances/settings/observability state;
-4. exercise login, model/instance management, and inference;
-5. restart the manager and confirm no migration reruns;
-6. upgrade the RC database to a build containing an additional Goose migration and verify the `1.x` upgrade path.
+1. boot the release candidate against a fresh database;
+2. verify schema creation through Goose migrations;
+3. exercise login, model/instance management, and inference;
+4. restart the manager and confirm no migration reruns;
+5. upgrade the RC database to a build containing an additional Goose migration and verify the `1.x` upgrade path.

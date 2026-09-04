@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+const baselineVersion = 1
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()
@@ -75,55 +76,9 @@ func TestRepeatedOpenAfterSuccessIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestPre10FixturePreservesDurableState(t *testing.T) {
+func TestUnmanagedDatabaseRejected(t *testing.T) {
 	ctx := context.Background()
-	path := createPre10FixtureDB(t)
-
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	version, err := gooseVersion(ctx, db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version != baselineVersion {
-		t.Fatalf("version=%d", version)
-	}
-	for _, table := range []string{"oidc_providers", "external_identities", "playground_lifecycle_events"} {
-		if !tableExistsQuick(ctx, db, table) {
-			t.Fatalf("bootstrap missing %s", table)
-		}
-	}
-
-	var username, modelName, settingValue, keyName string
-	if err := db.QueryRowContext(ctx, `SELECT username FROM users WHERE id=1`).Scan(&username); err != nil || username != "admin" {
-		t.Fatalf("user=%q err=%v", username, err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT name FROM models WHERE id='model-1'`).Scan(&modelName); err != nil || modelName != "Demo" {
-		t.Fatalf("model=%q err=%v", modelName, err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT setting_value FROM manager_settings WHERE setting_key='session_lifetime_seconds'`).Scan(&settingValue); err != nil || settingValue != "86400" {
-		t.Fatalf("setting=%q err=%v", settingValue, err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT name FROM api_keys WHERE id='key-1'`).Scan(&keyName); err != nil || keyName != "Admin" {
-		t.Fatalf("api key=%q err=%v", keyName, err)
-	}
-	var counter float64
-	if err := db.QueryRowContext(ctx, `SELECT value FROM observability_counters WHERE metric='autoload_total' AND instance_id='inst-1'`).Scan(&counter); err != nil || counter != 3 {
-		t.Fatalf("counter=%v err=%v", counter, err)
-	}
-	var sessionID string
-	if err := db.QueryRowContext(ctx, `SELECT session_id FROM inference_request_log_context WHERE request_id='req-1'`).Scan(&sessionID); err != nil || sessionID != "session-1" {
-		t.Fatalf("session=%q err=%v", sessionID, err)
-	}
-}
-
-func TestUnknownLegacySchemaRejected(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "unknown.db")
+	path := filepath.Join(t.TempDir(), "unmanaged.db")
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -136,37 +91,7 @@ func TestUnknownLegacySchemaRejected(t *testing.T) {
 	}
 
 	_, err = Open(ctx, path)
-	if !errors.Is(err, ErrUnsupportedLegacySchema) {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestUntypedAPIKeysRejected(t *testing.T) {
-	ctx := context.Background()
-	path := createPre10FixtureDB(t)
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.ExecContext(ctx, `DROP TABLE api_keys`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.ExecContext(ctx, `CREATE TABLE api_keys (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		prefix TEXT NOT NULL,
-		token_hash TEXT NOT NULL UNIQUE,
-		enabled INTEGER NOT NULL DEFAULT 1,
-		created_at INTEGER NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = Open(ctx, path)
-	if !errors.Is(err, ErrUnsupportedLegacySchema) {
+	if !errors.Is(err, ErrUnsupportedDatabaseSchema) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -286,34 +211,6 @@ INSERT INTO migration_fail_probe(id) VALUES (2);
 	}
 }
 
-func TestStampMigrationVersionIsIdempotent(t *testing.T) {
-	ctx := context.Background()
-	path := createPre10FixtureDB(t)
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := stampMigrationVersion(ctx, raw, baselineVersion); err != nil {
-		t.Fatal(err)
-	}
-	if err := stampMigrationVersion(ctx, raw, baselineVersion); err != nil {
-		t.Fatalf("idempotent stamp: %v", err)
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := Open(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	version, err := gooseVersion(ctx, db)
-	if err != nil || version != baselineVersion {
-		t.Fatalf("version=%d err=%v", version, err)
-	}
-}
-
 func TestClassifyDatabaseStates(t *testing.T) {
 	ctx := context.Background()
 
@@ -342,16 +239,18 @@ func TestClassifyDatabaseStates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	legacyPath := createPre10FixtureDB(t)
-	legacy, err := sql.Open("sqlite", legacyPath)
+	unmanaged, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "unmanaged.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	class, err = classifyDatabase(ctx, legacy)
-	if err != nil || class != dbClassLegacy {
-		t.Fatalf("legacy class=%d err=%v", class, err)
+	if _, err := unmanaged.ExecContext(ctx, `CREATE TABLE users (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
 	}
-	if err := legacy.Close(); err != nil {
+	class, err = classifyDatabase(ctx, unmanaged)
+	if err != nil || class != dbClassUnsupported {
+		t.Fatalf("unsupported class=%d err=%v", class, err)
+	}
+	if err := unmanaged.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -377,31 +276,6 @@ func TestMaxEmbeddedMigrationVersionRequiresFiles(t *testing.T) {
 	}
 }
 
-func createPre10FixtureDB(t *testing.T) string {
-	t.Helper()
-	fixture, err := os.ReadFile("testdata/pre10_current.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "pre10.db")
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range splitSQLStatements(string(fixture)) {
-		if strings.TrimSpace(stmt) == "" {
-			continue
-		}
-		if _, err := raw.Exec(stmt); err != nil {
-			t.Fatalf("fixture statement failed: %v\n%s", err, stmt)
-		}
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func gooseVersion(ctx context.Context, db *sql.DB) (int64, error) {
 	provider, err := newMigrationProvider(db)
 	if err != nil {
@@ -421,25 +295,4 @@ func mustOpenSQLite(path string) *sql.DB {
 		panic(err)
 	}
 	return db
-}
-
-func splitSQLStatements(sqlText string) []string {
-	var stmts []string
-	var current strings.Builder
-	for _, line := range strings.Split(sqlText, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "--") {
-			continue
-		}
-		current.WriteString(line)
-		current.WriteByte('\n')
-		if strings.HasSuffix(strings.TrimSpace(line), ";") {
-			stmts = append(stmts, current.String())
-			current.Reset()
-		}
-	}
-	if tail := strings.TrimSpace(current.String()); tail != "" {
-		stmts = append(stmts, tail)
-	}
-	return stmts
 }
