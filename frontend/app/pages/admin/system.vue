@@ -1,7 +1,21 @@
 <script setup lang="ts">
+type RequestForwarding = {
+  peer_address?: string
+  peer_trusted?: boolean
+  forwarded_header?: string[]
+  x_forwarded_for?: string[]
+  effective_remote_address?: string
+}
 type SystemInfo = {
   manager: { uptime_seconds: number; runtime: Record<string, string> }
-  network: { effective_scheme: string; secure_cookie: boolean; allowed_origins: unknown; trusted_proxies: unknown; external_url: unknown }
+  network: {
+    effective_scheme: string
+    secure_cookie: boolean
+    allowed_origins: unknown
+    trusted_proxies: unknown
+    external_url: unknown
+    request_forwarding?: RequestForwarding
+  }
   llamacpp: { available: boolean; path?: string; version?: string; fingerprint?: string; options?: number }
 }
 type ResolvedSetting = { value?: unknown }
@@ -69,6 +83,24 @@ function formatUptimeSeconds(seconds: number) {
 
 const allowedOrigins = computed(() => diagnosticValues(info.value?.network.allowed_origins))
 const trustedProxies = computed(() => diagnosticValues(info.value?.network.trusted_proxies))
+const forwardedIPs = computed(() => {
+  const forwarding = info.value?.network.request_forwarding
+  if (!forwarding) return []
+  const lines: string[] = []
+  if (forwarding.peer_address) {
+    lines.push(`Peer: ${forwarding.peer_address}${forwarding.peer_trusted ? ' (trusted)' : ''}`)
+  }
+  for (const ip of forwarding.forwarded_header ?? []) {
+    lines.push(`Forwarded: ${ip}`)
+  }
+  for (const ip of forwarding.x_forwarded_for ?? []) {
+    lines.push(`X-Forwarded-For: ${ip}`)
+  }
+  if (forwarding.effective_remote_address) {
+    lines.push(`Effective remote: ${forwarding.effective_remote_address}`)
+  }
+  return lines
+})
 const freshness = computed(() => {
   if (updatedAt.value == null) return 'Not updated yet'
   const time = new Intl.DateTimeFormat('en-GB', {
@@ -129,6 +161,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
           <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Effective scheme</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.network.effective_scheme }}</code></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Secure session cookie</dt><dd class="min-w-0"><StatusTag :variant="info.network.secure_cookie ? 'ready' : 'neutral'">{{ info.network.secure_cookie ? 'Enabled' : 'Disabled' }}</StatusTag></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Allowed origins</dt><dd class="min-w-0"><ul v-if="allowedOrigins.length" class="space-y-1"><li v-for="(origin, index) in allowedOrigins" :key="`${origin}-${index}`"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]" data-testid="allowed-origin-value">{{ origin }}</code></li></ul><code v-else class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">None configured</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Forwarded IPs</dt><dd class="min-w-0"><ul v-if="forwardedIPs.length" class="space-y-1"><li v-for="(entry, index) in forwardedIPs" :key="`${entry}-${index}`"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]" data-testid="forwarded-ip-value">{{ entry }}</code></li></ul><code v-else class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">None observed</code><p class="mt-2 text-xs leading-5 text-[var(--neutral-700)]">Shows all forwarded IPs from the current request for easier debugging behind proxies.</p></dd></div>
           <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Trusted proxies</dt><dd class="min-w-0"><ul v-if="trustedProxies.length" class="space-y-1"><li v-for="(proxy, index) in trustedProxies" :key="`${proxy}-${index}`"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]" data-testid="trusted-proxy-value">{{ proxy }}</code></li></ul><code v-else class="font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-800)]">None configured</code></dd></div>
         </dl>
       </Frame>

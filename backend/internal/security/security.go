@@ -41,6 +41,26 @@ func (n *Network) EffectiveScheme(r *http.Request) string {
 	return "http"
 }
 
+type RequestForwardingDiagnostics struct {
+	PeerAddress            string   `json:"peer_address"`
+	PeerTrusted            bool     `json:"peer_trusted"`
+	ForwardedHeader        []string `json:"forwarded_header"`
+	XForwardedFor          []string `json:"x_forwarded_for"`
+	EffectiveRemoteAddress string   `json:"effective_remote_address"`
+}
+
+func (n *Network) RequestForwardingDiagnostics(r *http.Request) RequestForwardingDiagnostics {
+	peer := remoteIP(r.RemoteAddr)
+	peerTrusted := peer.IsValid() && n.isTrustedPeer(r.Context(), peer)
+	return RequestForwardingDiagnostics{
+		PeerAddress:            peer.String(),
+		PeerTrusted:            peerTrusted,
+		ForwardedHeader:        addrsToStrings(forwardedFor(r.Header.Get("Forwarded"))),
+		XForwardedFor:          addrsToStrings(xForwardedFor(r.Header.Get("X-Forwarded-For"))),
+		EffectiveRemoteAddress: n.EffectiveRemoteAddress(r),
+	}
+}
+
 func (n *Network) EffectiveRemoteAddress(r *http.Request) string {
 	peer := remoteIP(r.RemoteAddr)
 	if !peer.IsValid() || !n.isTrustedPeer(r.Context(), peer) {
@@ -48,11 +68,7 @@ func (n *Network) EffectiveRemoteAddress(r *http.Request) string {
 	}
 	chain := forwardedFor(r.Header.Get("Forwarded"))
 	if len(chain) == 0 {
-		for _, raw := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
-			if ip, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(raw), "[]")); err == nil {
-				chain = append(chain, ip.Unmap())
-			}
-		}
+		chain = xForwardedFor(r.Header.Get("X-Forwarded-For"))
 	}
 	chain = append(chain, peer)
 	for index := len(chain) - 1; index >= 0; index-- {
@@ -157,6 +173,27 @@ func forwardedProto(header string) string {
 		}
 	}
 	return ""
+}
+
+func xForwardedFor(header string) []netip.Addr {
+	var result []netip.Addr
+	for _, raw := range strings.Split(header, ",") {
+		if ip, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(raw), "[]")); err == nil {
+			result = append(result, ip.Unmap())
+		}
+	}
+	return result
+}
+
+func addrsToStrings(addrs []netip.Addr) []string {
+	if len(addrs) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		result = append(result, addr.String())
+	}
+	return result
 }
 
 func forwardedFor(header string) []netip.Addr {

@@ -300,90 +300,6 @@ func (h *adminHandler) revokeOwnSession(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type generalSettingsInput struct {
-	SessionLifetimeSeconds     *int    `json:"session_lifetime_seconds"`
-	LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
-	LoginFailureThreshold      *int    `json:"login_failure_threshold"`
-	LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
-	TrustedProxies             *string `json:"trusted_proxies"`
-	AllowedOrigins             *string `json:"allowed_origins"`
-	ExternalURL                *string `json:"external_url"`
-	StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
-	IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
-	AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
-	MaxPendingPerInstance      *int    `json:"max_pending_requests_per_instance"`
-	MaxPendingGlobal           *int    `json:"max_pending_requests_global"`
-	ObservabilityRetentionDays *int    `json:"observability_retention_days"`
-	PrometheusAuthToken        *string `json:"prometheus_auth_token"`
-}
-
-type generalSettingClass uint8
-
-const (
-	generalSettingSensitive generalSettingClass = iota
-	generalSettingOperational
-)
-
-type generalSettingDefinition struct {
-	key   string
-	class generalSettingClass
-	read  func() (any, bool)
-}
-
-type generalSettingUpdate struct {
-	key   string
-	value any
-	class generalSettingClass
-}
-
-func generalSettingValue[T any](value *T) func() (any, bool) {
-	return func() (any, bool) {
-		if value == nil {
-			return nil, false
-		}
-		return *value, true
-	}
-}
-
-func generalSettingsUpdates(in generalSettingsInput) []generalSettingUpdate {
-	definitions := []generalSettingDefinition{
-		{key: settings.SessionLifetimeSeconds, class: generalSettingSensitive, read: generalSettingValue(in.SessionLifetimeSeconds)},
-		{key: settings.LoginProtectionEnabled, class: generalSettingSensitive, read: generalSettingValue(in.LoginProtectionEnabled)},
-		{key: settings.LoginFailureThreshold, class: generalSettingSensitive, read: generalSettingValue(in.LoginFailureThreshold)},
-		{key: settings.LoginLockoutSeconds, class: generalSettingSensitive, read: generalSettingValue(in.LoginLockoutSeconds)},
-		{key: settings.TrustedProxies, class: generalSettingSensitive, read: generalSettingValue(in.TrustedProxies)},
-		{key: settings.AllowedOrigins, class: generalSettingSensitive, read: generalSettingValue(in.AllowedOrigins)},
-		{key: settings.ExternalURL, class: generalSettingSensitive, read: generalSettingValue(in.ExternalURL)},
-		{key: settings.StartupTimeoutSeconds, class: generalSettingOperational, read: generalSettingValue(in.StartupTimeoutSeconds)},
-		{key: settings.IdleUnloadSeconds, class: generalSettingOperational, read: generalSettingValue(in.IdleUnloadSeconds)},
-		{key: settings.AlwaysOnReconcileSeconds, class: generalSettingOperational, read: generalSettingValue(in.AlwaysOnReconcileSeconds)},
-		{key: settings.MaxPendingRequestsPerInstance, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingPerInstance)},
-		{key: settings.MaxPendingRequestsGlobal, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingGlobal)},
-		{key: settings.ObservabilityRetentionDays, class: generalSettingOperational, read: generalSettingValue(in.ObservabilityRetentionDays)},
-		{key: settings.PrometheusAuthToken, class: generalSettingSensitive, read: generalSettingValue(in.PrometheusAuthToken)},
-	}
-
-	updates := make([]generalSettingUpdate, 0, len(definitions))
-	for _, definition := range definitions {
-		value, present := definition.read()
-		if !present {
-			continue
-		}
-		updates = append(updates, generalSettingUpdate{key: definition.key, value: value, class: definition.class})
-	}
-	return updates
-}
-
-func generalSettingsRequireUserPrincipal(updates []generalSettingUpdate) bool {
-	for _, update := range updates {
-		// Unknown/zero-value classifications are security-sensitive by default.
-		if update.class != generalSettingOperational {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
 	if r.Method == http.MethodGet {
 		general, err := h.settings.General(r.Context())
@@ -398,25 +314,79 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	var in generalSettingsInput
+	var in struct {
+		SessionLifetimeSeconds     *int    `json:"session_lifetime_seconds"`
+		LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
+		LoginFailureThreshold      *int    `json:"login_failure_threshold"`
+		LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
+		TrustedProxies             *string `json:"trusted_proxies"`
+		AllowedOrigins             *string `json:"allowed_origins"`
+		ExternalURL                *string `json:"external_url"`
+		StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
+		IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
+		AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
+		MaxPendingPerInstance      *int    `json:"max_pending_requests_per_instance"`
+		MaxPendingGlobal           *int    `json:"max_pending_requests_global"`
+		ObservabilityRetentionDays *int    `json:"observability_retention_days"`
+		PrometheusAuthToken        *string `json:"prometheus_auth_token"`
+	}
 	if !decode(w, r, &in) {
 		return
 	}
-	updates := generalSettingsUpdates(in)
-	if generalSettingsRequireUserPrincipal(updates) && !requireManagementUserPrincipal(w, principal) {
-		return
+	updates := map[string]any{}
+	if in.SessionLifetimeSeconds != nil {
+		updates[settings.SessionLifetimeSeconds] = *in.SessionLifetimeSeconds
 	}
-	for _, update := range updates {
-		if _, err := h.settings.Set(r.Context(), update.key, update.value); err != nil {
+	if in.LoginProtectionEnabled != nil {
+		updates[settings.LoginProtectionEnabled] = *in.LoginProtectionEnabled
+	}
+	if in.LoginFailureThreshold != nil {
+		updates[settings.LoginFailureThreshold] = *in.LoginFailureThreshold
+	}
+	if in.LoginLockoutSeconds != nil {
+		updates[settings.LoginLockoutSeconds] = *in.LoginLockoutSeconds
+	}
+	if in.TrustedProxies != nil {
+		updates[settings.TrustedProxies] = *in.TrustedProxies
+	}
+	if in.AllowedOrigins != nil {
+		updates[settings.AllowedOrigins] = *in.AllowedOrigins
+	}
+	if in.ExternalURL != nil {
+		updates[settings.ExternalURL] = *in.ExternalURL
+	}
+	if in.StartupTimeoutSeconds != nil {
+		updates[settings.StartupTimeoutSeconds] = *in.StartupTimeoutSeconds
+	}
+	if in.IdleUnloadSeconds != nil {
+		updates[settings.IdleUnloadSeconds] = *in.IdleUnloadSeconds
+	}
+	if in.AlwaysOnReconcileSeconds != nil {
+		updates[settings.AlwaysOnReconcileSeconds] = *in.AlwaysOnReconcileSeconds
+	}
+	if in.MaxPendingPerInstance != nil {
+		updates[settings.MaxPendingRequestsPerInstance] = *in.MaxPendingPerInstance
+	}
+	if in.MaxPendingGlobal != nil {
+		updates[settings.MaxPendingRequestsGlobal] = *in.MaxPendingGlobal
+	}
+	if in.ObservabilityRetentionDays != nil {
+		updates[settings.ObservabilityRetentionDays] = *in.ObservabilityRetentionDays
+	}
+	if in.PrometheusAuthToken != nil {
+		updates[settings.PrometheusAuthToken] = *in.PrometheusAuthToken
+	}
+	for key, value := range updates {
+		if _, err := h.settings.Set(r.Context(), key, value); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		if update.key == settings.SessionLifetimeSeconds {
-			if seconds, ok := update.value.(int); ok {
+		if key == settings.SessionLifetimeSeconds {
+			if seconds, ok := value.(int); ok {
 				h.auth.SetSessionLifetime(time.Duration(seconds) * time.Second)
 			}
 		}
-		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", update.key)...)
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", key)...)
 	}
 	general, err := h.settings.General(r.Context())
 	if err != nil {
@@ -481,9 +451,18 @@ func (h *adminHandler) system(w http.ResponseWriter, r *http.Request) {
 		llama["fingerprint"] = profile.Fingerprint
 		llama["options"] = len(profile.Options)
 	}
+	forwarding := h.network.RequestForwardingDiagnostics(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"manager":  map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
-		"network":  map[string]any{"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r), "allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL},
+		"manager": map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
+		"network": map[string]any{
+			"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r),
+			"allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL,
+			"request_forwarding": map[string]any{
+				"peer_address": forwarding.PeerAddress, "peer_trusted": forwarding.PeerTrusted,
+				"forwarded_header": forwarding.ForwardedHeader, "x_forwarded_for": forwarding.XForwardedFor,
+				"effective_remote_address": forwarding.EffectiveRemoteAddress,
+			},
+		},
 		"llamacpp": llama,
 	})
 }
