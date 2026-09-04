@@ -133,12 +133,21 @@ jobs:
       - name: Run real-hardware lifecycle soak
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
-        run: >-
-          bash scripts/release-qualification/gpu-soak.sh
-          '${{ inputs.cuda_image }}'
-          '${{ inputs.gpu_model_path }}'
-          '${{ inputs.gpu_moe_model_path }}'
-          '${{ inputs.gpu_cycles }}'
+        run: |
+          set -euo pipefail
+          bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
+          bash scripts/release-qualification/gpu-soak.sh \
+            '${{ inputs.cuda_image }}' \
+            '${{ inputs.gpu_model_path }}' \
+            '${{ inputs.gpu_moe_model_path }}' \
+            '${{ inputs.gpu_cycles }}'
+          wait "$monitor_pid"
+          python3 scripts/release-qualification/analyze-manager-growth.py \
+            "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
+            "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
+          trap - EXIT
       - name: Upload GPU qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
