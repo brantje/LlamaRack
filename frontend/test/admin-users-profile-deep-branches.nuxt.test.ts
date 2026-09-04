@@ -330,7 +330,7 @@ describe('llama.cpp and general branch variants', () => {
     const sidebar = await mountSuspended(AdminSidebar, { route: '/admin/llamacpp' })
     await flushPromises()
     expect(sidebar.text()).toContain('Administration')
-    expect(sidebar.get('[data-testid="admin-nav-llama.cpp"]').classes()).toContain('bg-[var(--accent-100)]')
+    expect(sidebar.get('[data-testid="admin-nav-llama.cpp"]').attributes('aria-current')).toBe('page')
     expect(sidebar.text()).not.toContain('Sign out')
     sidebar.unmount()
   })

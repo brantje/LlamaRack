@@ -21,7 +21,7 @@ describe('Administration system logs route', () => {
     const logs = wrapper.get('[data-testid="admin-nav-logs"]')
 
     expect(logs.attributes('href')).toBe('/admin/system-logs')
-    expect(logs.classes()).toContain('border-[var(--color-accent)]')
+    expect(logs.attributes('aria-current')).toBe('page')
     wrapper.unmount()
   })
 })
