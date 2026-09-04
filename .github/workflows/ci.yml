@@ -83,7 +83,7 @@ jobs:
       - name: Validate release qualification scripts
         run: |
           bash -n scripts/release-qualification/*.sh
-          python3 -m py_compile scripts/release-qualification/analyze-manager-growth.py
+          python3 -m py_compile scripts/release-qualification/*.py
 
   frontend:
     runs-on: ubuntu-latest
