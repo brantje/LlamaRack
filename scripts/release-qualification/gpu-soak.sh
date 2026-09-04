@@ -51,22 +51,28 @@ pick_model() {
 }
 
 extra_volume_args=()
-mount_if_outside_models_dir() {
-  local host="$1"
+container_model_path() {
+  local host="$1" role="$2"
+  local dest="/models/qualification/$(basename "$host")"
   case "$host" in
-    "$models_dir"/*) return 0 ;;
+    "$models_dir"/*)
+      printf '%s\n' "$dest"
+      return 0
+      ;;
   esac
-  extra_volume_args+=(-v "$host:/models/qualification/$(basename "$host"):ro")
+  dest="/models/qualification/${role}-$(basename "$host")"
+  extra_volume_args+=(-v "$host:${dest}:ro")
+  printf '%s\n' "$dest"
 }
 
 dense_lifecycle_host="$(pick_model "${GPU_QUALIFICATION_DENSE_LIFECYCLE:-}" qualification-llama-8B.gguf qualification.gguf)"
 dense_multi_host="$(pick_model "${GPU_QUALIFICATION_DENSE_MULTI:-}" qualification-12B.gguf)"
 moe_small_host="$(pick_model "${GPU_QUALIFICATION_MOE_SMALL:-}" qualification-moe-4ba1b.gguf qualification-moe.gguf)"
 moe_large_host="$(pick_model "${GPU_QUALIFICATION_MOE_LARGE:-}" qualification-moe-26b-a4b.gguf)"
-mount_if_outside_models_dir "$dense_lifecycle_host"
-mount_if_outside_models_dir "$dense_multi_host"
-mount_if_outside_models_dir "$moe_small_host"
-mount_if_outside_models_dir "$moe_large_host"
+dense_lifecycle_path="$(container_model_path "$dense_lifecycle_host" lifecycle)"
+dense_multi_path="$(container_model_path "$dense_multi_host" multi)"
+moe_small_path="$(container_model_path "$moe_small_host" moe-small)"
+moe_large_path="$(container_model_path "$moe_large_host" moe-large)"
 
 artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$(pwd)/artifacts/release-qualification/gpu}"
 mkdir -p "$artifact_dir"
@@ -74,10 +80,6 @@ config_dir="$(mktemp -d)"
 chmod 0777 "$config_dir"
 container_name="llamarack-gpu-qualification-$$"
 base_url=""
-dense_lifecycle_path="/models/qualification/$(basename "$dense_lifecycle_host")"
-dense_multi_path="/models/qualification/$(basename "$dense_multi_host")"
-moe_small_path="/models/qualification/$(basename "$moe_small_host")"
-moe_large_path="/models/qualification/$(basename "$moe_large_host")"
 docker_probe_host="${GPU_DOCKER_HOST:-127.0.0.1}"
 docker_publish_host="127.0.0.1"
 
@@ -212,11 +214,11 @@ auth_request() {
   local method="$1" path="$2" body="${3:-}" tmp status
   tmp="$(mktemp)"
   if [[ -n "$body" ]]; then
-    status="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
+    status="$(curl -sS --connect-timeout 10 --max-time 120 -o "$tmp" -w '%{http_code}' -X "$method" \
       -H "Authorization: Bearer $management_token" \
       -H 'Content-Type: application/json' -d "$body" "$base_url$path")" || true
   else
-    status="$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" \
+    status="$(curl -sS --connect-timeout 10 --max-time 120 -o "$tmp" -w '%{http_code}' -X "$method" \
       -H "Authorization: Bearer $management_token" "$base_url$path")" || true
   fi
   if [[ ! "$status" =~ ^2 ]]; then
@@ -627,7 +629,7 @@ for ctx in (4096, 8192, 16384, 32768, 65536):
         f"{base}/api/v1/models/{model_id}/recommendation?context_length={ctx}",
         headers={"Authorization": f"Bearer {token}"},
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=120) as resp:
         rec = json.load(resp)
     memory = rec.get("memory") or {}
     offload = rec.get("offload") or {}
@@ -749,7 +751,7 @@ log_step "12B multi-GPU dense placement"
 if (( ${#gpu_ids[@]} >= 2 )); then
   dense_multi_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_dense_multi_devices="${gpu_ids[0]},${gpu_ids[1]}"
-  dense_multi_instance_id="$(create_instance "$dense_multi_model_id" 'Qualification Dense Multi' 'qualification-dense-multi' ",\"gpu_mode\":\"manual\",\"gpu_devices\":${dense_multi_gpu_json}")"
+  dense_multi_instance_id="$(create_instance "$dense_multi_model_id" 'Qualification Dense Multi' 'qualification-dense-multi' ",\"gpu_mode\":\"manual\",\"gpu_devices\":${dense_multi_gpu_json},\"tensor_split\":\"1,1\"")"
   auth_request POST "/api/v1/instances/${dense_multi_instance_id}/start" >/dev/null
   wait_state "$dense_multi_instance_id" READY
   assert_single_worker "$dense_multi_instance_id"
