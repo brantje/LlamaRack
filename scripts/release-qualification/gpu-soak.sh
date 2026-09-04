@@ -17,20 +17,14 @@ mkdir -p "$artifact_dir"
 config_dir="$(mktemp -d)"
 chmod 0777 "$config_dir"
 container_name="llamarack-gpu-qualification-$$"
-port="$(python3 - <<'PY'
-import socket
-with socket.socket() as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-)"
-base_url="http://127.0.0.1:${port}"
+base_url=""
 dense_dir="$(cd "$(dirname "$dense_host")" && pwd)"
 moe_dir="$(cd "$(dirname "$moe_host")" && pwd)"
 dense_path="/qualification/dense/$(basename "$dense_host")"
 moe_path="/qualification/moe/$(basename "$moe_host")"
 
 cleanup() {
+  docker exec "$container_name" cat /config/manager.log >"$artifact_dir/manager.log" 2>/dev/null || true
   docker rm -f "$container_name" >/dev/null 2>&1 || true
   rm -rf "$config_dir"
 }
@@ -44,11 +38,14 @@ docker pull "$image"
 docker image inspect "$image" >"$artifact_dir/docker-image.json"
 docker run -d --gpus all --name "$container_name" \
   --entrypoint sh \
-  -p "127.0.0.1:${port}:8000" \
+  -p '127.0.0.1::8000' \
   -v "$config_dir:/config" \
   -v "$dense_dir:/qualification/dense:ro" \
   -v "$moe_dir:/qualification/moe:ro" \
   "$image" -c 'while :; do sleep 3600; done' >/dev/null
+port="$(docker port "$container_name" 8000/tcp | awk -F: 'NR == 1 { print $NF }')"
+[[ "$port" =~ ^[0-9]+$ ]] || { echo "unable to resolve Docker-published manager port" >&2; exit 1; }
+base_url="http://127.0.0.1:${port}"
 
 start_manager() {
   docker exec -d "$container_name" sh -c 'exec /usr/local/bin/llamarack >>/config/manager.log 2>&1'
@@ -129,6 +126,15 @@ assert_single_worker() {
   local instance_id="$1" count
   count="$(worker_count "$instance_id")"
   [[ "$count" == "1" ]] || { echo "worker invariant violated for $instance_id: count=$count" >&2; exit 1; }
+}
+
+assert_worker_identity() {
+  local pid="$1" instance_id="$2"
+  docker exec "$container_name" sh -c '
+    pid="$1"; instance="$2"
+    tr "\000" "\n" <"/proc/${pid}/environ" 2>/dev/null \
+      | grep -qx "LLAMARACK_INSTANCE_ID=$instance"
+  ' sh "$pid" "$instance_id"
 }
 
 wait_no_worker() {
@@ -273,10 +279,21 @@ wait_state "$moe_instance_id" READY
 assert_single_worker "$moe_instance_id"
 infer "$moe_instance_id"
 moe_worker_pid="$(auth_request GET "/api/v1/instances/${moe_instance_id}/runtime" | json_value 'data["pid"]')"
-docker exec "$container_name" sh -c "tr '\\000' ' ' </proc/${moe_worker_pid}/cmdline" \
-  | tee "$artifact_dir/moe-worker-cmdline.txt" | grep -q -- '--n-cpu-moe'
+assert_worker_identity "$moe_worker_pid" "$moe_instance_id"
+docker exec "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/cmdline" \
+  >"$artifact_dir/moe-worker-args.txt"
+python3 - "$artifact_dir/moe-worker-args.txt" "${gpu_ids[0]},${gpu_ids[1]}" <<'PY'
+import sys
+args = [line.rstrip("\n") for line in open(sys.argv[1], encoding="utf-8")]
+expected_devices = sys.argv[2]
+assert "--n-cpu-moe" in args, args
+index = args.index("--device")
+assert index + 1 < len(args), args
+assert args[index + 1] == expected_devices, (args, expected_devices)
+PY
 docker exec "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/environ" \
-  | tee "$artifact_dir/moe-worker-environ.txt" | grep -q '^CUDA_VISIBLE_DEVICES=.*,'
+  >"$artifact_dir/moe-worker-environ.txt"
+grep -qx "LLAMARACK_INSTANCE_ID=${moe_instance_id}" "$artifact_dir/moe-worker-environ.txt"
 auth_request POST "/api/v1/instances/${moe_instance_id}/stop" >/dev/null
 wait_state "$moe_instance_id" UNLOADED
 
