@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from common import PROBE_CASE_BY_CONTRACT_ID, REQUIRED_CAPABILITY_CASES
+
 
 PROXY_CASES = {
     "litellm.proxy.basic",
@@ -61,24 +63,47 @@ def main() -> None:
             )
 
     required_caps = {item.strip() for item in os.environ.get("LLAMARACK_REQUIRED_CAPABILITIES", "").split(",") if item.strip()}
-    required_case_map = {
-        "lifecycle_ready": "lifecycle.ready",
-        "lifecycle_autoload": "lifecycle.cold_autoload",
-        "lifecycle_no_autoload": "lifecycle.autoload_disabled",
-        "lifecycle_failed_start": "lifecycle.failed_start",
-        "completion": "completions.basic",
-        "embeddings": "embeddings.basic",
-        "tools": "tools.round_trip",
-        "structured_output": "structured_output.json_schema",
-        "vision": "multimodal.image",
-        "transcription": "audio.transcription",
-    }
     statuses: dict[str, list[str]] = {}
     for item in all_results:
         statuses.setdefault(str(item.get("name")), []).append(str(item.get("status")))
+
+    contract = json.loads((Path(__file__).with_name("contract.json")).read_text(encoding="utf-8"))
+    for surface in contract["surfaces"]:
+        if not surface.get("required_probe"):
+            continue
+        contract_id = str(surface["id"])
+        case = PROBE_CASE_BY_CONTRACT_ID.get(contract_id)
+        if case is None:
+            failures.append(
+                {
+                    "suite": "summary",
+                    "name": f"required_probe.{contract_id}",
+                    "status": "fail",
+                    "detail": f"contract surface {contract_id!r} has no probe case mapping",
+                }
+            )
+        elif "pass" not in statuses.get(case, []):
+            failures.append(
+                {
+                    "suite": "summary",
+                    "name": f"required_probe.{contract_id}",
+                    "status": "fail",
+                    "detail": f"required probe case {case!r} did not pass",
+                }
+            )
+
     for capability in sorted(required_caps):
-        case = required_case_map.get(capability)
-        if case and "pass" not in statuses.get(case, []):
+        case = REQUIRED_CAPABILITY_CASES.get(capability)
+        if case is None:
+            failures.append(
+                {
+                    "suite": "summary",
+                    "name": f"required_capability.{capability}",
+                    "status": "fail",
+                    "detail": f"unknown required capability {capability!r}",
+                }
+            )
+        elif "pass" not in statuses.get(case, []):
             failures.append(
                 {
                     "suite": "summary",

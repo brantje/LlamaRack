@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+from common import PROBE_CASE_BY_CONTRACT_ID
 CONTRACT = json.loads((ROOT / "contract.json").read_text(encoding="utf-8"))
 VERSIONS = json.loads((ROOT / "versions.json").read_text(encoding="utf-8"))
 
@@ -50,6 +53,8 @@ def main() -> None:
     }
     assert required.issubset(by_id), required.difference(by_id)
     assert all(by_id[item]["required_probe"] for item in required)
+    assert required.issubset(PROBE_CASE_BY_CONTRACT_ID), required.difference(PROBE_CASE_BY_CONTRACT_ID)
+    assert set(PROBE_CASE_BY_CONTRACT_ID) == required
 
     conditional = [item for item in surfaces if item["status"] == "conditional"]
     assert conditional

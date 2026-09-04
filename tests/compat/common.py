@@ -45,6 +45,36 @@ def required_capabilities() -> set[str]:
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
+# Maps contract surface IDs with required_probe=true to probe case names.
+PROBE_CASE_BY_CONTRACT_ID = {
+    "models.list": "models.list",
+    "models.retrieve": "models.retrieve",
+    "chat.completions": "chat.basic",
+    "chat.completions.streaming": "chat.streaming_sdk",
+    "responses.create": "responses.basic",
+    "client_disconnect": "wire.client_disconnect",
+    "lifecycle.ready": "lifecycle.ready",
+    "lifecycle.cold_autoload": "lifecycle.cold_autoload",
+    "lifecycle.autoload_disabled": "lifecycle.autoload_disabled",
+    "lifecycle.concurrent_cold_start": "lifecycle.concurrent_cold_start",
+}
+
+# Maps LLAMARACK_REQUIRED_CAPABILITIES values to probe case names.
+REQUIRED_CAPABILITY_CASES = {
+    "lifecycle_ready": "lifecycle.ready",
+    "lifecycle_autoload": "lifecycle.cold_autoload",
+    "lifecycle_no_autoload": "lifecycle.autoload_disabled",
+    "lifecycle_concurrent_start": "lifecycle.concurrent_cold_start",
+    "lifecycle_failed_start": "lifecycle.failed_start",
+    "completion": "completions.basic",
+    "embeddings": "embeddings.basic",
+    "tools": "tools.round_trip",
+    "structured_output": "structured_output.json_schema",
+    "vision": "multimodal.image",
+    "transcription": "audio.transcription",
+}
+
+
 def require_capability_env(capability: str, env_name: str) -> str:
     value = optional_env(env_name)
     if value:

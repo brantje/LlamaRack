@@ -158,11 +158,17 @@ def main() -> None:
             )
         if not response.id:
             raise AssertionError("Responses result has no id")
+        status = getattr(response, "status", None)
+        if status != "completed":
+            raise AssertionError(f"Responses status={status!r}, expected 'completed'")
+        output = getattr(response, "output", None)
+        if not output:
+            raise AssertionError("Responses result has empty output")
         return {
             "id": response.id,
             "model": getattr(response, "model", None),
-            "status": getattr(response, "status", None),
-            "has_output": bool(getattr(response, "output", None)),
+            "status": status,
+            "output_items": len(output),
         }
 
     run_case(results, "responses.basic", responses_basic)

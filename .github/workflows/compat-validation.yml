@@ -26,6 +26,7 @@ jobs:
         run: |
           python3 tests/compat/validate_contract.py
           python3 -m py_compile tests/compat/*.py
+          python3 -m unittest discover -s tests/compat -p 'test_*.py'
       - name: Validate qualification shell runners
         run: |
           bash -n scripts/release-qualification/compat.sh

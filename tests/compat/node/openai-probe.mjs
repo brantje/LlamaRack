@@ -167,7 +167,9 @@ async function main() {
     });
     if (!response.id) throw new Error('Responses result has no id');
     if (response.model && response.model !== responsesModel) throw new Error(`Responses model=${response.model}, expected ${responsesModel}`);
-    return { id: response.id, model: response.model, status: response.status, output_items: response.output?.length || 0 };
+    if (response.status !== 'completed') throw new Error(`Responses status=${response.status}, expected completed`);
+    if (!response.output?.length) throw new Error('Responses result has empty output');
+    return { id: response.id, model: response.model, status: response.status, output_items: response.output.length };
   });
 
   await runCase(results, 'errors.invalid_auth', () => expectStatus(
