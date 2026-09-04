@@ -16,7 +16,7 @@ function navTestId(prefix: string, label: string) {
 function buildItems(testIdPrefix: string): NavigationMenuItem[][] {
   const testId = (label: string) => navTestId(testIdPrefix, label)
 
-  return [
+  const groups: NavigationMenuItem[][] = [
     [
       { label: 'Administration', type: 'label' },
       { label: 'Dashboard', to: '/admin', exact: true, 'data-testid': testId('Dashboard') },
@@ -40,10 +40,25 @@ function buildItems(testIdPrefix: string): NavigationMenuItem[][] {
       { label: 'Logs', to: '/admin/system-logs', 'data-testid': testId('Logs') }
     ]
   ]
+
+  return groups.map(group => group.map(withActiveState))
 }
 
-const desktopItems = buildItems('admin-nav')
-const mobileItems = buildItems('admin-mobile-nav')
+function withActiveState(item: NavigationMenuItem): NavigationMenuItem {
+  const to = itemPath(item)
+  if (!to) {
+    return item
+  }
+  const isActive = active(to, item.exact === true)
+  return {
+    ...item,
+    active: isActive,
+    ...(isActive ? { 'aria-current': 'page' } : {})
+  }
+}
+
+const desktopItems = computed(() => buildItems('admin-nav'))
+const mobileItems = computed(() => buildItems('admin-mobile-nav'))
 
 function itemPath(item: NavigationMenuItem) {
   return typeof item.to === 'string' ? item.to : undefined
@@ -54,7 +69,7 @@ function active(to: string, exact = false) {
 }
 
 const currentItem = computed(() => {
-  for (const group of desktopItems) {
+  for (const group of desktopItems.value) {
     for (const item of group) {
       const to = itemPath(item)
       if (to && active(to, item.exact === true)) {
@@ -62,7 +77,7 @@ const currentItem = computed(() => {
       }
     }
   }
-  return desktopItems[0]![1]
+  return desktopItems.value[0]![1]
 })
 </script>
 
