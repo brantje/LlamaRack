@@ -85,17 +85,30 @@ GPU_QUALIFICATION_MODELS_DIR
 
 Individual absolute path overrides are also supported by the soak harness via `GPU_QUALIFICATION_DENSE_LIFECYCLE`, `GPU_QUALIFICATION_DENSE_PRESSURE`, `GPU_QUALIFICATION_MOE_SMALL`, and `GPU_QUALIFICATION_MOE_LARGE`.
 
-Missing qualification models or zero visible GPUs are release-gate failures. The dense pressure model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised. Multi-GPU placement is required when two or more GPUs are visible and must not be silently skipped on those hosts.
+Missing qualification models or zero visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix: when two or more GPUs are visible, multi-GPU placement must be exercised and must not be skipped. The dense pressure model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised.
 
 ## Real-hardware soak
 
-The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs are mounted from one host models directory beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager, smoke-loads every matrix member, then exercises role-specific scenarios:
+The CUDA candidate is run with all GPUs exposed. The four qualification GGUFs are mounted from one host models directory beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager, smoke-loads every matrix member, then exercises repeated combinations of:
 
-- dense lifecycle (8B): repeated inference, streaming, cancellation, crash recovery, autoload, idle unload, Always-On;
-- dense pressure (12B): real single-GPU resource pressure, active-request protection, and eviction;
-- small MoE: `n-cpu-moe` CPU expert offload;
-- large MoE: multi-GPU placement (when ≥2 GPUs) plus `n-cpu-moe`;
+- model registration and Instance creation;
+- real non-streaming inference;
+- streaming inference and explicit client cancellation;
+- concurrent inference;
+- concurrent starts with the single-worker invariant;
+- inference-triggered autoload;
+- per-Instance idle unload and subsequent autoload recovery;
+- Always-On automatic start, Kill recovery and manual-Stop suppression;
+- repeated stop and restart cycles;
+- real single-GPU resource pressure, active-request protection, and eviction (dense pressure GGUF);
+- manager termination while inference is active;
+- manager termination while a worker start is in progress;
+- stale-worker reconciliation and replacement;
+- multi-GPU placement (large MoE GGUF when two or more GPUs are visible);
+- MoE CPU expert offload using `n-cpu-moe` (small and large MoE GGUFs);
 - persistent settings and authentication across manager restart.
+
+Dense lifecycle scenarios use the 8B dense GGUF. Single-GPU pressure/eviction uses the larger dense pressure GGUF so VRAM demand is deterministic on 16 GB-class cards without spawning a large worker fan-out.
 
 The process-only crash scenario deliberately keeps the container alive while SIGKILLing the manager so a managed `llama-server` child can survive long enough for the next manager process to prove ownership and reconcile it.
 
