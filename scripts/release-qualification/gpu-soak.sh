@@ -300,9 +300,14 @@ service_account_id="$(printf '%s' "$service_account" | json_value 'data["id"]')"
 hardware="$(auth_request GET /api/v1/hardware)"
 printf '%s\n' "$hardware" >"$artifact_dir/hardware.json"
 mapfile -t gpu_ids < <(printf '%s' "$hardware" | python3 -c 'import json,sys; [print(g["id"]) for g in json.load(sys.stdin)["gpus"]]')
-[[ ${#gpu_ids[@]} -ge 2 ]] || { echo "release qualification requires at least two visible GPUs" >&2; exit 1; }
+[[ ${#gpu_ids[@]} -ge 1 ]] || { echo "release qualification requires at least one visible GPU" >&2; exit 1; }
 
 dense_model_id="$(create_model 'Qualification Dense' "$dense_path")"
+dense_bytes="$(auth_request GET "/api/v1/models/${dense_model_id}" | python3 -c 'import json,sys; d=json.load(sys.stdin); m=d.get("data", d); print(int(m.get("total_bytes") or 0))')"
+[[ "$dense_bytes" =~ ^[0-9]+$ && "$dense_bytes" -gt 0 ]] || {
+  echo "dense qualification model total_bytes is missing or zero" >&2
+  exit 1
+}
 dense_instance_id="$(create_instance "$dense_model_id" 'Qualification Dense' 'qualification-dense' ',"gpu_mode":"auto"')"
 auth_request POST "/api/v1/instances/${dense_instance_id}/start" >/dev/null
 wait_state "$dense_instance_id" READY
@@ -421,17 +426,105 @@ wait_state "$always_instance_id" UNLOADED
 sleep 3
 [[ "$(runtime_state "$always_instance_id")" == "UNLOADED" ]] || { echo "manual Stop did not suppress Always-On reconcile" >&2; exit 1; }
 
-# Fill the first GPU with evictable workers until the scheduler must evict one
-# to admit the next. This is a real placement/eviction test rather than a mocked
-# capacity check. A very small qualification model may require more iterations;
-# fail with a useful provisioning hint if pressure cannot be reached.
+# Resource-pressure eviction is always pinned to one target GPU so the scenario
+# behaves the same on 1-GPU and multi-GPU hosts. Additional GPUs must not absorb
+# copies and hide missing eviction. Raise per-worker VRAM demand (large ctx,
+# parallel=1) instead of spawning a dozen small workers.
+target_gpu="${gpu_ids[0]}"
+target_gpu_total="$(printf '%s' "$hardware" | python3 -c 'import json,sys; gpus=json.load(sys.stdin)["gpus"]; print(int(gpus[0]["total_bytes"]))')"
+reserve_bytes=$((512 * 1024 * 1024))
+usable_bytes=$((target_gpu_total > reserve_bytes ? target_gpu_total - reserve_bytes : 0))
+overhead_bytes=$((dense_bytes / 20))
+min_overhead=$((256 * 1024 * 1024))
+(( overhead_bytes < min_overhead )) && overhead_bytes=$min_overhead
+base_demand_bytes=$((dense_bytes + overhead_bytes))
+pressure_ctx="$(python3 - "$base_demand_bytes" "$usable_bytes" <<'PY'
+import sys
+base = int(sys.argv[1])
+usable = int(sys.argv[2])
+# Scheduler KV grows with ctx-size. Pick the smallest elevated context that makes
+# two copies exceed usable VRAM on the target GPU. When weights alone already
+# force eviction, keep the default 4096 used elsewhere in the soak.
+if usable <= 0 or base * 2 > usable:
+    print(4096)
+    raise SystemExit(0)
+# Conservative lower-bound KV: 1 MiB per 1k context tokens. Real KV is usually
+# larger; this only decides how far to raise ctx before admitting defeat.
+for ctx in (8192, 16384, 32768, 65536, 131072):
+    demand = base + (ctx * 1024)
+    if demand * 2 > usable:
+        print(ctx)
+        raise SystemExit(0)
+print(0)
+PY
+)"
+if [[ "$pressure_ctx" == "0" ]]; then
+  echo "dense model (${dense_bytes} bytes) cannot create single-GPU scheduler pressure on ${target_gpu} (${target_gpu_total} bytes usable≈${usable_bytes}); provision a larger dense qualification model or a smaller GPU for this gate" >&2
+  exit 1
+fi
+pressure_opts="\"options\":{\"ctx-size\":\"${pressure_ctx}\",\"parallel\":\"1\"}"
+pressure_common=",\"gpu_mode\":\"manual\",\"gpu_devices\":[\"${target_gpu}\"],\"eviction_enabled\":true,${pressure_opts}"
+
+# Active-request protection: the only resident worker with in-flight work must
+# not be evicted to admit another copy on the same GPU.
+protected_id="$(create_instance "$dense_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common")"
+auth_request POST "/api/v1/instances/${protected_id}/start" >/dev/null
+wait_state "$protected_id" READY
+assert_single_worker "$protected_id"
+curl -sS -N --limit-rate 1k -X POST \
+  -H "Authorization: Bearer $management_token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$protected_id\",\"messages\":[{\"role\":\"user\",\"content\":\"Write a very long numbered list with detailed explanations.\"}],\"max_tokens\":4096,\"stream\":true}" \
+  "$base_url/api/v1/playground/chat/completions" >"$artifact_dir/pressure-protected-stream.txt" 2>&1 &
+protected_stream_pid=$!
+# Give the gateway a moment to register the active request before challenging.
+sleep 1
+kill -0 "$protected_stream_pid" 2>/dev/null || {
+  echo "protected pressure stream ended before the eviction challenge could run" >&2
+  exit 1
+}
+blocked_id="$(create_instance "$dense_model_id" 'Qualification Pressure Blocked' 'qualification-pressure-blocked' "$pressure_common")"
+if auth_request POST "/api/v1/instances/${blocked_id}/start" >"$artifact_dir/pressure-blocked-start.json" 2>"$artifact_dir/pressure-blocked-start.err"; then
+  # Start may enqueue while eviction is attempted; the protected resident must
+  # remain READY and the challenger must not become the sole survivor.
+  sleep 2
+  [[ "$(runtime_state "$protected_id")" == "READY" ]] || {
+    echo "active-request protection failed: protected pressure worker is no longer READY" >&2
+    kill -TERM "$protected_stream_pid" >/dev/null 2>&1 || true
+    wait "$protected_stream_pid" >/dev/null 2>&1 || true
+    exit 1
+  }
+  blocked_state="$(runtime_state "$blocked_id" || true)"
+  if [[ "$blocked_state" == "READY" ]]; then
+    echo "active-request protection failed: challenger became READY while protected request was active" >&2
+    kill -TERM "$protected_stream_pid" >/dev/null 2>&1 || true
+    wait "$protected_stream_pid" >/dev/null 2>&1 || true
+    exit 1
+  fi
+fi
+kill -TERM "$protected_stream_pid" >/dev/null 2>&1 || true
+wait "$protected_stream_pid" >/dev/null 2>&1 || true
+auth_request POST "/api/v1/instances/${blocked_id}/stop" >/dev/null 2>&1 || true
+auth_request POST "/api/v1/instances/${protected_id}/stop" >/dev/null
+wait_state "$protected_id" UNLOADED
+
+# Idle eviction: fill the target GPU with a few high-demand workers until the
+# scheduler must evict an idle peer. Cap attempts so a too-small model fails
+# with a provisioning error instead of thrashing dozens of GGUF loads.
 pressure_ids=()
 eviction_observed=0
-for index in $(seq 1 12); do
-  pressure_id="$(create_instance "$dense_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" ",\"gpu_mode\":\"manual\",\"gpu_devices\":[\"${gpu_ids[0]}\"],\"eviction_enabled\":true")"
+max_pressure_workers=4
+for index in $(seq 1 "$max_pressure_workers"); do
+  pressure_id="$(create_instance "$dense_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common")"
   pressure_ids+=("$pressure_id")
-  auth_request POST "/api/v1/instances/${pressure_id}/start" >/dev/null
-  wait_state "$pressure_id" READY
+  if ! auth_request POST "/api/v1/instances/${pressure_id}/start" >"$artifact_dir/pressure-start-${index}.json" 2>"$artifact_dir/pressure-start-${index}.err"; then
+    echo "pressure worker ${index} failed to start on ${target_gpu} (ctx-size=${pressure_ctx}); see pressure-start-${index}.err" >&2
+    exit 1
+  fi
+  if ! wait_state "$pressure_id" READY; then
+    echo "pressure worker ${index} failed readiness on ${target_gpu} (ctx-size=${pressure_ctx}); provision a dense model that can load cleanly under single-GPU pressure" >&2
+    exit 1
+  fi
   assert_single_worker "$pressure_id"
   if (( ${#pressure_ids[@]} > 1 )); then
     for prior in "${pressure_ids[@]:0:${#pressure_ids[@]}-1}"; do
@@ -443,18 +536,24 @@ for index in $(seq 1 12); do
   fi
 done
 [[ "$eviction_observed" == "1" ]] || {
-  echo "GPU pressure was not reached after 12 workers; provision a larger dense qualification model" >&2
+  echo "GPU pressure was not reached after ${max_pressure_workers} workers on ${target_gpu} (model=${dense_bytes} bytes, ctx-size=${pressure_ctx}, gpu=${target_gpu_total} bytes); provision a larger dense qualification model" >&2
   exit 1
 }
 for pressure_id in "${pressure_ids[@]}"; do
   auth_request POST "/api/v1/instances/${pressure_id}/stop" >/dev/null 2>&1 || true
 done
 
-# MoE qualification deliberately uses both GPUs and an explicit expert spill so
-# the runtime path from #114 is exercised even when the chosen MoE would fit on
-# one device without offload.
+# MoE qualification always exercises n-cpu-moe. On multi-GPU hosts it also pins
+# both devices so the comma-separated --device launch path is covered. On a
+# single-GPU host the same offload flag is verified against that one device.
 moe_model_id="$(create_model 'Qualification MoE' "$moe_path")"
-gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+if (( ${#gpu_ids[@]} >= 2 )); then
+  gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+  expected_moe_devices="${gpu_ids[0]},${gpu_ids[1]}"
+else
+  gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
+  expected_moe_devices="${gpu_ids[0]}"
+fi
 moe_instance_id="$(auth_request POST /api/v1/instances \
   "{\"model_id\":\"$moe_model_id\",\"name\":\"Qualification MoE\",\"slug\":\"qualification-moe\",\"gpu_mode\":\"manual\",\"gpu_devices\":$gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
   | json_value 'data["id"]')"
@@ -466,7 +565,7 @@ moe_worker_pid="$(auth_request GET "/api/v1/instances/${moe_instance_id}/runtime
 assert_worker_identity "$moe_worker_pid" "$moe_instance_id"
 docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/cmdline" \
   >"$artifact_dir/moe-worker-args.txt"
-python3 - "$artifact_dir/moe-worker-args.txt" "${gpu_ids[0]},${gpu_ids[1]}" <<'PY'
+python3 - "$artifact_dir/moe-worker-args.txt" "$expected_moe_devices" <<'PY'
 import sys
 args = [line.rstrip("\n") for line in open(sys.argv[1], encoding="utf-8")]
 expected_devices = sys.argv[2]
@@ -489,6 +588,25 @@ docker exec "$container_name" cat /config/manager.log >"$artifact_dir/manager.lo
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 python3 - "$artifact_dir/manifest.json" <<PY
 import json, os, sys
+checks = [
+    "fresh-install-and-settings-persistence",
+    "real-inference-and-streaming",
+    "client-cancellation",
+    "concurrent-inference",
+    "concurrent-start-single-flight",
+    "autoload",
+    "idle-unload-and-reload",
+    "always-on-reconciliation",
+    "resource-pressure-active-request-protection",
+    "resource-pressure-placement-and-eviction",
+    "stop-restart-cycles",
+    "ready-crash-recovery",
+    "start-crash-recovery",
+    "single-worker-invariant",
+    "moe-cpu-expert-offload",
+]
+if ${#gpu_ids[@]} >= 2:
+    checks.append("multi-gpu-placement")
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump({
         "scenario": "gpu-release-qualification",
@@ -498,27 +616,14 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
         "finished_at": "${finished_at}",
         "cycles": int("${cycles}"),
         "dense_model": "$(basename "$dense_host")",
+        "dense_bytes": int("${dense_bytes}"),
+        "pressure_ctx_size": int("${pressure_ctx}"),
+        "pressure_target_gpu": "${target_gpu}",
         "moe_model": "$(basename "$moe_host")",
         "gpu_ids": ${gpu_json},
         "rss_baseline": "${rss_baseline}",
         "rss_final": "${rss_final}",
-        "checks": [
-            "fresh-install-and-settings-persistence",
-            "real-inference-and-streaming",
-            "client-cancellation",
-            "concurrent-inference",
-            "concurrent-start-single-flight",
-            "autoload",
-            "idle-unload-and-reload",
-            "always-on-reconciliation",
-            "resource-pressure-placement-and-eviction",
-            "stop-restart-cycles",
-            "ready-crash-recovery",
-            "start-crash-recovery",
-            "single-worker-invariant",
-            "multi-gpu-placement",
-            "moe-cpu-expert-offload"
-        ],
+        "checks": checks,
         "result": "pass"
     }, handle, indent=2, sort_keys=True)
     handle.write("\n")

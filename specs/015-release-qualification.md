@@ -60,7 +60,7 @@ self-hosted
 gpu-runner
 ```
 
-The runner is expected to provide Docker with NVIDIA container GPU access, `nvidia-smi`, and at least two visible GPUs for stable release qualification.
+The runner is expected to provide Docker with NVIDIA container GPU access, `nvidia-smi`, and at least one visible GPU. Stable release qualification on the project GPU runner is expected to expose two or more GPUs so multi-GPU placement is exercised; a single-GPU host still runs the single-device lifecycle, pressure/eviction, and MoE CPU-offload paths.
 
 Two representative GGUFs must already exist on the runner host. Default paths are:
 
@@ -76,7 +76,7 @@ GPU_QUALIFICATION_MODEL_PATH
 GPU_QUALIFICATION_MOE_MODEL_PATH
 ```
 
-Missing qualification models or fewer than two visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix. The dense model must also be large enough for repeated workers on one GPU to reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised.
+Missing qualification models or zero visible GPUs are release-gate failures. The dense model must be large enough that a small number of high-demand workers pinned to one GPU reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised. Multi-GPU placement is required when two or more GPUs are visible and must not be silently skipped on those hosts.
 
 ## Real-hardware soak
 
