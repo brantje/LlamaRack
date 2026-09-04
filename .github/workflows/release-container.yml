@@ -42,9 +42,9 @@ jobs:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -57,9 +57,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}-cuda
-            type=semver,pattern={{major}}.{{minor}}-cuda
-            type=semver,pattern={{major}}-cuda
+            type=semver,pattern=v{{version}}-cuda
+            type=semver,pattern=v{{major}}.{{minor}}-cuda
+            type=semver,pattern=v{{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -181,9 +181,9 @@ jobs:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -196,9 +196,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}-cuda
-            type=semver,pattern={{major}}.{{minor}}-cuda
-            type=semver,pattern={{major}}-cuda
+            type=semver,pattern=v{{version}}-cuda
+            type=semver,pattern=v{{major}}.{{minor}}-cuda
+            type=semver,pattern=v{{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
