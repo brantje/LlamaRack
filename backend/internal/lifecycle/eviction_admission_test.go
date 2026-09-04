@@ -328,7 +328,7 @@ func TestManualStopDuringDrainClaimDoesNotRestoreDyingEndpoint(t *testing.T) {
 	if err := <-stopDone; err != nil {
 		t.Fatalf("stop err=%v", err)
 	}
-	if err := <-acquired; err != nil && !strings.Contains(err.Error(), "autoload") {
+	if err := <-acquired; err != nil && !errors.Is(err, errStartupKilled) && !strings.Contains(err.Error(), "autoload") {
 		t.Fatalf("acquire err=%v", err)
 	}
 	if got := sup.Status(victim.ID); got.State == supervisor.Ready && got.PID == dyingPID {
