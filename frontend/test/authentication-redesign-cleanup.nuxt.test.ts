@@ -6,15 +6,19 @@ const page = readFileSync(resolve(process.cwd(), 'app/pages/admin/authentication
 const nav = readFileSync(resolve(process.cwd(), 'app/components/navigation/AdminSidebar.vue'), 'utf8')
 
 describe('Authentication redesign cleanup', () => {
-  it('keeps Authentication in the Administration secondary navigation between General and llama.cpp', () => {
-    const general = nav.indexOf("label: 'General'")
+  it('keeps Authentication in the Access group of the Administration secondary navigation', () => {
+    const access = nav.indexOf("label: 'Access'")
+    const users = nav.indexOf("label: 'Users'")
+    const serviceAccounts = nav.indexOf("label: 'Service accounts'")
     const authentication = nav.indexOf("label: 'Authentication'")
     const llamacpp = nav.indexOf("label: 'llama.cpp'")
 
-    expect(general).toBeGreaterThanOrEqual(0)
-    expect(authentication).toBeGreaterThan(general)
+    expect(access).toBeGreaterThanOrEqual(0)
+    expect(users).toBeGreaterThan(access)
+    expect(serviceAccounts).toBeGreaterThan(users)
+    expect(authentication).toBeGreaterThan(serviceAccounts)
     expect(llamacpp).toBeGreaterThan(authentication)
-    expect(nav).toContain("description: 'Local login and OIDC providers'")
+    expect(nav).not.toContain("description: 'Local login and OIDC providers'")
     expect(nav).toContain("to: '/admin/authentication'")
   })
 

@@ -76,7 +76,14 @@ describe('Service accounts administration', () => {
     const accounts = labels.findIndex(text => text.includes('Service accounts'))
     expect(accounts).toBe(users + 1)
     expect(wrapper.get('[data-testid="admin-nav-service-accounts"]').attributes('href')).toBe('/admin/service-accounts')
-    expect(wrapper.get('[data-testid="admin-nav-service-accounts"]').classes()).toContain('border-[var(--color-accent)]')
+    expect(wrapper.get('[data-testid="admin-nav-service-accounts"]').attributes('aria-current')).toBe('page')
+    wrapper.unmount()
+  })
+
+  it('keeps Service accounts active on nested administration routes', async () => {
+    const wrapper = await mountSuspended(AdminSidebar, { route: '/admin/service-accounts/sa-1' })
+    expect(wrapper.get('[data-testid="admin-nav-service-accounts"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-testid="admin-nav-dashboard"]').attributes('aria-current')).toBeUndefined()
     wrapper.unmount()
   })
 

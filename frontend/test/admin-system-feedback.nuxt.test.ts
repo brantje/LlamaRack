@@ -55,7 +55,9 @@ describe('Administration System UX feedback', () => {
 
     const mobile = wrapper.get('[data-testid="admin-mobile-navigation"]')
     expect(mobile.classes()).toContain('lg:hidden')
-    expect(mobile.get('summary').text()).toContain('Administration · System')
+    expect(mobile.get('button').text()).toContain('Administration · System')
+    await mobile.get('button').trigger('click')
+    await flushPromises()
     expect(mobile.findAll('a')).toHaveLength(10)
     expect(mobile.get('a[aria-current="page"]').text()).toContain('System')
 
@@ -65,6 +67,41 @@ describe('Administration System UX feedback', () => {
     expect(desktop.findAll('a')).toHaveLength(10)
     expect(desktop.get('a[aria-current="page"]').text()).toContain('System')
     wrapper.unmount()
+  })
+
+  it('renders grouped administration navigation labels and item order', async () => {
+    const wrapper = await mountSuspended(AdminSidebar, { route: '/admin/users' })
+    const desktop = wrapper.get('[data-testid="admin-desktop-navigation"]')
+    const text = desktop.text()
+
+    expect(text.indexOf('Administration')).toBeLessThan(text.indexOf('Dashboard'))
+    expect(text.indexOf('Access')).toBeLessThan(text.indexOf('Users'))
+    expect(text.indexOf('Runtime & integrations')).toBeLessThan(text.indexOf('llama.cpp'))
+    expect(text.indexOf('Diagnostics')).toBeLessThan(text.indexOf('System'))
+
+    const links = desktop.findAll('a').map(link => link.text().trim())
+    const users = links.findIndex(label => label.includes('Users'))
+    const serviceAccounts = links.findIndex(label => label.includes('Service accounts'))
+    const authentication = links.findIndex(label => label.includes('Authentication'))
+    const llamacpp = links.findIndex(label => label.includes('llama.cpp'))
+    const huggingFace = links.findIndex(label => label.includes('Hugging Face'))
+    const litellm = links.findIndex(label => label.includes('LiteLLM'))
+
+    expect(serviceAccounts).toBe(users + 1)
+    expect(authentication).toBe(serviceAccounts + 1)
+    expect(huggingFace).toBe(llamacpp + 1)
+    expect(litellm).toBe(huggingFace + 1)
+    expect(wrapper.get('[data-testid="admin-nav-users"]').attributes('aria-current')).toBe('page')
+    expect(wrapper.get('[data-testid="admin-nav-dashboard"]').attributes('aria-current')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('uses exact matching for Dashboard so nested admin routes stay on their own item', async () => {
+    const dashboard = await mountSuspended(AdminSidebar, { route: '/admin' })
+    expect(dashboard.get('[data-testid="admin-nav-dashboard"]').attributes('href')).toBe('/admin')
+    expect(dashboard.get('[data-testid="admin-nav-dashboard"]').attributes('aria-current')).toBe('page')
+    expect(dashboard.get('[data-testid="admin-nav-users"]').attributes('aria-current')).toBeUndefined()
+    dashboard.unmount()
   })
 
   it('formats diagnostic collections without object stringification and exposes freshness', async () => {

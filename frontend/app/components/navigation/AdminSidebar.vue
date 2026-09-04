@@ -1,72 +1,102 @@
 <script setup lang="ts">
+import type { NavigationMenuItem } from '@nuxt/ui'
+
 const route = useRoute()
 
-const navigation = [
-  { label: 'Dashboard', description: 'Security, provider and runtime status', to: '/admin' },
-  { label: 'General', description: 'Security, network and lifecycle defaults', to: '/admin/general' },
-  { label: 'Authentication', description: 'Local login and OIDC providers', to: '/admin/authentication' },
-  { label: 'llama.cpp', description: 'Binary capabilities and global defaults', to: '/admin/llamacpp' },
-  { label: 'Hugging Face', description: 'Provider credential', to: '/admin/huggingface' },
-  { label: 'LiteLLM', description: 'Proxy catalog sync', to: '/admin/litellm' },
-  { label: 'Users', description: 'Local management accounts', to: '/admin/users' },
-  { label: 'Service accounts', description: 'Non-user API key owners', to: '/admin/service-accounts' },
-  { label: 'System', description: 'Read-only diagnostics', to: '/admin/system' },
-  { label: 'Logs', description: 'Manager, gateway and Instance diagnostics', to: '/admin/system-logs' }
-]
-
-function active(to: string) {
-  return to === '/admin' ? route.path === '/admin' : route.path === to || route.path.startsWith(`${to}/`)
+const navigationMenuUi = {
+  label: 'mb-3 px-3 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]',
+  link: 'rounded-none',
+  separator: 'my-3'
 }
 
-const currentItem = computed(() => navigation.find(item => active(item.to)) ?? navigation[0])
+function navTestId(prefix: string, label: string) {
+  return `${prefix}-${label.toLowerCase().replaceAll(' ', '-')}`
+}
+
+function buildItems(testIdPrefix: string): NavigationMenuItem[][] {
+  const testId = (label: string) => navTestId(testIdPrefix, label)
+
+  return [
+    [
+      { label: 'Administration', type: 'label' },
+      { label: 'Dashboard', to: '/admin', exact: true, 'data-testid': testId('Dashboard') },
+      { label: 'General', to: '/admin/general', 'data-testid': testId('General') }
+    ],
+    [
+      { label: 'Access', type: 'label' },
+      { label: 'Users', to: '/admin/users', 'data-testid': testId('Users') },
+      { label: 'Service accounts', to: '/admin/service-accounts', 'data-testid': testId('Service accounts') },
+      { label: 'Authentication', to: '/admin/authentication', 'data-testid': testId('Authentication') }
+    ],
+    [
+      { label: 'Runtime & integrations', type: 'label' },
+      { label: 'llama.cpp', to: '/admin/llamacpp', 'data-testid': testId('llama.cpp') },
+      { label: 'Hugging Face', to: '/admin/huggingface', 'data-testid': testId('Hugging Face') },
+      { label: 'LiteLLM', to: '/admin/litellm', 'data-testid': testId('LiteLLM') }
+    ],
+    [
+      { label: 'Diagnostics', type: 'label' },
+      { label: 'System', to: '/admin/system', 'data-testid': testId('System') },
+      { label: 'Logs', to: '/admin/system-logs', 'data-testid': testId('Logs') }
+    ]
+  ]
+}
+
+const desktopItems = buildItems('admin-nav')
+const mobileItems = buildItems('admin-mobile-nav')
+
+function itemPath(item: NavigationMenuItem) {
+  return typeof item.to === 'string' ? item.to : undefined
+}
+
+function active(to: string, exact = false) {
+  return exact ? route.path === to : route.path === to || route.path.startsWith(`${to}/`)
+}
+
+const currentItem = computed(() => {
+  for (const group of desktopItems) {
+    for (const item of group) {
+      const to = itemPath(item)
+      if (to && active(to, item.exact === true)) {
+        return item
+      }
+    }
+  }
+  return desktopItems[0]![1]
+})
 </script>
 
 <template>
   <aside class="w-full shrink-0 border-b border-[var(--color-divider)] pb-4 lg:w-[216px] lg:border-r lg:border-b-0 lg:pr-4 lg:pb-0" data-testid="admin-secondary-nav">
-    <details class="lg:hidden" data-testid="admin-mobile-navigation">
-      <summary class="flex min-h-11 cursor-pointer items-center justify-between border border-[var(--color-divider)] px-3 py-2 text-[var(--neutral-900)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
-        <span class="min-w-0">
-          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">Administration · {{ currentItem.label }}</span>
-          <span class="block text-[length:var(--font-size-table-header)] leading-4 text-[var(--neutral-800)]">Choose administration section</span>
-        </span>
-        <UIcon name="i-lucide-chevron-down" class="size-4 shrink-0 text-[var(--neutral-700)]" aria-hidden="true" />
-      </summary>
-      <nav class="mt-2 border border-[var(--color-divider)]" aria-label="Administration sections">
-        <NuxtLink
-          v-for="item in navigation"
-          :key="item.to"
-          :to="item.to"
-          class="block border-l-2 px-3 py-2.5 transition-colors"
-          :class="active(item.to)
-            ? 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]'
-            : 'border-transparent bg-transparent text-[var(--neutral-900)] hover:bg-[var(--neutral-100)]'"
-          :aria-current="active(item.to) ? 'page' : undefined"
-          :data-testid="`admin-mobile-nav-${item.label.toLowerCase().replaceAll(' ', '-')}`"
-        >
-          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">{{ item.label }}</span>
-          <span class="block text-[length:var(--font-size-table-header)] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
-        </NuxtLink>
-      </nav>
-    </details>
+    <UCollapsible class="space-y-2 lg:hidden" data-testid="admin-mobile-navigation">
+      <template #default="{ open }">
+        <UButton type="button" color="neutral" variant="outline" class="min-h-11 w-full rounded-none">
+          <span class="flex w-full items-center justify-between gap-3 text-left">
+            <span class="min-w-0 text-[length:var(--font-size-table-body)] font-semibold leading-5">Administration · {{ currentItem.label }}</span>
+            <UIcon :name="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-4 shrink-0 text-[var(--neutral-700)]" aria-hidden="true" />
+          </span>
+        </UButton>
+      </template>
+
+      <template #content>
+        <UNavigationMenu
+          :items="mobileItems"
+          orientation="vertical"
+          class="w-full border border-[var(--color-divider)]"
+          :ui="navigationMenuUi"
+          aria-label="Administration sections"
+        />
+      </template>
+    </UCollapsible>
 
     <div class="hidden lg:block" data-testid="admin-desktop-navigation">
-      <p class="mb-3 px-3 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">Administration</p>
-      <nav class="space-y-1" aria-label="Administration">
-        <NuxtLink
-          v-for="item in navigation"
-          :key="item.to"
-          :to="item.to"
-          class="block border-l-2 px-3 py-2 transition-colors"
-          :class="active(item.to)
-            ? 'border-[var(--color-accent)] bg-[var(--accent-100)] text-[var(--accent-800)]'
-            : 'border-transparent bg-transparent text-[var(--neutral-900)] hover:bg-[var(--neutral-100)]'"
-          :aria-current="active(item.to) ? 'page' : undefined"
-          :data-testid="`admin-nav-${item.label.toLowerCase().replaceAll(' ', '-')}`"
-        >
-          <span class="block text-[length:var(--font-size-table-body)] font-semibold leading-5">{{ item.label }}</span>
-          <span class="block text-[length:var(--font-size-table-header)] leading-4" :class="active(item.to) ? 'text-[var(--accent-700)]' : 'text-[var(--neutral-800)]'">{{ item.description }}</span>
-        </NuxtLink>
-      </nav>
+      <UNavigationMenu
+        :items="desktopItems"
+        orientation="vertical"
+        class="w-full"
+        :ui="navigationMenuUi"
+        aria-label="Administration"
+      />
     </div>
   </aside>
 </template>
