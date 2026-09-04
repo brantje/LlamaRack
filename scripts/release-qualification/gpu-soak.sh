@@ -22,6 +22,26 @@ dense_dir="$(cd "$(dirname "$dense_host")" && pwd)"
 moe_dir="$(cd "$(dirname "$moe_host")" && pwd)"
 dense_path="/models/qualification/dense/$(basename "$dense_host")"
 moe_path="/models/qualification/moe/$(basename "$moe_host")"
+docker_probe_host="${GPU_DOCKER_HOST:-127.0.0.1}"
+docker_publish_host="127.0.0.1"
+
+if [[ -f /.dockerenv && "$docker_probe_host" == "127.0.0.1" ]]; then
+  docker_probe_host="host.docker.internal"
+fi
+if [[ "$docker_probe_host" != "127.0.0.1" ]]; then
+  docker_publish_host="$(python3 - "$docker_probe_host" <<'PY'
+import socket
+import sys
+
+try:
+    print(socket.gethostbyname(sys.argv[1]))
+except OSError as exc:
+    raise SystemExit(f"unable to resolve Docker host {sys.argv[1]!r}: {exc}")
+PY
+)"
+fi
+printf 'probe_host=%s\npublish_host=%s\n' "$docker_probe_host" "$docker_publish_host" \
+  >"$artifact_dir/docker-network.txt"
 
 cleanup() {
   docker exec "$container_name" cat /config/manager.log >"$artifact_dir/manager.log" 2>/dev/null || true
@@ -38,14 +58,14 @@ docker pull "$image"
 docker image inspect "$image" >"$artifact_dir/docker-image.json"
 docker run -d --gpus all --name "$container_name" \
   --entrypoint sh \
-  -p '127.0.0.1::8000' \
+  -p "${docker_publish_host}::8000" \
   -v "$config_dir:/config" \
   -v "$dense_dir:/models/qualification/dense:ro" \
   -v "$moe_dir:/models/qualification/moe:ro" \
   "$image" -c 'while :; do sleep 3600; done' >/dev/null
 port="$(docker port "$container_name" 8000/tcp | awk -F: 'NR == 1 { print $NF }')"
 [[ "$port" =~ ^[0-9]+$ ]] || { echo "unable to resolve Docker-published manager port" >&2; exit 1; }
-base_url="http://127.0.0.1:${port}"
+base_url="http://${docker_probe_host}:${port}"
 
 start_manager() {
   docker exec -d "$container_name" sh -c 'exec /usr/local/bin/llamarack >>/config/manager.log 2>&1'
