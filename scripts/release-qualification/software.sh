@@ -15,10 +15,28 @@ run_group() {
   go test -count=1 "$@" 2>&1 | tee "$artifact_dir/${name}.log"
 }
 
-# These packages are intentionally grouped as the deterministic software part
-# of release qualification. They cover migration/upgrade semantics, stale-worker
-# recovery, download interruption/resume behavior, model filesystem boundaries,
-# and lifecycle/scheduler admission and eviction invariants.
+# Run named acceptance scenarios first so the release evidence demonstrates the
+# issue #120 invariants directly instead of requiring reviewers to infer them
+# from a broad package pass.
+run_group upgrade-acceptance \
+  -run 'Test(FreshDatabaseMigratesToLatestSchema|ReopenAtLatestVersionIsIdempotent|SecondMigrationUpgradesFromBaseline|FailingMigrationRollsBackAndRetries)$' \
+  ./internal/database
+run_group recovery-acceptance \
+  -run 'Test(ReconcileRestartsSurvivingOwnedWorker|ReconcileTerminatesOwnedOrphans|ReconcileNeverKillsUnrelatedOrUnprovenProcesses|ReconcileRejectsPIDReuseAndGenerationMismatch|ReconcileCleansDeadPIDMetadata)$' \
+  ./internal/supervisor
+run_group download-acceptance \
+  -run 'Test(ResumeUsesRangeForMatchingETag|ChangedETagRestartsInsteadOfAppending|DownloadFailureLeavesPartialUnpromoted|DiskFullWriteFailureLeavesDownloadRecoverable)$' \
+  ./internal/downloads
+run_group filesystem-acceptance \
+  -run 'Test(ResolveArtifactFileSafetyBranches|DeleteFilesPlanAndReferenceEdgeCases)$' \
+  ./internal/models
+run_group lifecycle-acceptance \
+  -run 'Test(IdleUnloadStopsInactiveModelButNotActiveRequest|EvictionPlanUsesActivityAlwaysOnAndInstancePolicy|ConcurrentAcquiresCannotBypassDrainClaim|AcquireCancelledWhileWaitingForDrain|MissingGGUFStartFailureIsRecoverable)$' \
+  ./internal/lifecycle
+
+# Keep broad package qualification as a second layer. This catches regressions
+# in adjacent branches while the named groups above make the release contract
+# and failure evidence explicit.
 run_group database ./internal/database
 run_group recovery ./internal/supervisor
 run_group downloads ./internal/downloads
@@ -34,6 +52,13 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
         "commit": os.environ.get("GITHUB_SHA", ""),
         "started_at": "${started_at}",
         "finished_at": "${finished_at}",
+        "acceptance_groups": [
+            "upgrade-acceptance",
+            "recovery-acceptance",
+            "download-acceptance",
+            "filesystem-acceptance",
+            "lifecycle-acceptance"
+        ],
         "domains": [
             "database-migrations-and-upgrade",
             "crash-and-stale-worker-recovery",
