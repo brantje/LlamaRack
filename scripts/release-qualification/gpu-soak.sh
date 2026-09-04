@@ -45,6 +45,10 @@ printf 'probe_host=%s\npublish_host=%s\n' "$docker_probe_host" "$docker_publish_
 
 cleanup() {
   docker exec "$container_name" cat /config/manager.log >"$artifact_dir/manager.log" 2>/dev/null || true
+  # llama.cpp may create root-owned slot directories inside the host-backed
+  # qualification config directory. Make the dedicated temp tree removable by
+  # the non-root Actions runner before destroying the container.
+  docker exec -u 0 "$container_name" sh -c 'chmod -R a+rwX /config' >/dev/null 2>&1 || true
   docker rm -f "$container_name" >/dev/null 2>&1 || true
   rm -rf "$config_dir"
 }
@@ -79,7 +83,7 @@ start_manager() {
 }
 
 manager_pid() {
-  docker exec "$container_name" sh -c '
+  docker exec -u 0 "$container_name" sh -c '
     for p in /proc/[0-9]*; do
       [ "$(cat "$p/comm" 2>/dev/null)" = "llamarack" ] && { echo "${p##*/}"; exit 0; }
     done
@@ -90,7 +94,7 @@ manager_pid() {
 kill_manager() {
   local pid
   pid="$(manager_pid)"
-  docker exec "$container_name" kill -9 "$pid"
+  docker exec -u 0 "$container_name" kill -9 "$pid"
   for _ in $(seq 1 50); do
     curl -fsS "$base_url/health" >/dev/null 2>&1 || return 0
     sleep 0.1
@@ -134,9 +138,21 @@ wait_state() {
   return 1
 }
 
+wait_state_through_failure() {
+  local instance_id="$1" wanted="$2"
+  for _ in $(seq 1 90); do
+    state="$(runtime_state "$instance_id")"
+    [[ "$state" == "$wanted" ]] && return 0
+    sleep 1
+  done
+  echo "instance ${instance_id} did not recover to ${wanted}" >&2
+  auth_request GET "/api/v1/instances/${instance_id}/runtime" >&2 || true
+  return 1
+}
+
 worker_count() {
   local instance_id="$1"
-  docker exec "$container_name" sh -c '
+  docker exec -u 0 "$container_name" sh -c '
     instance="$1"; count=0
     for env in /proc/[0-9]*/environ; do
       if tr "\000" "\n" <"$env" 2>/dev/null | grep -qx "LLAMARACK_INSTANCE_ID=$instance"; then
@@ -155,7 +171,7 @@ assert_single_worker() {
 
 assert_worker_identity() {
   local pid="$1" instance_id="$2"
-  docker exec "$container_name" sh -c '
+  docker exec -u 0 "$container_name" sh -c '
     pid="$1"; instance="$2"
     tr "\000" "\n" <"/proc/${pid}/environ" 2>/dev/null \
       | grep -qx "LLAMARACK_INSTANCE_ID=$instance"
@@ -340,12 +356,17 @@ auth_request POST "/api/v1/instances/${idle_instance_id}/stop" >/dev/null
 wait_state "$idle_instance_id" UNLOADED
 
 # Always-On reconciliation must start the Instance without an explicit launch,
-# recover after an operator Kill, and remain suppressible by an explicit Stop.
+# recover after an unexpected worker SIGKILL, and remain suppressible by an
+# explicit Stop. Use a direct process kill here: the management Kill action is
+# an operator command, while this scenario specifically qualifies crash recovery.
 always_instance_id="$(create_instance "$dense_model_id" 'Qualification Always On' 'qualification-always-on' ',"always_on":true,"gpu_mode":"auto"')"
 wait_state "$always_instance_id" READY
 assert_single_worker "$always_instance_id"
-auth_request POST "/api/v1/instances/${always_instance_id}/kill" >/dev/null
-wait_state "$always_instance_id" READY
+always_worker_pid="$(auth_request GET "/api/v1/instances/${always_instance_id}/runtime" | json_value 'data["pid"]')"
+docker exec -u 0 "$container_name" kill -9 "$always_worker_pid"
+wait_state_through_failure "$always_instance_id" READY
+recovered_always_worker_pid="$(auth_request GET "/api/v1/instances/${always_instance_id}/runtime" | json_value 'data["pid"]')"
+[[ "$recovered_always_worker_pid" != "$always_worker_pid" ]] || { echo "Always-On worker PID did not change after crash recovery" >&2; exit 1; }
 assert_single_worker "$always_instance_id"
 auth_request POST "/api/v1/instances/${always_instance_id}/stop" >/dev/null
 wait_state "$always_instance_id" UNLOADED
@@ -395,7 +416,7 @@ assert_single_worker "$moe_instance_id"
 infer "$moe_instance_id"
 moe_worker_pid="$(auth_request GET "/api/v1/instances/${moe_instance_id}/runtime" | json_value 'data["pid"]')"
 assert_worker_identity "$moe_worker_pid" "$moe_instance_id"
-docker exec "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/cmdline" \
+docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/cmdline" \
   >"$artifact_dir/moe-worker-args.txt"
 python3 - "$artifact_dir/moe-worker-args.txt" "${gpu_ids[0]},${gpu_ids[1]}" <<'PY'
 import sys
@@ -406,7 +427,7 @@ index = args.index("--device")
 assert index + 1 < len(args), args
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
-docker exec "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/environ" \
+docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${moe_worker_pid}/environ" \
   >"$artifact_dir/moe-worker-environ.txt"
 grep -qx "LLAMARACK_INSTANCE_ID=${moe_instance_id}" "$artifact_dir/moe-worker-environ.txt"
 auth_request POST "/api/v1/instances/${moe_instance_id}/stop" >/dev/null
