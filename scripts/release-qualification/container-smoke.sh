@@ -16,29 +16,27 @@ artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$work_dir/artifacts}"
 mkdir -p "$config_dir" "$models_dir" "$artifact_dir"
 chmod 0777 "$config_dir" "$models_dir"
 container_name="llamarack-qualification-${variant}-$$"
-port="$(python3 - <<'PY'
-import socket
-with socket.socket() as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-)"
-base_url="http://127.0.0.1:${port}"
+base_url=""
 log_file="$artifact_dir/${variant}-manager.log"
 
 cleanup() {
+  docker logs "$container_name" >"$log_file" 2>&1 || true
   docker rm -f "$container_name" >/dev/null 2>&1 || true
   [[ -n "${QUALIFICATION_KEEP_WORKDIR:-}" ]] || rm -rf "$work_dir"
 }
 trap cleanup EXIT
 
 start_manager() {
+  local port
   docker rm -f "$container_name" >/dev/null 2>&1 || true
   docker run -d --name "$container_name" \
-    -p "127.0.0.1:${port}:8000" \
+    -p '127.0.0.1::8000' \
     -v "$config_dir:/config" \
     -v "$models_dir:/models" \
     "$image" >/dev/null
+  port="$(docker port "$container_name" 8000/tcp | awk -F: 'NR == 1 { print $NF }')"
+  [[ "$port" =~ ^[0-9]+$ ]] || { echo "unable to resolve Docker-published manager port" >&2; return 1; }
+  base_url="http://127.0.0.1:${port}"
   for _ in $(seq 1 90); do
     curl -fsS "$base_url/health" >/dev/null 2>&1 && return 0
     if ! docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null | grep -qx true; then
@@ -97,15 +95,20 @@ service_account_response="$(auth_request POST /api/v1/admin/service-accounts '{"
 service_account_id="$(printf '%s' "$service_account_response" | json_value 'data["id"]')"
 [[ -n "$service_account_id" ]]
 
-# Exercise key creation without retaining or logging the generated secret.
-auth_request POST /api/v1/api-keys \
-  "{\"name\":\"Release Qualification\",\"key_type\":\"full\",\"owner_service_account_id\":\"$service_account_id\"}" \
+# Verify key creation while retaining only its non-secret identifier for the
+# post-restart durability assertion.
+api_key_response="$(auth_request POST /api/v1/api-keys \
+  "{\"name\":\"Release Qualification\",\"key_type\":\"full\",\"owner_service_account_id\":\"$service_account_id\"}")"
+printf '%s' "$api_key_response" \
   | SERVICE_ACCOUNT_ID="$service_account_id" python3 -c '
 import json, os, sys
 payload = json.load(sys.stdin)
 assert payload["key"]["owner_id"] == os.environ["SERVICE_ACCOUNT_ID"]
 assert payload["secret"].startswith("sk-")
 '
+api_key_id="$(printf '%s' "$api_key_response" | json_value 'data["key"]["id"]')"
+unset api_key_response
+[[ -n "$api_key_id" ]]
 
 # A graceful restart with the same data directory exercises SQLite migrations,
 # durable signing-key initialization, settings persistence, and auth state.
@@ -123,6 +126,12 @@ auth_request GET /api/v1/admin/service-accounts \
 import json, os, sys
 items = json.load(sys.stdin)
 assert any(item["id"] == os.environ["SERVICE_ACCOUNT_ID"] for item in items)
+'
+auth_request GET /api/v1/api-keys \
+  | API_KEY_ID="$api_key_id" python3 -c '
+import json, os, sys
+items = json.load(sys.stdin)
+assert any(item["id"] == os.environ["API_KEY_ID"] for item in items)
 '
 
 docker logs "$container_name" >"$log_file" 2>&1 || true
@@ -144,7 +153,8 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
             "fresh_bootstrap_and_login",
             "sqlite_migrations",
             "settings_persistence",
-            "service_account_and_api_key_creation",
+            "service_account_persistence",
+            "api_key_persistence",
             "durable_bearer_session",
             "restart"
         ],
