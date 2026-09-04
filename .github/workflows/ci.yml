@@ -102,97 +102,98 @@ jobs:
       - run: npm ci
       - run: npm run test:coverage
       - run: npm run build
+  # Enable for testing GPU soak 
+  # @AI DO NOT DELETE THIS COMMENT
+  # gpu-soak:
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   name: GPU lifecycle soak
+  #   if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/issue-120-release-qualification' && github.event.pull_request.head.repo.full_name == github.repository }}
+  #   runs-on: [self-hosted, gpu-runner]
+  #   timeout-minutes: 180
+  #   env:
+  #     QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
+  #     GPU_MODELS_DIR: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
+  #     GPU_CYCLES: '8'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
 
-  gpu-soak:
-    permissions:
-      contents: read
-      packages: write
-    name: GPU lifecycle soak
-    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/issue-120-release-qualification' && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: [self-hosted, gpu-runner]
-    timeout-minutes: 180
-    env:
-      QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
-      GPU_MODELS_DIR: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
-      GPU_CYCLES: '8'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+  #     - name: Verify GPU runner prerequisites
+  #       run: |
+  #         set -euo pipefail
+  #         for command in docker curl python3 nvidia-smi; do
+  #           command -v "$command" >/dev/null || { echo "missing command on gpu-runner: $command" >&2; exit 1; }
+  #         done
+  #         docker info >/dev/null
+  #         nvidia-smi -L
+  #         test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
+  #         [[ -f "$GPU_MODELS_DIR/qualification-llama-8B.gguf" || -f "$GPU_MODELS_DIR/qualification.gguf" ]] \
+  #           || { echo "missing dense lifecycle/pressure GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
+  #         test -f "$GPU_MODELS_DIR/qualification-12B.gguf" \
+  #           || { echo "missing dense multi-GPU GGUF: $GPU_MODELS_DIR/qualification-12B.gguf" >&2; exit 1; }
+  #         [[ -f "$GPU_MODELS_DIR/qualification-moe-4ba1b.gguf" || -f "$GPU_MODELS_DIR/qualification-moe.gguf" ]] \
+  #           || { echo "missing small MoE GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
+  #         test -f "$GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" \
+  #           || { echo "missing large MoE GGUF: $GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" >&2; exit 1; }
 
-      - name: Verify GPU runner prerequisites
-        run: |
-          set -euo pipefail
-          for command in docker curl python3 nvidia-smi; do
-            command -v "$command" >/dev/null || { echo "missing command on gpu-runner: $command" >&2; exit 1; }
-          done
-          docker info >/dev/null
-          nvidia-smi -L
-          test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
-          [[ -f "$GPU_MODELS_DIR/qualification-llama-8B.gguf" || -f "$GPU_MODELS_DIR/qualification.gguf" ]] \
-            || { echo "missing dense lifecycle/pressure GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
-          test -f "$GPU_MODELS_DIR/qualification-12B.gguf" \
-            || { echo "missing dense multi-GPU GGUF: $GPU_MODELS_DIR/qualification-12B.gguf" >&2; exit 1; }
-          [[ -f "$GPU_MODELS_DIR/qualification-moe-4ba1b.gguf" || -f "$GPU_MODELS_DIR/qualification-moe.gguf" ]] \
-            || { echo "missing small MoE GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
-          test -f "$GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" \
-            || { echo "missing large MoE GGUF: $GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" >&2; exit 1; }
+  #     - name: Log in to GHCR
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Build and push current CUDA candidate
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: |
+  #         set -euo pipefail
+  #         docker build \
+  #           --build-arg LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda \
+  #           --tag "$CUDA_TAG" \
+  #           .
+  #         docker push "$CUDA_TAG"
 
-      - name: Build and push current CUDA candidate
-        env:
-          CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
-        run: |
-          set -euo pipefail
-          docker build \
-            --build-arg LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda \
-            --tag "$CUDA_TAG" \
-            .
-          docker push "$CUDA_TAG"
+  #     - name: Run real-hardware GPU soak
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: |
+  #         set -euo pipefail
+  #         mkdir -p "$QUALIFICATION_ARTIFACT_DIR"
+  #         bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
+  #         monitor_pid=$!
+  #         trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
+  #         bash scripts/release-qualification/gpu-soak.sh \
+  #           "$CUDA_TAG" \
+  #           "$GPU_MODELS_DIR" \
+  #           "$GPU_CYCLES"
+  #         python3 scripts/release-qualification/verify-moe-evidence.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
+  #         python3 scripts/release-qualification/verify-moe-evidence.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/moe-large-worker-args.txt" 1
+  #         if [[ -f "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt" ]]; then
+  #           python3 scripts/release-qualification/verify-dense-multi-evidence.py \
+  #             "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
+  #         fi
+  #         wait "$monitor_pid"
+  #         python3 scripts/release-qualification/analyze-manager-growth.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
+  #           "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
+  #         trap - EXIT
 
-      - name: Run real-hardware GPU soak
-        env:
-          CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
-        run: |
-          set -euo pipefail
-          mkdir -p "$QUALIFICATION_ARTIFACT_DIR"
-          bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
-          monitor_pid=$!
-          trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
-          bash scripts/release-qualification/gpu-soak.sh \
-            "$CUDA_TAG" \
-            "$GPU_MODELS_DIR" \
-            "$GPU_CYCLES"
-          python3 scripts/release-qualification/verify-moe-evidence.py \
-            "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
-          python3 scripts/release-qualification/verify-moe-evidence.py \
-            "$QUALIFICATION_ARTIFACT_DIR/moe-large-worker-args.txt" 1
-          if [[ -f "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt" ]]; then
-            python3 scripts/release-qualification/verify-dense-multi-evidence.py \
-              "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
-          fi
-          wait "$monitor_pid"
-          python3 scripts/release-qualification/analyze-manager-growth.py \
-            "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
-            "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
-          trap - EXIT
+  #     - name: Upload GPU qualification evidence
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: gpu-qualification-${{ github.run_id }}
+  #         path: artifacts/release-qualification/gpu
+  #         if-no-files-found: warn
 
-      - name: Upload GPU qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gpu-qualification-${{ github.run_id }}
-          path: artifacts/release-qualification/gpu
-          if-no-files-found: warn
-
-      - name: Remove local qualification image
-        if: always()
-        env:
-          CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
-        run: docker image rm -f "$CUDA_TAG" >/dev/null 2>&1 || true
+  #     - name: Remove local qualification image
+  #       if: always()
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: docker image rm -f "$CUDA_TAG" >/dev/null 2>&1 || true
