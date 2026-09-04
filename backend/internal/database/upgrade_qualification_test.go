@@ -90,6 +90,8 @@ DROP TABLE release_upgrade_probe;
 			{`SELECT token_hash FROM sessions WHERE id='session-1'`, "session-hash"},
 			{`SELECT name FROM service_accounts WHERE id='sa-1'`, "Upgrade Service"},
 			{`SELECT key_type FROM api_keys WHERE id='key-1'`, "full"},
+			{`SELECT prefix FROM api_keys WHERE id='key-1'`, "sk-upgrade"},
+			{`SELECT token_hash FROM api_keys WHERE id='key-1'`, "key-hash"},
 			{`SELECT prefix FROM provider_secrets WHERE name='huggingface'`, "hf_"},
 			{`SELECT hex(ciphertext) FROM provider_secrets WHERE name='huggingface'`, "0102"},
 			{`SELECT hex(nonce) FROM provider_secrets WHERE name='huggingface'`, "0304"},
