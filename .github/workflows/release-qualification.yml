@@ -179,6 +179,8 @@ jobs:
             "$GPU_MODEL_PATH" \
             "$GPU_MOE_MODEL_PATH" \
             "$GPU_CYCLES"
+          python3 scripts/release-qualification/verify-moe-evidence.py \
+            "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
           wait "$monitor_pid"
           python3 scripts/release-qualification/analyze-manager-growth.py \
             "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
