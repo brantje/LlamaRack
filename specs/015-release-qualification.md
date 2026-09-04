@@ -14,7 +14,7 @@ Every change continues to require the repository coverage gates. Backend CI addi
 
 Release-container jobs build CPU and CUDA candidates locally first. The exact local images receive startup smoke qualification before any registry publication. Only successful builds are pushed under commit-specific `qualification-*` tags.
 
-Later release jobs pull those candidate images and retag the already-qualified image digest. Stable tags MUST NOT be produced by a second independent rebuild after qualification.
+After upload, qualification tags are resolved to immutable `ghcr.io/brantje/llamarack@sha256:...` references. Hosted qualification, GPU qualification and final publication all consume those digest references. Stable tags MUST NOT be produced by a second rebuild or by resolving a mutable candidate tag after qualification.
 
 Hosted container qualification verifies:
 
@@ -25,23 +25,31 @@ Hosted container qualification verifies:
 - a persistent setting can be written and read;
 - service-account and API-key creation works;
 - the manager restarts against the same data directory;
-- the bearer signing key, settings and service account remain usable after restart;
+- the bearer signing key, settings, service account and non-secret API-key identity remain usable after restart;
 - CPU packaging boots without CUDA;
 - CUDA packaging boots far enough to validate the manager image when no GPU is present.
 
 ## Deterministic software qualification
 
-The reusable software suite runs the database, supervisor, downloads, models and lifecycle package integration tests as one release scenario. Those tests are the authoritative deterministic coverage for:
+The reusable software suite first runs named acceptance groups, then runs the complete database, supervisor, downloads, models and lifecycle package integration suites. The named groups make release evidence directly traceable to issue #120 rather than requiring a reviewer to infer coverage from a broad package pass.
 
-- Goose migration execution, idempotency, upgrade and rollback;
-- rejection of unmanaged/foreign/newer database schemas;
-- stale owned-worker reconciliation and unrelated-process safety;
-- interrupted and resumed downloads, changed remote identity and partial-file handling;
-- disk-full/write failure without promoting an incomplete GGUF;
-- model artifact deletion boundaries and missing-GGUF recovery;
-- lifecycle, admission, eviction, reservation, autoload, Always-On and idle-unload invariants.
+The acceptance groups cover:
+
+- `upgrade-acceptance`: fresh Goose migration, latest-schema reopen/idempotency, baseline-to-next migration and failed-migration rollback/retry;
+- `recovery-acceptance`: surviving owned-worker termination/replacement, unrelated-process protection, PID-reuse/generation mismatch safety and stale metadata cleanup;
+- `download-acceptance`: Range resume, changed remote identity, failed partial download and deterministic disk-full recovery;
+- `filesystem-acceptance`: artifact-path/symlink boundaries and safe model-file deletion planning;
+- `lifecycle-acceptance`: active-request idle protection, idle unload, eviction policy, concurrent admission during drain, cancellation while waiting and missing-GGUF recovery.
+
+The full package passes additionally remain authoritative deterministic coverage for rejection of unmanaged/foreign/newer database schemas, reservations, autoload, Always-On reconciliation, scheduler placement, routing and adjacent lifecycle branches.
 
 Qualification scripts MUST compose these tests rather than duplicating their implementation logic in shell.
+
+## Upgrade qualification
+
+Before a previous release candidate exists, the migration gate exercises the exact embedded baseline plus a synthetic next migration, including rollback/retry and durable reopen. Once an RC database artifact exists, it becomes a retained release fixture and MUST be added to the same gate for RC-to-current qualification; an unavailable historical RC is not fabricated by reconstructing undocumented schema state.
+
+Every retained release fixture must be opened by the current candidate, migrated once, reopened idempotently and checked for durable user/authentication, key/service-account, model, Instance, option and setting state that existed in that fixture.
 
 ## GPU runner
 
@@ -68,17 +76,22 @@ GPU_QUALIFICATION_MODEL_PATH
 GPU_QUALIFICATION_MOE_MODEL_PATH
 ```
 
-Missing qualification models or fewer than two visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix.
+Missing qualification models or fewer than two visible GPUs are release-gate failures. Stable qualification MUST NOT silently downgrade to a reduced hardware matrix. The dense model must also be large enough for repeated workers on one GPU to reach resource pressure within the bounded eviction scenario; otherwise qualification fails with a provisioning error rather than pretending eviction was exercised.
 
 ## Real-hardware soak
 
-The CUDA candidate is run with all GPUs exposed. The suite bootstraps a clean manager and exercises repeated combinations of:
+The CUDA candidate is run with all GPUs exposed. Qualification models are mounted beneath the manager's `/models` root so model registration uses the same filesystem boundary as production. The suite bootstraps a clean manager and exercises repeated combinations of:
 
 - model registration and Instance creation;
 - real non-streaming inference;
-- streaming inference;
+- streaming inference and explicit client cancellation;
 - concurrent inference;
-- stop and restart cycles;
+- concurrent starts with the single-worker invariant;
+- inference-triggered autoload;
+- per-Instance idle unload and subsequent autoload recovery;
+- Always-On automatic start, Kill recovery and manual-Stop suppression;
+- repeated stop and restart cycles;
+- real single-GPU resource pressure and eviction;
 - manager termination while inference is active;
 - manager termination while a worker start is in progress;
 - stale-worker reconciliation and replacement;
@@ -96,8 +109,11 @@ Qualification MUST fail if it observes any of the following:
 - a stale managed worker remaining after recovery;
 - replacement worker identity reusing the stale PID;
 - failed recovery preventing a later healthy inference;
+- an active request being selected as an eviction victim in deterministic admission coverage;
+- a pressure scenario that never exercises a real eviction;
+- autoload, idle-unload or Always-On reconciliation failing to reach the expected lifecycle state;
 - the MoE worker not receiving CPU-expert-offload flags;
-- the multi-GPU worker not receiving visibility for multiple GPUs;
+- the multi-GPU MoE worker not receiving the expected comma-separated `--device` selection;
 - unbounded manager goroutine growth;
 - unbounded manager-process RSS growth.
 
@@ -108,12 +124,14 @@ The manager exports `llamarack_manager_goroutines` as a normal Prometheus gauge.
 Qualification jobs upload artifacts even on failure where possible. Evidence includes:
 
 - LlamaRack commit SHA;
-- exact image reference and image metadata;
+- exact immutable image reference and image metadata;
+- resolved Go toolchain for deterministic software qualification;
 - scenario start/end timestamps;
+- named acceptance-group logs;
 - manager logs;
 - per-scenario logs;
 - GPU inventory and driver information;
-- streamed inference samples;
+- streamed and cancelled-inference samples;
 - worker command/environment evidence for MoE placement;
 - manager goroutine/RSS samples and growth summary.
 
@@ -121,6 +139,6 @@ Evidence must contain enough information to identify the exact candidate under t
 
 ## Release gating
 
-Main-branch container publication requires hosted software and container qualification. Stable GitHub releases additionally require the `gpu-runner` hardware job. Publication jobs depend on those qualification jobs and only retag the already-qualified candidate images.
+Main-branch container publication requires hosted software and container qualification. Stable GitHub releases additionally require the `gpu-runner` hardware job. Publication jobs depend on those qualification jobs and only retag the already-qualified candidate digests.
 
 Performance benchmarking and exhaustive GPU-vendor coverage are not part of this gate. Multi-node qualification and persistent KV-cache qualification remain separate feature concerns.
