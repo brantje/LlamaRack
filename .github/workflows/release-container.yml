@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/issue-120-release-qualification
   release:
     types: [published]
 
@@ -13,8 +12,75 @@ permissions:
   packages: write
 
 jobs:
+  resolve-runtime:
+    name: Resolve release identity and llama.cpp runtime
+    if: ${{ github.event_name == 'push' || github.event.release.prerelease == true }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+      build_time: ${{ steps.identity.outputs.build_time }}
+      release_tag: ${{ steps.runtime.outputs.release_tag }}
+      build_tag: ${{ steps.runtime.outputs.build_tag }}
+      cpu_image: ${{ steps.runtime.outputs.cpu_image }}
+      cuda_image: ${{ steps.runtime.outputs.cuda_image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve LlamaRack identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == 'release' ]]; then
+            version='${{ github.event.release.tag_name }}'
+            version="${version#v}"
+            channel='release'
+          else
+            version='development'
+            channel='development'
+          fi
+          [[ -n "$version" && "$version" != *[[:space:]]* ]] || { echo 'invalid LlamaRack version' >&2; exit 1; }
+          build_time="$(git show -s --format=%cI "$GITHUB_SHA")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "build_time=${build_time}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve latest stable llama.cpp
+        id: runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/release-qualification/resolve-llama-runtime.sh "$GITHUB_OUTPUT"
+
+      - name: Resolution summary
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          CHANNEL: ${{ steps.identity.outputs.channel }}
+          RELEASE_TAG: ${{ steps.runtime.outputs.release_tag }}
+          BUILD_TAG: ${{ steps.runtime.outputs.build_tag }}
+          CPU_IMAGE: ${{ steps.runtime.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ steps.runtime.outputs.cuda_image }}
+        run: |
+          {
+            echo '## Release build identity'
+            echo
+            echo "- LlamaRack: \`${VERSION}\` (\`${GITHUB_SHA}\`, ${CHANNEL})"
+            echo "- llama.cpp release: \`${RELEASE_TAG}\`"
+            echo "- llama.cpp build: \`${BUILD_TAG}\`"
+            echo "- CPU runtime: \`${CPU_IMAGE}\`"
+            echo "- CUDA runtime: \`${CUDA_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-candidates:
     name: Build and smoke candidate images
+    needs: resolve-runtime
     runs-on: ubuntu-latest
     outputs:
       cpu_image: ${{ steps.resolved-candidates.outputs.cpu_image }}
@@ -42,9 +108,9 @@ jobs:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -57,9 +123,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}-cuda
-            type=semver,pattern=v{{major}}.{{minor}}-cuda
-            type=semver,pattern=v{{major}}-cuda
+            type=semver,pattern={{version}}-cuda
+            type=semver,pattern={{major}}.{{minor}}-cuda
+            type=semver,pattern={{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -76,10 +142,24 @@ jobs:
           context: .
           file: ./Dockerfile
           load: true
+          build-args: |
+            LLAMA_IMAGE=${{ needs.resolve-runtime.outputs.cpu_image }}
+            LLAMARACK_VERSION=${{ needs.resolve-runtime.outputs.version }}
+            LLAMARACK_COMMIT=${{ github.sha }}
+            LLAMARACK_BUILD_TIME=${{ needs.resolve-runtime.outputs.build_time }}
+            LLAMARACK_CHANNEL=${{ needs.resolve-runtime.outputs.channel }}
+            LLAMARACK_VARIANT=cpu
+            LLAMA_CPP_RELEASE=${{ needs.resolve-runtime.outputs.release_tag }}
+            LLAMA_CPP_BUILD=${{ needs.resolve-runtime.outputs.build_tag }}
+            LLAMA_CPP_IMAGE=${{ needs.resolve-runtime.outputs.cpu_image }}
           tags: llamarack-candidate-cpu:${{ github.sha }}
           labels: |
             ${{ steps.meta.outputs.labels }}
             io.llamarack.build.reason=release
+            io.llamarack.runtime.variant=cpu
+            io.llamarack.llama.cpp.release=${{ needs.resolve-runtime.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.resolve-runtime.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.resolve-runtime.outputs.cpu_image }}
           cache-from: type=gha,scope=cpu
           cache-to: type=gha,mode=max,scope=cpu
 
@@ -90,11 +170,23 @@ jobs:
           file: ./Dockerfile
           load: true
           build-args: |
-            LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
+            LLAMA_IMAGE=${{ needs.resolve-runtime.outputs.cuda_image }}
+            LLAMARACK_VERSION=${{ needs.resolve-runtime.outputs.version }}
+            LLAMARACK_COMMIT=${{ github.sha }}
+            LLAMARACK_BUILD_TIME=${{ needs.resolve-runtime.outputs.build_time }}
+            LLAMARACK_CHANNEL=${{ needs.resolve-runtime.outputs.channel }}
+            LLAMARACK_VARIANT=cuda
+            LLAMA_CPP_RELEASE=${{ needs.resolve-runtime.outputs.release_tag }}
+            LLAMA_CPP_BUILD=${{ needs.resolve-runtime.outputs.build_tag }}
+            LLAMA_CPP_IMAGE=${{ needs.resolve-runtime.outputs.cuda_image }}
           tags: llamarack-candidate-cuda:${{ github.sha }}
           labels: |
             ${{ steps.meta-cuda.outputs.labels }}
             io.llamarack.build.reason=release
+            io.llamarack.runtime.variant=cuda
+            io.llamarack.llama.cpp.release=${{ needs.resolve-runtime.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.resolve-runtime.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.resolve-runtime.outputs.cuda_image }}
           cache-from: type=gha,scope=cuda
           cache-to: type=gha,mode=max,scope=cuda
 
@@ -155,7 +247,7 @@ jobs:
     with:
       cpu_image: ${{ needs.build-candidates.outputs.cpu_image }}
       cuda_image: ${{ needs.build-candidates.outputs.cuda_image }}
-      run_gpu: ${{ github.event_name == 'release' || github.ref == 'refs/heads/feat/issue-120-release-qualification' }}
+      run_gpu: ${{ github.event_name == 'release' }}
       run_compat: ${{ github.event_name == 'release' }}
       gpu_models_dir: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
       gpu_cycles: 8
@@ -163,8 +255,8 @@ jobs:
 
   publish:
     name: Publish qualified tags
-    if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
-    needs: [build-candidates, qualify]
+    if: ${{ github.event_name == 'push' || github.event.release.prerelease == true }}
+    needs: [resolve-runtime, build-candidates, qualify]
     runs-on: ubuntu-latest
     steps:
       - name: Log in to GHCR
@@ -181,10 +273,9 @@ jobs:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
@@ -196,10 +287,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}-cuda
-            type=semver,pattern=v{{major}}.{{minor}}-cuda
-            type=semver,pattern=v{{major}}-cuda
-            type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}-cuda
+            type=semver,pattern={{major}}.{{minor}}-cuda
+            type=semver,pattern={{major}}-cuda
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
