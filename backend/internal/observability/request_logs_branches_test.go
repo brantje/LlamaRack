@@ -121,11 +121,4 @@ func TestRequestLogSchemaExistingColumnsAndFailure(t *testing.T) {
 	if err := fresh.EnsureCorrelationSchema(ctx); err != nil {
 		t.Fatalf("existing schema: %v", err)
 	}
-	if err := s.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	closed := New(s.db)
-	if err := closed.EnsureCorrelationSchema(ctx); err == nil {
-		t.Fatal("expected closed database error")
-	}
 }

@@ -32,9 +32,8 @@ type RequestLogDetail struct {
 	ResponseBody *string `json:"response_body,omitempty"`
 }
 
-// EnsureRequestLogSchema creates the development-time request log context
-// table. No ALTER/backfill migration is used: session and model-at-request-time
-// metadata is kept separately from the existing correlation and request rows.
+// EnsureRequestLogSchema marks request-log schema as ready. Tables are created
+// by embedded Goose migrations during database.Open.
 func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 	if _, ok := requestLogSchemaReady.Load(s.db); ok {
 		return nil
@@ -46,22 +45,6 @@ func (s *Service) EnsureRequestLogSchema(ctx context.Context) error {
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS inference_request_log_context (
-		request_id TEXT PRIMARY KEY REFERENCES inference_request_correlations(request_id) ON DELETE CASCADE,
-		session_id TEXT NOT NULL DEFAULT '',
-		model_id TEXT NOT NULL DEFAULT '',
-		model_name TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		return err
-	}
-	for _, index := range []string{
-		`CREATE INDEX IF NOT EXISTS inference_request_log_context_session_idx ON inference_request_log_context(session_id)`,
-		`CREATE INDEX IF NOT EXISTS inference_request_log_context_model_idx ON inference_request_log_context(model_id)`,
-	} {
-		if _, err := s.db.ExecContext(ctx, index); err != nil {
-			return err
-		}
 	}
 	requestLogSchemaReady.Store(s.db, struct{}{})
 	return nil

@@ -16,18 +16,17 @@ The core separation is:
 
 SQLite is the durable store for configuration that must survive manager restarts.
 
-## 2. Development schema policy
+## 2. Release schema policy
 
-The project is still in active development.
+LlamaRack uses embedded Goose migrations for SQLite schema evolution. See [014 — Database Migrations](014-database-migrations.md).
 
-For Model/Instance control-plane separation, GGUF metadata work and related schema restructuring:
+For active development on unreleased schema:
 
-- change the current schema directly;
-- update fixtures/seeds/tests directly;
-- development databases may be recreated;
-- **do not create database migration files for this development work**.
+- add a new immutable Goose migration for every schema change after the 1.0 baseline;
+- update fixtures/seeds/tests in the same change;
+- do not add runtime `ensure*Schema`, `PRAGMA table_info`, or guarded `ALTER TABLE` compatibility helpers to application code.
 
-A production/release migration policy can be introduced before schema backward compatibility becomes a requirement.
+Before `1.0.0`, incompatible databases must be recreated or restored from a Goose-managed backup. There is no pre-Goose upgrade path.
 
 ## 3. Design principles
 
@@ -425,7 +424,7 @@ GGUF metadata cache, when used, contains artifact metadata only and must never c
 9. Model and Instance llama.cpp overrides retain inheritance semantics.
 10. Instance GPU assignments cannot silently retarget another device.
 11. Model deletion and artifact deletion are separate.
-12. Development schema changes do not require migration files during active development.
+12. Schema changes after the 1.0 baseline require a new immutable Goose migration in the same change, with fixtures/seeds/tests updated together; runtime schema compatibility helpers are prohibited.
 13. The GGUF file/shard set is the source of truth; cached inspection must be invalidated/refreshed when its artifact fingerprint changes.
 14. Arbitrary GGUF metadata keys are not modeled as one schema column each.
 15. Model metadata/details never acquire Instance runtime lifecycle ownership.

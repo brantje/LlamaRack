@@ -564,6 +564,16 @@ Mounted inside the container as:
 
 The configuration volume contains manager persistence, application configuration and stored credentials. GGUF artifacts live under the models volume.
 
+### Database backup and upgrades
+
+SQLite state lives at `{dataDir}/manager.db` (default `/config/manager.db` in containers). Before upgrading LlamaRack across releases:
+
+1. stop the manager process;
+2. copy `manager.db` and any `manager.db-wal` / `manager.db-shm` sidecars from the configuration volume;
+3. restore those files before starting the upgraded build.
+
+Schema upgrades run automatically during startup through embedded Goose migrations. Unmanaged databases and databases created by a newer release than the running binary fail startup instead of wiping data.
+
 ---
 
 ## Common configuration

@@ -171,7 +171,6 @@ func New(db *sql.DB, sessionLifetime time.Duration) *Service {
 	return &Service{
 		db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		jwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
-		schemaErr: ensureAuthSchema(db),
 	}
 }
 

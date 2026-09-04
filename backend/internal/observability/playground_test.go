@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -110,23 +111,38 @@ func TestPlaygroundLifecycleRecorderIgnoresUnrelatedEvents(t *testing.T) {
 	}
 }
 
-func TestPlaygroundSchemaMigratesDraftTable(t *testing.T) {
+func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	service := playgroundTestService(t)
 	ctx := context.Background()
-	if _, err := service.db.ExecContext(ctx, `CREATE TABLE playground_lifecycle_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		recorded_at INTEGER NOT NULL,
-		event TEXT NOT NULL,
-		instance_id TEXT NOT NULL
-	)`); err != nil {
-		t.Fatal(err)
-	}
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(recorded_at,event,instance_id,correlation_id) VALUES(?,?,?,?)`, time.Now().UnixMilli(), LifecycleEviction, "victim", "trace"); err != nil {
-		t.Fatalf("migration did not add correlation_id: %v", err)
+	if !hasPlaygroundCorrelationColumn(ctx, service.db) {
+		t.Fatal("expected playground_lifecycle_events.correlation_id from migrations")
 	}
+	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
+		t.Fatalf("insert playground event: %v", err)
+	}
+}
+
+func hasPlaygroundCorrelationColumn(ctx context.Context, db *sql.DB) bool {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(playground_lifecycle_events)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false
+		}
+		if name == "correlation_id" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPlaygroundEvictionsWithoutTraceAreEmpty(t *testing.T) {

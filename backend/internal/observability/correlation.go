@@ -23,24 +23,8 @@ func (s *Service) EnsureCorrelationSchema(ctx context.Context) error {
 	if s.correlationReady {
 		return nil
 	}
-	// The complete development schema is defined by database.initializeSchema.
-	// Keep this idempotent table/index guard for focused service tests, but never
-	// ALTER or backfill an existing development database: incompatible DBs must be
-	// recreated instead of being silently migrated at runtime.
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS inference_request_correlations (
-		request_id TEXT PRIMARY KEY,
-		inference_request_id INTEGER NOT NULL UNIQUE REFERENCES inference_requests(id) ON DELETE CASCADE,
-		prompt_tokens_per_second REAL
-	)`); err != nil {
-		return err
-	}
-	for _, index := range []string{
-		`CREATE INDEX IF NOT EXISTS inference_requests_trace_started_idx ON inference_requests(trace_id,started_at)`,
-		`CREATE INDEX IF NOT EXISTS inference_requests_endpoint_started_idx ON inference_requests(endpoint,started_at DESC)`,
-	} {
-		if _, err := s.db.ExecContext(ctx, index); err != nil {
-			return err
-		}
+	if s.db == nil {
+		return fmt.Errorf("database unavailable")
 	}
 	s.correlationReady = true
 	return nil
