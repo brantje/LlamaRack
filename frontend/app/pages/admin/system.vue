@@ -1,5 +1,15 @@
 <script setup lang="ts">
+type BuildIdentity = {
+  version: string
+  commit?: string
+  build_time?: string
+  channel: string
+  variant: string
+  dirty?: boolean
+  llama_cpp: { release?: string; build?: string; image?: string }
+}
 type SystemInfo = {
+  identity?: BuildIdentity
   manager: { uptime_seconds: number; runtime: Record<string, string> }
   network: { effective_scheme: string; secure_cookie: boolean; allowed_origins: unknown; trusted_proxies: unknown; external_url: unknown }
   llamacpp: { available: boolean; path?: string; version?: string; fingerprint?: string; options?: number }
@@ -67,6 +77,43 @@ function formatUptimeSeconds(seconds: number) {
   return parts.join(' ') || '0s'
 }
 
+function formatBuildTime(value?: string) {
+  if (!value) return 'Unknown'
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return value
+  return `${new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+    timeZone: 'UTC'
+  }).format(timestamp)} UTC`
+}
+
+function shortCommit(value?: string) {
+  const commit = value?.trim()
+  return commit ? commit.slice(0, 12) : 'Unknown'
+}
+
+function channelLabel(value?: string) {
+  const channel = value?.trim().toLowerCase()
+  if (!channel) return 'Unknown'
+  return channel.charAt(0).toUpperCase() + channel.slice(1)
+}
+
+function channelVariant(value?: string): 'ready' | 'pending' | 'neutral' {
+  switch (value?.trim().toLowerCase()) {
+    case 'release': return 'ready'
+    case 'development': return 'pending'
+    default: return 'neutral'
+  }
+}
+
+function variantLabel(value?: string) {
+  const variant = value?.trim().toLowerCase()
+  if (!variant || variant === 'unknown') return 'Unknown'
+  if (['cpu', 'cuda', 'rocm'].includes(variant)) return variant.toUpperCase()
+  return variant.charAt(0).toUpperCase() + variant.slice(1)
+}
+
 const allowedOrigins = computed(() => diagnosticValues(info.value?.network.allowed_origins))
 const trustedProxies = computed(() => diagnosticValues(info.value?.network.trusted_proxies))
 const freshness = computed(() => {
@@ -104,7 +151,7 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
 </script>
 
 <template>
-  <AdminShell title="System" description="Read-only manager, network and llama.cpp diagnostics.">
+  <AdminShell title="System" description="Read-only manager, build, network and llama.cpp diagnostics.">
     <template #actions>
       <div class="flex flex-col items-end gap-1">
         <AppButton class="min-w-[104px]" intent="secondary" :disabled="loading" :aria-busy="loading" @click="load">{{ loading ? 'Refreshing…' : 'Refresh' }}</AppButton>
@@ -115,6 +162,21 @@ watch(manager.user, user => { if (user) void load() }, { immediate: true })
     <Frame v-if="error" class="mb-5 p-3"><div class="flex items-start gap-2"><StatusTag variant="failed">Error</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">{{ error }}</p></div></Frame>
 
     <div v-if="info" class="space-y-5">
+      <UCard v-if="info.identity" data-testid="admin-system-identity">
+        <h2 class="text-base font-semibold">Build identity</h2>
+        <p class="mt-1 text-xs leading-5 text-[var(--neutral-800)]">Exact application and bundled runtime metadata for support and release verification.</p>
+        <dl class="mt-4 text-sm">
+          <div class="grid gap-1 py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">LlamaRack version</dt><dd class="min-w-0 flex flex-wrap items-center gap-2"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.identity.version || 'Unknown' }}</code><StatusTag :variant="channelVariant(info.identity.channel)">{{ channelLabel(info.identity.channel) }}</StatusTag></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Runtime variant</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ variantLabel(info.identity.variant) }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Git commit</dt><dd class="min-w-0 flex items-center gap-2"><code class="font-mono text-[length:var(--font-size-h6)]" :title="info.identity.commit || undefined" data-testid="build-commit">{{ shortCommit(info.identity.commit) }}</code><AppCopyButton v-if="info.identity.commit" :text="info.identity.commit" label="Copy commit" icon-only size="xs" color="neutral" variant="ghost" /></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Built</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]">{{ formatBuildTime(info.identity.build_time) }}</code></dd></div>
+          <div v-if="info.identity.dirty" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Working tree</dt><dd class="min-w-0"><StatusTag variant="pending">Modified</StatusTag></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">llama.cpp release</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.identity.llama_cpp.release || 'Unknown' }}</code></dd></div>
+          <div class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">llama.cpp build</dt><dd class="min-w-0"><code class="font-mono text-[length:var(--font-size-h6)]">{{ info.identity.llama_cpp.build || 'Unknown' }}</code></dd></div>
+          <div v-if="info.identity.llama_cpp.image" class="grid gap-1 border-t border-[var(--color-divider)] py-3 sm:grid-cols-[180px_1fr]"><dt class="text-[var(--neutral-700)]">Bundled runtime image</dt><dd class="min-w-0"><code class="whitespace-normal font-mono text-[length:var(--font-size-h6)] [overflow-wrap:anywhere]">{{ info.identity.llama_cpp.image }}</code></dd></div>
+        </dl>
+      </UCard>
+
       <Frame class="p-5" data-testid="admin-system-manager">
         <h2 class="text-base font-semibold">Manager</h2>
         <dl class="mt-4 text-sm">
