@@ -54,25 +54,30 @@ extra_volume_args=()
 container_model_path() {
   local host="$1" role="$2"
   local dest="/models/qualification/$(basename "$host")"
+  container_model_path_result=""
   case "$host" in
     "$models_dir"/*)
-      printf '%s\n' "$dest"
+      container_model_path_result="$dest"
       return 0
       ;;
   esac
   dest="/models/qualification/${role}-$(basename "$host")"
   extra_volume_args+=(-v "$host:${dest}:ro")
-  printf '%s\n' "$dest"
+  container_model_path_result="$dest"
 }
 
 dense_lifecycle_host="$(pick_model "${GPU_QUALIFICATION_DENSE_LIFECYCLE:-}" qualification-llama-8B.gguf qualification.gguf)"
 dense_multi_host="$(pick_model "${GPU_QUALIFICATION_DENSE_MULTI:-}" qualification-12B.gguf)"
 moe_small_host="$(pick_model "${GPU_QUALIFICATION_MOE_SMALL:-}" qualification-moe-4ba1b.gguf qualification-moe.gguf)"
 moe_large_host="$(pick_model "${GPU_QUALIFICATION_MOE_LARGE:-}" qualification-moe-26b-a4b.gguf)"
-dense_lifecycle_path="$(container_model_path "$dense_lifecycle_host" lifecycle)"
-dense_multi_path="$(container_model_path "$dense_multi_host" multi)"
-moe_small_path="$(container_model_path "$moe_small_host" moe-small)"
-moe_large_path="$(container_model_path "$moe_large_host" moe-large)"
+container_model_path "$dense_lifecycle_host" lifecycle
+dense_lifecycle_path="$container_model_path_result"
+container_model_path "$dense_multi_host" multi
+dense_multi_path="$container_model_path_result"
+container_model_path "$moe_small_host" moe-small
+moe_small_path="$container_model_path_result"
+container_model_path "$moe_large_host" moe-large
+moe_large_path="$container_model_path_result"
 
 artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$(pwd)/artifacts/release-qualification/gpu}"
 mkdir -p "$artifact_dir"

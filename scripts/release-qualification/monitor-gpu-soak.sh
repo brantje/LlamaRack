@@ -42,12 +42,15 @@ for host in "$probe_host" "$publish_host" "127.0.0.1"; do
 done
 
 scrape_goroutines() {
-  local host metrics
+  local host metrics value
   for host in "${candidates[@]}"; do
     metrics="$(curl -fsS --connect-timeout 2 --max-time 5 "http://${host}:${port}/metrics" 2>/dev/null || true)"
     [[ -n "$metrics" ]] || continue
-    awk '$1 == "llamarack_manager_goroutines" {print $2; exit}' <<<"$metrics"
-    return 0
+    value="$(awk '$1 == "llamarack_manager_goroutines" {print $2; exit}' <<<"$metrics")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
   done
   return 0
 }
