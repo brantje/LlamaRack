@@ -154,14 +154,16 @@ func (s *Sampler) Run(ctx context.Context) {
 			}
 			lastGateway = now
 		}
-		live := LiveSnapshot{Type: "observability", CollectedAt: snapshot.CollectedAt, Hardware: snapshot, Telemetry: withMetrics, Gateway: gateway, Requests: requests}
-		s.publish(live)
 
 		plain := make([]telemetry.Sample, len(withMetrics))
 		for index := range withMetrics {
 			plain[index] = withMetrics[index].Sample
 		}
 		s.service.SetLatestHardware(snapshot, plain)
+
+		live := LiveSnapshot{Type: "observability", CollectedAt: snapshot.CollectedAt, Hardware: snapshot, Telemetry: withMetrics, Gateway: gateway, Requests: requests}
+		s.publish(live)
+
 		if lastPersist.IsZero() || time.Since(lastPersist) >= s.persist {
 			persistCtx, persistCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_ = s.service.RecordHardware(persistCtx, snapshot, plain)
