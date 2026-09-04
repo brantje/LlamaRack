@@ -9,14 +9,14 @@ ARG LLAMA_CPP_RELEASE=
 ARG LLAMA_CPP_BUILD=
 ARG LLAMA_CPP_IMAGE=
 
-FROM node:24-bookworm-slim AS frontend-build
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS frontend-build
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run generate
 
-FROM golang:1.27-bookworm AS backend-build
+FROM golang:1.27.1-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS backend-build
 ARG LLAMARACK_VERSION
 ARG LLAMARACK_COMMIT
 ARG LLAMARACK_BUILD_TIME
