@@ -389,17 +389,17 @@ jobs:
           marker='<!-- llamarack-runtime-identity -->'
           if ! grep -Fq "$marker" <<< "$body"; then
             section="$(cat <<EOF
-
-${marker}
-## Bundled runtime
-
-- LlamaRack commit: \`${GITHUB_SHA}\`
-- llama.cpp release: \`${LLAMA_RELEASE}\`
-- llama.cpp build: \`${LLAMA_BUILD}\`
-- CPU image: \`${CPU_IMAGE}\`
-- CUDA image: \`${CUDA_IMAGE}\`
-EOF
-)"
+          
+          ${marker}
+          ## Bundled runtime
+          
+          - LlamaRack commit: \`${GITHUB_SHA}\`
+          - llama.cpp release: \`${LLAMA_RELEASE}\`
+          - llama.cpp build: \`${LLAMA_BUILD}\`
+          - CPU image: \`${CPU_IMAGE}\`
+          - CUDA image: \`${CUDA_IMAGE}\`
+          EOF
+          )"
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f body="${body}${section}" >/dev/null
           fi
 
@@ -457,6 +457,17 @@ EOF
             echo "no published qualified RC found for ${stable_version}" >&2
             exit 1
           fi
+          is_highest="$(jq -r --arg current "$stable_version" '
+            ([ .[]
+              | select(.draft == false and .prerelease == false)
+              | (.tag_name | ltrimstr("v")) as $tag
+              | select($tag | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+              | $tag
+            ] + [$current])
+            | map({version:., parts:(split(".") | map(tonumber))})
+            | sort_by(.parts)
+            | last.version == $current
+          ' <<< "$releases_json")"
 
           rc_version="${rc_tag#v}"
           cpu_source="ghcr.io/brantje/llamarack:${rc_version}"
@@ -496,6 +507,7 @@ EOF
           echo "build_time=${build_time}" >> "$GITHUB_OUTPUT"
           echo "major=${major}" >> "$GITHUB_OUTPUT"
           echo "minor=${minor}" >> "$GITHUB_OUTPUT"
+          echo "is_highest=${is_highest}" >> "$GITHUB_OUTPUT"
           echo "rc_tag=${rc_tag}" >> "$GITHUB_OUTPUT"
           echo "llama_release=${llama_release}" >> "$GITHUB_OUTPUT"
           echo "llama_build=${llama_build}" >> "$GITHUB_OUTPUT"
@@ -601,13 +613,20 @@ EOF
           VERSION: ${{ steps.source.outputs.stable_version }}
           MINOR: ${{ steps.source.outputs.minor }}
           MAJOR: ${{ steps.source.outputs.major }}
+          IS_HIGHEST: ${{ steps.source.outputs.is_highest }}
         run: |
           set -euo pipefail
-          for tag in "$VERSION" "$MINOR" "$MAJOR" latest; do
+          cpu_tags=("$VERSION" "$MINOR")
+          cuda_tags=("${VERSION}-cuda" "${MINOR}-cuda")
+          if [[ "$IS_HIGHEST" == 'true' ]]; then
+            cpu_tags+=("$MAJOR" latest)
+            cuda_tags+=("${MAJOR}-cuda" latest-cuda)
+          fi
+          for tag in "${cpu_tags[@]}"; do
             docker tag 'llamarack-stable-cpu:${{ github.sha }}' "ghcr.io/brantje/llamarack:${tag}"
             docker push "ghcr.io/brantje/llamarack:${tag}"
           done
-          for tag in "${VERSION}-cuda" "${MINOR}-cuda" "${MAJOR}-cuda" latest-cuda; do
+          for tag in "${cuda_tags[@]}"; do
             docker tag 'llamarack-stable-cuda:${{ github.sha }}' "ghcr.io/brantje/llamarack:${tag}"
             docker push "ghcr.io/brantje/llamarack:${tag}"
           done
@@ -650,18 +669,18 @@ EOF
           marker='<!-- llamarack-runtime-identity -->'
           if ! grep -Fq "$marker" <<< "$body"; then
             section="$(cat <<EOF
-
-${marker}
-## Bundled runtime
-
-- Promoted from qualified RC: \`${SOURCE_RC}\`
-- LlamaRack commit: \`${GITHUB_SHA}\`
-- llama.cpp release: \`${LLAMA_RELEASE}\`
-- llama.cpp build: \`${LLAMA_BUILD}\`
-- CPU image: \`${cpu_digest}\`
-- CUDA image: \`${cuda_digest}\`
-EOF
-)"
+          
+          ${marker}
+          ## Bundled runtime
+          
+          - Promoted from qualified RC: \`${SOURCE_RC}\`
+          - LlamaRack commit: \`${GITHUB_SHA}\`
+          - llama.cpp release: \`${LLAMA_RELEASE}\`
+          - llama.cpp build: \`${LLAMA_BUILD}\`
+          - CPU image: \`${cpu_digest}\`
+          - CUDA image: \`${cuda_digest}\`
+          EOF
+          )"
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f body="${body}${section}" >/dev/null
           fi
 
