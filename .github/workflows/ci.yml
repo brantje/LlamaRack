@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   backend:
@@ -105,6 +104,9 @@ jobs:
       - run: npm run build
 
   gpu-soak:
+    permissions:
+      contents: read
+      packages: write
     name: GPU lifecycle soak
     if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/issue-120-release-qualification' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: [self-hosted, gpu-runner]
