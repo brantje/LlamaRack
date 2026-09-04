@@ -15,10 +15,21 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-      - run: go mod tidy
+          cache-dependency-path: backend/go.sum
+      - name: Verify modules
+        run: |
+          go mod download
+          go mod verify
+          cp go.mod /tmp/go.mod.before
+          cp go.sum /tmp/go.sum.before
+          go mod tidy
+          cmp -s go.mod /tmp/go.mod.before || { echo 'go.mod is not tidy'; diff -u /tmp/go.mod.before go.mod; exit 1; }
+          cmp -s go.sum /tmp/go.sum.before || { echo 'go.sum is not tidy'; diff -u /tmp/go.sum.before go.sum; exit 1; }
       - name: Test with coverage
         run: |
           go test ./... -covermode=atomic -coverprofile=coverage.out
@@ -26,7 +37,53 @@ jobs:
           coverage="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $3); print $3}')"
           echo "Total backend coverage: ${coverage}%"
           awk -v coverage="$coverage" 'BEGIN { if ((coverage + 0) < 90.0) { printf "Coverage %.1f%% is below required 90.0%%\n", coverage; exit 1 } }'
-      - run: go vet ./...
+      - name: Vet
+        run: go vet ./...
+
+  backend-race:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Race detector
+        run: go test -race ./...
+
+  backend-vulnerability:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Vulnerability scan
+        run: govulncheck ./...
+
+  qualification-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate release qualification scripts
+        run: |
+          bash -n scripts/release-qualification/*.sh
+          python3 -m py_compile scripts/release-qualification/*.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -35,9 +92,108 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
       - run: npm run test:coverage
       - run: npm run build
+  # Enable for testing GPU soak 
+  # @AI DO NOT DELETE THIS COMMENT
+  # gpu-soak:
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   name: GPU lifecycle soak
+  #   if: ${{ github.event_name == 'pull_request' && github.head_ref == 'feat/issue-120-release-qualification' && github.event.pull_request.head.repo.full_name == github.repository }}
+  #   runs-on: [self-hosted, gpu-runner]
+  #   timeout-minutes: 180
+  #   env:
+  #     QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/gpu
+  #     GPU_MODELS_DIR: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
+  #     GPU_CYCLES: '8'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+
+  #     - name: Verify GPU runner prerequisites
+  #       run: |
+  #         set -euo pipefail
+  #         for command in docker curl python3 nvidia-smi; do
+  #           command -v "$command" >/dev/null || { echo "missing command on gpu-runner: $command" >&2; exit 1; }
+  #         done
+  #         docker info >/dev/null
+  #         nvidia-smi -L
+  #         test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
+  #         [[ -f "$GPU_MODELS_DIR/qualification-llama-8B.gguf" || -f "$GPU_MODELS_DIR/qualification.gguf" ]] \
+  #           || { echo "missing dense lifecycle/pressure GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
+  #         test -f "$GPU_MODELS_DIR/qualification-12B.gguf" \
+  #           || { echo "missing dense multi-GPU GGUF: $GPU_MODELS_DIR/qualification-12B.gguf" >&2; exit 1; }
+  #         [[ -f "$GPU_MODELS_DIR/qualification-moe-4ba1b.gguf" || -f "$GPU_MODELS_DIR/qualification-moe.gguf" ]] \
+  #           || { echo "missing small MoE GGUF under $GPU_MODELS_DIR" >&2; exit 1; }
+  #         test -f "$GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" \
+  #           || { echo "missing large MoE GGUF: $GPU_MODELS_DIR/qualification-moe-26b-a4b.gguf" >&2; exit 1; }
+
+  #     - name: Log in to GHCR
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+
+  #     - name: Build and push current CUDA candidate
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: |
+  #         set -euo pipefail
+  #         docker build \
+  #           --build-arg LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda \
+  #           --tag "$CUDA_TAG" \
+  #           .
+  #         docker push "$CUDA_TAG"
+
+  #     - name: Run real-hardware GPU soak
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: |
+  #         set -euo pipefail
+  #         mkdir -p "$QUALIFICATION_ARTIFACT_DIR"
+  #         bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
+  #         monitor_pid=$!
+  #         trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
+  #         bash scripts/release-qualification/gpu-soak.sh \
+  #           "$CUDA_TAG" \
+  #           "$GPU_MODELS_DIR" \
+  #           "$GPU_CYCLES"
+  #         python3 scripts/release-qualification/verify-moe-evidence.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/moe-worker-args.txt" 1
+  #         python3 scripts/release-qualification/verify-moe-evidence.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/moe-large-worker-args.txt" 1
+  #         if [[ -f "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt" ]]; then
+  #           python3 scripts/release-qualification/verify-dense-multi-evidence.py \
+  #             "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
+  #         fi
+  #         wait "$monitor_pid"
+  #         python3 scripts/release-qualification/analyze-manager-growth.py \
+  #           "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
+  #           "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
+  #         trap - EXIT
+
+  #     - name: Upload GPU qualification evidence
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: gpu-qualification-${{ github.run_id }}
+  #         path: artifacts/release-qualification/gpu
+  #         if-no-files-found: warn
+
+  #     - name: Remove local qualification image
+  #       if: always()
+  #       env:
+  #         CUDA_TAG: ghcr.io/brantje/llamarack:qualification-pr-${{ github.sha }}-cuda
+  #       run: docker image rm -f "$CUDA_TAG" >/dev/null 2>&1 || true

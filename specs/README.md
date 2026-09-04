@@ -16,10 +16,11 @@ These design specifications define the initial architecture and product contract
 - [012 — Observability](012-observability.md)
 - [013 — LiteLLM Proxy catalog sync](013-litellm.md)
 - [014 — Database Migrations](014-database-migrations.md)
+- [015 — Release Qualification](015-release-qualification.md)
 
 ## Review order
 
-The recommended review order is the numeric order above. Architecture, data model and lifecycle establish the invariants used by routing and scheduling. API/options/providers/auth/UI build on those contracts. The GGUF metadata/recommendation specification extends the Model artifact, provider, UI and hardware-estimation contracts and should be read alongside 002, 005, 008 and 010. Observability builds on routing, lifecycle and the UI contract.
+The recommended review order is the numeric order above. Architecture, data model and lifecycle establish the invariants used by routing and scheduling. API/options/providers/auth/UI build on those contracts. The GGUF metadata/recommendation specification extends the Model artifact, provider, UI and hardware-estimation contracts and should be read alongside 002, 005, 008 and 010. Observability builds on routing, lifecycle and the UI contract. Release qualification composes those runtime contracts into the final stable-release safety gate.
 
 ## Model configuration UI parity
 

@@ -2,7 +2,9 @@ name: Release container
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - feat/issue-120-release-qualification
   release:
     types: [published]
 
@@ -11,11 +13,17 @@ permissions:
   packages: write
 
 jobs:
-  publish:
+  build-candidates:
+    name: Build and smoke candidate images
     runs-on: ubuntu-latest
+    outputs:
+      cpu_image: ${{ steps.resolved-candidates.outputs.cpu_image }}
+      cuda_image: ${{ steps.resolved-candidates.outputs.cuda_image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -39,22 +47,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            io.llamarack.build.reason=release
-            io.llamacpp-manager.build.reason=release
-          cache-from: type=gha,scope=cpu
-          cache-to: type=gha,mode=max,scope=cpu
+            type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Docker metadata (CUDA)
         id: meta-cuda
@@ -69,21 +63,177 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}-cuda
             type=semver,pattern={{major}}-cuda
             type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
-            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' }}
-            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' }}
+            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
-      - name: Build and push CUDA image
+      - name: Define candidate image tags
+        id: candidate-tags
+        run: |
+          echo "cpu_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "cuda_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-cuda" >> "$GITHUB_OUTPUT"
+
+      - name: Build CPU candidate locally
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          push: true
+          load: true
+          tags: llamarack-candidate-cpu:${{ github.sha }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            io.llamarack.build.reason=release
+            io.llamacpp-manager.build.reason=release
+          cache-from: type=gha,scope=cpu
+          cache-to: type=gha,mode=max,scope=cpu
+
+      - name: Build CUDA candidate locally
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
           build-args: |
             LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
-          tags: ${{ steps.meta-cuda.outputs.tags }}
+          tags: llamarack-candidate-cuda:${{ github.sha }}
           labels: |
             ${{ steps.meta-cuda.outputs.labels }}
             io.llamarack.build.reason=release
             io.llamacpp-manager.build.reason=release
           cache-from: type=gha,scope=cuda
           cache-to: type=gha,mode=max,scope=cuda
+
+      - name: Smoke exact CPU build before publication
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/prepublish
+        run: bash scripts/release-qualification/container-smoke.sh 'llamarack-candidate-cpu:${{ github.sha }}' cpu
+
+      - name: Smoke exact CUDA build before publication
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/prepublish
+        run: bash scripts/release-qualification/container-smoke.sh 'llamarack-candidate-cuda:${{ github.sha }}' cuda
+
+      - name: Push qualified candidate images
+        env:
+          CPU_TAG: ${{ steps.candidate-tags.outputs.cpu_tag }}
+          CUDA_TAG: ${{ steps.candidate-tags.outputs.cuda_tag }}
+        run: |
+          docker tag 'llamarack-candidate-cpu:${{ github.sha }}' "$CPU_TAG"
+          docker push "$CPU_TAG"
+          docker tag 'llamarack-candidate-cuda:${{ github.sha }}' "$CUDA_TAG"
+          docker push "$CUDA_TAG"
+
+      - name: Resolve immutable candidate digests
+        id: resolved-candidates
+        env:
+          CPU_TAG: ${{ steps.candidate-tags.outputs.cpu_tag }}
+          CUDA_TAG: ${{ steps.candidate-tags.outputs.cuda_tag }}
+        run: |
+          set -euo pipefail
+          resolve_digest_ref() {
+            local tag="$1" digest_ref
+            docker pull "$tag" >/dev/null
+            digest_ref="$(docker image inspect "$tag" --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+              | grep -E '^ghcr\.io/brantje/llamarack@sha256:[0-9a-f]{64}$' \
+              | head -n 1)"
+            if [[ ! "$digest_ref" =~ ^ghcr\.io/brantje/llamarack@sha256:[0-9a-f]{64}$ ]]; then
+              echo "failed to resolve immutable digest for $tag" >&2
+              exit 1
+            fi
+            printf '%s' "$digest_ref"
+          }
+          echo "cpu_image=$(resolve_digest_ref "$CPU_TAG")" >> "$GITHUB_OUTPUT"
+          echo "cuda_image=$(resolve_digest_ref "$CUDA_TAG")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload pre-publication smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepublish-container-smoke-${{ github.run_id }}
+          path: artifacts/release-qualification/prepublish
+          if-no-files-found: error
+
+  qualify:
+    name: Qualify candidate release
+    needs: build-candidates
+    uses: ./.github/workflows/release-qualification.yml
+    with:
+      cpu_image: ${{ needs.build-candidates.outputs.cpu_image }}
+      cuda_image: ${{ needs.build-candidates.outputs.cuda_image }}
+      run_gpu: ${{ github.event_name == 'release' || github.ref == 'refs/heads/feat/issue-120-release-qualification' }}
+      gpu_models_dir: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
+      gpu_cycles: 8
+    secrets: inherit
+
+  publish:
+    name: Publish qualified tags
+    if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
+    needs: [build-candidates, qualify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/brantje/llamarack
+            ghcr.io/brantje/llamacpp-manager
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Docker metadata (CUDA)
+        id: meta-cuda
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/brantje/llamarack
+            ghcr.io/brantje/llamacpp-manager
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}-cuda
+            type=semver,pattern={{major}}.{{minor}}-cuda
+            type=semver,pattern={{major}}-cuda
+            type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Pull qualified candidate images
+        env:
+          CPU_IMAGE: ${{ needs.build-candidates.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ needs.build-candidates.outputs.cuda_image }}
+        run: |
+          docker pull "$CPU_IMAGE"
+          docker pull "$CUDA_IMAGE"
+
+      - name: Publish CPU tags from qualified digest
+        env:
+          CPU_IMAGE: ${{ needs.build-candidates.outputs.cpu_image }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$CPU_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
+
+      - name: Publish CUDA tags from qualified digest
+        env:
+          CUDA_IMAGE: ${{ needs.build-candidates.outputs.cuda_image }}
+          TAGS: ${{ steps.meta-cuda.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$CUDA_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
