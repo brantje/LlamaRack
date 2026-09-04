@@ -26,7 +26,39 @@ docker_probe_host="${GPU_DOCKER_HOST:-127.0.0.1}"
 docker_publish_host="127.0.0.1"
 
 if [[ -f /.dockerenv && "$docker_probe_host" == "127.0.0.1" ]]; then
-  docker_probe_host="host.docker.internal"
+  docker_probe_host="$(python3 - <<'PY'
+import socket
+import struct
+
+try:
+    socket.gethostbyname("host.docker.internal")
+    print("host.docker.internal")
+    raise SystemExit(0)
+except OSError:
+    pass
+
+try:
+    with open("/proc/net/route", encoding="utf-8") as routes:
+        next(routes, None)
+        for line in routes:
+            fields = line.split()
+            if len(fields) < 4 or fields[1] != "00000000":
+                continue
+            flags = int(fields[3], 16)
+            if not flags & 0x2:
+                continue
+            gateway = socket.inet_ntoa(struct.pack("<L", int(fields[2], 16)))
+            print(gateway)
+            raise SystemExit(0)
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"unable to inspect container default route: {exc}")
+
+raise SystemExit(
+    "containerized GPU runner cannot resolve the Docker host; "
+    "set GPU_DOCKER_HOST to a Docker-host address reachable from the runner"
+)
+PY
+)"
 fi
 if [[ "$docker_probe_host" != "127.0.0.1" ]]; then
   docker_publish_host="$(python3 - "$docker_probe_host" <<'PY'
