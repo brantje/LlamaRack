@@ -300,6 +300,34 @@ func (h *adminHandler) revokeOwnSession(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type generalSettingsInput struct {
+	SessionLifetimeSeconds     *int    `json:"session_lifetime_seconds"`
+	LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
+	LoginFailureThreshold      *int    `json:"login_failure_threshold"`
+	LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
+	TrustedProxies             *string `json:"trusted_proxies"`
+	AllowedOrigins             *string `json:"allowed_origins"`
+	ExternalURL                *string `json:"external_url"`
+	StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
+	IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
+	AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
+	MaxPendingPerInstance      *int    `json:"max_pending_requests_per_instance"`
+	MaxPendingGlobal           *int    `json:"max_pending_requests_global"`
+	ObservabilityRetentionDays *int    `json:"observability_retention_days"`
+	PrometheusAuthToken        *string `json:"prometheus_auth_token"`
+}
+
+func generalSettingsRequireUserPrincipal(in generalSettingsInput) bool {
+	return in.SessionLifetimeSeconds != nil ||
+		in.LoginProtectionEnabled != nil ||
+		in.LoginFailureThreshold != nil ||
+		in.LoginLockoutSeconds != nil ||
+		in.TrustedProxies != nil ||
+		in.AllowedOrigins != nil ||
+		in.ExternalURL != nil ||
+		in.PrometheusAuthToken != nil
+}
+
 func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
 	if r.Method == http.MethodGet {
 		general, err := h.settings.General(r.Context())
@@ -314,23 +342,11 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	var in struct {
-		SessionLifetimeSeconds     *int    `json:"session_lifetime_seconds"`
-		LoginProtectionEnabled     *bool   `json:"login_protection_enabled"`
-		LoginFailureThreshold      *int    `json:"login_failure_threshold"`
-		LoginLockoutSeconds        *int    `json:"login_lockout_seconds"`
-		TrustedProxies             *string `json:"trusted_proxies"`
-		AllowedOrigins             *string `json:"allowed_origins"`
-		ExternalURL                *string `json:"external_url"`
-		StartupTimeoutSeconds      *int    `json:"startup_timeout_seconds"`
-		IdleUnloadSeconds          *int    `json:"idle_unload_seconds"`
-		AlwaysOnReconcileSeconds   *int    `json:"always_on_reconcile_seconds"`
-		MaxPendingPerInstance      *int    `json:"max_pending_requests_per_instance"`
-		MaxPendingGlobal           *int    `json:"max_pending_requests_global"`
-		ObservabilityRetentionDays *int    `json:"observability_retention_days"`
-		PrometheusAuthToken        *string `json:"prometheus_auth_token"`
-	}
+	var in generalSettingsInput
 	if !decode(w, r, &in) {
+		return
+	}
+	if generalSettingsRequireUserPrincipal(in) && !requireManagementUserPrincipal(w, principal) {
 		return
 	}
 	updates := map[string]any{}
