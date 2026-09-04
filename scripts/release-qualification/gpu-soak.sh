@@ -182,6 +182,18 @@ wait_state_through_failure() {
   return 1
 }
 
+wait_process_gone() {
+  local pid="$1"
+  for _ in $(seq 1 100); do
+    if ! docker exec -u 0 "$container_name" sh -c 'kill -0 "$1" 2>/dev/null' sh "$pid"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "process ${pid} remained after SIGKILL" >&2
+  return 1
+}
+
 worker_count() {
   local instance_id="$1"
   # The managed worker runs as the image's USER (1000). Linux ptrace/procfs
@@ -399,6 +411,7 @@ wait_state "$always_instance_id" READY
 assert_single_worker "$always_instance_id"
 always_worker_pid="$(auth_request GET "/api/v1/instances/${always_instance_id}/runtime" | json_value 'data["pid"]')"
 docker exec -u 0 "$container_name" kill -9 "$always_worker_pid"
+wait_process_gone "$always_worker_pid"
 wait_state_through_failure "$always_instance_id" READY
 recovered_always_worker_pid="$(auth_request GET "/api/v1/instances/${always_instance_id}/runtime" | json_value 'data["pid"]')"
 [[ "$recovered_always_worker_pid" != "$always_worker_pid" ]] || { echo "Always-On worker PID did not change after crash recovery" >&2; exit 1; }
