@@ -4,36 +4,45 @@ import { type ModelInspection } from '~/utils/modelCompanions'
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
-const id = computed(() => String(route.params.id || ''))
+const originalSlug = computed(() => String(route.params.id || ''))
+const durableID = ref('')
 const busy = ref(false)
 const loading = ref(true)
 const loaded = ref(false)
 const inspecting = ref(false)
 const error = ref('')
 const inspection = ref<ModelInspection | null>(null)
-const form = reactive({ name: '', context_length: 0, options: {} as Record<string, string> })
+const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
+const form = reactive({ name: '', slug: '', context_length: 0, options: {} as Record<string, string> })
 const baselineFingerprint = ref('')
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '')
+}
 
 function formFingerprint() {
   return JSON.stringify({
     name: form.name,
+    slug: form.slug,
     context_length: form.context_length,
     options: Object.entries(form.options).sort(([left], [right]) => left.localeCompare(right))
   })
 }
 
-const valid = computed(() => Boolean(form.name.trim()))
+const valid = computed(() => Boolean(form.name.trim() && slugify(form.slug)))
 const dirty = computed(() => !loading.value && Boolean(baselineFingerprint.value) && formFingerprint() !== baselineFingerprint.value)
 const canSubmit = computed(() => valid.value && dirty.value)
 
 onMounted(async () => {
   try {
     const [model, options] = await Promise.all([
-      manager.request<{ name?: string; context_length?: number; gguf_path?: string }>(`/api/v1/models/${encodeURIComponent(id.value)}`),
-      manager.request<Record<string, string>>(`/api/v1/models/${encodeURIComponent(id.value)}/options`)
+      manager.request<{ id: string; slug: string; name?: string; context_length?: number; gguf_path?: string }>(`/api/v1/models/${encodeURIComponent(originalSlug.value)}`),
+      manager.request<Record<string, string>>(`/api/v1/models/${encodeURIComponent(originalSlug.value)}/options`)
     ])
     if (!model?.name) throw { data: { error: 'Unable to load Model' } }
+    durableID.value = model.id
     form.name = model.name
+    form.slug = model.slug || originalSlug.value
     form.context_length = model.context_length || 0
     form.options = { ...(options || {}) }
     loaded.value = true
@@ -61,14 +70,25 @@ onMounted(async () => {
 
 async function submit() {
   if (!canSubmit.value) return
-  busy.value = true
   error.value = ''
+  const nextSlug = slugify(form.slug)
+  const slugChanged = nextSlug !== originalSlug.value
+  if (slugChanged) {
+    const confirmed = await confirmation.value?.request({
+      title: 'Confirm Model slug change',
+      description: `Changing the Model slug from “${originalSlug.value}” to “${nextSlug}” changes management URLs and bookmarks. It does not change any Instance OpenAI model ID.`,
+      confirmLabel: 'Change slug',
+      confirmTone: 'destructive'
+    })
+    if (!confirmed) return
+  }
+  busy.value = true
   try {
-    await manager.request(`/api/v1/models/${encodeURIComponent(id.value)}`, {
-      method: 'PUT', body: { name: form.name, context_length: form.context_length, options: form.options }
+    const updated = await manager.request<{ id: string; slug: string }>(`/api/v1/models/${encodeURIComponent(originalSlug.value)}`, {
+      method: 'PUT', body: { name: form.name, slug: form.slug, context_length: form.context_length, options: form.options }
     })
     await manager.refresh()
-    await router.push('/models')
+    await router.push(slugChanged ? `/models/${encodeURIComponent(updated.slug)}/details` : '/models')
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to update Model'
   } finally {
@@ -99,22 +119,34 @@ async function submit() {
       </div>
     </Frame>
   </div>
-  <ModelForm
-    v-else
-    :form="form"
-    mode="edit"
-    title="Edit model"
-    description="Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately."
-    submit-label="Save Model"
-    :busy="busy"
-    :error="error"
-    :submit-disabled="!dirty"
-    :dirty="dirty"
-    :model-id="id"
-    :inspection="inspection"
-    :inspecting="inspecting"
-    back-to="/models"
-    back-label="Back to Models"
-    @submit="submit"
-  />
+  <div v-else class="space-y-5">
+    <Frame class="p-5" data-testid="model-edit-slug">
+      <div class="mb-4">
+        <p class="text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">ROUTE IDENTITY</p>
+        <h2 class="mt-1 text-base font-semibold">Model slug</h2>
+        <p class="mt-1 text-xs text-[var(--neutral-700)]">Used in Model management URLs. Changing it does not change the durable Model ID or any Instance OpenAI model ID.</p>
+      </div>
+      <UFormField label="Slug" name="slug" description="Unique human-readable management URL identifier." required>
+        <UInput v-model="form.slug" class="w-full font-mono" data-testid="model-slug" required />
+      </UFormField>
+    </Frame>
+    <ModelForm
+      :form="form"
+      mode="edit"
+      title="Edit model"
+      description="Edit reusable Model metadata and llama.cpp defaults. Instance lifecycle and overrides are configured separately."
+      submit-label="Save Model"
+      :busy="busy"
+      :error="error"
+      :submit-disabled="!dirty"
+      :dirty="dirty"
+      :model-id="durableID"
+      :inspection="inspection"
+      :inspecting="inspecting"
+      back-to="/models"
+      back-label="Back to Models"
+      @submit="submit"
+    />
+  </div>
+  <AppConfirmationModal ref="confirmation" />
 </template>
