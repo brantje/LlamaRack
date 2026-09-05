@@ -153,16 +153,17 @@ done
 [[ -f "$cancel_root/docker-inspect-blocked" ]] \
   || fail "blocked docker inspect was not exercised"
 
-SECONDS=0
+start_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
 kill -TERM "$wrapper_pid"
 set +e
 wait "$wrapper_pid"
 wrapper_status=$?
 set -e
-elapsed=$SECONDS
+end_ns="$(python3 -c 'import time; print(time.monotonic_ns())')"
+elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
 [[ "$wrapper_status" == "143" ]] \
   || fail "cancelled wrapper exited with $wrapper_status instead of 143"
-(( elapsed < 5 )) \
-  || fail "wrapper cancellation exceeded Docker timeout bound (${elapsed}s)"
+(( elapsed_ms < 1200 )) \
+  || fail "wrapper cancellation exceeded Docker timeout bound (${elapsed_ms}ms)"
 
 printf '%s\n' 'test-run-gpu-soak: PASS'
