@@ -56,10 +56,37 @@ actual_container="$(cat "$tmpdir/monitor-container.txt")"
 [[ "$actual_container" == "$expected_container" ]] \
   || fail "monitor target mismatch: expected $expected_container, got $actual_container"
 
-grep -F -- '-sS http://unit.test/health --connect-timeout 10 --max-time 120' "$tmpdir/curl-args.txt" >/dev/null \
-  || fail "GPU soak curl shim did not enforce the control request timeout"
-grep -F -- '-sS --max-time 120 http://unit.test/api/v1/playground/chat/completions --connect-timeout 10 --max-time 600' "$tmpdir/curl-args.txt" >/dev/null \
-  || fail "GPU soak curl shim did not override inference requests to the longer timeout"
+grep -Fx -- '-sS http://unit.test/health --connect-timeout 10 --max-time 120' "$tmpdir/curl-args.txt" >/dev/null \
+  || fail "GPU soak curl shim did not enforce the effective control request timeout"
+grep -Fx -- '-sS --max-time 120 http://unit.test/api/v1/playground/chat/completions --connect-timeout 10 --max-time 600' "$tmpdir/curl-args.txt" >/dev/null \
+  || fail "GPU soak curl shim did not enforce the effective inference timeout"
+
+invalid_root="$tmpdir/invalid-timeouts"
+mkdir -p "$invalid_root"
+for timeout_var in GPU_CURL_CONNECT_TIMEOUT GPU_CURL_MAX_TIME GPU_INFERENCE_CURL_MAX_TIME; do
+  for invalid_value in 0 -1 nope; do
+    case_root="$invalid_root/${timeout_var}-${invalid_value//[^[:alnum:]]/_}"
+    mkdir -p "$case_root/artifacts"
+    set +e
+    env \
+      TEST_ROOT="$case_root" \
+      GPU_REAL_CURL="$fake_real_curl" \
+      GPU_SOAK_SCRIPT="$fake_soak" \
+      GPU_MONITOR_SCRIPT="$fake_monitor" \
+      QUALIFICATION_ARTIFACT_DIR="$case_root/artifacts" \
+      "$timeout_var=$invalid_value" \
+      bash "$wrapper" example.invalid/image "$tmpdir/models" 1 \
+      >"$case_root/stdout.txt" 2>"$case_root/stderr.txt"
+    invalid_status=$?
+    set -e
+    (( invalid_status != 0 )) \
+      || fail "$timeout_var accepted invalid timeout value '$invalid_value'"
+    grep -F "invalid ${timeout_var}:" "$case_root/stderr.txt" >/dev/null \
+      || fail "$timeout_var invalid value '$invalid_value' did not produce a validation error"
+    [[ ! -f "$case_root/soak-pid.txt" ]] \
+      || fail "$timeout_var invalid value '$invalid_value' launched the soak child"
+  done
+done
 
 fakebin="$tmpdir/fakebin"
 mkdir -p "$fakebin" "$tmpdir/monitor-artifacts"
