@@ -33,7 +33,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 	if count != 0 {
 		return User{}, errors.New("bootstrap already completed")
 	}
-	hash, err := hashPassword(password)
+	hash, err := hashPasswordContext(ctx, password)
 	if err != nil {
 		return User{}, err
 	}
@@ -57,7 +57,7 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 	if err != nil {
 		return User{}, err
 	}
-	hash, err := hashPassword(password)
+	hash, err := hashPasswordContext(ctx, password)
 	if err != nil {
 		return User{}, err
 	}
@@ -169,7 +169,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, newPassword s
 	if err := validatePassword(newPassword); err != nil {
 		return err
 	}
-	hash, err := hashPassword(newPassword)
+	hash, err := hashPasswordContext(ctx, newPassword)
 	if err != nil {
 		return err
 	}
@@ -200,10 +200,17 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassw
 		return err
 	}
 	var currentHash string
-	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=? AND enabled=1", userID).Scan(&currentHash); err != nil || !verifyPassword(currentPassword, currentHash) {
+	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=? AND enabled=1", userID).Scan(&currentHash); err != nil {
 		return ErrInvalidCredentials
 	}
-	newHash, err := hashPassword(newPassword)
+	verified, err := verifyPasswordContext(ctx, currentPassword, currentHash)
+	if err != nil {
+		return err
+	}
+	if !verified {
+		return ErrInvalidCredentials
+	}
+	newHash, err := hashPasswordContext(ctx, newPassword)
 	if err != nil {
 		return err
 	}
