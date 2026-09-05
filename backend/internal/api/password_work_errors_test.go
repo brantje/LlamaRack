@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 func TestLoginPasswordWorkBusyResponseStaysGeneric(t *testing.T) {
@@ -40,5 +42,16 @@ func TestPasswordMutationWorkBusyResponseIsTemporaryUnavailable(t *testing.T) {
 	}
 	if got := body["error"]; got != "password processing is temporarily unavailable" {
 		t.Fatalf("error=%q", got)
+	}
+}
+
+func TestUserMutationPasswordWorkBusyUsesTemporaryUnavailable(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writeUserMutationError(recorder, auth.ErrPasswordWorkBusy)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After=%q", got)
 	}
 }
