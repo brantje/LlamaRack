@@ -83,6 +83,21 @@ func loadOrCreateEd25519Key(path string) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
+func persistPasswordRehash(ctx context.Context, tx *sql.Tx, userID int64, originalHash, rehashed string) error {
+	result, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=? AND password_hash=?", rehashed, userID, originalHash)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, password, remoteAddress, userAgent string) (LoginResult, error) {
 	work, err := reservePasswordWork()
 	if err != nil {
@@ -124,9 +139,9 @@ func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, passwor
 	if err != nil {
 		return LoginResult{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if rehashed != "" {
-		if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", rehashed, user.ID); err != nil {
+		if err := persistPasswordRehash(ctx, tx, user.ID, hash, rehashed); err != nil {
 			return LoginResult{}, err
 		}
 	}
