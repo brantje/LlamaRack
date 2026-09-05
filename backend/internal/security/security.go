@@ -93,7 +93,7 @@ func (n *Network) OriginAllowed(r *http.Request, origin string) bool {
 			if strings.TrimSpace(allowed) == origin {
 				return true
 			}
-	}
+		}
 	}
 	parsed, err := url.Parse(origin)
 	if err != nil || parsed.Host == "" {
@@ -217,9 +217,9 @@ func forwardedFor(header string) []netip.Addr {
 }
 
 const (
-	loginAddressDelayAfter  = 8
-	loginAddressTTL         = 10 * time.Minute
-	defaultMaxLoginAttempts = 4096
+	loginAddressDelayAfter   = 8
+	loginAddressTTL          = 10 * time.Minute
+	defaultMaxLoginAttempts  = 4096
 	defaultMaxLoginAddresses = 1024
 )
 
@@ -294,7 +294,7 @@ func (p *LoginProtector) Failure(ctx context.Context, username, address string) 
 	p.recordAddressFailure(strings.TrimSpace(address), now)
 
 	attempt, exists := p.attempts[key]
-	if !exists && len(p.attempts) >= p.maxItems {
+	if !exists && !p.makeAttemptRoom(now) {
 		return false
 	}
 	attempt.Failures++
@@ -313,8 +313,33 @@ func (p *LoginProtector) Success(username, address string) {
 	p.mu.Unlock()
 }
 
+func (p *LoginProtector) makeAttemptRoom(now time.Time) bool {
+	if p.maxItems <= 0 {
+		return false
+	}
+	if len(p.attempts) < p.maxItems {
+		return true
+	}
+	oldestKey := ""
+	var oldest time.Time
+	for key, attempt := range p.attempts {
+		if attempt.LockedUntil.After(now) {
+			continue
+		}
+		if oldestKey == "" || attempt.UpdatedAt.Before(oldest) {
+			oldestKey = key
+			oldest = attempt.UpdatedAt
+		}
+	}
+	if oldestKey == "" {
+		return false
+	}
+	delete(p.attempts, oldestKey)
+	return true
+}
+
 func (p *LoginProtector) recordAddressFailure(address string, now time.Time) {
-	if address == "" {
+	if address == "" || p.maxAddresses <= 0 {
 		return
 	}
 	if _, exists := p.addresses[address]; !exists && len(p.addresses) >= p.maxAddresses {
