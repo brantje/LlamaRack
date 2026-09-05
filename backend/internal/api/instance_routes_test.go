@@ -113,7 +113,7 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	}
 
 	duplicate := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/primary-coder/duplicate", nil, cookie)
-	if duplicate.Code != http.StatusCreated || !strings.Contains(duplicate.Body.String(), "primary-coder-copy") {
+	if duplicate.Code != http.StatusCreated || !strings.Contains(duplicate.Body.String(), "renamed-coder-copy") {
 		t.Fatalf("duplicate=%d body=%s", duplicate.Code, duplicate.Body.String())
 	}
 
@@ -182,7 +182,7 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 		}
 	}
 
-	if removed := doRequest(t, f.server, http.MethodDelete, "/api/v1/instances/primary-coder-copy", nil, cookie); removed.Code != http.StatusNoContent {
+	if removed := doRequest(t, f.server, http.MethodDelete, "/api/v1/instances/renamed-coder-copy", nil, cookie); removed.Code != http.StatusNoContent {
 		t.Fatalf("delete duplicate=%d body=%s", removed.Code, removed.Body.String())
 	}
 	if removed := doRequest(t, f.server, http.MethodDelete, "/api/v1/instances/renamed-coder", nil, cookie); removed.Code != http.StatusNoContent {
