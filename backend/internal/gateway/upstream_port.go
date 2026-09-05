@@ -2,17 +2,13 @@ package gateway
 
 import (
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 )
 
 type upstreamPortResponseWriter struct {
 	http.ResponseWriter
-	request   *http.Request
-	lifecycle *lifecycle.Service
-	resolved  bool
+	resolved bool
 }
 
 func (w *upstreamPortResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -22,15 +18,11 @@ func (w *upstreamPortResponseWriter) resolve() {
 		return
 	}
 	w.resolved = true
-	instanceID := strings.TrimSpace(getProductHeader(w.Header(), headerInstance))
-	if instanceID == "" || w.lifecycle == nil {
-		return
-	}
-	runtime, err := w.lifecycle.RuntimeInstance(w.request.Context(), instanceID)
-	if err != nil || runtime.Port <= 0 {
-		return
-	}
-	setProductHeader(w.Header(), headerUpstreamPort, strconv.Itoa(runtime.Port))
+	// The gateway writes X-Llamarack-Upstream-Port from the already-resolved
+	// worker target before proxying. Do not resolve X-Llamarack-Instance here:
+	// that header is the public mutable slug, while lifecycle ownership is keyed
+	// by the durable Instance UUID. Looking it up here would also add an extra
+	// storage/runtime lookup to the hot /v1 response path.
 }
 
 func (w *upstreamPortResponseWriter) WriteHeader(status int) {
@@ -50,14 +42,15 @@ func (w *upstreamPortResponseWriter) Flush() {
 	}
 }
 
-// WithUpstreamPortHeader exposes the resolved internal worker port as response
-// metadata while requests continue to flow exclusively through the public
-// manager gateway. It never exposes a direct worker URL or credentials.
+// WithUpstreamPortHeader preserves the response-writer capabilities used by
+// proxied responses. The gateway itself attaches the resolved internal worker
+// port from the already-selected target, so this wrapper never needs to look up
+// an Instance by response metadata.
 func WithUpstreamPortHeader(service *lifecycle.Service, next http.Handler) http.Handler {
 	if service == nil {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&upstreamPortResponseWriter{ResponseWriter: w, request: r, lifecycle: service}, r)
+		next.ServeHTTP(&upstreamPortResponseWriter{ResponseWriter: w}, r)
 	})
 }
