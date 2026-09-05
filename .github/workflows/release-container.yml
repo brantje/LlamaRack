@@ -131,9 +131,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}-cuda
-            type=semver,pattern={{major}}.{{minor}}-cuda
-            type=semver,pattern={{major}}-cuda
+            type=semver,pattern={{version}},suffix=-cuda
+            type=semver,pattern={{major}}.{{minor}},suffix=-cuda
+            type=semver,pattern={{major}},suffix=-cuda
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
@@ -329,9 +329,9 @@ jobs:
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}-cuda
-            type=semver,pattern={{major}}.{{minor}}-cuda
-            type=semver,pattern={{major}}-cuda
+            type=semver,pattern={{version}},suffix=-cuda
+            type=semver,pattern={{major}}.{{minor}},suffix=-cuda
+            type=semver,pattern={{major}},suffix=-cuda
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
@@ -392,7 +392,7 @@ jobs:
             --arg cuda_image "$CUDA_IMAGE" \
             '{llamarack:{version:$version,commit:$commit},llama_cpp:{release:$llama_release,build:$llama_build,cpu_runtime:$cpu_runtime,cuda_runtime:$cuda_runtime},images:{cpu:$cpu_image,cuda:$cuda_image}}' \
             > artifacts/release/build-identity.json
-          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber
+          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"
 
           body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""')"
           marker='<!-- llamarack-runtime-identity -->'
@@ -672,7 +672,7 @@ jobs:
             --arg cuda_image "$cuda_digest" \
             '{llamarack:{version:$version,commit:$commit,promoted_from:$source_rc},llama_cpp:{release:$llama_release,build:$llama_build,cpu_runtime:$cpu_runtime,cuda_runtime:$cuda_runtime},images:{cpu:$cpu_image,cuda:$cuda_image}}' \
             > artifacts/release/build-identity.json
-          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber
+          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"
 
           body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""')"
           marker='<!-- llamarack-runtime-identity -->'
