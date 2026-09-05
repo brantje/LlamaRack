@@ -49,7 +49,7 @@ async function remove(id: string) {
   clearMessage()
   try {
     const suffix = result.deleteFiles ? '?delete_files=true' : ''
-    await manager.request(`/api/v1/models/${encodeURIComponent(id)}${suffix}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/models/${encodeURIComponent(model.slug)}${suffix}`, { method: 'DELETE' })
     await manager.refresh()
   } catch (error: any) {
     messageTitle.value = 'Unable to delete model'
@@ -106,7 +106,7 @@ async function remove(id: string) {
           <tbody class="divide-y divide-[var(--color-divider)]">
             <tr v-for="model in models" :key="model.id" data-testid="model-row">
               <td class="px-4 py-3">
-                <NuxtLink :to="`/models/${model.id}/details`" class="text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:underline">
+                <NuxtLink :to="`/models/${encodeURIComponent(model.slug)}/details`" class="text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:underline">
                   {{ model.name }}
                 </NuxtLink>
               </td>
@@ -133,8 +133,8 @@ async function remove(id: string) {
               <td class="whitespace-nowrap px-4 py-3 text-sm">{{ contextLabel(model.context_length) }}</td>
               <td class="whitespace-nowrap px-4 py-3">
                 <div class="flex justify-end gap-1">
-                  <AppButton :to="`/models/${model.id}/details`" intent="ghost" size="xs">Details</AppButton>
-                  <AppButton :to="`/models/${model.id}/edit`" intent="ghost" size="xs">Edit</AppButton>
+                  <AppButton :to="`/models/${encodeURIComponent(model.slug)}/details`" intent="ghost" size="xs">Details</AppButton>
+                  <AppButton :to="`/models/${encodeURIComponent(model.slug)}/edit`" intent="ghost" size="xs">Edit</AppButton>
                   <AppButton type="button" intent="ghost" size="xs" :loading="pending === model.id" @click="remove(model.id)">Delete</AppButton>
                 </div>
               </td>
