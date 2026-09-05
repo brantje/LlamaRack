@@ -50,7 +50,7 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.ID != "primary-coder" || created.ModelID != model.ID || created.MaxPendingRequests != 8 {
+	if created.ID == "" || created.ID == created.Slug || created.Slug != "primary-coder" || created.ModelID != model.ID || created.MaxPendingRequests != 8 {
 		t.Fatalf("created=%+v", created)
 	}
 
@@ -95,14 +95,21 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 		t.Fatalf("update unloaded=%d body=%s", updated.Code, updated.Body.String())
 	}
 
-	renameWithoutConfirmation := map[string]any{}
+	nameOnlyUpdate := map[string]any{}
 	for k, v := range baseUpdate {
-		renameWithoutConfirmation[k] = v
+		nameOnlyUpdate[k] = v
 	}
-	renameWithoutConfirmation["name"] = "Renamed Coder"
-	w := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", renameWithoutConfirmation, cookie)
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "confirmation required") {
-		t.Fatalf("rename without confirmation=%d body=%s", w.Code, w.Body.String())
+	nameOnlyUpdate["name"] = "Renamed Coder"
+	w := doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", nameOnlyUpdate, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("name-only update=%d body=%s", w.Code, w.Body.String())
+	}
+	var nameOnly instances.Instance
+	if err := json.Unmarshal(w.Body.Bytes(), &nameOnly); err != nil {
+		t.Fatal(err)
+	}
+	if nameOnly.ID != created.ID || nameOnly.Slug != "primary-coder" || nameOnly.Name != "Renamed Coder" {
+		t.Fatalf("name-only update changed identity: %+v", nameOnly)
 	}
 
 	duplicate := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/primary-coder/duplicate", nil, cookie)
@@ -125,12 +132,20 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 		runningRename[k] = v
 	}
 	runningRename["name"] = "Renamed Coder"
+	runningRename["slug"] = "Renamed Coder"
 	runningRename["restart_running"] = true
-	runningRename["confirm_model_id_change"] = true
+	runningRename["confirm_slug_change"] = true
 	runningRename["always_on"] = false
 	w = doRequest(t, f.server, http.MethodPut, "/api/v1/instances/primary-coder", runningRename, cookie)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"renamed-coder"`) {
+	if w.Code != http.StatusOK {
 		t.Fatalf("running rename=%d body=%s", w.Code, w.Body.String())
+	}
+	var renamed instances.Instance
+	if err := json.Unmarshal(w.Body.Bytes(), &renamed); err != nil {
+		t.Fatal(err)
+	}
+	if renamed.ID != created.ID || renamed.Slug != "renamed-coder" {
+		t.Fatalf("slug rename changed durable identity: created=%+v renamed=%+v", created, renamed)
 	}
 
 	restarted := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/renamed-coder/restart", nil, cookie)
@@ -202,7 +217,7 @@ func TestModelCreationFirstInstanceBranches(t *testing.T) {
 			"start":            true,
 		},
 	}, cookie)
-	if started.Code != http.StatusCreated || !strings.Contains(started.Body.String(), `"id":"bootstrap-api"`) || !strings.Contains(started.Body.String(), `"start_error"`) {
+	if started.Code != http.StatusCreated || !strings.Contains(started.Body.String(), `"slug":"bootstrap-api"`) || !strings.Contains(started.Body.String(), `"start_error"`) {
 		t.Fatalf("bootstrap start failure=%d body=%s", started.Code, started.Body.String())
 	}
 
