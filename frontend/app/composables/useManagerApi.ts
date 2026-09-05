@@ -20,14 +20,20 @@ export function clearManagementToken() {
   window.localStorage.removeItem(managementTokenKey)
 }
 
+export function resolveManagerApiBase(configured: unknown, requestURL: Pick<URL, 'origin'>, development = import.meta.dev) {
+  const normalized = String(configured || '').replace(/\/$/, '')
+  if (normalized) return normalized
+  if (!development) return requestURL.origin
+
+  const developmentURL = new URL(requestURL.origin)
+  developmentURL.port = '8888'
+  return developmentURL.origin
+}
+
 export function useManagerApi(fetcher: typeof $fetch = $fetch) {
   const config = useRuntimeConfig()
   const requestURL = useRequestURL()
-  const apiBase = computed(() => {
-    const configured = String(config.public.apiBase || '').replace(/\/$/, '')
-    if (configured) return configured
-    return requestURL.origin
-  })
+  const apiBase = computed(() => resolveManagerApiBase(config.public.apiBase, requestURL))
 
   async function request<T = unknown>(path: string, options: any = {}): Promise<T> {
     const headers = new Headers(options.headers || {})
