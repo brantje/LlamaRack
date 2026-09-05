@@ -117,7 +117,7 @@ func (s *Supervisor) StartWithEnv(ctx context.Context, instanceID, modelID, mode
 		return Runtime{}, err
 	}
 	resolvedArgs := sanitizeWorkerOwnedArgs(args)
-	workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}
+	workerArgs := []string{"--model", modelPath, "--alias", instanceID, "--host", s.host, "--port", fmt.Sprint(port)}
 	workerArgs = append(workerArgs, resolvedArgs...)
 	// Managed workers are internal backend targets, not browser-facing APIs.
 	// The manager owns worker CORS/auth configuration and applies it exactly once.
@@ -563,6 +563,7 @@ func (s *Supervisor) setState(id string, state State, msg string) {
 }
 
 var workerOwnedValueOptions = map[string]bool{
+	"alias":          true,
 	"model":          true,
 	"host":           true,
 	"port":           true,

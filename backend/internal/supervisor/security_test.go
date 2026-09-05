@@ -33,6 +33,7 @@ func TestSanitizeWorkerOwnedArgs(t *testing.T) {
 	got := sanitizeWorkerOwnedArgs([]string{
 		"--ctx-size", "1024",
 		"--model", "/tmp/other.gguf",
+		"--alias", "user-alias",
 		"--host", "0.0.0.0",
 		"--port", "9999",
 		"--cors-origins", "*",
@@ -58,6 +59,7 @@ func TestStartEnforcesSecureManagerOwnedArgs(t *testing.T) {
 	rt, err := s.Start(ctx, "secure-instance", "model-1", "/tmp/model.gguf", []string{
 		"--ctx-size", "1024",
 		"--model", "/tmp/other.gguf",
+		"--alias", "user-alias",
 		"--host", "0.0.0.0",
 		"--port", "9999",
 		"--cors-origins", "*",
@@ -77,15 +79,15 @@ func TestStartEnforcesSecureManagerOwnedArgs(t *testing.T) {
 	if len(args) < 2 || args[len(args)-2] != "--cors-origins" || args[len(args)-1] != "localhost" {
 		t.Fatalf("worker args do not end with manager-owned secure CORS policy: %v", args)
 	}
-	for _, flag := range []string{"--model\n", "--host\n", "--port\n", "--cors-origins\n"} {
+	for _, flag := range []string{"--model\n", "--alias\n", "--host\n", "--port\n", "--cors-origins\n"} {
 		if strings.Count(text, flag) != 1 {
 			t.Fatalf("worker args should contain exactly one %s setting: %q", strings.TrimSpace(flag), raw)
 		}
 	}
-	if !strings.Contains(text, "--model\n/tmp/model.gguf") || !strings.Contains(text, "--host\n127.0.0.1") || !strings.Contains(text, "--port\n"+strconv.Itoa(rt.Port)) {
+	if !strings.Contains(text, "--model\n/tmp/model.gguf") || !strings.Contains(text, "--alias\nsecure-instance") || !strings.Contains(text, "--host\n127.0.0.1") || !strings.Contains(text, "--port\n"+strconv.Itoa(rt.Port)) {
 		t.Fatalf("manager-owned model/bind arguments were not preserved: %q", raw)
 	}
-	if strings.Contains(text, "/tmp/other.gguf\n") || strings.Contains(text, "0.0.0.0\n") || strings.Contains(text, "\n9999\n") {
+	if strings.Contains(text, "/tmp/other.gguf\n") || strings.Contains(text, "user-alias\n") || strings.Contains(text, "0.0.0.0\n") || strings.Contains(text, "\n9999\n") {
 		t.Fatalf("conflicting manager-owned arguments reached worker: %q", raw)
 	}
 	if strings.Contains(text, "worker-secret\n") || strings.Contains(text, "--api-key\n") {

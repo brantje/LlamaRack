@@ -73,6 +73,7 @@ model_list:
       api_key: os.environ/LLAMARACK_API_KEY
 general_settings:
   master_key: os.environ/LLAMARACK_LITELLM_MASTER_KEY
+  forward_client_headers_to_llm_api: true
 EOF
 
 export LLAMARACK_LITELLM_MASTER_KEY="$proxy_master_key"

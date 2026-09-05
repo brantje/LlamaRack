@@ -8,6 +8,7 @@ import (
 func TestValidateOptionsRejectsManagerOwnedWorkerSecurityOptions(t *testing.T) {
 	profile := Profile{Options: []Option{{Key: "ctx-size", ValueHint: "N", Kind: "integer"}}}
 	for _, key := range []string{
+		"alias",
 		"cors-origins",
 		"cors-methods",
 		"cors-headers",

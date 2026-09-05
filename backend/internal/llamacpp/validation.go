@@ -8,6 +8,7 @@ import (
 )
 
 var managerOwnedOptions = map[string]bool{
+	"alias":               true,
 	"model":               true,
 	"host":                true,
 	"port":                true,

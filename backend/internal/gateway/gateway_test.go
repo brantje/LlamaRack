@@ -271,7 +271,7 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 		t.Fatalf("missing model=%d %s", w.Code, w.Body.String())
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"missing"}`)
-	if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") || w.Header().Get(headerRequestID) == "" {
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "model_not_found") || w.Header().Get(headerRequestID) == "" {
 		t.Fatalf("missing model=%d %s headers=%v", w.Code, w.Body.String(), w.Header())
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"gateway-model\"}")
@@ -457,6 +457,10 @@ func TestListModelsDatabaseError(t *testing.T) {
 	w := gatewayRequest(t, g, http.MethodGet, "/v1/models", secret, "")
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {
 		t.Fatalf("models database failure=%d %s", w.Code, w.Body.String())
+	}
+	w = gatewayRequest(t, g, http.MethodGet, "/v1/models/gateway-model", secret, "")
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "model_unavailable") {
+		t.Fatalf("model lookup database failure=%d %s", w.Code, w.Body.String())
 	}
 }
 

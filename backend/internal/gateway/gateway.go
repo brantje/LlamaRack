@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -345,7 +346,15 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bo
 func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, modelID string) {
 	modelID = strings.TrimSpace(modelID)
 	instance, err := g.lifecycle.Instances().Get(r.Context(), modelID)
-	if err != nil || !instance.Enabled {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		}
+		return
+	}
+	if !instance.Enabled {
 		writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		return
 	}
@@ -468,7 +477,11 @@ func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, r
 	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
 	if err != nil {
 		record.Error = sanitizeError(err.Error())
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+		} else {
+			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		}
 		return instances.Instance{}, false
 	}
 	return instance, true
