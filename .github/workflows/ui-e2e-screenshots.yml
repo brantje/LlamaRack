@@ -2,6 +2,8 @@ name: UI E2E screenshots
 
 on:
   pull_request:
+    paths:
+      - 'frontend/**'
   workflow_dispatch:
 
 permissions:
