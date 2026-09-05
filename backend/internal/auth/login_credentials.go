@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 )
 
@@ -24,6 +25,9 @@ func (s *Service) verifyLoginCredentials(ctx context.Context, work *passwordWork
 		&user.CreatedAt,
 		&lastLogin,
 	)
+	if queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
+		return User{}, "", queryErr
+	}
 
 	verificationHash := dummyPasswordHash
 	realAccount := queryErr == nil && enabled != 0
