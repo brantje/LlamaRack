@@ -1,0 +1,206 @@
+name: Temporary OpenAI compatibility fix validation
+
+on:
+  push:
+    branches:
+      - fix/openai-compat-response-models
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compat-fix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: [self-hosted, gpu-runner]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Bootstrap compatibility fix on the test branch
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          changed = False
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              global changed
+              file = Path(path)
+              text = file.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f"expected source fragment not found in {path}")
+              file.write_text(text.replace(old, new, 1))
+              changed = True
+
+          replace_once(
+              "backend/internal/gateway/gateway.go",
+              '\t"crypto/rand"\n\t"encoding/hex"',
+              '\t"crypto/rand"\n\t"database/sql"\n\t"encoding/hex"',
+          )
+          replace_once(
+              "backend/internal/gateway/gateway.go",
+              '''\tinstance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)\n\tif err != nil {\n\t\trecord.Error = sanitizeError(err.Error())\n\t\twriteError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())\n\t\treturn instances.Instance{}, false\n\t}\n\treturn instance, true''',
+              '''\tinstance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)\n\tif err != nil {\n\t\trecord.Error = sanitizeError(err.Error())\n\t\tif errors.Is(err, sql.ErrNoRows) {\n\t\t\twriteError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")\n\t\t} else {\n\t\t\twriteError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())\n\t\t}\n\t\treturn instances.Instance{}, false\n\t}\n\treturn instance, true''',
+          )
+          replace_once(
+              "backend/internal/supervisor/supervisor.go",
+              'workerArgs := []string{"--model", modelPath, "--host", s.host, "--port", fmt.Sprint(port)}',
+              'workerArgs := []string{"--model", modelPath, "--alias", instanceID, "--host", s.host, "--port", fmt.Sprint(port)}',
+          )
+          replace_once(
+              "backend/internal/supervisor/supervisor.go",
+              'var workerOwnedValueOptions = map[string]bool{\n\t"model":',
+              'var workerOwnedValueOptions = map[string]bool{\n\t"alias":          true,\n\t"model":',
+          )
+          replace_once(
+              "backend/internal/llamacpp/validation.go",
+              'var managerOwnedOptions = map[string]bool{\n\t"model":',
+              'var managerOwnedOptions = map[string]bool{\n\t"alias":               true,\n\t"model":',
+          )
+          replace_once(
+              "backend/internal/gateway/gateway_test.go",
+              'if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") || w.Header().Get(headerRequestID) == "" {',
+              'if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "model_not_found") || w.Header().Get(headerRequestID) == "" {',
+          )
+          replace_once(
+              "backend/internal/supervisor/security_test.go",
+              '\t\t"--model", "/tmp/other.gguf",\n\t\t"--host", "0.0.0.0",',
+              '\t\t"--model", "/tmp/other.gguf",\n\t\t"--alias", "user-alias",\n\t\t"--host", "0.0.0.0",',
+          )
+          replace_once(
+              "backend/internal/supervisor/security_test.go",
+              'for _, flag := range []string{"--model\\n", "--host\\n", "--port\\n", "--cors-origins\\n"} {',
+              'for _, flag := range []string{"--model\\n", "--alias\\n", "--host\\n", "--port\\n", "--cors-origins\\n"} {',
+          )
+          replace_once(
+              "backend/internal/supervisor/security_test.go",
+              'if !strings.Contains(text, "--model\\n/tmp/model.gguf") || !strings.Contains(text, "--host\\n127.0.0.1") || !strings.Contains(text, "--port\\n"+strconv.Itoa(rt.Port)) {',
+              'if !strings.Contains(text, "--model\\n/tmp/model.gguf") || !strings.Contains(text, "--alias\\nsecure-instance") || !strings.Contains(text, "--host\\n127.0.0.1") || !strings.Contains(text, "--port\\n"+strconv.Itoa(rt.Port)) {',
+          )
+          replace_once(
+              "backend/internal/supervisor/security_test.go",
+              'if strings.Contains(text, "/tmp/other.gguf\\n") || strings.Contains(text, "0.0.0.0\\n") || strings.Contains(text, "\\n9999\\n") {',
+              'if strings.Contains(text, "/tmp/other.gguf\\n") || strings.Contains(text, "user-alias\\n") || strings.Contains(text, "0.0.0.0\\n") || strings.Contains(text, "\\n9999\\n") {',
+          )
+          replace_once(
+              "backend/internal/llamacpp/security_test.go",
+              'for _, key := range []string{\n\t\t"cors-origins",',
+              'for _, key := range []string{\n\t\t"alias",\n\t\t"cors-origins",',
+          )
+
+          Path(".compat-fix-changed").write_text("1" if changed else "0")
+          PY
+          gofmt -w backend/internal/gateway/gateway.go backend/internal/gateway/gateway_test.go backend/internal/supervisor/supervisor.go backend/internal/supervisor/security_test.go backend/internal/llamacpp/validation.go backend/internal/llamacpp/security_test.go
+          if [[ "$(cat .compat-fix-changed)" == "1" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          rm -f .compat-fix-changed
+
+      - name: Commit bootstrapped fix
+        if: steps.patch.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/internal/gateway/gateway.go backend/internal/gateway/gateway_test.go backend/internal/supervisor/supervisor.go backend/internal/supervisor/security_test.go backend/internal/llamacpp/validation.go backend/internal/llamacpp/security_test.go
+          git commit -m 'fix: normalize OpenAI model identity and missing-model errors'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Stop bootstrap run after publishing the fix
+        if: steps.patch.outputs.changed == 'true'
+        run: echo 'Fix committed; the next branch run performs the live validation.'
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: steps.patch.outputs.changed != 'true'
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: steps.patch.outputs.changed != 'true'
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.patch.outputs.changed != 'true'
+        with:
+          node-version: '24'
+
+      - name: Run backend regression tests
+        if: steps.patch.outputs.changed != 'true'
+        working-directory: backend
+        run: go test ./...
+
+      - name: Verify GPU runner
+        if: steps.patch.outputs.changed != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for command in docker curl python3 node npm nvidia-smi; do
+            command -v "$command" >/dev/null || { echo "missing command: $command" >&2; exit 1; }
+          done
+          docker info >/dev/null
+          nvidia-smi -L
+          test -d /home/node/github-runners/models
+
+      - name: Build branch CUDA image
+        if: steps.patch.outputs.changed != 'true'
+        id: image
+        shell: bash
+        env:
+          LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp@sha256:7f87a3bbe3143cdb857f5c84f82d2c15528be70ca0e7c5ade9a47d56b791f93f
+        run: |
+          set -euo pipefail
+          image="llamarack-compat-fix:${GITHUB_SHA}"
+          docker build \
+            --build-arg "LLAMA_IMAGE=${LLAMA_IMAGE}" \
+            --build-arg "LLAMARACK_VERSION=compat-fix" \
+            --build-arg "LLAMARACK_COMMIT=${GITHUB_SHA}" \
+            --build-arg "LLAMARACK_CHANNEL=development" \
+            --build-arg "LLAMARACK_VARIANT=cuda" \
+            --build-arg "LLAMA_CPP_RELEASE=b10795" \
+            --build-arg "LLAMA_CPP_BUILD=b10795" \
+            --build-arg "LLAMA_CPP_IMAGE=${LLAMA_IMAGE}" \
+            -t "$image" .
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Run real-client compatibility suite against branch image
+        if: steps.patch.outputs.changed != 'true'
+        shell: bash
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/compatibility
+          CUDA_IMAGE: ${{ steps.image.outputs.image }}
+          GPU_MODELS_DIR: /home/node/github-runners/models
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/release-qualification/compat-gpu.sh")
+          text = path.read_text()
+          needle = 'docker pull "$image"\n'
+          if needle not in text:
+              raise SystemExit("compat-gpu.sh image pull line not found")
+          path.write_text(text.replace(needle, '# Temporary validation uses the locally built branch image.\n', 1))
+          PY
+          bash scripts/release-qualification/compat-gpu.sh "$CUDA_IMAGE" "$GPU_MODELS_DIR"
+
+      - name: Upload compatibility evidence
+        if: always() && steps.patch.outputs.changed != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compat-fix-validation-${{ github.run_id }}
+          path: artifacts/release-qualification/compatibility
+          if-no-files-found: warn
