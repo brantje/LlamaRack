@@ -2,7 +2,8 @@
 const manager = useManager()
 const route = useRoute()
 const router = useRouter()
-const originalID = computed(() => String(route.params.id || ''))
+const originalSlug = computed(() => String(route.params.id || ''))
+const durableID = ref('')
 const busy = ref(false)
 const loading = ref(true)
 const loaded = ref(false)
@@ -36,12 +37,13 @@ const hasChanges = computed(() => Boolean(baseline.value) && serializeForm() !==
 onMounted(async () => {
   try {
     const [instance, options] = await Promise.all([
-      manager.request<any>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`),
-      manager.request<Record<string, string>>(`/api/v1/instances/${encodeURIComponent(originalID.value)}/options`)
+      manager.request<any>(`/api/v1/instances/${encodeURIComponent(originalSlug.value)}`),
+      manager.request<Record<string, string>>(`/api/v1/instances/${encodeURIComponent(originalSlug.value)}/options`)
     ])
     if (!instance?.name && !instance?.id) throw { data: { error: 'Unable to load Instance' } }
+    durableID.value = instance.id
     Object.assign(form, instance, {
-      slug: instance.id || originalID.value,
+      slug: instance.slug || originalSlug.value,
       gpu_devices: [...(instance.gpu_devices || [])],
       request_log_mode: instance.request_log_mode || 'metadata',
       max_pending_requests: Number(instance.max_pending_requests) || 0,
@@ -59,18 +61,18 @@ onMounted(async () => {
 async function submit() {
   if (!form.model_id || !form.name.trim() || !form.slug.trim() || !hasChanges.value) return
   error.value = ''
-  const nextID = slugify(form.slug || form.name)
-  const rename = nextID !== originalID.value
+  const nextSlug = slugify(form.slug || form.name)
+  const rename = nextSlug !== originalSlug.value
   if (rename) {
     const confirmed = await confirmation.value?.request({
-      title: 'Confirm Instance rename',
-      description: `Renaming this Instance changes the OpenAI model ID from “${originalID.value}” to “${nextID}”. Existing clients using the old model ID will break.`,
-      confirmLabel: 'Continue',
+      title: 'Confirm Instance slug change',
+      description: `Changing this Instance slug changes the OpenAI model ID from “${originalSlug.value}” to “${nextSlug}”. Existing clients using the old model ID and old bookmarks will break.`,
+      confirmLabel: 'Change slug',
       confirmTone: 'destructive'
     })
     if (!confirmed) return
   }
-  const runtime = manager.runtimeForInstance({ id: originalID.value, model_id: form.model_id } as any)
+  const runtime = manager.runtimeForInstance({ id: durableID.value, slug: originalSlug.value, model_id: form.model_id } as any)
   const running = !['UNLOADED', 'FAILED'].includes(runtime.state)
   if (running) {
     const confirmed = await confirmation.value?.request({
@@ -84,7 +86,7 @@ async function submit() {
 
   busy.value = true
   try {
-    await manager.request<{ id: string }>(`/api/v1/instances/${encodeURIComponent(originalID.value)}`, {
+    const updated = await manager.request<{ id: string; slug: string }>(`/api/v1/instances/${encodeURIComponent(originalSlug.value)}`, {
       method: 'PUT',
       body: {
         model_id: form.model_id, name: form.name, slug: form.slug, enabled: form.enabled,
@@ -98,7 +100,7 @@ async function submit() {
       }
     })
     await manager.refresh()
-    await router.push('/instances')
+    await router.push(rename ? `/instances/${encodeURIComponent(updated.slug)}/detail` : '/instances')
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to update Instance'
   } finally {
@@ -131,7 +133,7 @@ async function submit() {
     :submit-disabled="!hasChanges"
     submit-disabled-reason="No changes to save."
     :dirty="hasChanges"
-    :instance-id="originalID"
+    :instance-id="durableID"
     @submit="submit"
   />
   <AppConfirmationModal ref="confirmation" />
