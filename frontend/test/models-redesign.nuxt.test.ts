@@ -31,7 +31,8 @@ describe('Models registry redesign', () => {
   it('renders the exact registry columns, linked names and ghost row actions', async () => {
     const manager = resetManager()
     manager.models.value = [{
-      id: 'coder',
+      id: 'model-coder-id',
+      slug: 'coder',
       name: 'Coder 7B',
       gguf_path: 'nested/models/coder/coder-q4.gguf',
       total_bytes: 1536,
