@@ -93,7 +93,7 @@ func (n *Network) OriginAllowed(r *http.Request, origin string) bool {
 			if strings.TrimSpace(allowed) == origin {
 				return true
 			}
-		}
+	}
 	}
 	parsed, err := url.Parse(origin)
 	if err != nil || parsed.Host == "" {
@@ -216,6 +216,13 @@ func forwardedFor(header string) []netip.Addr {
 	return result
 }
 
+const (
+	loginAddressDelayAfter  = 8
+	loginAddressTTL         = 10 * time.Minute
+	defaultMaxLoginAttempts = 4096
+	defaultMaxLoginAddresses = 1024
+)
+
 type loginAttempt struct {
 	Failures    int
 	UpdatedAt   time.Time
@@ -223,15 +230,24 @@ type loginAttempt struct {
 }
 
 type LoginProtector struct {
-	mu       sync.Mutex
-	settings *settings.Service
-	attempts map[string]loginAttempt
-	maxItems int
-	now      func() time.Time
+	mu           sync.Mutex
+	settings     *settings.Service
+	attempts     map[string]loginAttempt
+	addresses    map[string]loginAttempt
+	maxItems     int
+	maxAddresses int
+	now          func() time.Time
 }
 
 func NewLoginProtector(s *settings.Service) *LoginProtector {
-	return &LoginProtector{settings: s, attempts: map[string]loginAttempt{}, maxItems: 4096, now: time.Now}
+	return &LoginProtector{
+		settings:     s,
+		attempts:     map[string]loginAttempt{},
+		addresses:    map[string]loginAttempt{},
+		maxItems:     defaultMaxLoginAttempts,
+		maxAddresses: defaultMaxLoginAddresses,
+		now:          time.Now,
+	}
 }
 
 func (p *LoginProtector) BeforeAttempt(ctx context.Context, username, address string) (time.Duration, bool) {
@@ -240,26 +256,21 @@ func (p *LoginProtector) BeforeAttempt(ctx context.Context, username, address st
 		return 0, false
 	}
 	key := loginKey(username, address)
+	address = strings.TrimSpace(address)
 	now := p.now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pruneLocked(now)
-	attempt, ok := p.attempts[key]
-	if !ok {
-		return 0, false
+
+	accountDelay, accountLocked := loginAttemptPenalty(p.attempts[key], now, 2)
+	if accountLocked {
+		return accountDelay, true
 	}
-	if attempt.LockedUntil.After(now) {
-		return attempt.LockedUntil.Sub(now), true
+	addressDelay, _ := loginAttemptPenalty(p.addresses[address], now, loginAddressDelayAfter)
+	if addressDelay > accountDelay {
+		return addressDelay, false
 	}
-	if attempt.Failures < 2 {
-		return 0, false
-	}
-	shift := attempt.Failures - 2
-	if shift > 4 {
-		shift = 4
-	}
-	delay := 100 * time.Millisecond * time.Duration(1<<shift)
-	return delay, false
+	return accountDelay, false
 }
 
 func (p *LoginProtector) Failure(ctx context.Context, username, address string) bool {
@@ -280,7 +291,12 @@ func (p *LoginProtector) Failure(ctx context.Context, username, address string) 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pruneLocked(now)
-	attempt := p.attempts[key]
+	p.recordAddressFailure(strings.TrimSpace(address), now)
+
+	attempt, exists := p.attempts[key]
+	if !exists && len(p.attempts) >= p.maxItems {
+		return false
+	}
 	attempt.Failures++
 	attempt.UpdatedAt = now
 	locked := attempt.Failures >= threshold
@@ -297,27 +313,86 @@ func (p *LoginProtector) Success(username, address string) {
 	p.mu.Unlock()
 }
 
+func (p *LoginProtector) recordAddressFailure(address string, now time.Time) {
+	if address == "" {
+		return
+	}
+	if _, exists := p.addresses[address]; !exists && len(p.addresses) >= p.maxAddresses {
+		p.evictOldestAddress()
+	}
+	attempt := p.addresses[address]
+	attempt.Failures++
+	attempt.UpdatedAt = now
+	p.addresses[address] = attempt
+}
+
 func (p *LoginProtector) pruneLocked(now time.Time) {
 	for key, attempt := range p.attempts {
 		if now.Sub(attempt.UpdatedAt) > 24*time.Hour && !attempt.LockedUntil.After(now) {
 			delete(p.attempts, key)
 		}
 	}
-	if len(p.attempts) <= p.maxItems {
-		return
+	if len(p.attempts) > p.maxItems {
+		type item struct {
+			key string
+			at  time.Time
+		}
+		items := make([]item, 0, len(p.attempts))
+		for key, attempt := range p.attempts {
+			if attempt.LockedUntil.After(now) {
+				continue
+			}
+			items = append(items, item{key: key, at: attempt.UpdatedAt})
+		}
+		sort.Slice(items, func(i, j int) bool { return items[i].at.Before(items[j].at) })
+		remove := len(p.attempts) - p.maxItems
+		if remove > len(items) {
+			remove = len(items)
+		}
+		for index := 0; index < remove; index++ {
+			delete(p.attempts, items[index].key)
+		}
 	}
-	type item struct {
-		key string
-		at  time.Time
+	p.pruneAddresses(now)
+}
+
+func (p *LoginProtector) pruneAddresses(now time.Time) {
+	for address, attempt := range p.addresses {
+		if now.Sub(attempt.UpdatedAt) > loginAddressTTL {
+			delete(p.addresses, address)
+		}
 	}
-	items := make([]item, 0, len(p.attempts))
-	for key, attempt := range p.attempts {
-		items = append(items, item{key: key, at: attempt.UpdatedAt})
+	for len(p.addresses) > p.maxAddresses {
+		p.evictOldestAddress()
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].at.Before(items[j].at) })
-	for index := 0; index < len(items)-p.maxItems; index++ {
-		delete(p.attempts, items[index].key)
+}
+
+func (p *LoginProtector) evictOldestAddress() {
+	oldestKey := ""
+	var oldest time.Time
+	for key, attempt := range p.addresses {
+		if oldestKey == "" || attempt.UpdatedAt.Before(oldest) {
+			oldestKey = key
+			oldest = attempt.UpdatedAt
+		}
 	}
+	if oldestKey != "" {
+		delete(p.addresses, oldestKey)
+	}
+}
+
+func loginAttemptPenalty(attempt loginAttempt, now time.Time, delayAfter int) (time.Duration, bool) {
+	if attempt.LockedUntil.After(now) {
+		return attempt.LockedUntil.Sub(now), true
+	}
+	if attempt.Failures < delayAfter {
+		return 0, false
+	}
+	shift := attempt.Failures - delayAfter
+	if shift > 4 {
+		shift = 4
+	}
+	return 100 * time.Millisecond * time.Duration(1<<shift), false
 }
 
 func loginKey(username, address string) string {
