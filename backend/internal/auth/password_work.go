@@ -55,6 +55,9 @@ func (r *passwordWorkReservation) run(ctx context.Context, work func()) error {
 	select {
 	case r.gate.active <- struct{}{}:
 		defer func() { <-r.gate.active }()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		work()
 		return nil
 	case <-ctx.Done():

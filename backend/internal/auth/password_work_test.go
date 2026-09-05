@@ -8,7 +8,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+type cancelAfterFirstErrContext struct {
+	calls int32
+}
+
+func (c *cancelAfterFirstErrContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterFirstErrContext) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterFirstErrContext) Err() error {
+	if atomic.AddInt32(&c.calls, 1) == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+func (c *cancelAfterFirstErrContext) Value(any) any { return nil }
 
 func TestPasswordWorkGateBoundsConcurrencyAndBacklog(t *testing.T) {
 	gate := newPasswordWorkGate(2, 4)
@@ -115,6 +130,26 @@ func TestPasswordWorkQueuedCancellationReleasesBacklogCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	activeReservation.Release()
+}
+
+func TestPasswordWorkRechecksCancellationAfterAcquiringActiveSlot(t *testing.T) {
+	gate := newPasswordWorkGate(1, 0)
+	reservation, err := gate.reserve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &cancelAfterFirstErrContext{}
+	called := false
+	if err := reservation.run(ctx, func() { called = true }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error=%v, want %v", err, context.Canceled)
+	}
+	if called {
+		t.Fatal("password work executed after cancellation became visible")
+	}
+	reservation.Release()
+	if len(gate.active) != 0 || len(gate.admitted) != 0 {
+		t.Fatalf("gate leaked capacity: active=%d admitted=%d", len(gate.active), len(gate.admitted))
+	}
 }
 
 func TestPasswordWorkAdmissionStressRemainsBounded(t *testing.T) {
