@@ -14,6 +14,7 @@ type RequestRecord = {
   started_at: number
   finished_at: number
   instance_id: string
+  model_slug?: string
   endpoint: string
   api_key?: APIKeyRef
   streaming: boolean
@@ -161,6 +162,21 @@ const instanceColorByID = computed(() => {
   return new Map(ids.map((id, index) => [id, instanceColorTokens[index % instanceColorTokens.length]!]))
 })
 
+function instanceByID(id?: string) {
+  return id ? instances.value.find(instance => instance.id === id) : undefined
+}
+function instancePublicLabel(id?: string) {
+  const instance = instanceByID(id)
+  return instance?.slug || id || '—'
+}
+function instanceDetailTarget(id?: string) {
+  const instance = instanceByID(id)
+  return instance ? `/instances/${encodeURIComponent(instance.slug)}/detail` : '/instances'
+}
+function requestInstanceLabel(record: RequestRecord) {
+  return record.model_slug || instancePublicLabel(record.instance_id)
+}
+
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return '—'
   if (value === 0) return '0 B'
@@ -250,7 +266,7 @@ function gpuSegments(gpu: HardwareGPU): VRAMSegment[] {
     const bytes = Math.min(remaining, assignment.used)
     if (bytes <= 0) continue
     const token = instanceColorByID.value.get(assignment.instanceID) ?? instanceColorTokens[0]
-    segments.push({ label: assignment.instanceID, bytes, percent: bytes / total * 100, color: token.color, colorKey: token.key })
+    segments.push({ label: instancePublicLabel(assignment.instanceID), bytes, percent: bytes / total * 100, color: token.color, colorKey: token.key })
     remaining -= bytes
   }
 
@@ -277,17 +293,18 @@ const attention = computed<AttentionItem[]>(() => {
   const items: AttentionItem[] = []
   for (const runtime of runtimeList.value.filter(runtime => runtime.state === 'FAILED')) {
     const backoff = startupBackoffMessage(runtime)
+    const current = instanceByID(runtime.instance_id)
     items.push({
       key: `failed-${runtime.instance_id}`,
-      title: `${runtime.instance_id} failed to start`,
+      title: `${current?.slug || runtime.instance_id} failed to start`,
       detail: backoff || runtime.last_error || 'The managed llama-server process is in FAILED state.',
-      to: `/instances/${encodeURIComponent(runtime.instance_id)}/detail`
+      to: current ? `/instances/${encodeURIComponent(current.slug)}/detail` : '/instances'
     })
   }
   for (const request of recentRequests.value.filter(request => request.result !== 'success' && request.result !== 'pending' && request.status_code !== 500).slice(0, 2)) {
     items.push({
       key: `request-${request.request_id || request.id}`,
-      title: `${request.instance_id} returned ${request.status_code || 'an error'}`,
+      title: `${requestInstanceLabel(request)} returned ${request.status_code || 'an error'}`,
       detail: request.error || `${request.endpoint} failed during the last ${selectedRangeLabel.value}.`,
       to: requestDetailTarget(request)
     })
@@ -297,9 +314,9 @@ const attention = computed<AttentionItem[]>(() => {
     const backoff = startupBackoffMessage(manager.runtimeForInstance(instance))
     items.push({
       key: `always-${instance.id}`,
-      title: `${instance.id} is Always-On but unloaded`,
+      title: `${instance.slug} is Always-On but unloaded`,
       detail: backoff || 'The Instance may have been stopped manually or could be waiting for resources.',
-      to: `/instances/${encodeURIComponent(instance.id)}/detail`
+      to: `/instances/${encodeURIComponent(instance.slug)}/detail`
     })
   }
   for (const gpu of hardware.value.gpus) {
@@ -611,7 +628,7 @@ watch(selectedWindow, (next, previous) => {
           </template>
           <template #instance_id-cell="{ row }">
             <div>
-              <NuxtLink :to="`/instances/${encodeURIComponent(row.original.instance_id)}/detail`" class="font-mono text-xs text-[var(--color-accent)] hover:underline">{{ row.original.instance_id }}</NuxtLink>
+              <NuxtLink :to="instanceDetailTarget(row.original.instance_id)" class="font-mono text-xs text-[var(--color-accent)] hover:underline">{{ requestInstanceLabel(row.original) }}</NuxtLink>
               <div class="mt-0.5 font-mono text-xs text-muted">{{ row.original.streaming ? 'stream' : 'unary' }}</div>
             </div>
           </template>
