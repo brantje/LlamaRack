@@ -19,7 +19,7 @@ func TestGatewayTypedKeysAllowlistAndJWTRejection(t *testing.T) {
 		t.Fatalf("users=%+v err=%v", users, err)
 	}
 	ownerID := users[0].ID
-	existing, err := f.lifecycle.Instances().Get(ctx, "gateway-model")
+	existing, err := f.lifecycle.Instances().GetBySlug(ctx, "gateway-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestGatewayTypedKeysAllowlistAndJWTRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, scopedSecret, err := f.gateway.auth.CreateAPIKey(ctx, auth.CreateAPIKeyInput{Name: "scoped", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{"gateway-model"}})
+	_, scopedSecret, err := f.gateway.auth.CreateAPIKey(ctx, auth.CreateAPIKeyInput{Name: "scoped", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{existing.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
