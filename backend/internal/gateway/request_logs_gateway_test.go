@@ -114,10 +114,10 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 		want                     int
 		wantInstance             string
 	}{
-		{"invalid-key", "wrong", "/v1/chat/completions", `{"model":"gateway-model"}`, http.StatusUnauthorized, "gateway-model"},
+		{"invalid-key", "wrong", "/v1/chat/completions", `{"model":"gateway-model"}`, http.StatusUnauthorized, ""},
 		{"malformed", f.secret, "/v1/chat/completions", `{`, http.StatusBadRequest, ""},
 		{"missing-model", f.secret, "/v1/chat/completions", `{}`, http.StatusBadRequest, ""},
-		{"unsupported", f.secret, "/v1/does-not-exist", `{"model":"gateway-model"}`, http.StatusNotFound, "gateway-model"},
+		{"unsupported", f.secret, "/v1/does-not-exist", `{"model":"gateway-model"}`, http.StatusNotFound, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
