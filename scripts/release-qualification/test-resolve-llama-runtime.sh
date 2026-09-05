@@ -13,6 +13,11 @@ cat > "${mock_bin}/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${MOCK_CURL_FORBID:-}" == '1' ]]; then
+  echo 'curl must not be used in container-current mode' >&2
+  exit 99
+fi
+
 args="$*"
 if [[ "$args" == *'/releases/latest'* ]]; then
   cat <<'JSON'
@@ -43,6 +48,21 @@ printf '%s\n' "$ref" >> "$log_file"
 if [[ "$mode" == 'never' ]]; then
   exit 1
 fi
+if [[ "$mode" == 'container' ]]; then
+  case "$ref" in
+    ghcr.io/ggml-org/llama.cpp:server)
+      printf '"sha256:%064d"\n' 0 | tr '0' 'c'
+      exit 0
+      ;;
+    ghcr.io/ggml-org/llama.cpp:server-cuda)
+      printf '"sha256:%064d"\n' 0 | tr '0' 'd'
+      exit 0
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
+fi
 
 count=0
 if [[ -f "$state_file" ]]; then
@@ -68,11 +88,38 @@ esac
 EOF
 chmod +x "${mock_bin}/docker"
 
-success_output="${tmpdir}/success.out"
 export MOCK_DOCKER_STATE="${tmpdir}/docker-state"
 export MOCK_DOCKER_LOG="${tmpdir}/docker.log"
-export MOCK_DOCKER_MODE='lag'
+
+container_output="${tmpdir}/container.out"
+export MOCK_DOCKER_MODE='container'
+export MOCK_CURL_FORBID='1'
 PATH="${mock_bin}:${PATH}" \
+GITHUB_EVENT_NAME=push \
+LLAMA_RUNTIME_RESOLVE_ATTEMPTS=1 \
+LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS=0 \
+  bash "$resolver" "$container_output" 2>"${tmpdir}/container.err"
+
+grep -qx 'release_tag=container-current' "$container_output"
+grep -qx 'build_tag=container-current' "$container_output"
+grep -qx 'cpu_image=ghcr.io/ggml-org/llama.cpp@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' "$container_output"
+grep -qx 'cuda_image=ghcr.io/ggml-org/llama.cpp@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' "$container_output"
+printf '%s\n' \
+  'ghcr.io/ggml-org/llama.cpp:server' \
+  'ghcr.io/ggml-org/llama.cpp:server-cuda' > "${tmpdir}/container-expected.log"
+cmp -s "$MOCK_DOCKER_LOG" "${tmpdir}/container-expected.log" || {
+  echo 'push mode did not resolve only the current CPU/CUDA aliases' >&2
+  diff -u "${tmpdir}/container-expected.log" "$MOCK_DOCKER_LOG" >&2 || true
+  exit 1
+}
+
+: > "$MOCK_DOCKER_LOG"
+rm -f "$MOCK_DOCKER_STATE"
+unset MOCK_CURL_FORBID
+export MOCK_DOCKER_MODE='lag'
+success_output="${tmpdir}/success.out"
+PATH="${mock_bin}:${PATH}" \
+GITHUB_EVENT_NAME=release \
 LLAMA_RUNTIME_RESOLVE_ATTEMPTS=2 \
 LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS=0 \
   bash "$resolver" "$success_output" 2>"${tmpdir}/success.err"
@@ -83,7 +130,7 @@ grep -qx 'cpu_image=ghcr.io/ggml-org/llama.cpp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaa
 grep -qx 'cuda_image=ghcr.io/ggml-org/llama.cpp@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$success_output"
 grep -q 'attempt 1/2' "${tmpdir}/success.err"
 if grep -Ev '^ghcr\.io/ggml-org/llama\.cpp:server(-cuda|-cuda13|-cuda12)?-b10809$' "$MOCK_DOCKER_LOG" | grep -q .; then
-  echo 'resolver queried a runtime outside the selected b10809 build' >&2
+  echo 'release mode queried a runtime outside the selected b10809 build' >&2
   exit 1
 fi
 
@@ -91,17 +138,18 @@ fi
 rm -f "$MOCK_DOCKER_STATE"
 export MOCK_DOCKER_MODE='never'
 if PATH="${mock_bin}:${PATH}" \
+  GITHUB_EVENT_NAME=release \
   LLAMA_RUNTIME_RESOLVE_ATTEMPTS=2 \
   LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS=0 \
   bash "$resolver" "${tmpdir}/failure.out" >"${tmpdir}/failure.stdout" 2>"${tmpdir}/failure.err"; then
-  echo 'resolver unexpectedly succeeded when the exact runtime never appeared' >&2
+  echo 'resolver unexpectedly succeeded when the exact release runtime never appeared' >&2
   exit 1
 fi
 
 grep -q 'after 2 attempts' "${tmpdir}/failure.err"
 if grep -Ev '^ghcr\.io/ggml-org/llama\.cpp:server(-cuda|-cuda13|-cuda12)?-b10809$' "$MOCK_DOCKER_LOG" | grep -q .; then
-  echo 'resolver fell back to a runtime outside the selected b10809 build' >&2
+  echo 'release mode fell back to a runtime outside the selected b10809 build' >&2
   exit 1
 fi
 
-echo 'resolve-llama-runtime retry tests passed'
+echo 'resolve-llama-runtime mode and retry tests passed'
