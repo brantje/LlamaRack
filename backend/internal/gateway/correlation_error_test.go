@@ -17,7 +17,14 @@ func TestUnavailableModelRequestIDMapsToObservabilityRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.InstanceID != "missing" || record.StatusCode != http.StatusNotFound || record.Result != "error" {
+	if record.InstanceID != "" || record.StatusCode != http.StatusNotFound || record.Result != "error" {
 		t.Fatalf("correlated record=%+v", record)
+	}
+	var modelSlug string
+	if err := f.db.QueryRowContext(context.Background(), `SELECT model_slug FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE c.request_id=?`, requestID).Scan(&modelSlug); err != nil {
+		t.Fatal(err)
+	}
+	if modelSlug != "missing" {
+		t.Fatalf("model_slug=%q want missing", modelSlug)
 	}
 }
