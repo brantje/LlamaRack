@@ -7,6 +7,7 @@ monitor="$repo_root/scripts/release-qualification/monitor-gpu-soak.sh"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
+# Fail the regression harness with a consistent diagnostic.
 fail() {
   echo "test-run-gpu-soak: $*" >&2
   exit 1
@@ -112,5 +113,56 @@ grep -F 'inspect llamarack-gpu-qualification-target' "$tmpdir/docker-args.txt" >
   || fail "monitor did not inspect the exact target container"
 [[ "$(wc -l < "$tmpdir/monitor-artifacts/manager-resource-samples.tsv")" -ge 2 ]] \
   || fail "monitor did not record a resource sample"
+
+cancel_root="$tmpdir/cancel"
+cancel_bin="$cancel_root/bin"
+mkdir -p "$cancel_bin" "$cancel_root/artifacts"
+cat >"$cancel_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "inspect" ]]; then
+  : >"${TEST_ROOT:?}/docker-inspect-blocked"
+  sleep 30
+fi
+EOF
+chmod +x "$cancel_bin/docker"
+
+hanging_soak="$cancel_root/hanging-soak.sh"
+cat >"$hanging_soak" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'exit 0' TERM INT
+while :; do sleep 0.05; done
+EOF
+chmod +x "$hanging_soak"
+
+TEST_ROOT="$cancel_root" \
+PATH="$cancel_bin:$PATH" \
+GPU_REAL_CURL="$fake_real_curl" \
+GPU_SOAK_SCRIPT="$hanging_soak" \
+GPU_MONITOR_SCRIPT="$monitor" \
+GPU_DOCKER_TIMEOUT="0.5s" \
+GPU_DOCKER_KILL_AFTER="0.2s" \
+QUALIFICATION_ARTIFACT_DIR="$cancel_root/artifacts" \
+  bash "$wrapper" example.invalid/image "$tmpdir/models" 1 &
+wrapper_pid=$!
+for _ in $(seq 1 100); do
+  [[ -f "$cancel_root/docker-inspect-blocked" ]] && break
+  sleep 0.02
+done
+[[ -f "$cancel_root/docker-inspect-blocked" ]] \
+  || fail "blocked docker inspect was not exercised"
+
+SECONDS=0
+kill -TERM "$wrapper_pid"
+set +e
+wait "$wrapper_pid"
+wrapper_status=$?
+set -e
+elapsed=$SECONDS
+[[ "$wrapper_status" == "143" ]] \
+  || fail "cancelled wrapper exited with $wrapper_status instead of 143"
+(( elapsed < 5 )) \
+  || fail "wrapper cancellation exceeded Docker timeout bound (${elapsed}s)"
 
 printf '%s\n' 'test-run-gpu-soak: PASS'
