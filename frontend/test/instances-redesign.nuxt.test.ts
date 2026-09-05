@@ -11,7 +11,7 @@ const gib = 1024 ** 3
 const now = Date.parse('2026-09-01T12:00:00.000Z')
 
 function instance(id: string, overrides: Partial<Instance> = {}): Instance {
-  return { id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
+  return { id, slug: id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
 }
 
 function telemetry(id: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {
@@ -25,7 +25,7 @@ function seed() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 8192 }]
+  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 8192 }]
   manager.instances.value = [
     instance('ready', { always_on: true, idle_unload_seconds: 600, gpu_devices: ['CUDA0'] }),
     instance('stopped'),
