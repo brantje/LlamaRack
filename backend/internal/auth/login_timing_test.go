@@ -100,14 +100,14 @@ func assertLoginWaitsForPasswordWork(t *testing.T, login func(context.Context, s
 		case err := <-loginDone:
 			cancel()
 			close(release)
-			_ = <-blockerDone
+			<-blockerDone
 			blocker.Release()
 			t.Fatalf("login returned before entering password work: %v", err)
 		case <-ticker.C:
 		case <-timeout.C:
 			cancel()
 			close(release)
-			_ = <-blockerDone
+			<-blockerDone
 			blocker.Release()
 			t.Fatal("login did not reserve queued password work")
 		}
@@ -116,7 +116,7 @@ func assertLoginWaitsForPasswordWork(t *testing.T, login func(context.Context, s
 	cancel()
 	if err := <-loginDone; !errors.Is(err, context.Canceled) {
 		close(release)
-		_ = <-blockerDone
+		<-blockerDone
 		blocker.Release()
 		t.Fatalf("queued login error=%v, want %v", err, context.Canceled)
 	}
