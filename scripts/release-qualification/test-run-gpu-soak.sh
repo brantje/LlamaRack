@@ -26,7 +26,8 @@ cat >"$fake_soak" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$$" >"${TEST_ROOT:?}/soak-pid.txt"
-curl -sS http://unit.test/stream >/dev/null
+curl -sS http://unit.test/health >/dev/null
+curl -sS --max-time 120 http://unit.test/api/v1/playground/chat/completions >/dev/null
 sleep 0.2
 EOF
 chmod +x "$fake_soak"
@@ -55,8 +56,10 @@ actual_container="$(cat "$tmpdir/monitor-container.txt")"
 [[ "$actual_container" == "$expected_container" ]] \
   || fail "monitor target mismatch: expected $expected_container, got $actual_container"
 
-grep -F -- '--connect-timeout 10 --max-time 120 -sS http://unit.test/stream' "$tmpdir/curl-args.txt" >/dev/null \
-  || fail "GPU soak curl shim did not enforce connect/max timeouts"
+grep -F -- '-sS http://unit.test/health --connect-timeout 10 --max-time 120' "$tmpdir/curl-args.txt" >/dev/null \
+  || fail "GPU soak curl shim did not enforce the control request timeout"
+grep -F -- '-sS --max-time 120 http://unit.test/api/v1/playground/chat/completions --connect-timeout 10 --max-time 600' "$tmpdir/curl-args.txt" >/dev/null \
+  || fail "GPU soak curl shim did not override inference requests to the longer timeout"
 
 fakebin="$tmpdir/fakebin"
 mkdir -p "$fakebin" "$tmpdir/monitor-artifacts"
