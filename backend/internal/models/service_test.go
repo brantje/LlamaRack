@@ -107,7 +107,7 @@ func TestRegistryCreateGetUpdateOptionsAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.ID == "" || m.Name != "Coder Model" || m.GGUFPath != "coder-IQ2_XS.gguf" || m.TotalBytes == 0 || m.Quantization != "IQ2_XS" || m.ContextLength != 32768 {
+	if m.ID == "" || m.Slug != "coder-model" || m.Name != "Coder Model" || m.GGUFPath != "coder-IQ2_XS.gguf" || m.TotalBytes == 0 || m.Quantization != "IQ2_XS" || m.ContextLength != 32768 {
 		t.Fatalf("unexpected model: %+v", m)
 	}
 	if instances, err := s.Instances(ctx, m.ID); err != nil || len(instances) != 0 {
@@ -131,7 +131,7 @@ func TestRegistryCreateGetUpdateOptionsAndDelete(t *testing.T) {
 	}
 
 	updated, err := s.Update(ctx, m.ID, UpdateModelInput{Name: "Coder Updated", ContextLength: 65536, Options: map[string]string{"threads": "8"}})
-	if err != nil || updated.Name != "Coder Updated" || updated.ContextLength != 65536 {
+	if err != nil || updated.ID != m.ID || updated.Slug != m.Slug || updated.Name != "Coder Updated" || updated.ContextLength != 65536 {
 		t.Fatalf("Update=%+v err=%v", updated, err)
 	}
 	opts, _ = s.Options(ctx, m.ID)
@@ -175,7 +175,7 @@ func TestLegacyPublicIDCompatibilityCreatesAddressableInstance(t *testing.T) {
 	if err != nil || len(instances) != 1 {
 		t.Fatalf("instances=%+v err=%v", instances, err)
 	}
-	if instances[0].ID != "legacy-model" || instances[0].Autoload || !instances[0].AlwaysOn || instances[0].Priority != "high" || instances[0].EvictionEnabled || instances[0].IdleUnloadSeconds != 90 {
+	if instances[0].ID == "" || instances[0].ID == "legacy-model" || instances[0].Slug != "legacy-model" || instances[0].Autoload || !instances[0].AlwaysOn || instances[0].Priority != "high" || instances[0].EvictionEnabled || instances[0].IdleUnloadSeconds != 90 {
 		t.Fatalf("legacy instance=%+v", instances[0])
 	}
 	resolved, err := s.GetByPublicID(ctx, "legacy-model")
@@ -185,8 +185,8 @@ func TestLegacyPublicIDCompatibilityCreatesAddressableInstance(t *testing.T) {
 
 	// List historically projects policy from the earliest Instance ordered by
 	// created_at then id. Keep that exact compatibility behavior while batching.
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		"legacy-first", m.ID, "Legacy First", 0, 1, 0, "low", 1, 17, 1); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		"00000000-0000-4000-8000-000000000001", "legacy-first", m.ID, "Legacy First", 0, 1, 0, "low", 1, 17, 1); err != nil {
 		t.Fatal(err)
 	}
 	expected, err := s.GetByID(ctx, m.ID)
