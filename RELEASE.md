@@ -70,7 +70,7 @@ Rebuilding a release from the same source inputs must not silently choose a diff
 Every `1.0.0-rc.N` (and later release candidate following this policy) performs a fresh upstream lookup when that candidate is cut:
 
 1. pin the current published `ghcr.io/ggml-org/llama.cpp` `server` and supported `server-cuda*` images to immutable digests;
-2. read the CPU/CUDA images' `org.opencontainers.image.version` and require the same `bNNNN` build;
+2. read `org.opencontainers.image.version` from those pinned digest references and require the same `bNNNN` build;
 3. query `ggml-org/llama.cpp` for the latest normal/stable GitHub release (reject drafts and prereleases);
 4. if that GitHub release's immutable `bNNNN` matches the published GHCR images, record the GitHub release name;
 5. otherwise record the published GHCR `bNNNN` as the bundled runtime identity (upstream container images are published on a different cadence than GitHub stable releases, so `server-bNNNN` tags for `releases/latest` may never exist);
@@ -163,14 +163,14 @@ The expected stable release sequence is:
 
 ```text
 freeze main for RC scope
-→ resolve latest stable llama.cpp
-→ resolve/pin immutable bNNNN runtime
+→ pin current GHCR llama.cpp server images by digest
+→ record matching GitHub stable name or published GHCR bNNNN
 → build versioned CPU/CUDA candidates
 → verify build identity
 → run release qualification
 → publish 1.0.0-rc.N prerelease + images
 → bug fixes only
-→ repeat latest-stable lookup + qualification for each later RC
+→ repeat GHCR pin + identity lookup + qualification for each later RC
 → tag final 1.0.0 at the final RC commit
 → verify final RC identity
 → rebuild stable version identity with the same runtime

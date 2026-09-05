@@ -70,16 +70,13 @@ image_build_tag() {
 
 cpu_image=''
 cuda_image=''
-selected_cuda_tag=''
 for ((attempt = 1; attempt <= resolve_attempts; attempt++)); do
   cpu_image="$(pin_digest "$alias_cpu_tag")" || cpu_image=''
 
   cuda_image=''
-  selected_cuda_tag=''
   for candidate in "${alias_cuda_candidates[@]}"; do
     if resolved="$(pin_digest "$candidate")"; then
       cuda_image="$resolved"
-      selected_cuda_tag="$candidate"
       break
     fi
   done
@@ -147,12 +144,12 @@ else
     exit 1
   fi
 
-  cpu_build="$(image_build_tag "$alias_cpu_tag")" || {
-    echo "Unable to read llama.cpp build identity from ${alias_cpu_tag}." >&2
+  cpu_build="$(image_build_tag "$cpu_image")" || {
+    echo "Unable to read llama.cpp build identity from ${cpu_image}." >&2
     exit 1
   }
-  cuda_build="$(image_build_tag "$selected_cuda_tag")" || {
-    echo "Unable to read llama.cpp build identity from ${selected_cuda_tag}." >&2
+  cuda_build="$(image_build_tag "$cuda_image")" || {
+    echo "Unable to read llama.cpp build identity from ${cuda_image}." >&2
     exit 1
   }
   if [[ "$cpu_build" != "$cuda_build" ]]; then

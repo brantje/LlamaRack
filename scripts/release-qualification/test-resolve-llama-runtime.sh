@@ -74,8 +74,21 @@ digest_for() {
   esac
 }
 
+cpu_digest_ref='ghcr.io/ggml-org/llama.cpp@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+cuda_digest_ref='ghcr.io/ggml-org/llama.cpp@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+
 version_for() {
-  printf '%s\n' "${MOCK_IMAGE_VERSION:-b10809}"
+  case "$1" in
+    ghcr.io/ggml-org/llama.cpp:server|"$cpu_digest_ref")
+      printf '%s\n' "${MOCK_IMAGE_VERSION:-b10809}"
+      ;;
+    ghcr.io/ggml-org/llama.cpp:server-cuda|"$cuda_digest_ref")
+      printf '%s\n' "${MOCK_IMAGE_VERSION:-b10809}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 if [[ "$mode" == 'never' ]]; then
@@ -97,8 +110,8 @@ fi
 if [[ "$mode" == 'mismatch-cuda' ]]; then
   if [[ "$is_version_query" == '1' ]]; then
     case "$ref" in
-      ghcr.io/ggml-org/llama.cpp:server) printf 'b10795\n' ;;
-      ghcr.io/ggml-org/llama.cpp:server-cuda) printf 'b10796\n' ;;
+      ghcr.io/ggml-org/llama.cpp:server|"$cpu_digest_ref") printf 'b10795\n' ;;
+      ghcr.io/ggml-org/llama.cpp:server-cuda|"$cuda_digest_ref") printf 'b10796\n' ;;
       *) exit 1 ;;
     esac
     exit 0
@@ -108,9 +121,9 @@ if [[ "$mode" == 'mismatch-cuda' ]]; then
 fi
 
 case "$ref" in
-  ghcr.io/ggml-org/llama.cpp:server|ghcr.io/ggml-org/llama.cpp:server-cuda)
+  ghcr.io/ggml-org/llama.cpp:server|ghcr.io/ggml-org/llama.cpp:server-cuda|"$cpu_digest_ref"|"$cuda_digest_ref")
     if [[ "$is_version_query" == '1' ]]; then
-      version_for
+      version_for "$ref" || exit 1
     else
       digest_for "$ref" || exit 1
     fi
@@ -174,8 +187,8 @@ grep -q 'Resolved latest stable llama.cpp v0.4.0 (b10809)' "${tmpdir}/success.er
 printf '%s\n' \
   'ghcr.io/ggml-org/llama.cpp:server' \
   'ghcr.io/ggml-org/llama.cpp:server-cuda' \
-  'ghcr.io/ggml-org/llama.cpp:server' \
-  'ghcr.io/ggml-org/llama.cpp:server-cuda' > "${tmpdir}/match-expected.log"
+  'ghcr.io/ggml-org/llama.cpp@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
+  'ghcr.io/ggml-org/llama.cpp@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' > "${tmpdir}/match-expected.log"
 expect_log_refs "${tmpdir}/match-expected.log"
 
 : > "$MOCK_DOCKER_LOG"
