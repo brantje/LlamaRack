@@ -50,6 +50,19 @@ func TestInvalidLoginClassesUseBoundedPasswordWork(t *testing.T) {
 	}
 }
 
+func TestDummyPasswordHashUsesCurrentParameters(t *testing.T) {
+	memory, iterations, threads, _, expected, ok := parsePasswordHash(dummyPasswordHash)
+	if !ok {
+		t.Fatal("dummy password hash must parse")
+	}
+	if memory != argonMemory || iterations != argonTime || threads != argonThreads || len(expected) != argonKeyLength {
+		t.Fatalf("dummy hash parameters m=%d t=%d p=%d len=%d do not match current password parameters", memory, iterations, threads, len(expected))
+	}
+	if passwordNeedsRehash(dummyPasswordHash) {
+		t.Fatal("dummy password hash must use current password parameters")
+	}
+}
+
 func assertLoginWaitsForPasswordWork(t *testing.T, login func(context.Context, string, string) error, username string) {
 	t.Helper()
 	previous := globalPasswordWorkGate
