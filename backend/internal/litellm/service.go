@@ -28,14 +28,14 @@ type LastSync struct {
 }
 
 type Status struct {
-	ProxyURL            string    `json:"proxy_url"`
-	APIBase             string    `json:"api_base"`
-	DefaultAPIBase      string    `json:"default_api_base"`
-	ProxyKey            KeyStatus `json:"proxy_key"`
-	GeneratedKey        KeyStatus `json:"generated_key"`
-	LastSync            *LastSync `json:"last_sync,omitempty"`
-	Configured          bool      `json:"configured"`
-	LastSyncOK          bool      `json:"last_sync_ok"`
+	ProxyURL       string    `json:"proxy_url"`
+	APIBase        string    `json:"api_base"`
+	DefaultAPIBase string    `json:"default_api_base"`
+	ProxyKey       KeyStatus `json:"proxy_key"`
+	GeneratedKey   KeyStatus `json:"generated_key"`
+	LastSync       *LastSync `json:"last_sync,omitempty"`
+	Configured     bool      `json:"configured"`
+	LastSyncOK     bool      `json:"last_sync_ok"`
 }
 
 type KeyStatus struct {
@@ -65,13 +65,7 @@ type Service struct {
 }
 
 func New(db *sql.DB, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
-	return &Service{
-		db:       db,
-		auth:     authService,
-		secrets:  secrets,
-		settings: managerSettings,
-		http:     &http.Client{Timeout: 30 * time.Second},
-	}
+	return &Service{db: db, auth: authService, secrets: secrets, settings: managerSettings, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
 func (s *Service) SetHTTPClient(client *http.Client) {
@@ -238,104 +232,111 @@ func (s *Service) BootReconcile(ctx context.Context) {
 func (s *Service) reconcile(ctx context.Context) (LastSync, error) {
 	client, err := s.newClient(ctx)
 	if err != nil {
-		syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error()}
-		_ = s.persistLastSync(ctx, syncResult)
-		return syncResult, err
+		return s.reconcileFailure(ctx, err, 0, 0)
 	}
 	apiBase, err := s.effectiveAPIBase(ctx)
 	if err != nil {
-		syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error()}
-		_ = s.persistLastSync(ctx, syncResult)
-		return syncResult, err
+		return s.reconcileFailure(ctx, err, 0, 0)
 	}
 	inferenceKey, err := s.inferenceSecret(ctx)
 	if err != nil {
-		syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error()}
-		_ = s.persistLastSync(ctx, syncResult)
-		return syncResult, err
+		return s.reconcileFailure(ctx, err, 0, 0)
 	}
 	enabled, err := s.enabledInstances(ctx)
 	if err != nil {
-		syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error()}
-		_ = s.persistLastSync(ctx, syncResult)
-		return syncResult, err
+		return s.reconcileFailure(ctx, err, 0, 0)
 	}
-	enabledSet := map[string]instances.Instance{}
+	enabledByID := make(map[string]instances.Instance, len(enabled))
+	enabledBySlug := make(map[string]instances.Instance, len(enabled))
 	for _, item := range enabled {
-		enabledSet[item.ID] = item
+		enabledByID[item.ID] = item
+		enabledBySlug[item.Slug] = item
 	}
+
 	remote, err := client.ListModels(ctx)
 	if err != nil {
-		syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error()}
-		_ = s.persistLastSync(ctx, syncResult)
-		return syncResult, err
+		return s.reconcileFailure(ctx, err, 0, 0)
 	}
 	owned := make([]ModelEntry, 0)
-	ownedByInstance := map[string]ModelEntry{}
+	ownedByInstanceID := make(map[string]ModelEntry)
 	for _, entry := range remote {
 		if !IsManaged(entry) {
 			continue
 		}
 		owned = append(owned, entry)
-		if id := strings.TrimSpace(entry.ModelInfo.LlamaRackInstanceID); id != "" {
-			ownedByInstance[id] = entry
+		owner := strings.TrimSpace(entry.ModelInfo.LlamaRackInstanceID)
+		if _, ok := enabledByID[owner]; ok {
+			ownedByInstanceID[owner] = entry
+			continue
 		}
-		if id := strings.TrimSpace(entry.ModelName); id != "" {
-			if _, ok := ownedByInstance[id]; !ok {
-				ownedByInstance[id] = entry
+		// Pre-#180 rows stored the public Instance slug in durable ownership
+		// metadata. Adopt those rows by mapping either the legacy metadata value or
+		// model_name to the current Instance UUID, then update them in place below.
+		if item, ok := enabledBySlug[owner]; ok {
+			ownedByInstanceID[item.ID] = entry
+			continue
+		}
+		if item, ok := enabledBySlug[strings.TrimSpace(entry.ModelName)]; ok {
+			if _, exists := ownedByInstanceID[item.ID]; !exists {
+				ownedByInstanceID[item.ID] = entry
 			}
 		}
 	}
+
 	published := 0
-	for id := range enabledSet {
-		entry, ok := ownedByInstance[id]
+	for id, item := range enabledByID {
+		entry, ok := ownedByInstanceID[id]
 		if !ok {
-			model := BuildModelEntry(id, apiBase, inferenceKey, "")
+			model := BuildInstanceModelEntry(item.ID, item.Slug, apiBase, inferenceKey, "")
 			if err := client.CreateModel(ctx, model); err != nil {
-				syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error(), Published: published}
-				_ = s.persistLastSync(ctx, syncResult)
-				return syncResult, err
+				return s.reconcileFailure(ctx, err, published, 0)
 			}
 			published++
 			continue
 		}
-		if entryDrifted(entry, id, apiBase, inferenceKey) {
-			update := BuildModelEntry(id, apiBase, inferenceKey, entry.ModelInfo.ID)
+		if instanceEntryDrifted(entry, item.ID, item.Slug, apiBase, inferenceKey) {
+			update := BuildInstanceModelEntry(item.ID, item.Slug, apiBase, inferenceKey, entry.ModelInfo.ID)
 			if err := client.UpdateModel(ctx, update); err != nil {
-				syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error(), Published: published}
-				_ = s.persistLastSync(ctx, syncResult)
-				return syncResult, err
+				return s.reconcileFailure(ctx, err, published, 0)
 			}
 			published++
 		}
 	}
+
 	unpublished := 0
 	for _, entry := range owned {
-		instanceID := strings.TrimSpace(entry.ModelInfo.LlamaRackInstanceID)
-		if instanceID == "" {
-			instanceID = entry.ModelName
-		}
-		if _, ok := enabledSet[instanceID]; ok {
+		if _, ok := resolveManagedRemoteInstance(entry, enabledByID, enabledBySlug); ok {
 			continue
 		}
 		if entry.ModelInfo.ID == "" {
 			continue
 		}
 		if err := client.DeleteModel(ctx, entry.ModelInfo.ID); err != nil {
-			syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error(), Published: published, Unpublished: unpublished}
-			_ = s.persistLastSync(ctx, syncResult)
-			return syncResult, err
+			return s.reconcileFailure(ctx, err, published, unpublished)
 		}
 		unpublished++
 	}
-	syncResult := LastSync{
-		At:          time.Now().UTC().Format(time.RFC3339),
-		OK:          true,
-		Published:   published,
-		Unpublished: unpublished,
-	}
+	syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: true, Published: published, Unpublished: unpublished}
 	_ = s.persistLastSync(ctx, syncResult)
 	return syncResult, nil
+}
+
+func resolveManagedRemoteInstance(entry ModelEntry, byID, bySlug map[string]instances.Instance) (instances.Instance, bool) {
+	owner := strings.TrimSpace(entry.ModelInfo.LlamaRackInstanceID)
+	if item, ok := byID[owner]; ok {
+		return item, true
+	}
+	if item, ok := bySlug[owner]; ok {
+		return item, true
+	}
+	item, ok := bySlug[strings.TrimSpace(entry.ModelName)]
+	return item, ok
+}
+
+func (s *Service) reconcileFailure(ctx context.Context, err error, published, unpublished int) (LastSync, error) {
+	syncResult := LastSync{At: time.Now().UTC().Format(time.RFC3339), OK: false, Error: err.Error(), Published: published, Unpublished: unpublished}
+	_ = s.persistLastSync(ctx, syncResult)
+	return syncResult, err
 }
 
 func (s *Service) unpublishAll(ctx context.Context) (int, error) {
@@ -416,7 +417,7 @@ func (s *Service) newClient(ctx context.Context) (*Client, error) {
 }
 
 func (s *Service) enabledInstances(ctx context.Context) ([]instances.Instance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE enabled=1 AND NOT EXISTS (SELECT 1 FROM provider_imports pi WHERE pi.instance_id=instances.id AND pi.state=?) ORDER BY name,id`, modelimports.StateDownloading)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE enabled=1 AND NOT EXISTS (SELECT 1 FROM provider_imports pi WHERE pi.instance_id=instances.id AND pi.state=?) ORDER BY name,id`, modelimports.StateDownloading)
 	if err != nil {
 		return nil, err
 	}
@@ -426,13 +427,23 @@ func (s *Service) enabledInstances(ctx context.Context) ([]instances.Instance, e
 		var item instances.Instance
 		var enabled, autoload, alwaysOn, eviction int
 		var devices, split sql.NullString
-		if err := rows.Scan(&item.ID, &item.ModelID, &item.Name, &enabled, &autoload, &alwaysOn, &item.Priority, &eviction, &item.IdleUnloadSeconds, &item.MaxPendingRequests, &item.GPUMode, &devices, &split, &item.RequestLogMode); err != nil {
+		if err := rows.Scan(&item.ID, &item.Slug, &item.ModelID, &item.Name, &enabled, &autoload, &alwaysOn, &item.Priority, &eviction, &item.IdleUnloadSeconds, &item.MaxPendingRequests, &item.GPUMode, &devices, &split, &item.RequestLogMode); err != nil {
 			return nil, err
 		}
 		item.Enabled = enabled != 0
 		item.Autoload = autoload != 0
 		item.AlwaysOn = alwaysOn != 0
 		item.EvictionEnabled = eviction != 0
+		if devices.Valid && strings.TrimSpace(devices.String) != "" {
+			for _, device := range strings.Split(devices.String, ",") {
+				if device = strings.TrimSpace(device); device != "" {
+					item.GPUDevices = append(item.GPUDevices, device)
+				}
+			}
+		}
+		if split.Valid {
+			item.TensorSplit = split.String
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
