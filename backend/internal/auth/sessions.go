@@ -8,11 +8,24 @@ import (
 )
 
 func (s *Service) LoginWithMetadata(ctx context.Context, username, password, remoteAddress, userAgent string) (string, string, User, error) {
+	work, err := reservePasswordWork()
+	if err != nil {
+		return "", "", User{}, err
+	}
+	defer work.Release()
+
 	var user User
 	var hash string
 	var enabled int
 	var lastLogin sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled, &user.CreatedAt, &lastLogin); err != nil || enabled == 0 || !verifyPassword(password, hash) {
+	if err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled, &user.CreatedAt, &lastLogin); err != nil || enabled == 0 {
+		return "", "", User{}, ErrInvalidCredentials
+	}
+	verified, err := verifyPasswordWithReservation(ctx, work, password, hash)
+	if err != nil {
+		return "", "", User{}, err
+	}
+	if !verified {
 		return "", "", User{}, ErrInvalidCredentials
 	}
 	user.Enabled = true
@@ -20,6 +33,16 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 		value := lastLogin.Int64
 		user.LastLoginAt = &value
 	}
+
+	var rehashed string
+	if passwordNeedsRehash(hash) {
+		rehashed, err = hashPasswordWithReservation(ctx, work, password)
+		if err != nil {
+			return "", "", User{}, err
+		}
+	}
+	work.Release()
+
 	token, err := randomToken(32)
 	if err != nil {
 		return "", "", User{}, err
@@ -37,13 +60,9 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 	if err != nil {
 		return "", "", User{}, err
 	}
-	defer tx.Rollback()
-	if passwordNeedsRehash(hash) {
-		rehashed, err := hashPassword(password)
-		if err != nil {
-			return "", "", User{}, err
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", rehashed, user.ID); err != nil {
+	defer func() { _ = tx.Rollback() }()
+	if rehashed != "" {
+		if err := persistPasswordRehash(ctx, tx, user.ID, hash, rehashed); err != nil {
 			return "", "", User{}, err
 		}
 	}

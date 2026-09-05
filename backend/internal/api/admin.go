@@ -144,6 +144,13 @@ func (h *adminHandler) users(w http.ResponseWriter, r *http.Request, principal m
 		}
 		created, err := h.auth.CreateUser(r.Context(), in.Username, in.Password)
 		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			if errors.Is(err, auth.ErrPasswordWorkBusy) {
+				writePasswordWorkUnavailable(w)
+				return
+			}
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
@@ -213,6 +220,9 @@ func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, princip
 			return
 		}
 		if err := h.auth.ResetPassword(r.Context(), id, in.Password); err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
 			writeUserMutationError(w, err)
 			return
 		}
@@ -247,6 +257,13 @@ func (h *adminHandler) changePassword(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	if err := h.auth.ChangePassword(r.Context(), user.ID, in.CurrentPassword, in.NewPassword, session.ID); err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
+		if errors.Is(err, auth.ErrPasswordWorkBusy) {
+			writePasswordWorkUnavailable(w)
+			return
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "current password is invalid"})
 			return
@@ -501,6 +518,8 @@ func (h *adminHandler) system(w http.ResponseWriter, r *http.Request) {
 
 func writeUserMutationError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, auth.ErrPasswordWorkBusy):
+		writePasswordWorkUnavailable(w)
 	case errors.Is(err, sql.ErrNoRows):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 	case errors.Is(err, auth.ErrLastEnabledUser), errors.Is(err, auth.ErrSelfDelete):

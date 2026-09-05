@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -91,19 +92,21 @@ func TestLoginProtectorPrunesExpiredAndOldestEntries(t *testing.T) {
 	if _, ok := p.attempts["expired"]; ok {
 		t.Fatal("expired unlocked entry was not pruned")
 	}
-	if _, ok := p.attempts["locked"]; ok {
-		t.Fatal("oldest retained entry should be removed by maxItems pruning")
+	if _, ok := p.attempts["locked"]; !ok {
+		t.Fatal("active lockout must not be evicted")
+	}
+	if _, ok := p.attempts["old"]; ok {
+		t.Fatal("oldest unlocked entry should be removed by maxItems pruning")
 	}
 	if len(p.attempts) != 2 {
 		t.Fatalf("attempt count=%d entries=%v", len(p.attempts), p.attempts)
-	}
-	if _, ok := p.attempts["old"]; !ok {
-		t.Fatal("expected old recent entry to remain")
 	}
 	if _, ok := p.attempts["new"]; !ok {
 		t.Fatal("expected newest entry to remain")
 	}
 
+	p.attempts = map[string]loginAttempt{}
+	p.addresses = map[string]loginAttempt{}
 	ctx := context.Background()
 	if _, err := store.Set(ctx, settings.LoginFailureThreshold, 99); err != nil {
 		t.Fatal(err)
@@ -113,6 +116,76 @@ func TestLoginProtectorPrunesExpiredAndOldestEntries(t *testing.T) {
 	}
 	if delay, locked := p.BeforeAttempt(ctx, "shift-cap", "192.0.2.55"); locked || delay != 1600*time.Millisecond {
 		t.Fatalf("capped delay=%v locked=%v", delay, locked)
+	}
+}
+
+func TestLoginProtectorKeepsActiveLockoutAtCapacity(t *testing.T) {
+	ctx := context.Background()
+	store := testSecuritySettings(t)
+	if _, err := store.Set(ctx, settings.LoginFailureThreshold, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Set(ctx, settings.LoginLockoutSeconds, 60); err != nil {
+		t.Fatal(err)
+	}
+	p := NewLoginProtector(store)
+	p.maxItems = 3
+	now := time.Unix(300000, 0)
+	p.now = func() time.Time { return now }
+
+	if p.Failure(ctx, "target", "192.0.2.1") {
+		t.Fatal("first target failure should not lock")
+	}
+	if !p.Failure(ctx, "target", "192.0.2.1") {
+		t.Fatal("second target failure should lock")
+	}
+	for i := 0; i < 20; i++ {
+		p.Failure(ctx, fmt.Sprintf("spray-%d", i), fmt.Sprintf("198.51.100.%d", i+1))
+	}
+	if len(p.attempts) > p.maxItems {
+		t.Fatalf("attempt tracker exceeded bound: %d > %d", len(p.attempts), p.maxItems)
+	}
+	if delay, locked := p.BeforeAttempt(ctx, "target", "192.0.2.1"); !locked || delay != time.Minute {
+		t.Fatalf("target lockout was displaced: delay=%v locked=%v", delay, locked)
+	}
+}
+
+func TestLoginProtectorAggregatesFailuresByAddress(t *testing.T) {
+	ctx := context.Background()
+	store := testSecuritySettings(t)
+	if _, err := store.Set(ctx, settings.LoginFailureThreshold, 99); err != nil {
+		t.Fatal(err)
+	}
+	p := NewLoginProtector(store)
+	p.maxAddresses = 2
+	now := time.Unix(400000, 0)
+	p.now = func() time.Time { return now }
+
+	address := "192.0.2.10"
+	for i := 0; i < loginAddressDelayAfter; i++ {
+		p.Failure(ctx, fmt.Sprintf("user-%d", i), address)
+	}
+	if delay, locked := p.BeforeAttempt(ctx, "never-seen", address); locked || delay != 100*time.Millisecond {
+		t.Fatalf("aggregate delay=%v locked=%v", delay, locked)
+	}
+	if delay, locked := p.BeforeAttempt(ctx, "never-seen", "192.0.2.11"); locked || delay != 0 {
+		t.Fatalf("different address was throttled: delay=%v locked=%v", delay, locked)
+	}
+
+	p.Success("user-0", address)
+	if delay, _ := p.BeforeAttempt(ctx, "another-user", address); delay == 0 {
+		t.Fatal("successful account login must not clear aggregate address pressure")
+	}
+
+	p.Failure(ctx, "other-a", "192.0.2.20")
+	p.Failure(ctx, "other-b", "192.0.2.21")
+	if len(p.addresses) > p.maxAddresses {
+		t.Fatalf("address tracker exceeded bound: %d > %d", len(p.addresses), p.maxAddresses)
+	}
+
+	now = now.Add(loginAddressTTL + time.Second)
+	if delay, locked := p.BeforeAttempt(ctx, "fresh-user", address); locked || delay != 0 {
+		t.Fatalf("expired aggregate pressure remained: delay=%v locked=%v", delay, locked)
 	}
 }
 

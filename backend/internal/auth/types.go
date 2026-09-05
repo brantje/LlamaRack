@@ -45,6 +45,7 @@ var (
 	ErrOIDCLinkRequired   = errors.New("external identity is not linked to a management user")
 	ErrOIDCUsernameTaken  = errors.New("OIDC username matches an existing account; explicit linking is required")
 	ErrAuthLockoutRisk    = errors.New("operation would leave no usable management login method")
+	ErrPasswordWorkBusy   = errors.New("password work capacity exhausted")
 
 	ErrAPIKeyMissing              = errors.New("missing api key")
 	ErrAPIKeyInvalid              = errors.New("invalid api key")
