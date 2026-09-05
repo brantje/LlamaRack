@@ -112,9 +112,11 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 		t.Fatalf("foreign key violations=%d", violations)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','model-a','Missing slug')`); err == nil {
-		t.Fatal("expected instance slug trigger to reject missing slug")
+	const fixtureID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES(?,'model-a','Missing slug')`, fixtureID); err != nil {
+		t.Fatalf("direct fixture insert should receive an id-based slug fallback: %v", err)
 	}
+	assertSingleString(t, ctx, db, `SELECT slug FROM instances WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`, fixtureID)
 	if _, err := db.ExecContext(ctx, `UPDATE models SET slug='' WHERE id='model-a'`); err == nil {
 		t.Fatal("expected model slug trigger to reject empty slug")
 	}

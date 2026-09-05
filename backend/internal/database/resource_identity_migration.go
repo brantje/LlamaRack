@@ -163,9 +163,9 @@ func upResourceIdentity(ctx context.Context, tx *sql.Tx) error {
 	for _, statement := range []string{
 		`CREATE UNIQUE INDEX instances_slug_uidx ON instances(slug)`,
 		`CREATE UNIQUE INDEX models_slug_uidx ON models(slug)`,
-		`CREATE TRIGGER instances_slug_required_insert BEFORE INSERT ON instances WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN SELECT RAISE(ABORT,'instance slug is required'); END`,
+		`CREATE TRIGGER instances_slug_default_insert AFTER INSERT ON instances WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN UPDATE instances SET slug=NEW.id WHERE id=NEW.id; END`,
 		`CREATE TRIGGER instances_slug_required_update BEFORE UPDATE OF slug ON instances WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN SELECT RAISE(ABORT,'instance slug is required'); END`,
-		`CREATE TRIGGER models_slug_required_insert BEFORE INSERT ON models WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN SELECT RAISE(ABORT,'model slug is required'); END`,
+		`CREATE TRIGGER models_slug_default_insert AFTER INSERT ON models WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN UPDATE models SET slug=NEW.id WHERE id=NEW.id; END`,
 		`CREATE TRIGGER models_slug_required_update BEFORE UPDATE OF slug ON models WHEN NEW.slug IS NULL OR trim(NEW.slug)='' BEGIN SELECT RAISE(ABORT,'model slug is required'); END`,
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
