@@ -194,6 +194,7 @@ type gatewayFixture struct {
 	db            *sql.DB
 	sup           *supervisor.Supervisor
 	observability *observability.Service
+	instanceID    string
 }
 
 func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
@@ -233,8 +234,12 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 		sup.Shutdown(ctx)
 	})
 	l := lifecycle.New(m, sup)
+	instance, err := l.Instances().GetBySlug(ctx, "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
 	obs := observability.New(db)
-	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, ownerID: user.ID, db: db, sup: sup, observability: obs}
+	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, ownerID: user.ID, db: db, sup: sup, observability: obs, instanceID: instance.ID}
 }
 
 func gatewayRequest(t *testing.T, g http.Handler, method, path, secret, body string) *httptest.ResponseRecorder {
@@ -282,7 +287,7 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 		t.Fatalf("missing failure correlation headers: %v", w.Header())
 	}
 
-	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: "gateway-model"})
+	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: f.instanceID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,11 +349,11 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if correlated.InstanceID != "gateway-model" || correlated.PromptTokensPerSecond == nil || correlated.GenerationTokensPerSecond == nil {
+		if correlated.InstanceID != f.instanceID || correlated.PromptTokensPerSecond == nil || correlated.GenerationTokensPerSecond == nil {
 			t.Fatalf("correlated metrics=%+v", correlated)
 		}
 	}
-	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: "gateway-model", Limit: 10})
+	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: f.instanceID, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +416,7 @@ func TestStreamingHeadersDoNotBufferOrFabricateFinalMetrics(t *testing.T) {
 	if !strings.Contains(line, "hello") || time.Since(started) >= 750*time.Millisecond {
 		t.Fatalf("streaming first chunk was buffered: elapsed=%v line=%q", time.Since(started), line)
 	}
-	if activity := f.lifecycle.Activity("gateway-model"); activity.ActiveRequests != 1 || activity.PendingRequests != 0 {
+	if activity := f.lifecycle.Activity(f.instanceID); activity.ActiveRequests != 1 || activity.PendingRequests != 0 {
 		t.Fatalf("streaming should remain active until proxy completion: %+v", activity)
 	}
 	_, _ = reader.ReadString(0)
