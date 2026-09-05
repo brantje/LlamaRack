@@ -30,16 +30,14 @@ func TestUpstreamPortHeaderPassThroughBranches(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	writer := &upstreamPortResponseWriter{ResponseWriter: recorder, request: request}
+	writer := &upstreamPortResponseWriter{ResponseWriter: recorder}
 	writer.WriteHeader(http.StatusAccepted)
 	if recorder.Code != http.StatusAccepted || recorder.Header().Get(headerUpstreamPort) != "" {
 		t.Fatalf("unexpected response: code=%d headers=%v", recorder.Code, recorder.Header())
 	}
 
 	recorder = httptest.NewRecorder()
-	request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	writer = &upstreamPortResponseWriter{ResponseWriter: recorder, request: request}
+	writer = &upstreamPortResponseWriter{ResponseWriter: recorder}
 	_, _ = writer.Write([]byte("ok"))
 	writer.Flush()
 	if recorder.Body.String() != "ok" || writer.Unwrap() != recorder {
