@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -21,21 +22,58 @@ func validatePassword(password string) error {
 }
 
 func hashPassword(password string) (string, error) {
+	return hashPasswordContext(context.Background(), password)
+}
+
+func hashPasswordContext(ctx context.Context, password string) (string, error) {
+	reservation, err := reservePasswordWork()
+	if err != nil {
+		return "", err
+	}
+	defer reservation.Release()
+	return hashPasswordWithReservation(ctx, reservation, password)
+}
+
+func hashPasswordWithReservation(ctx context.Context, reservation *passwordWorkReservation, password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLength)
+	var hash []byte
+	if err := reservation.run(ctx, func() {
+		hash = argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLength)
+	}); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", argonMemory, argonTime, argonThreads, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
 }
 
 func verifyPassword(password, encoded string) bool {
+	verified, err := verifyPasswordContext(context.Background(), password, encoded)
+	return err == nil && verified
+}
+
+func verifyPasswordContext(ctx context.Context, password, encoded string) (bool, error) {
+	reservation, err := reservePasswordWork()
+	if err != nil {
+		return false, err
+	}
+	defer reservation.Release()
+	return verifyPasswordWithReservation(ctx, reservation, password, encoded)
+}
+
+func verifyPasswordWithReservation(ctx context.Context, reservation *passwordWorkReservation, password, encoded string) (bool, error) {
 	memory, iterations, threads, salt, expected, ok := parsePasswordHash(encoded)
 	if !ok {
-		return false
+		return false, nil
 	}
-	actual := argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(expected)))
-	return subtle.ConstantTimeCompare(actual, expected) == 1
+	var actual []byte
+	if err := reservation.run(ctx, func() {
+		actual = argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(expected)))
+	}); err != nil {
+		return false, err
+	}
+	return subtle.ConstantTimeCompare(actual, expected) == 1, nil
 }
 
 func passwordNeedsRehash(encoded string) bool {
