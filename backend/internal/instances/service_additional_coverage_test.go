@@ -29,7 +29,7 @@ func TestUpdateValidationConflictAndNilOptionsBranches(t *testing.T) {
 	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", MaxPendingRequests: intp(-1)}); err == nil {
 		t.Fatal("expected invalid update pending limit")
 	}
-	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", Slug: second.ID}); err == nil {
+	if _, err := s.Update(ctx, first.ID, UpdateInput{Name: "First", Slug: second.Slug}); err == nil {
 		t.Fatal("expected unique slug conflict")
 	}
 
@@ -39,7 +39,7 @@ func TestUpdateValidationConflictAndNilOptionsBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != "first-defaulted" || !updated.Enabled || !updated.Autoload || !updated.EvictionEnabled || updated.Priority != "normal" || updated.GPUMode != "auto" {
+	if updated.ID != first.ID || updated.Slug != "first-defaulted" || !updated.Enabled || !updated.Autoload || !updated.EvictionEnabled || updated.Priority != "normal" || updated.GPUMode != "auto" {
 		t.Fatalf("unexpected updated defaults: %+v", updated)
 	}
 }
