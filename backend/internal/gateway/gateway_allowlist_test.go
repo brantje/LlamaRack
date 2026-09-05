@@ -52,15 +52,19 @@ func TestGatewayRejectsManagementKeysAndFiltersAllowlist(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("allowlist get model=%d %s", w.Code, w.Body.String())
 	}
+	var modelID string
+	if err := f.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, instanceID).Scan(&modelID); err != nil {
+		t.Fatal(err)
+	}
+	const otherID = "00000000-0000-4000-8000-000000000098"
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,'Other')`, otherID, "other", modelID); err != nil {
+		t.Fatal(err)
+	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", allowedSecret, `{"model":"other"}`)
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "instance_not_allowed") {
 		t.Fatalf("allowlist miss=%d %s", w.Code, w.Body.String())
 	}
 
-	var modelID string
-	if err := f.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, instanceID).Scan(&modelID); err != nil {
-		t.Fatal(err)
-	}
 	const tempID = "00000000-0000-4000-8000-000000000099"
 	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,'Temp')`, tempID, "temp-only", modelID); err != nil {
 		t.Fatal(err)
