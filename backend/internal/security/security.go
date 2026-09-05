@@ -343,7 +343,9 @@ func (p *LoginProtector) recordAddressFailure(address string, now time.Time) {
 		return
 	}
 	if _, exists := p.addresses[address]; !exists && len(p.addresses) >= p.maxAddresses {
-		p.evictOldestAddress()
+		if !p.evictOldestAddress(now) {
+			return
+		}
 	}
 	attempt := p.addresses[address]
 	attempt.Failures++
@@ -388,22 +390,29 @@ func (p *LoginProtector) pruneAddresses(now time.Time) {
 		}
 	}
 	for len(p.addresses) > p.maxAddresses {
-		p.evictOldestAddress()
+		if !p.evictOldestAddress(now) {
+			break
+		}
 	}
 }
 
-func (p *LoginProtector) evictOldestAddress() {
+func (p *LoginProtector) evictOldestAddress(now time.Time) bool {
 	oldestKey := ""
 	var oldest time.Time
 	for key, attempt := range p.addresses {
+		if delay, _ := loginAttemptPenalty(attempt, now, loginAddressDelayAfter); delay > 0 {
+			continue
+		}
 		if oldestKey == "" || attempt.UpdatedAt.Before(oldest) {
 			oldestKey = key
 			oldest = attempt.UpdatedAt
 		}
 	}
-	if oldestKey != "" {
-		delete(p.addresses, oldestKey)
+	if oldestKey == "" {
+		return false
 	}
+	delete(p.addresses, oldestKey)
+	return true
 }
 
 func loginAttemptPenalty(attempt loginAttempt, now time.Time, delayAfter int) (time.Duration, bool) {
