@@ -291,7 +291,7 @@ async function action(instance: Instance, operation: 'start' | 'stop' | 'restart
   pending.value = `${instance.id}:${operation}`
   error.value = ''
   try {
-    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.id)}/${operation}`, { method: 'POST' })
+    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.slug)}/${operation}`, { method: 'POST' })
     await manager.refresh()
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || `Unable to ${operation} Instance`
@@ -311,7 +311,7 @@ async function remove(instance: Instance) {
   pending.value = `${instance.id}:delete`
   error.value = ''
   try {
-    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.id)}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.slug)}`, { method: 'DELETE' })
     await manager.refresh()
     await refreshImportStates()
   } catch (value: any) {
@@ -409,10 +409,10 @@ onBeforeUnmount(() => {
         <tbody>
           <tr v-for="instance in filteredInstances" :key="instance.id" class="border-t border-[var(--color-divider)] align-top" :data-instance-state="instanceState(instance)">
             <td class="px-3 py-3">
-              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
+              <NuxtLink :to="`/instances/${encodeURIComponent(instance.slug)}/detail`" class="block text-[length:var(--font-size-table-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
               <div class="mt-1 flex items-center gap-1">
-                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
-                <AppCopyButton :text="instance.id" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance ID. Select the ID and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.slug }}</code>
+                <AppCopyButton :text="instance.slug" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance slug. Select the slug and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
               </div>
             </td>
             <td class="px-3 py-3 text-[var(--neutral-800)]">{{ modelName(instance.model_id) }}</td>
@@ -471,10 +471,10 @@ onBeforeUnmount(() => {
         <div class="flex h-full flex-col gap-4">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
-              <NuxtLink :to="`/instances/${encodeURIComponent(instance.id)}/detail`" class="block truncate text-[length:var(--font-size-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
+              <NuxtLink :to="`/instances/${encodeURIComponent(instance.slug)}/detail`" class="block truncate text-[length:var(--font-size-body)] font-semibold text-[var(--color-text)] hover:text-[var(--accent-700)]">{{ instance.name }}</NuxtLink>
               <div class="mt-1 flex items-center gap-1">
-                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.id }}</code>
-                <AppCopyButton :text="instance.id" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance ID. Select the ID and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
+                <code class="break-all font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="instance-id">{{ instance.slug }}</code>
+                <AppCopyButton :text="instance.slug" icon-only color="neutral" variant="ghost" size="xs" error-message="Unable to copy Instance slug. Select the slug and copy it manually." data-testid="copy-instance-id" @copied="error = ''" @error="message => error = message" />
               </div>
               <p class="mt-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ modelName(instance.model_id) }}</p>
             </div>
@@ -509,7 +509,7 @@ onBeforeUnmount(() => {
               <AppButton v-if="['UNLOADED', 'FAILED'].includes(instanceState(instance))" intent="ghost" size="xs" :loading="pending === `${instance.id}:start`" @click="action(instance, 'start')">Launch</AppButton>
               <AppButton v-else intent="ghost" size="xs" :loading="pending === `${instance.id}:stop`" @click="action(instance, 'stop')">Stop</AppButton>
             </template>
-            <AppButton :to="`/instances/${encodeURIComponent(instance.id)}/detail`" intent="ghost" size="xs">Details</AppButton>
+            <AppButton :to="`/instances/${encodeURIComponent(instance.slug)}/detail`" intent="ghost" size="xs">Details</AppButton>
             <AppButton v-if="!importBlocked(instance)" intent="ghost" size="xs" @click="showLogs(instance)">Logs</AppButton>
             <UDropdownMenu v-if="!importBlocked(instance)" :items="cardOverflowItems(instance)">
               <AppButton intent="ghost" size="xs" data-testid="instance-card-more" aria-label="More instance actions">More</AppButton>
