@@ -4,9 +4,16 @@ set -euo pipefail
 output_file="${1:-}"
 repository="${LLAMA_CPP_REPOSITORY:-ggml-org/llama.cpp}"
 api_url="${GITHUB_API_URL:-https://api.github.com}"
-resolution_mode="${LLAMA_RUNTIME_RESOLUTION_MODE:-release}"
 resolve_attempts="${LLAMA_RUNTIME_RESOLVE_ATTEMPTS:-20}"
 resolve_delay_seconds="${LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS:-30}"
+
+if [[ -n "${LLAMA_RUNTIME_RESOLUTION_MODE:-}" ]]; then
+  resolution_mode="$LLAMA_RUNTIME_RESOLUTION_MODE"
+elif [[ "${GITHUB_EVENT_NAME:-}" == 'push' ]]; then
+  resolution_mode='container'
+else
+  resolution_mode='release'
+fi
 
 for command in curl jq docker; do
   command -v "$command" >/dev/null || { echo "missing command: $command" >&2; exit 1; }
