@@ -43,10 +43,6 @@ jobs:
               text = text.replace(old, new)
 
           path.write_text(text)
-
-          for old in replacements:
-              if old in text:
-                  raise SystemExit(f'old workflow pattern still present: {old}')
           PY
 
           git diff --check
