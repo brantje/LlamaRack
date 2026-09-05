@@ -222,10 +222,7 @@ jobs:
             exit 2
           }
           test -d "$GPU_MODELS_DIR" || { echo "qualification models directory not found: $GPU_MODELS_DIR" >&2; exit 1; }
-          bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
-          monitor_pid=$!
-          trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
-          bash scripts/release-qualification/gpu-soak.sh \
+          bash scripts/release-qualification/run-gpu-soak.sh \
             "$CUDA_IMAGE" \
             "$GPU_MODELS_DIR" \
             "$GPU_CYCLES"
@@ -237,11 +234,9 @@ jobs:
             python3 scripts/release-qualification/verify-dense-multi-evidence.py \
               "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
           fi
-          wait "$monitor_pid"
           python3 scripts/release-qualification/analyze-manager-growth.py \
             "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
             "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
-          trap - EXIT
       - name: Upload GPU qualification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

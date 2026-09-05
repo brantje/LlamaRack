@@ -1,20 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-artifact_dir="${1:?usage: monitor-gpu-soak.sh <artifact-dir>}"
+artifact_dir="${1:?usage: monitor-gpu-soak.sh <artifact-dir> <container-name>}"
+container="${2:?usage: monitor-gpu-soak.sh <artifact-dir> <container-name>}"
 mkdir -p "$artifact_dir"
 output="$artifact_dir/manager-resource-samples.tsv"
 printf 'timestamp\tgoroutines\trss_kib\n' >"$output"
 
-container=""
+docker_timeout="${GPU_DOCKER_TIMEOUT:-10s}"
+docker_kill_after="${GPU_DOCKER_KILL_AFTER:-2s}"
+command -v timeout >/dev/null || { echo "missing command: timeout" >&2; exit 1; }
+
+trap 'exit 0' TERM INT
+
+# Bound every Docker CLI operation so a wedged daemon cannot block monitor shutdown indefinitely.
+bounded_docker() {
+  timeout -k "$docker_kill_after" "$docker_timeout" docker "$@"
+}
+
 for _ in $(seq 1 120); do
-  container="$(docker ps --filter 'name=llamarack-gpu-qualification-' --format '{{.Names}}' | head -n1)"
-  [[ -n "$container" ]] && break
+  bounded_docker inspect "$container" >/dev/null 2>&1 && break
   sleep 1
 done
-[[ -n "$container" ]] || { echo "GPU qualification container did not appear" >&2; exit 1; }
+bounded_docker inspect "$container" >/dev/null 2>&1 \
+  || { echo "GPU qualification container did not appear: $container" >&2; exit 1; }
 
-port="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostPort}}' "$container")"
+port="$(bounded_docker inspect -f '{{(index (index .NetworkSettings.Ports "8000/tcp") 0).HostPort}}' "$container")"
 [[ "$port" =~ ^[0-9]+$ ]] || { echo "unable to resolve published manager port" >&2; exit 1; }
 
 probe_host="127.0.0.1"
@@ -41,6 +52,7 @@ for host in "$probe_host" "$publish_host" "127.0.0.1"; do
   candidates+=("$host")
 done
 
+# Scrape the manager goroutine gauge from the first reachable published host.
 scrape_goroutines() {
   local host metrics value
   for host in "${candidates[@]}"; do
@@ -55,16 +67,16 @@ scrape_goroutines() {
   return 0
 }
 
-while docker inspect "$container" >/dev/null 2>&1; do
+while bounded_docker inspect "$container" >/dev/null 2>&1; do
   goroutines="$(scrape_goroutines)"
-  manager_pid="$(docker exec "$container" sh -c '
+  manager_pid="$(bounded_docker exec "$container" sh -c '
     for p in /proc/[0-9]*; do
       [ "$(cat "$p/comm" 2>/dev/null)" = "llamarack" ] && { echo "${p##*/}"; exit 0; }
     done
   ' 2>/dev/null || true)"
   rss_kib=""
   if [[ -n "$manager_pid" ]]; then
-    rss_kib="$(docker exec "$container" awk '/^VmRSS:/ {print $2; exit}' "/proc/${manager_pid}/status" 2>/dev/null || true)"
+    rss_kib="$(bounded_docker exec "$container" awk '/^VmRSS:/ {print $2; exit}' "/proc/${manager_pid}/status" 2>/dev/null || true)"
   fi
   if [[ -n "${goroutines:-}" && -n "${rss_kib:-}" ]]; then
     printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$goroutines" "$rss_kib" >>"$output"
