@@ -34,8 +34,12 @@ func TestGatewayRejectsManagementKeysAndFiltersAllowlist(t *testing.T) {
 		t.Fatalf("JWT on /v1=%d %s", w.Code, w.Body.String())
 	}
 
+	var instanceID string
+	if err := f.db.QueryRowContext(ctx, `SELECT id FROM instances WHERE slug=?`, "gateway-model").Scan(&instanceID); err != nil {
+		t.Fatal(err)
+	}
 	_, allowedSecret, err := f.gateway.auth.CreateAPIKey(ctx, auth.CreateAPIKeyInput{
-		Name: "allow", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{"gateway-model"},
+		Name: "allow", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{instanceID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,19 +58,20 @@ func TestGatewayRejectsManagementKeysAndFiltersAllowlist(t *testing.T) {
 	}
 
 	var modelID string
-	if err := f.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, "gateway-model").Scan(&modelID); err != nil {
+	if err := f.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, instanceID).Scan(&modelID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('temp-only',?,'Temp')`, modelID); err != nil {
+	const tempID = "00000000-0000-4000-8000-000000000099"
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,'Temp')`, tempID, "temp-only", modelID); err != nil {
 		t.Fatal(err)
 	}
 	stale, staleSecret, err := f.gateway.auth.CreateAPIKey(ctx, auth.CreateAPIKeyInput{
-		Name: "stale", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{"temp-only"},
+		Name: "stale", KeyType: auth.APIKeyTypeInference, OwnerUserID: &ownerID, InstanceIDs: []string{tempID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.ExecContext(ctx, `DELETE FROM instances WHERE id=?`, "temp-only"); err != nil {
+	if _, err := f.db.ExecContext(ctx, `DELETE FROM instances WHERE id=?`, tempID); err != nil {
 		t.Fatal(err)
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodGet, "/v1/models", staleSecret, "")
