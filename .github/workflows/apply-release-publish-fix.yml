@@ -32,7 +32,7 @@ jobs:
               'type=semver,pattern={{major}}-cuda': ('type=semver,pattern={{major}},suffix=-cuda', 2),
               'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber': (
                   'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"',
-                  1,
+                  2,
               ),
           }
 
@@ -53,7 +53,7 @@ jobs:
           test "$(grep -Fc 'type=semver,pattern={{version}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
           test "$(grep -Fc 'type=semver,pattern={{major}}.{{minor}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
           test "$(grep -Fc 'type=semver,pattern={{major}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
-          grep -Fq 'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"' .github/workflows/release-container.yml
+          test "$(grep -Fc 'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"' .github/workflows/release-container.yml)" -eq 2
 
       - name: Commit fix and remove maintenance workflow
         shell: bash
