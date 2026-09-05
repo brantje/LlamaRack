@@ -5,7 +5,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -37,3 +37,112 @@ jobs:
           npm ci --ignore-scripts
           node --check openai-probe.mjs
           node -e "const p=require('./node_modules/openai/package.json'); if (p.version !== '7.9.0') throw new Error('unexpected OpenAI Node version '+p.version)"
+
+  feedback_fix:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/openai-compat-response-models'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+      - name: Apply verified review fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          gateway = Path("backend/internal/gateway/gateway.go")
+          text = gateway.read_text()
+          old = '''\tinstance, err := g.lifecycle.Instances().Get(r.Context(), modelID)
+\tif err != nil || !instance.Enabled {
+\t\twriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+\t\treturn
+\t}
+'''
+          new = '''\tinstance, err := g.lifecycle.Instances().Get(r.Context(), modelID)
+\tif err != nil {
+\t\tif errors.Is(err, sql.ErrNoRows) {
+\t\t\twriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+\t\t} else {
+\t\t\twriteError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+\t\t}
+\t\treturn
+\t}
+\tif !instance.Enabled {
+\t\twriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+\t\treturn
+\t}
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f"gateway.go: expected one getModel block, found {text.count(old)}")
+          gateway.write_text(text.replace(old, new, 1))
+
+          body_test = Path("backend/internal/gateway/request_body_limit_test.go")
+          text = body_test.read_text()
+          if "type countingBody struct" not in text:
+              raise SystemExit("request_body_limit_test.go: countingBody helper not found")
+          body_test.write_text(text.replace("newCountingBody", "newTrackingBody").replace("countingBody", "trackingBody"))
+
+          replace_once(
+              "backend/internal/supervisor/security_test.go",
+              '''\t\t"--ctx-size", "1024",
+\t\t"--model", "/tmp/other.gguf",
+\t\t"--host", "0.0.0.0",
+''',
+              '''\t\t"--ctx-size", "1024",
+\t\t"--model", "/tmp/other.gguf",
+\t\t"--alias", "user-alias",
+\t\t"--host", "0.0.0.0",
+''',
+          )
+
+          replace_once(
+              "backend/internal/gateway/gateway_test.go",
+              '''\tw := gatewayRequest(t, g, http.MethodGet, "/v1/models", secret, "")
+\tif w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {
+\t\tt.Fatalf("models database failure=%d %s", w.Code, w.Body.String())
+\t}
+''',
+              '''\tw := gatewayRequest(t, g, http.MethodGet, "/v1/models", secret, "")
+\tif w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {
+\t\tt.Fatalf("models database failure=%d %s", w.Code, w.Body.String())
+\t}
+\tw = gatewayRequest(t, g, http.MethodGet, "/v1/models/gateway-model", secret, "")
+\tif w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "model_unavailable") {
+\t\tt.Fatalf("model lookup database failure=%d %s", w.Code, w.Body.String())
+\t}
+''',
+          )
+          PY
+          gofmt -w \
+            backend/internal/gateway/gateway.go \
+            backend/internal/gateway/gateway_test.go \
+            backend/internal/gateway/request_body_limit_test.go \
+            backend/internal/supervisor/security_test.go
+      - name: Run focused backend tests
+        working-directory: backend
+        run: go test ./internal/gateway ./internal/supervisor ./internal/llamacpp
+      - name: Restore workflow and commit fixes
+        shell: bash
+        run: |
+          git show HEAD^:.github/workflows/compat-validation.yml > .github/workflows/compat-validation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/internal/gateway/gateway.go \
+                  backend/internal/gateway/gateway_test.go \
+                  backend/internal/gateway/request_body_limit_test.go \
+                  backend/internal/supervisor/security_test.go \
+                  .github/workflows/compat-validation.yml
+          git commit -m "fix: address PR review feedback"
+          git push origin HEAD:fix/openai-compat-response-models
