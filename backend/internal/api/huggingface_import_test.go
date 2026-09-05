@@ -90,12 +90,30 @@ func TestHuggingFaceImportCreatesPendingModelAndInstance(t *testing.T) {
 		},
 	}
 	w := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/huggingface/import", body, true)
-	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), "demo-api") || !strings.Contains(w.Body.String(), "Demo Q4") {
+	if w.Code != http.StatusCreated {
 		t.Fatalf("import status=%d body=%s", w.Code, w.Body.String())
 	}
+	var prepared modelimports.PrepareResult
+	if err := json.Unmarshal(w.Body.Bytes(), &prepared); err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Instance.ID == "" || prepared.Instance.ID == prepared.Instance.Slug || prepared.Instance.Slug != "demo-api" || prepared.Model.Name != "Demo Q4" {
+		t.Fatalf("prepared import=%+v", prepared)
+	}
+
 	w = huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/imports", nil, true)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "demo-api") {
+	if w.Code != http.StatusOK {
 		t.Fatalf("statuses status=%d body=%s", w.Code, w.Body.String())
+	}
+	var statuses []modelimports.Status
+	if err := json.Unmarshal(w.Body.Bytes(), &statuses); err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 1 || statuses[0].InstanceID != prepared.Instance.ID {
+		t.Fatalf("provider import did not retain durable Instance link: %+v", statuses)
+	}
+	if strings.Contains(w.Body.String(), `"instance_id":"demo-api"`) {
+		t.Fatalf("provider import persisted mutable slug as durable identity: %s", w.Body.String())
 	}
 }
 
