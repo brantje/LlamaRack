@@ -14,6 +14,7 @@ type RequestRecord = {
   session_total_count?: number
   model_id?: string
   model_name?: string
+  model_slug?: string
   call_type?: string
   started_at: number
   finished_at: number
@@ -84,10 +85,10 @@ const endpointItems = [
 const resultItems = [{ label: 'All results', value: '' }, { label: 'Success', value: 'success' }, { label: 'Error', value: 'error' }]
 const streamingItems = [{ label: 'Streaming + non-streaming', value: '' }, { label: 'Streaming', value: 'true' }, { label: 'Non-streaming', value: 'false' }]
 const sessionSortItems = [{ label: 'Duration', value: 'duration' }, { label: 'Start time', value: 'start_time' }]
-const instanceItems = computed(() => [{ label: 'All Instances', value: '' }, ...manager.instances.value.map(item => ({ label: `${item.name} (${item.id})`, value: item.id }))])
+const instanceItems = computed(() => [{ label: 'All Instances', value: '' }, ...manager.instances.value.map(item => ({ label: `${item.name} (${item.slug})`, value: item.id }))])
 const columns: TableColumn<RequestRecord>[] = [
   { accessorKey: 'started_at', header: 'Time' }, { accessorKey: 'result', header: 'Status' },
-  { accessorKey: 'model_name', header: 'Model' }, { accessorKey: 'instance_id', header: 'Instance ID' },
+  { accessorKey: 'model_name', header: 'Model' }, { accessorKey: 'model_slug', header: 'Model slug' },
   { accessorKey: 'api_key', header: 'Key alias' }, { accessorKey: 'duration_ms', header: 'Duration' },
   { accessorKey: 'ttft_ms', header: 'TTFT' }, { accessorKey: 'total_tokens', header: 'Tokens' },
   { accessorKey: 'prompt_tokens_per_second', header: 'Prompt tok/s' }, { accessorKey: 'generation_tokens_per_second', header: 'Gen tok/s' },
@@ -145,6 +146,14 @@ function requestModelName(item: RequestRecord) {
   const instance = manager.instances.value.find(candidate => candidate.id === item.instance_id)
   if (!instance) return '—'
   return manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id || '—'
+}
+function requestModelSlug(item: RequestRecord) {
+  if (item.model_slug) return item.model_slug
+  return manager.instances.value.find(candidate => candidate.id === item.instance_id)?.slug || '—'
+}
+function currentInstanceTarget(item: RequestRecord) {
+  const instance = manager.instances.value.find(candidate => candidate.id === item.instance_id)
+  return instance ? `/instances/${encodeURIComponent(instance.slug)}/detail` : ''
 }
 function isPending(item: RequestRecord) { return item.finished_at === 0 || !item.result || item.result === 'pending' }
 function resultLabel(item: RequestRecord) { return isPending(item) ? 'pending' : String(item.status_code || item.result) }
@@ -466,7 +475,7 @@ watch(liveRequestFingerprint, (next, previous) => {
           <template #started_at-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatTime(row.original.started_at) }}</span></template>
           <template #result-cell="{ row }"><StatusTag :variant="isPending(row.original) ? 'pending' : row.original.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(row.original) }}</StatusTag></template>
           <template #model_name-cell="{ row }"><span class="text-xs font-semibold">{{ requestModelName(row.original) }}</span></template>
-          <template #instance_id-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ row.original.instance_id || '—' }}</span></template>
+          <template #model_slug-cell="{ row }"><span class="font-mono text-xs text-[var(--neutral-800)]">{{ requestModelSlug(row.original) }}</span></template>
           <template #api_key-cell="{ row }"><span class="text-xs text-[var(--neutral-800)]">{{ requestKeyAlias(row.original) }}</span></template>
           <template #duration_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums">{{ formatDuration(row.original.duration_ms) }}</span></template>
           <template #ttft_ms-cell="{ row }"><span class="whitespace-nowrap font-mono text-xs tabular-nums text-[var(--neutral-800)]">{{ formatDuration(row.original.ttft_ms) }}</span></template>
@@ -518,7 +527,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                     <StatusTag :variant="isPending(item) ? 'pending' : item.result === 'success' ? 'ready' : 'failed'">{{ resultLabel(item) }}</StatusTag>
                   </div>
                   <p class="mt-1 truncate font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ shortID(item.request_id, 26) }}</p>
-                  <p class="mt-1 truncate text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">{{ requestModelName(item) }}</p>
+                  <p class="mt-1 truncate text-[length:var(--font-size-kicker)] text-[var(--neutral-800)]">{{ requestModelName(item) }} · <span class="font-mono">{{ requestModelSlug(item) }}</span></p>
                   <p class="mt-1 font-mono text-[length:var(--font-size-kicker)] tabular-nums text-[var(--neutral-700)]">{{ formatDuration(item.duration_ms) }} · {{ item.total_tokens || 0 }} tok · {{ formatTime(item.started_at) }}</p>
                 </button>
               </div>
@@ -545,6 +554,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                   <div data-testid="request-detail-overview-grid" class="grid gap-x-12 gap-y-4 lg:grid-cols-2">
                     <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
                       <dt class="text-[var(--neutral-700)]">Model</dt><dd class="min-w-0 break-words">{{ requestModelName(detail) }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Model slug</dt><dd class="min-w-0 break-all font-mono text-xs">{{ requestModelSlug(detail) }}</dd>
                       <dt class="text-[var(--neutral-700)]">Call Type</dt><dd>{{ detail.call_type || '—' }}</dd>
                       <dt class="text-[var(--neutral-700)]">Endpoint</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.endpoint }}</dd>
                       <dt class="text-[var(--neutral-700)]">Streaming</dt><dd>{{ detail.streaming ? 'True' : 'False' }}</dd>
@@ -552,7 +562,7 @@ watch(liveRequestFingerprint, (next, previous) => {
                       <dt class="text-[var(--neutral-700)]">Request ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.request_id }}</dd>
                     </dl>
                     <dl class="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-sm">
-                      <dt class="text-[var(--neutral-700)]">Instance ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.instance_id || 'Unresolved' }}</dd>
+                      <dt class="text-[var(--neutral-700)]">Instance ID</dt><dd class="min-w-0 break-all font-mono text-xs"><NuxtLink v-if="currentInstanceTarget(detail)" :to="currentInstanceTarget(detail)" class="hover:underline">{{ detail.instance_id }}</NuxtLink><span v-else>{{ detail.instance_id || 'Unresolved' }}</span></dd>
                       <dt class="text-[var(--neutral-700)]">Model ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.model_id || '—' }}</dd>
                       <dt class="text-[var(--neutral-700)]">Session ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.session_id || '—' }}</dd>
                       <dt class="text-[var(--neutral-700)]">Trace ID</dt><dd class="min-w-0 break-all font-mono text-xs">{{ detail.trace_id || '—' }}</dd>
