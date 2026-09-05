@@ -26,7 +26,7 @@ export function useManagerApi(fetcher: typeof $fetch = $fetch) {
   const apiBase = computed(() => {
     const configured = String(config.public.apiBase || '').replace(/\/$/, '')
     if (configured) return configured
-    return `${requestURL.protocol}//${requestURL.hostname}:8888`
+    return requestURL.origin
   })
 
   async function request<T = unknown>(path: string, options: any = {}): Promise<T> {

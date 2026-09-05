@@ -12,10 +12,10 @@ beforeEach(() => {
 })
 
 describe('useManagerApi', () => {
-  it('derives the API URL from the current request host', () => {
+  it('uses the current request origin when no API URL is configured', () => {
     const requestURL = useRequestURL()
     const { apiBase } = useManagerApi(fetchMock as any)
-    expect(apiBase.value).toBe(`${requestURL.protocol}//${requestURL.hostname}:8888`)
+    expect(apiBase.value).toBe(requestURL.origin)
   })
 
   it('prefers and normalizes an explicitly configured API URL', () => {
