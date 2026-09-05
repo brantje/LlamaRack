@@ -36,7 +36,7 @@ type RuntimeWithTime = ReturnType<ReturnType<typeof useManager>['runtimeForInsta
 
 const manager = useManager()
 const route = useRoute()
-const instanceID = computed(() => String(route.params.id || ''))
+const instanceSlug = computed(() => String(route.params.id || ''))
 const loading = ref(true)
 const historyLoading = ref(false)
 const historyError = ref('')
@@ -68,7 +68,8 @@ const latencyP50Series = ref<SeriesPoint[]>([])
 const latencyP95Series = ref<SeriesPoint[]>([])
 const contextSeries = ref<SeriesPoint[]>([])
 
-const instance = computed(() => manager.instances.value.find(item => item.id === instanceID.value))
+const instance = computed(() => manager.instances.value.find(item => item.slug === instanceSlug.value))
+const instanceID = computed(() => instance.value?.id || '')
 const model = computed(() => instance.value ? manager.models.value.find(item => item.id === instance.value!.model_id) : undefined)
 const runtime = computed(() => (instance.value ? manager.runtimeForInstance(instance.value) : undefined) as RuntimeWithTime | undefined)
 const telemetry = computed(() => instance.value ? manager.telemetryForInstance(instance.value) as DetailTelemetry | undefined : undefined)
@@ -331,7 +332,7 @@ async function runtimeAction(operation: 'start' | 'stop' | 'kill') {
   pending.value = operation
   error.value = ''
   try {
-    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.value.id)}/${operation}`, { method: 'POST' })
+    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.value.slug)}/${operation}`, { method: 'POST' })
     await manager.refresh()
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || `Unable to ${operation} Instance`
@@ -346,7 +347,7 @@ async function removeInstance() {
   pending.value = 'delete'
   error.value = ''
   try {
-    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.value.id)}`, { method: 'DELETE' })
+    await manager.request(`/api/v1/instances/${encodeURIComponent(instance.value.slug)}`, { method: 'DELETE' })
     await manager.refresh()
     await navigateTo('/instances')
   } catch (value: any) {
@@ -359,7 +360,7 @@ async function loadPage() {
   try {
     if (!instance.value) await manager.refresh()
     if (!instance.value) {
-      error.value = `Instance “${instanceID.value}” was not found.`
+      error.value = `Instance “${instanceSlug.value}” was not found.`
       return
     }
     if (error.value.includes('was not found')) error.value = ''
@@ -381,7 +382,7 @@ watch(selectedWindow, (next, previous) => {
   }
   void loadHistory()
 })
-watch([instanceID, () => instance.value?.id], () => {
+watch([instanceSlug, () => instance.value?.id], () => {
   loading.value = true
   if (error.value.includes('was not found')) error.value = ''
   void loadPage()
@@ -395,14 +396,14 @@ defineExpose({ setSelectedWindow })
       <div class="min-w-0 flex-1">
         <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.18em] text-[var(--accent-700)]">INSTANCE DETAIL</p>
         <div class="mt-2 flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance?.name || instanceID }}</h1>
+          <h1 class="text-2xl font-semibold text-[var(--color-text)]">{{ instance?.name || instanceSlug }}</h1>
           <StatusTag v-if="instance && !error.includes('was not found')" :variant="statusVariant(runtime?.state)">{{ runtime?.state || 'UNLOADED' }}</StatusTag>
         </div>
         <p class="mt-2 max-w-3xl text-sm text-[var(--neutral-800)]">Live runtime resources and llama.cpp performance for this Instance.</p>
       </div>
       <div v-if="instance" class="flex flex-wrap items-center justify-end gap-2">
         <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
-        <AppButton :to="`/instances/${encodeURIComponent(instance.id)}/edit`" intent="secondary">Edit</AppButton>
+        <AppButton :to="`/instances/${encodeURIComponent(instance.slug)}/edit`" intent="secondary">Edit</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
         <AppButton v-if="!isRunning" intent="primary" :loading="pending === 'start'" @click="runtimeAction('start')">Launch</AppButton>
