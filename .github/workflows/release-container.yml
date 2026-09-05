@@ -37,11 +37,12 @@ jobs:
       - name: Resolve LlamaRack identity
         id: identity
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == 'release' ]]; then
-            version='${{ github.event.release.tag_name }}'
-            version="${version#v}"
+            version="${RELEASE_TAG#v}"
             channel='release'
           else
             version='development'

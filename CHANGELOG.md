@@ -17,7 +17,7 @@ The format is based on Keep a Changelog and releases follow Semantic Versioning.
 
 - Official release candidates resolve the latest stable llama.cpp release at candidate-cut time and pin its immutable build for CPU and CUDA images.
 - Stable LlamaRack releases are promoted from the already-qualified final RC runtime instead of silently selecting a newer llama.cpp build.
-- Official container tags use SemVer without a leading `v` (`1.0.0`, `1.0`, `1`, `latest`) with corresponding `-cuda` variants.
+- Official container tags publish the exact SemVer tag `1.0.0` without a leading `v`, plus moving aliases `1.0`, `1`, and `latest` (`latest` is not SemVer), with corresponding `-cuda` variants.
 
 ## Release-entry convention
 

@@ -61,7 +61,7 @@ Official builds treat dependency metadata as source input:
 - the build uses `-trimpath` and injects release identity explicitly;
 - release build time is derived deterministically from the release commit timestamp rather than wall-clock build time;
 - the selected llama.cpp runtime is pinned to an immutable upstream build identifier for that release candidate;
-- workflow/container dependencies used in the release path should be pinned or upgraded deliberately rather than resolved implicitly during a release.
+- workflow actions and builder images used in the release path must use immutable references (commit SHAs or image digests) rather than mutable tags or implicitly resolved versions.
 
 Rebuilding a release from the same source inputs must not silently choose a different llama.cpp runtime.
 
@@ -129,7 +129,7 @@ Rules:
 - `main`, `main-<sha>`, `llama.cpp-latest`, and `llama.cpp-*` are development/update channels and are not stable semantic releases;
 - the corresponding CUDA tag represents the same LlamaRack source and selected upstream llama.cpp release/build as the CPU tag.
 
-Image digests are recorded in release metadata where the release workflow can resolve them. Operators that require byte-for-byte deployment identity should deploy by digest.
+Official release records must include CPU and CUDA image digests, runtime identity, and qualification results. Publication fails if any of these provenance fields is unavailable. Operators that require byte-for-byte deployment identity should deploy by digest.
 
 ## Database upgrades and backups
 
@@ -152,7 +152,7 @@ A release note is an operator-facing compatibility record, not a commit dump. Fo
 - upgrade/migration/backup notes;
 - compatibility or deprecation notes;
 - bundled llama.cpp release and `bNNNN` build;
-- CPU/CUDA image identity/digests when available;
+- CPU/CUDA image digests, runtime identity, and qualification results;
 - known release blockers or intentionally deferred work.
 
 The durable project history lives in `CHANGELOG.md`; GitHub Release notes may summarize the same information more narratively.

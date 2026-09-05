@@ -72,12 +72,24 @@ jobs:
           fi
           target="${REGISTRY}/${IMAGE_NAME}:${image_tag}"
           cuda_target="${REGISTRY}/${IMAGE_NAME}:${image_tag}-cuda"
+          latest_target="${REGISTRY}/${IMAGE_NAME}:llama.cpp-latest"
+          latest_cuda_target="${REGISTRY}/${IMAGE_NAME}:llama.cpp-latest-cuda"
           echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
 
-          if docker buildx imagetools inspect "$target" >/dev/null 2>&1 && \
-            docker buildx imagetools inspect "$cuda_target" >/dev/null 2>&1; then
+          manifest_digest() {
+            local ref="$1" digest
+            digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"')" || return 1
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+            printf '%s' "$digest"
+          }
+
+          if cpu_digest="$(manifest_digest "$target")" && \
+            cuda_digest="$(manifest_digest "$cuda_target")" && \
+            latest_digest="$(manifest_digest "$latest_target")" && \
+            latest_cuda_digest="$(manifest_digest "$latest_cuda_target")" && \
+            [[ "$latest_digest" == "$cpu_digest" && "$latest_cuda_digest" == "$cuda_digest" ]]; then
             echo 'should_build=false' >> "$GITHUB_OUTPUT"
-            echo "llama.cpp ${RELEASE_TAG} CPU and CUDA images are already published."
+            echo "llama.cpp ${RELEASE_TAG} CPU/CUDA tags and latest aliases already match."
           else
             echo 'should_build=true' >> "$GITHUB_OUTPUT"
             echo "New or incomplete llama.cpp release publication detected: ${RELEASE_TAG}."
