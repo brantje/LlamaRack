@@ -369,8 +369,8 @@ export function useManager() {
   async function refresh() {
     if (!user.value) return
     const [modelItems, instanceItems] = await Promise.all([request<Model[]>('/api/v1/models'), request<Instance[]>('/api/v1/instances')])
-    models.value = modelItems || []
-    instances.value = instanceItems || []
+    models.value = (modelItems || []).map(model => ({ ...model, slug: model.slug || model.id }))
+    instances.value = (instanceItems || []).map(instance => ({ ...instance, slug: instance.slug || instance.id }))
     if (runtimeEventsConnected.value) {
       runtimes.value = Object.fromEntries(models.value.map(model => [model.id, runtimes.value[model.id] || []]))
     } else {
