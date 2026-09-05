@@ -13,6 +13,14 @@ CONTRACT = json.loads((ROOT / "contract.json").read_text(encoding="utf-8"))
 VERSIONS = json.loads((ROOT / "versions.json").read_text(encoding="utf-8"))
 
 
+def requirement_lines(path: Path) -> list[str]:
+    return [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
 def main() -> None:
     assert CONTRACT["schema_version"] == 1
     assert CONTRACT["release_contract"] == "1.0"
@@ -31,6 +39,16 @@ def main() -> None:
             assert re.fullmatch(r"\d+(?:\.\d+)?", value), (key, value)
         else:
             assert re.fullmatch(r"\d+\.\d+\.\d+", value), (key, value)
+
+    # These clients intentionally live in separate virtual environments. LiteLLM
+    # currently depends on OpenAI <3, while the direct compatibility probe tests
+    # the pinned OpenAI 3.x SDK.
+    assert requirement_lines(ROOT / "python" / "requirements.txt") == [
+        f"openai=={VERSIONS['openai_python']}"
+    ]
+    assert requirement_lines(ROOT / "python" / "litellm-requirements.txt") == [
+        f"litellm[proxy]=={VERSIONS['litellm']}"
+    ]
 
     surfaces = CONTRACT["surfaces"]
     ids = [item["id"] for item in surfaces]
