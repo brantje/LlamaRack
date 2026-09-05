@@ -10,6 +10,8 @@ ARG LLAMA_CPP_BUILD=
 ARG LLAMA_CPP_IMAGE=
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS frontend-build
+ARG NUXT_PUBLIC_API_BASE=
+ARG LLAMARACK_EXTERNAL_URL=
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci

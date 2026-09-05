@@ -1,3 +1,5 @@
+import { resolveFrontendApiBase } from './config/public-api-base'
+
 const themeBootstrap = `(() => {
   const key = 'llamarack-theme'
   const allowed = new Set(['dark', 'light'])
@@ -16,7 +18,7 @@ export default defineNuxtConfig({
   devtools: { enabled: process.env.CI !== 'true' },
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || ''
+      apiBase: resolveFrontendApiBase(process.env)
     }
   },
   app: {
