@@ -60,9 +60,9 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 	if err != nil {
 		return "", "", User{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if rehashed != "" {
-		if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", rehashed, user.ID); err != nil {
+		if err := persistPasswordRehash(ctx, tx, user.ID, hash, rehashed); err != nil {
 			return "", "", User{}, err
 		}
 	}
