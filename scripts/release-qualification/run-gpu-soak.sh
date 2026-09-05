@@ -13,6 +13,7 @@ shim_dir="$(mktemp -d)"
 soak_pid=""
 monitor_pid=""
 
+# Terminate and reap both child processes so cancellation cannot leave qualification work behind.
 cleanup() {
   if [[ -n "$soak_pid" ]] && kill -0 "$soak_pid" >/dev/null 2>&1; then
     kill -TERM "$soak_pid" >/dev/null 2>&1 || true
