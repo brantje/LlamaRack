@@ -19,6 +19,9 @@ import (
 )
 
 func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, target *url.URL, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any, registerActive bool) {
+	if port := target.Port(); port != "" {
+		setProductHeader(wHeader(observed), headerUpstreamPort, port)
+	}
 	if g.observability != nil {
 		g.observability.Activate(instance.ID)
 	}
