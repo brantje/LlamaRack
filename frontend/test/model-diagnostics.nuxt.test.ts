@@ -7,15 +7,18 @@ import { useManager } from '~/composables/useManager'
 const mocks = vi.hoisted(() => ({ request: vi.fn(), writeText: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
+const primaryID = 'coder-primary-uuid'
+const primarySlug = 'coder-primary'
+
 function seed() {
   const manager = useManager()
   manager.initialized.value = true
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Coder model', gguf_path: 'coder.gguf', total_bytes: 4, quantization: 'Q4_K_M', context_length: 8192 }]
-  manager.instances.value = [{ id: 'coder-primary', model_id: 'm1', name: 'Coder Primary', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }]
-  manager.runtimes.value = { m1: [{ instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }] }
+  manager.models.value = [{ id: 'm1', slug: 'coder-model', name: 'Coder model', gguf_path: 'coder.gguf', total_bytes: 4, quantization: 'Q4_K_M', context_length: 8192 }]
+  manager.instances.value = [{ id: primaryID, slug: primarySlug, model_id: 'm1', name: 'Coder Primary', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }]
+  manager.runtimes.value = { m1: [{ instance_id: primaryID, model_id: 'm1', state: 'UNLOADED' }] }
   return manager
 }
 
@@ -58,19 +61,19 @@ describe('instance control plane', () => {
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     expect(wrapper.findAll('[data-testid="instance-card"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('Coder Primary')
-    expect(wrapper.find('[data-testid="instance-id"]').text()).toBe('coder-primary')
-    expect(wrapper.text()).not.toContain('model=coder-primary')
+    expect(wrapper.find('[data-testid="instance-id"]').text()).toBe(primarySlug)
+    expect(wrapper.text()).not.toContain(`model=${primarySlug}`)
     expect(wrapper.text()).toContain('UNLOADED')
     expect(wrapper.text()).toContain('Launch')
     expect(wrapper.find('[data-testid="instance-card-more"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Logs')
 
     const copy = wrapper.find('[data-testid="copy-instance-id"]')
-    expect(copy.attributes('aria-label')).toBe('Copy coder-primary')
+    expect(copy.attributes('aria-label')).toBe(`Copy ${primarySlug}`)
     await copy.trigger('click')
     await flushPromises()
-    expect(mocks.writeText).toHaveBeenCalledWith('coder-primary')
-    expect(copy.attributes('aria-label')).toBe('Copied coder-primary')
+    expect(mocks.writeText).toHaveBeenCalledWith(primarySlug)
+    expect(copy.attributes('aria-label')).toBe(`Copied ${primarySlug}`)
     expect(copy.attributes('title')).toBe('Copied')
   })
 
@@ -80,26 +83,26 @@ describe('instance control plane', () => {
     await wrapper.find('[data-testid="copy-instance-id"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('clipboard blocked')
-    expect(wrapper.find('[data-testid="copy-instance-id"]').attributes('aria-label')).toBe('Copy coder-primary')
+    expect(wrapper.find('[data-testid="copy-instance-id"]').attributes('aria-label')).toBe(`Copy ${primarySlug}`)
   })
 
   it('launches, stops, restarts, duplicates and kills the exact instance', async () => {
     const manager = seed()
     let runtimeState = 'UNLOADED'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/instances/coder-primary/start' && options?.method === 'POST') runtimeState = 'READY'
-      if (path === '/api/v1/instances/coder-primary/stop' && options?.method === 'POST') runtimeState = 'UNLOADED'
+      if (path === `/api/v1/instances/${primarySlug}/start` && options?.method === 'POST') runtimeState = 'READY'
+      if (path === `/api/v1/instances/${primarySlug}/stop` && options?.method === 'POST') runtimeState = 'UNLOADED'
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: runtimeState }
+      if (path === `/api/v1/instances/${primarySlug}/runtime`) return { instance_id: primaryID, model_id: 'm1', state: runtimeState }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', expect.anything())
+    expect(mocks.request).not.toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/start`, expect.anything())
     await clickConfirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/start', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/start`, { method: 'POST' })
 
     for (const label of ['Restart', 'Duplicate']) {
       await selectOverflow(wrapper, label)
@@ -110,18 +113,18 @@ describe('instance control plane', () => {
 
     const stop = wrapper.findAll('button').find(button => button.text() === 'Stop')
     if (stop) { await stop.trigger('click'); await flushPromises() }
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/restart', { method: 'POST' })
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/duplicate', { method: 'POST' })
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/kill', { method: 'POST' })
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary/stop', { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/restart`, { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/duplicate`, { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/kill`, { method: 'POST' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}/stop`, { method: 'POST' })
   })
 
   it('shows logs and deletes without deleting the registered model', async () => {
     const manager = seed()
     mocks.request.mockImplementation(async (path: string) => {
-      if (path === '/api/v1/logs?instance_id=coder-primary&limit=2000') {
+      if (path === `/api/v1/logs?instance_id=${primaryID}&limit=2000`) {
         return {
-          instance_id: 'coder-primary',
+          instance_id: primaryID,
           entries: [
             { source: 'manager', timestamp: '2026-08-28T12:00:00Z', text: 'worker ready' },
             { source: 'stdout', timestamp: '2026-08-28T12:00:01Z', text: 'request complete' }
@@ -130,18 +133,18 @@ describe('instance control plane', () => {
       }
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/instances/coder-primary/runtime') return { instance_id: 'coder-primary', model_id: 'm1', state: 'UNLOADED' }
+      if (path === `/api/v1/instances/${primarySlug}/runtime`) return { instance_id: primaryID, model_id: 'm1', state: 'UNLOADED' }
       return {}
     })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await wrapper.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=coder-primary&limit=2000')
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/logs?instance_id=${primaryID}&limit=2000`)
     expect(document.body.textContent).toContain('worker ready')
     await selectOverflow(wrapper, 'Delete')
-    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/instances/coder-primary', expect.anything())
+    expect(mocks.request).not.toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}`, expect.anything())
     await clickConfirmation('confirm')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/instances/coder-primary', { method: 'DELETE' })
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/instances/${primarySlug}`, { method: 'DELETE' })
     expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/models/m1', expect.anything())
   })
 
@@ -149,8 +152,6 @@ describe('instance control plane', () => {
     mocks.request.mockRejectedValue({ data: { error: 'worker failed' } })
     const wrapper = await mountSuspended(InstancesPage, { route: false })
     await flushPromises()
-    // Mounting the control plane now performs one import-status read so a
-    // completed Hugging Face context-detection warning can survive reloads.
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/imports')
     mocks.request.mockClear()
 
@@ -165,26 +166,28 @@ describe('instance control plane', () => {
 
   it('covers policy variants, state badges, model fallback and empty/error log branches', async () => {
     const manager = seed()
+    const protectedID = 'protected-uuid'
+    const readyID = 'ready-uuid'
     manager.instances.value = [
-      { id: 'protected', model_id: 'missing-model', name: 'Protected', enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: false, idle_unload_seconds: 60, gpu_mode: 'manual', gpu_devices: ['0'] },
-      { id: 'ready', model_id: 'm1', name: 'Ready Instance', enabled: true, autoload_enabled: true, always_on: false, priority: 'low', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }
+      { id: protectedID, slug: 'protected', model_id: 'missing-model', name: 'Protected', enabled: true, autoload_enabled: false, always_on: true, priority: 'high', eviction_enabled: false, idle_unload_seconds: 60, gpu_mode: 'manual', gpu_devices: ['0'] },
+      { id: readyID, slug: 'ready', model_id: 'm1', name: 'Ready Instance', enabled: true, autoload_enabled: true, always_on: false, priority: 'low', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [] }
     ]
     manager.runtimes.value = {
-      'missing-model': [{ instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }],
-      m1: [{ instance_id: 'ready', model_id: 'm1', state: 'READY' }]
+      'missing-model': [{ instance_id: protectedID, model_id: 'missing-model', state: 'FAILED' }],
+      m1: [{ instance_id: readyID, model_id: 'm1', state: 'READY' }]
     }
     let logMode: 'empty' | 'error' = 'empty'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
-      if (path === '/api/v1/logs?instance_id=protected&limit=2000') {
+      if (path === `/api/v1/logs?instance_id=${protectedID}&limit=2000`) {
         if (logMode === 'error') throw new Error('log retrieval failed')
-        return { instance_id: 'protected', entries: [] }
+        return { instance_id: protectedID, entries: [] }
       }
       if (path === '/api/v1/instances/protected/start' && options?.method === 'POST') throw {}
       if (path === '/api/v1/instances/protected/restart' && options?.method === 'POST') throw new Error('restart failed')
       if (path === '/api/v1/instances') return manager.instances.value
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/instances/protected/runtime') return { instance_id: 'protected', model_id: 'missing-model', state: 'FAILED' }
-      if (path === '/api/v1/instances/ready/runtime') return { instance_id: 'ready', model_id: 'm1', state: 'READY' }
+      if (path === '/api/v1/instances/protected/runtime') return { instance_id: protectedID, model_id: 'missing-model', state: 'FAILED' }
+      if (path === '/api/v1/instances/ready/runtime') return { instance_id: readyID, model_id: 'm1', state: 'READY' }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return {}
     })
@@ -200,7 +203,7 @@ describe('instance control plane', () => {
     const protectedCard = wrapper.findAll('[data-testid="instance-card"]')[0]!
     await protectedCard.findAll('button').find(button => button.text() === 'Logs')!.trigger('click')
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=protected&limit=2000')
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/logs?instance_id=${protectedID}&limit=2000`)
     expect(document.body.textContent).toContain('No logs in the current view')
 
     await protectedCard.findAll('button').find(button => button.text() === 'Launch')!.trigger('click')
@@ -217,7 +220,7 @@ describe('instance control plane', () => {
     if (!reconnect) throw new Error('Missing log reconnect button')
     reconnect.click()
     await flushPromises()
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=protected&limit=2000')
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/logs?instance_id=${protectedID}&limit=2000`)
     expect(document.body.textContent).toContain('log retrieval failed')
 
     mocks.request.mockClear()
