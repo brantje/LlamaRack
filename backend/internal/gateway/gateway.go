@@ -3,30 +3,19 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
-	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
-	"github.com/brantje/llamarack/backend/internal/slots"
-	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
 
 const (
@@ -76,9 +65,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		spec.CallType = callType(r.URL.Path)
 	}
 
-	// Read only a small metadata budget before authentication. This preserves
-	// useful body-derived metadata for normal/small failed-auth requests without
-	// allowing an unauthenticated caller to allocate the full request-body limit.
 	var prefix []byte
 	var bodyReadErr error
 	if r.Body != nil {
@@ -97,17 +83,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		callTypeValue = ""
 	}
 	record := observability.RequestRecord{
-		StartedAt:  started.UnixMilli(),
-		InstanceID: strings.TrimSpace(envelope.Model),
-		Endpoint:   r.URL.Path,
-		TraceID:    traceID,
-		CallType:   callTypeValue,
-		ClientIP:   clientIP(r),
-		UserAgent:  boundedMetadata(r.UserAgent(), 2048),
-		Streaming:  envelope.Stream,
+		StartedAt: started.UnixMilli(), Endpoint: r.URL.Path, TraceID: traceID,
+		CallType: callTypeValue, ClientIP: clientIP(r), UserAgent: boundedMetadata(r.UserAgent(), 2048), Streaming: envelope.Stream,
 	}
 	observed := newResponseObserver(w, false)
 	g.begin(r.Context(), requestID, record)
+	g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 
 	var promptTPS *float64
 	var proxyPanic any
@@ -180,8 +161,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(r.Context(), gatewayAllowlistKey{}, gatewayAllowlist{all: allowAll, ids: allowedIDs}))
 
-	// Authentication succeeded. Read the remainder up to one byte beyond the
-	// normal limit so oversized bodies are rejected instead of truncated.
 	body := append([]byte(nil), prefix...)
 	bodyTooLarge := false
 	if spec.Body != bodyNone && bodyReadErr == nil && r.Body != nil {
@@ -205,8 +184,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			parseErr = errors.New("invalid json")
 		}
 		envelope = fullEnvelope
-		record.InstanceID = strings.TrimSpace(envelope.Model)
 		record.Streaming = envelope.Stream
+		g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 		if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
 			traceID = suppliedTraceID
 			record.TraceID = suppliedTraceID
@@ -234,10 +213,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case routeListModels:
 		g.listModels(observed, r, allowAll, allowedIDs)
 	case routeGetModel:
-		if !g.instanceAllowed(strings.TrimSpace(params["model"]), allowAll, allowedIDs) {
-			writeError(observed, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-			return
-		}
 		g.getModel(observed, r, params["model"])
 	case routeGetResponse:
 		g.getStoredResponse(observed, r, params["response_id"])
@@ -262,7 +237,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid request body")
 			return
 		}
-		g.proxySlots(observed, r, spec, params, &record, body, &proxyPanic)
+		g.proxySlots(observed, r, spec, params, requestID, &record, body, &proxyPanic)
 	default:
 		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown OpenAI-compatible endpoint")
 	}
@@ -278,40 +253,37 @@ func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, cont
 }
 
 func (g *Gateway) begin(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil {
-		return
-	}
-	persistCtx, cancel := g.persistenceContext(ctx)
-	defer cancel()
+	if g.observability == nil { return }
+	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
 	if err := g.observability.BeginCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("begin inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) update(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil {
-		return
-	}
-	persistCtx, cancel := g.persistenceContext(ctx)
-	defer cancel()
+	if g.observability == nil { return }
+	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
 	if err := g.observability.UpdateCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("update inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
-	if g.observability == nil {
-		return
-	}
-	persistCtx, cancel := g.persistenceContext(ctx)
-	defer cancel()
+	if g.observability == nil { return }
+	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
 	if err := g.observability.FinalizeCorrelatedRequest(persistCtx, requestID, promptTPS, record); err != nil {
 		slog.Warn("finalize inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
-// persist preserves the completion-only helper used by focused tests and older
-// internal call sites. Finalization recovers atomically if the early row is absent.
+func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
+	if g.observability == nil || strings.TrimSpace(slug) == "" { return }
+	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if err := g.observability.SetRequestModelSlug(persistCtx, requestID, slug); err != nil {
+		slog.Warn("capture inference model slug failed", "request_id", requestID, "model_slug", slug, "error", err)
+	}
+}
+
 func (g *Gateway) persist(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
 	g.finalize(ctx, requestID, promptTPS, record)
 }
@@ -326,939 +298,4 @@ func (g *Gateway) authenticateKey(ctx context.Context, header string) (auth.APIK
 		return auth.APIKey{}, errors.New("missing bearer token")
 	}
 	return g.auth.AuthenticateAPIKeyInfo(ctx, strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
-}
-
-func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bool, allowedIDs map[string]struct{}) {
-	items, err := g.lifecycle.Instances().List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "server_error", "database_error", "Unable to list models")
-		return
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, instance := range items {
-		if instance.Enabled && g.instanceAllowed(instance.ID, allowAll, allowedIDs) {
-			out = append(out, openaiModelObject(instance.ID))
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
-}
-
-func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, modelID string) {
-	modelID = strings.TrimSpace(modelID)
-	instance, err := g.lifecycle.Instances().Get(r.Context(), modelID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
-		} else {
-			writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		}
-		return
-	}
-	if !instance.Enabled {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
-		return
-	}
-	writeJSON(w, http.StatusOK, openaiModelObject(instance.ID))
-}
-
-func openaiModelObject(id string) map[string]any {
-	return map[string]any{"id": id, "object": "model", "created": time.Now().Unix(), "owned_by": "llamarack"}
-}
-
-func (g *Gateway) proxyJSON(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, envelope requestEnvelope, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
-	instance, ok := g.resolveInstance(observed, r, record, strings.TrimSpace(envelope.Model))
-	if !ok {
-		return
-	}
-	if instance.RequestLogMode == "full" {
-		value := string(body)
-		record.RequestBody = &value
-		observed.captureAll = true
-	}
-	g.proxyAcquired(observed, r, spec, requestID, record, instance, body, envelope.Stream, started, promptTPS, proxyPanic)
-}
-
-func (g *Gateway) proxyMultipart(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
-	model, logJSON, err := parseMultipartModel(body, r.Header.Get("Content-Type"))
-	if err != nil {
-		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_body", "Invalid multipart body")
-		return
-	}
-	if strings.TrimSpace(model) == "" {
-		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
-		return
-	}
-	record.InstanceID = model
-	instance, ok := g.resolveInstance(observed, r, record, model)
-	if !ok {
-		return
-	}
-	if instance.RequestLogMode == "full" {
-		record.RequestBody = &logJSON
-		observed.captureAll = true
-	}
-	g.proxyAcquired(observed, r, spec, requestID, record, instance, body, false, started, promptTPS, proxyPanic)
-}
-
-func (g *Gateway) proxyChatControl(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, body []byte, started time.Time, promptTPS **float64, proxyPanic *any) {
-	var envelope struct {
-		ID string `json:"id"`
-	}
-	_ = json.Unmarshal(body, &envelope)
-	active := g.active.getByUpstream(strings.TrimSpace(envelope.ID))
-	if active == nil || active.target == nil {
-		writeError(observed, http.StatusNotFound, "invalid_request_error", "not_found", "Unknown in-flight completion")
-		return
-	}
-	record.InstanceID = active.instanceID
-	instance, ok := g.resolveInstance(observed, r, record, active.instanceID)
-	if !ok {
-		return
-	}
-	if instance.RequestLogMode == "full" {
-		value := string(body)
-		record.RequestBody = &value
-		observed.captureAll = true
-	}
-	g.proxyToTarget(observed, r, spec, requestID, record, instance, active.target, body, false, started, promptTPS, proxyPanic, false)
-}
-
-func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec routeSpec, params map[string]string, record *observability.RequestRecord, body []byte, proxyPanic *any) {
-	model := strings.TrimSpace(r.URL.Query().Get("model"))
-	if model == "" {
-		writeError(observed, http.StatusBadRequest, "invalid_request_error", "model_required", "A model ID is required")
-		return
-	}
-	record.InstanceID = model
-	instance, ok := g.resolveInstance(observed, r, record, model)
-	if !ok {
-		return
-	}
-	setProductHeader(wHeader(observed), headerInstance, instance.ID)
-
-	upstreamPath := slots.UpstreamPath(r.Method, params["slot_id"])
-	if r.Method == http.MethodPost {
-		action := strings.TrimSpace(r.URL.Query().Get("action"))
-		if err := slots.ValidateAction(action); err != nil {
-			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_request", err.Error())
-			return
-		}
-		validated, err := slots.ValidateRequestBody(body, action)
-		if err != nil {
-			writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_request", err.Error())
-			return
-		}
-		body = validated
-	}
-
-	endpoint, ready := g.lifecycle.RuntimeEndpoint(instance.ID)
-	if !ready {
-		record.Error = "instance unloaded"
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", "instance unloaded and autoload disabled")
-		return
-	}
-
-	func() {
-		defer func() {
-			*proxyPanic = recover()
-		}()
-		if err := slots.Proxy(observed, r, endpoint, upstreamPath, body, spec.MapNotImplemented); err != nil {
-			record.Error = "Invalid worker endpoint"
-			writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
-		}
-	}()
-}
-
-func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, record *observability.RequestRecord, instanceID string) (instances.Instance, bool) {
-	if !requestInstanceAllowed(r, instanceID) {
-		writeError(observed, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return instances.Instance{}, false
-	}
-	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
-	if err != nil {
-		record.Error = sanitizeError(err.Error())
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
-		} else {
-			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		}
-		return instances.Instance{}, false
-	}
-	return instance, true
-}
-
-func (g *Gateway) inferenceAllowlist(ctx context.Context, key auth.APIKey) (allowAll bool, allowed map[string]struct{}, allStale bool, err error) {
-	if key.KeyType != auth.APIKeyTypeInference || len(key.InstanceIDs) == 0 {
-		return true, nil, false, nil
-	}
-	items, err := g.lifecycle.Instances().List(ctx)
-	if err != nil {
-		return false, nil, false, err
-	}
-	live := map[string]struct{}{}
-	for _, item := range items {
-		live[item.ID] = struct{}{}
-	}
-	allowed = map[string]struct{}{}
-	for _, id := range key.InstanceIDs {
-		if _, ok := live[id]; ok {
-			allowed[id] = struct{}{}
-		}
-	}
-	if len(allowed) == 0 {
-		return false, allowed, true, nil
-	}
-	return false, allowed, false, nil
-}
-
-func (g *Gateway) instanceAllowed(instanceID string, allowAll bool, allowedIDs map[string]struct{}) bool {
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
-		return false
-	}
-	if allowAll {
-		return true
-	}
-	_, ok := allowedIDs[instanceID]
-	return ok
-}
-
-func requestInstanceAllowed(r *http.Request, instanceID string) bool {
-	value, ok := r.Context().Value(gatewayAllowlistKey{}).(gatewayAllowlist)
-	if !ok {
-		return true
-	}
-	if value.all {
-		return true
-	}
-	_, allowed := value.ids[strings.TrimSpace(instanceID)]
-	return allowed
-}
-
-func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any) {
-	record.InstanceID = instance.ID
-	setProductHeader(wHeader(observed), headerInstance, instance.ID)
-	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
-	record.Autoloaded = preRuntime.State != supervisor.Ready
-	setProductHeader(wHeader(observed), headerAutoloaded, strconv.FormatBool(record.Autoloaded))
-	g.update(r.Context(), requestID, *record)
-
-	if g.observability != nil {
-		g.observability.Queue(instance.ID)
-	}
-	queueStarted := time.Now()
-	endpoint, release, err := g.lifecycle.Acquire(r.Context(), instance.ID)
-	record.QueueDurationMS = milliseconds(time.Since(queueStarted))
-	setProductHeader(wHeader(observed), headerQueueMS, metricFloat(record.QueueDurationMS))
-	if record.Autoloaded {
-		record.LoadDurationMS = record.QueueDurationMS
-		setProductHeader(wHeader(observed), headerLoadMS, metricFloat(record.LoadDurationMS))
-	}
-	if err != nil {
-		if g.observability != nil {
-			g.observability.EndQueued(instance.ID)
-		}
-		record.Error = sanitizeError(err.Error())
-		if errors.Is(err, lifecycle.ErrQueueLimitExceeded) {
-			scope := lifecycle.QueueLimitScope(err)
-			if g.observability != nil {
-				if recErr := g.observability.RecordQueueLimitRejection(r.Context(), instance.ID, scope); recErr != nil {
-					slog.Warn("record queue-limit rejection failed", "instance_id", instance.ID, "error", recErr)
-				}
-			}
-			slog.Warn("gateway pending request rejected", "instance_id", instance.ID, "limit", scope)
-			writeError(observed, http.StatusServiceUnavailable, "server_error", "overloaded", err.Error())
-			return
-		}
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		return
-	}
-	defer release()
-
-	target, err := url.Parse(endpoint)
-	if err != nil {
-		if g.observability != nil {
-			g.observability.EndQueued(instance.ID)
-		}
-		record.Error = "Invalid worker endpoint"
-		writeError(observed, http.StatusInternalServerError, "server_error", "invalid_worker_endpoint", "Invalid worker endpoint")
-		return
-	}
-	g.proxyToTarget(observed, r, spec, requestID, record, instance, target, body, stream, started, promptTPS, proxyPanic, true)
-}
-
-func wHeader(observed *responseObserver) http.Header {
-	return observed.Header()
-}
-
-func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, target *url.URL, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any, registerActive bool) {
-	if g.observability != nil {
-		g.observability.Activate(instance.ID)
-	}
-	active := true
-	defer func() {
-		if active && g.observability != nil {
-			g.observability.EndActive(instance.ID)
-		}
-	}()
-
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	r = r.WithContext(ctx)
-	entry := &activeRequest{
-		managerRequestID: requestID,
-		instanceID:       instance.ID,
-		target:           target,
-		cancel:           cancel,
-		endpoint:         r.URL.Path,
-		startedAt:        record.StartedAt,
-		model:            instance.ID,
-	}
-	if registerActive {
-		g.active.register(entry)
-		defer g.active.remove(requestID)
-	}
-
-	workerStarted := time.Now()
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-	r.Header.Del("Authorization")
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	original := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		original(req)
-		req.Host = target.Host
-		req.Header.Del("Authorization")
-	}
-	proxy.FlushInterval = -1
-	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
-		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)
-		record.Error = sanitizeError(proxyErr.Error())
-		writeError(writer, http.StatusServiceUnavailable, "server_error", "backend_unavailable", "Model worker unavailable")
-	}
-
-	var completed *responseMetrics
-	onUpstreamID := func(id string) {
-		if id == "" {
-			return
-		}
-		g.active.setUpstreamID(requestID, id)
-		if spec.CaptureResponseID {
-			g.persistOpenAIResponseID(r.Context(), requestID, id)
-		}
-	}
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		if spec.MapNotImplemented && resp.StatusCode == http.StatusNotFound {
-			payload, _ := json.Marshal(map[string]any{"error": map[string]any{
-				"message": "This llama.cpp worker does not implement this route",
-				"type":    "invalid_request_error",
-				"param":   nil,
-				"code":    "not_implemented",
-			}})
-			resp.StatusCode = http.StatusNotImplemented
-			resp.Body = io.NopCloser(bytes.NewReader(payload))
-			resp.ContentLength = int64(len(payload))
-			resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
-			resp.Header.Set("Content-Type", "application/json")
-			return nil
-		}
-		if stream {
-			resp.Body = &idCaptureStream{ReadCloser: resp.Body, onID: onUpstreamID, captureResponse: spec.CaptureResponseID, captureCompletion: spec.CaptureCompletionID}
-			return nil
-		}
-		tracked := &firstReadCloser{ReadCloser: resp.Body}
-		payload, readErr := io.ReadAll(tracked)
-		closeErr := resp.Body.Close()
-		if readErr != nil {
-			return readErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		resp.Body = io.NopCloser(bytes.NewReader(payload))
-		resp.ContentLength = int64(len(payload))
-		resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
-		if spec.CaptureResponseID {
-			onUpstreamID(firstNonEmpty(extractJSONID(payload), parseResponseIDFromSSE(payload)))
-		}
-		if spec.CaptureCompletionID {
-			onUpstreamID(extractJSONID(payload))
-		}
-		metrics := calculateResponseMetrics(workerStarted, tracked.firstRead, time.Now(), parseUsage(payload))
-		completed = &metrics
-		addFinalMetricHeaders(resp.Header, spec.Metrics, metrics)
-		return nil
-	}
-
-	func() {
-		defer func() {
-			*proxyPanic = recover()
-		}()
-		proxy.ServeHTTP(observed, r)
-	}()
-	finished := time.Now()
-	active = false
-	if g.observability != nil {
-		g.observability.EndActive(instance.ID)
-	}
-
-	record.StatusCode = observed.StatusCode()
-	if record.StatusCode >= 200 && record.StatusCode < 400 {
-		record.Result = "success"
-	} else {
-		record.Result = "error"
-	}
-	record.FinishedAt = finished.UnixMilli()
-	record.DurationMS = milliseconds(finished.Sub(started))
-	responseSample := observed.Bytes()
-	metrics := responseMetrics{}
-	if completed != nil {
-		metrics = *completed
-	} else {
-		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
-	}
-	record.TTFTMS = metrics.ttftMS
-	record.PromptTokens = metrics.promptTokens
-	record.GeneratedTokens = metrics.generatedTokens
-	record.TotalTokens = metrics.totalTokens
-	record.TokensPerSecond = metrics.generationTPS
-	*promptTPS = metrics.promptTPS
-	if record.Result == "error" && record.Error == "" {
-		record.Error = responseError(record.StatusCode, responseSample)
-	}
-	if observed.captureAll {
-		value := string(responseSample)
-		record.ResponseBody = &value
-	}
-	if *proxyPanic != nil {
-		panic(*proxyPanic)
-	}
-}
-
-func (g *Gateway) persistOpenAIResponseID(ctx context.Context, requestID, openaiID string) {
-	if g.observability == nil || strings.TrimSpace(openaiID) == "" {
-		return
-	}
-	persistCtx, cancel := g.persistenceContext(ctx)
-	defer cancel()
-	if err := g.observability.SetOpenAIResponseID(persistCtx, requestID, openaiID); err != nil && !errors.Is(err, observability.ErrDuplicateOpenAIResponseID) {
-		slog.Warn("persist openai response id failed", "request_id", requestID, "openai_response_id", openaiID, "error", err)
-	} else if errors.Is(err, observability.ErrDuplicateOpenAIResponseID) {
-		slog.Warn("duplicate openai response id ignored", "request_id", requestID, "openai_response_id", openaiID)
-	}
-}
-
-type idCaptureStream struct {
-	io.ReadCloser
-	buf               []byte
-	onID              func(string)
-	seen              bool
-	captureResponse   bool
-	captureCompletion bool
-}
-
-func (s *idCaptureStream) Read(p []byte) (int, error) {
-	n, err := s.ReadCloser.Read(p)
-	if n > 0 && !s.seen {
-		s.buf = append(s.buf, p[:n]...)
-		id := ""
-		if s.captureResponse {
-			id = parseResponseIDFromSSE(s.buf)
-		}
-		if id == "" && s.captureCompletion {
-			id = extractJSONID(s.buf)
-			if id == "" {
-				id = parseResponseIDFromSSE(s.buf)
-			}
-		}
-		if id == "" {
-			id = extractQuotedID(s.buf)
-			if s.captureResponse && id != "" && !strings.HasPrefix(id, "resp_") {
-				id = ""
-			}
-		}
-		if id != "" {
-			s.seen = true
-			s.onID(id)
-		}
-		if len(s.buf) > 1<<20 {
-			s.buf = s.buf[len(s.buf)/2:]
-		}
-	}
-	return n, err
-}
-
-func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
-	responseID = strings.TrimSpace(responseID)
-	if inFlight := g.active.getByUpstream(responseID); inFlight != nil && strings.HasPrefix(inFlight.endpoint, "/v1/responses") {
-		if !requestInstanceAllowed(r, inFlight.model) {
-			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"id": responseID, "object": "response", "status": "in_progress",
-			"model": inFlight.model, "created_at": inFlight.startedAt / 1000,
-		})
-		return
-	}
-	stored, err := g.lookupStoredResponse(r.Context(), responseID)
-	if err != nil || stored.Deleted || stored.ResponseBody == nil || strings.TrimSpace(*stored.ResponseBody) == "" {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return
-	}
-	payload, ok := parseFinalResponseJSON([]byte(*stored.ResponseBody))
-	if !ok {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
-	if !bytes.HasSuffix(payload, []byte("\n")) {
-		_, _ = w.Write([]byte("\n"))
-	}
-}
-
-func (g *Gateway) deleteStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
-	if g.observability == nil {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	stored, err := g.lookupStoredResponse(r.Context(), responseID)
-	if err != nil || stored.Deleted {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return
-	}
-	if err := g.observability.MarkOpenAIResponseDeleted(r.Context(), responseID); err != nil {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": responseID, "object": "response", "deleted": true})
-}
-
-func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, responseID string) {
-	stored, err := g.lookupStoredResponse(r.Context(), responseID)
-	if err != nil || stored.Deleted || stored.RequestBody == nil || strings.TrimSpace(*stored.RequestBody) == "" {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return
-	}
-	items := normalizeInputItems([]byte(*stored.RequestBody))
-	writeJSON(w, http.StatusOK, inputItemsList(items, r.URL.Query().Get("after"), parseLimitQuery(r.URL.Query().Get("limit"))))
-}
-
-func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
-	responseID = strings.TrimSpace(responseID)
-	if preview := g.active.getByUpstream(responseID); preview != nil && !requestInstanceAllowed(r, preview.model) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return
-	}
-	if entry, ok := g.active.cancelByUpstream(responseID); ok {
-		_ = g.active.waitRemoved(entry.managerRequestID, 2*time.Second)
-		if stored, err := g.lookupStoredResponse(r.Context(), responseID); err == nil && stored.ResponseBody != nil {
-			if payload, parsed := parseFinalResponseJSON([]byte(*stored.ResponseBody)); parsed {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(payload)
-				return
-			}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"id": responseID, "object": "response", "status": "cancelled",
-			"model": entry.model,
-		})
-		return
-	}
-	if entry := g.active.getByUpstream(responseID); entry != nil && entry.cancelled {
-		if !requestInstanceAllowed(r, entry.model) {
-			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is already cancelled")
-		return
-	}
-	stored, err := g.lookupStoredResponse(r.Context(), responseID)
-	if err != nil || stored.Deleted {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
-		return
-	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-		return
-	}
-	writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is not cancellable")
-}
-
-func (g *Gateway) lookupStoredResponse(ctx context.Context, responseID string) (observability.StoredOpenAIResponse, error) {
-	if g.observability == nil {
-		return observability.StoredOpenAIResponse{}, errors.New("observability unavailable")
-	}
-	return g.observability.GetStoredOpenAIResponse(ctx, responseID)
-}
-
-func suppliedTraceID(r *http.Request, bodyTraceID string) (string, bool) {
-	for _, value := range []string{r.Header.Get(headerTraceID), bodyTraceID} {
-		if traceID, ok := normalizeUUID(value); ok {
-			return traceID, true
-		}
-	}
-	return "", false
-}
-
-func resolveTraceID(r *http.Request, bodyTraceID string) string {
-	if traceID, ok := suppliedTraceID(r, bodyTraceID); ok {
-		return traceID
-	}
-	return newTraceID()
-}
-
-func normalizeUUID(value string) (string, bool) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
-		return "", false
-	}
-	for index, r := range value {
-		if index == 8 || index == 13 || index == 18 || index == 23 {
-			continue
-		}
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-			return "", false
-		}
-	}
-	return value, true
-}
-
-func newTraceID() string {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		fallback := fmt.Sprintf("%032x", uint64(time.Now().UnixNano())^requestIDFallback.Add(1))
-		return fmt.Sprintf("%s-%s-%s-%s-%s", fallback[0:8], fallback[8:12], fallback[12:16], fallback[16:20], fallback[20:32])
-	}
-	value[6] = (value[6] & 0x0f) | 0x40
-	value[8] = (value[8] & 0x3f) | 0x80
-	hexValue := hex.EncodeToString(value[:])
-	return fmt.Sprintf("%s-%s-%s-%s-%s", hexValue[0:8], hexValue[8:12], hexValue[12:16], hexValue[16:20], hexValue[20:32])
-}
-
-func clientIP(r *http.Request) string {
-	if value := forwardedClientIP(r.Header.Values("Forwarded")); value != "" {
-		return value
-	}
-	for _, part := range strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",") {
-		if value := canonicalIP(part); value != "" {
-			return value
-		}
-	}
-	if value := canonicalIP(r.Header.Get("X-Real-IP")); value != "" {
-		return value
-	}
-	return canonicalIP(r.RemoteAddr)
-}
-
-func forwardedClientIP(values []string) string {
-	raw := strings.Join(values, ",")
-	for _, element := range strings.Split(raw, ",") {
-		for _, parameter := range strings.Split(element, ";") {
-			key, value, ok := strings.Cut(parameter, "=")
-			if !ok || !strings.EqualFold(strings.TrimSpace(key), "for") {
-				continue
-			}
-			if ip := canonicalIP(strings.Trim(strings.TrimSpace(value), `"`)); ip != "" {
-				return ip
-			}
-		}
-	}
-	return ""
-}
-
-func canonicalIP(value string) string {
-	value = strings.Trim(strings.TrimSpace(value), `"`)
-	if value == "" || strings.EqualFold(value, "unknown") || strings.HasPrefix(value, "_") {
-		return ""
-	}
-	if host, _, err := net.SplitHostPort(value); err == nil {
-		value = host
-	}
-	value = strings.Trim(value, "[]")
-	if ip := net.ParseIP(value); ip != nil {
-		return ip.String()
-	}
-	return ""
-}
-
-func boundedMetadata(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if limit > 0 && len(value) > limit {
-		value = value[:limit]
-	}
-	return value
-}
-
-type responseObserver struct {
-	http.ResponseWriter
-	status     int
-	firstByte  time.Time
-	body       bytes.Buffer
-	captureAll bool
-}
-
-func newResponseObserver(writer http.ResponseWriter, captureAll bool) *responseObserver {
-	return &responseObserver{ResponseWriter: writer, captureAll: captureAll}
-}
-func (w *responseObserver) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-func (w *responseObserver) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
-	}
-	w.ResponseWriter.WriteHeader(status)
-}
-func (w *responseObserver) Write(value []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	if w.firstByte.IsZero() {
-		w.firstByte = time.Now()
-	}
-	if w.captureAll {
-		_, _ = w.body.Write(value)
-	} else if w.body.Len() < metadataResponseCaptureLimit {
-		remaining := metadataResponseCaptureLimit - w.body.Len()
-		if remaining > len(value) {
-			remaining = len(value)
-		}
-		_, _ = w.body.Write(value[:remaining])
-	}
-	return w.ResponseWriter.Write(value)
-}
-func (w *responseObserver) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
-	}
-}
-func (w *responseObserver) StatusCode() int {
-	if w.status == 0 {
-		return http.StatusOK
-	}
-	return w.status
-}
-func (w *responseObserver) FirstByte() time.Time { return w.firstByte }
-func (w *responseObserver) Bytes() []byte        { return append([]byte(nil), w.body.Bytes()...) }
-
-type firstReadCloser struct {
-	io.ReadCloser
-	firstRead time.Time
-}
-
-func (r *firstReadCloser) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p)
-	if n > 0 && r.firstRead.IsZero() {
-		r.firstRead = time.Now()
-	}
-	return n, err
-}
-
-type usageValues struct {
-	prompt, generated, total int64
-	promptTPS, generationTPS *float64
-}
-
-type responseMetrics struct {
-	ttftMS                        *float64
-	promptTPS, generationTPS      *float64
-	promptTokens, generatedTokens int64
-	totalTokens                   int64
-}
-
-func calculateResponseMetrics(started, firstByte, finished time.Time, usage usageValues) responseMetrics {
-	metrics := responseMetrics{
-		promptTPS:       usage.promptTPS,
-		generationTPS:   usage.generationTPS,
-		promptTokens:    usage.prompt,
-		generatedTokens: usage.generated,
-		totalTokens:     usage.total,
-	}
-	if !firstByte.IsZero() {
-		value := milliseconds(firstByte.Sub(started))
-		metrics.ttftMS = &value
-	}
-	if metrics.generationTPS == nil && usage.generated > 0 {
-		generationStarted := started
-		if !firstByte.IsZero() {
-			generationStarted = firstByte
-		}
-		seconds := finished.Sub(generationStarted).Seconds()
-		if seconds > 0 {
-			value := float64(usage.generated) / seconds
-			metrics.generationTPS = &value
-		}
-	}
-	return metrics
-}
-
-func addFinalMetricHeaders(header http.Header, kind metricKind, metrics responseMetrics) {
-	if kind == metricNone {
-		return
-	}
-	if metrics.ttftMS != nil {
-		setProductHeader(header, headerTTFTMS, metricFloat(*metrics.ttftMS))
-	}
-	if metrics.promptTPS != nil {
-		setProductHeader(header, headerPromptTPS, metricFloat(*metrics.promptTPS))
-	}
-	if kind == metricGeneration && metrics.generationTPS != nil {
-		setProductHeader(header, headerGenerationTPS, metricFloat(*metrics.generationTPS))
-	}
-	if metrics.promptTokens > 0 {
-		setProductHeader(header, headerPromptTokens, strconv.FormatInt(metrics.promptTokens, 10))
-	}
-	if kind == metricGeneration && metrics.generatedTokens > 0 {
-		setProductHeader(header, headerGeneratedTokens, strconv.FormatInt(metrics.generatedTokens, 10))
-	}
-	if metrics.totalTokens > 0 {
-		setProductHeader(header, headerTotalTokens, strconv.FormatInt(metrics.totalTokens, 10))
-	}
-}
-
-func parseUsage(body []byte) usageValues {
-	var best usageValues
-	parseObject := func(raw []byte) {
-		var value map[string]any
-		if json.Unmarshal(raw, &value) != nil {
-			return
-		}
-		candidate := usageFromObject(value)
-		if candidate.total > 0 || candidate.prompt > 0 || candidate.generated > 0 || candidate.promptTPS != nil || candidate.generationTPS != nil {
-			best = candidate
-		}
-	}
-	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) > 0 && trimmed[0] == '{' {
-		parseObject(trimmed)
-	}
-	for _, line := range bytes.Split(body, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
-		}
-		line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-		if bytes.Equal(line, []byte("[DONE]")) {
-			continue
-		}
-		parseObject(line)
-	}
-	return best
-}
-
-func usageFromObject(value map[string]any) usageValues {
-	var result usageValues
-	if raw, ok := value["usage"].(map[string]any); ok {
-		result.prompt = intValue(raw, "prompt_tokens", "input_tokens")
-		result.generated = intValue(raw, "completion_tokens", "output_tokens")
-		result.total = intValue(raw, "total_tokens")
-		if result.total == 0 {
-			result.total = result.prompt + result.generated
-		}
-	}
-	if timings, ok := value["timings"].(map[string]any); ok {
-		if result.prompt == 0 {
-			result.prompt = intValue(timings, "prompt_n")
-		}
-		if result.generated == 0 {
-			result.generated = intValue(timings, "predicted_n")
-		}
-		if result.total == 0 {
-			result.total = result.prompt + result.generated
-		}
-		if value, ok := numberValue(timings["prompt_per_second"]); ok && value > 0 {
-			result.promptTPS = &value
-		} else if promptMS, ok := numberValue(timings["prompt_ms"]); ok && promptMS > 0 && result.prompt > 0 {
-			value := float64(result.prompt) / (promptMS / 1000)
-			result.promptTPS = &value
-		}
-		if value, ok := numberValue(timings["predicted_per_second"]); ok && value > 0 {
-			result.generationTPS = &value
-		} else if predictedMS, ok := numberValue(timings["predicted_ms"]); ok && predictedMS > 0 && result.generated > 0 {
-			value := float64(result.generated) / (predictedMS / 1000)
-			result.generationTPS = &value
-		}
-	}
-	return result
-}
-
-func intValue(values map[string]any, keys ...string) int64 {
-	for _, key := range keys {
-		if value, ok := numberValue(values[key]); ok {
-			return int64(value)
-		}
-	}
-	return 0
-}
-func numberValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case float64:
-		return typed, true
-	case json.Number:
-		value, err := typed.Float64()
-		return value, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func newRequestID() string {
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err == nil {
-		return "lr_" + hex.EncodeToString(random[:])
-	}
-	return fmt.Sprintf("lr_%x_%x", time.Now().UnixNano(), requestIDFallback.Add(1))
-}
-
-func milliseconds(value time.Duration) float64 { return float64(value.Microseconds()) / 1000 }
-func metricFloat(value float64) string         { return strconv.FormatFloat(value, 'f', 3, 64) }
-
-func responseError(status int, body []byte) string {
-	var value map[string]any
-	if json.Unmarshal(body, &value) == nil {
-		if errorValue, ok := value["error"].(map[string]any); ok {
-			if message, ok := errorValue["message"].(string); ok {
-				return sanitizeError(message)
-			}
-		}
-	}
-	return fmt.Sprintf("HTTP %d", status)
-}
-
-func sanitizeError(value string) string {
-	value = strings.Map(func(r rune) rune {
-		if r < 32 && r != '\t' && r != '\n' {
-			return -1
-		}
-		return r
-	}, value)
-	value = strings.Join(strings.Fields(value), " ")
-	if len(value) > 512 {
-		value = value[:512]
-	}
-	return value
-}
-
-func writeError(w http.ResponseWriter, status int, typ, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]any{"message": message, "type": typ, "param": nil, "code": code}})
-}
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
