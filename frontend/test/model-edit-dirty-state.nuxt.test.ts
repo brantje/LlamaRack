@@ -10,7 +10,7 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 beforeEach(() => {
   mocks.request.mockReset()
   mocks.request.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/models/model-1') return { id: 'model-1', name: 'Model One', context_length: 8192 }
+    if (path === '/api/v1/models/model-1') return { id: 'model-1', slug: 'model-1', name: 'Model One', context_length: 8192 }
     if (path === '/api/v1/models/model-1/options') return { 'ctx-size': '8192' }
     throw new Error(`unexpected request ${path}`)
   })
@@ -54,7 +54,7 @@ describe('Edit Model dirty state', () => {
   it('surfaces built-in MTP from inspect features without dirtying the loaded Model', async () => {
     mocks.request.mockImplementation(async (path: string, options?: { method?: string }) => {
       if (path === '/api/v1/models/model-1') {
-        return { id: 'model-1', name: 'Model One', context_length: 8192, gguf_path: 'native.gguf' }
+        return { id: 'model-1', slug: 'model-1', name: 'Model One', context_length: 8192, gguf_path: 'native.gguf' }
       }
       if (path === '/api/v1/models/model-1/options') {
         return { 'spec-type': 'draft-mtp', 'spec-draft-n-max': '16', 'spec-draft-p-min': '0.8' }
@@ -90,7 +90,7 @@ describe('Edit Model dirty state', () => {
   it('keeps the edit form usable when GGUF inspection fails', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/models/model-1') {
-        return { id: 'model-1', name: 'Model One', context_length: 8192, gguf_path: 'broken.gguf' }
+        return { id: 'model-1', slug: 'model-1', name: 'Model One', context_length: 8192, gguf_path: 'broken.gguf' }
       }
       if (path === '/api/v1/models/model-1/options') return { mmproj: '/models/mmproj.gguf' }
       if (path === '/api/v1/models/inspect') throw { data: { error: 'inspect exploded' } }

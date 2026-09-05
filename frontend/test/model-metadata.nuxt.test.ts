@@ -9,7 +9,7 @@ import { useManager } from '~/composables/useManager'
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
-const model = { id: 'm1', name: 'Qwen Model', gguf_path: 'qwen-Q4_K_M.gguf', total_bytes: 4 * 1024 ** 3, quantization: 'Q4_K_M', context_length: 32768 }
+const model = { id: 'm1', slug: 'm1', name: 'Qwen Model', gguf_path: 'qwen-Q4_K_M.gguf', total_bytes: 4 * 1024 ** 3, quantization: 'Q4_K_M', context_length: 32768 }
 const available = [{ path: model.gguf_path, name: model.gguf_path, total_bytes: model.total_bytes, quantization: model.quantization }]
 
 function resetManager() {

@@ -12,6 +12,7 @@ const gib = 1024 ** 3
 function instance(id: string, overrides: Partial<Instance> = {}): Instance {
   return {
     id,
+    slug: id,
     model_id: 'm1',
     name: id,
     enabled: true,
@@ -35,7 +36,7 @@ function resetManager() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Model', gguf_path: 'model.gguf', total_bytes: 1, context_length: 8192 }]
+  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Model', gguf_path: 'model.gguf', total_bytes: 1, context_length: 8192 }]
   manager.instances.value = []
   manager.runtimes.value = { m1: [] }
   manager.runtimeTelemetry.value = {}

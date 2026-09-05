@@ -16,7 +16,7 @@ function seedManager() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 0, context_length: 0 }]
+  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Demo', gguf_path: 'demo.gguf', total_bytes: 0, context_length: 0 }]
   manager.instances.value = []
   manager.runtimes.value = {}
   manager.profile.value = null
@@ -24,7 +24,7 @@ function seedManager() {
 
 function response() {
   return {
-    model: { id: 'm1', name: 'Demo', gguf_path: 'nested/demo.gguf', total_bytes: 0, context_length: 0, quantization: '' },
+    model: { id: 'm1', slug: 'm1', name: 'Demo', gguf_path: 'nested/demo.gguf', total_bytes: 0, context_length: 0, quantization: '' },
     gguf_version: 0,
     tensor_count: 0,
     metadata_count: 0,
