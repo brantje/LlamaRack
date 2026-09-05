@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/issue-120-release-qualification
   release:
     types: [published]
 
@@ -13,23 +12,91 @@ permissions:
   packages: write
 
 jobs:
+  resolve-runtime:
+    name: Resolve release identity and llama.cpp runtime
+    if: ${{ github.event_name == 'push' || github.event.release.prerelease == true }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+      build_time: ${{ steps.identity.outputs.build_time }}
+      release_tag: ${{ steps.runtime.outputs.release_tag }}
+      build_tag: ${{ steps.runtime.outputs.build_tag }}
+      cpu_image: ${{ steps.runtime.outputs.cpu_image }}
+      cuda_image: ${{ steps.runtime.outputs.cuda_image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Resolve LlamaRack identity
+        id: identity
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == 'release' ]]; then
+            version="${RELEASE_TAG#v}"
+            channel='release'
+          else
+            version='development'
+            channel='development'
+          fi
+          [[ -n "$version" && "$version" != *[[:space:]]* ]] || { echo 'invalid LlamaRack version' >&2; exit 1; }
+          build_time="$(git show -s --format=%cI "$GITHUB_SHA")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "build_time=${build_time}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve latest stable llama.cpp
+        id: runtime
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/release-qualification/resolve-llama-runtime.sh "$GITHUB_OUTPUT"
+
+      - name: Resolution summary
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          CHANNEL: ${{ steps.identity.outputs.channel }}
+          RELEASE_TAG: ${{ steps.runtime.outputs.release_tag }}
+          BUILD_TAG: ${{ steps.runtime.outputs.build_tag }}
+          CPU_IMAGE: ${{ steps.runtime.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ steps.runtime.outputs.cuda_image }}
+        run: |
+          {
+            echo '## Release build identity'
+            echo
+            echo "- LlamaRack: \`${VERSION}\` (\`${GITHUB_SHA}\`, ${CHANNEL})"
+            echo "- llama.cpp release: \`${RELEASE_TAG}\`"
+            echo "- llama.cpp build: \`${BUILD_TAG}\`"
+            echo "- CPU runtime: \`${CPU_IMAGE}\`"
+            echo "- CUDA runtime: \`${CUDA_IMAGE}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-candidates:
     name: Build and smoke candidate images
+    needs: resolve-runtime
     runs-on: ubuntu-latest
     outputs:
       cpu_image: ${{ steps.resolved-candidates.outputs.cpu_image }}
       cuda_image: ${{ steps.resolved-candidates.outputs.cuda_image }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -37,30 +104,28 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Docker metadata (CUDA)
         id: meta-cuda
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}-cuda
-            type=semver,pattern=v{{major}}.{{minor}}-cuda
-            type=semver,pattern=v{{major}}-cuda
-            type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}-cuda
+            type=semver,pattern={{major}}.{{minor}}-cuda
+            type=semver,pattern={{major}}-cuda
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
@@ -71,41 +136,83 @@ jobs:
           echo "cuda_tag=ghcr.io/brantje/llamarack:qualification-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-cuda" >> "$GITHUB_OUTPUT"
 
       - name: Build CPU candidate locally
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          load: true
-          tags: llamarack-candidate-cpu:${{ github.sha }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            io.llamarack.build.reason=release
-          cache-from: type=gha,scope=cpu
-          cache-to: type=gha,mode=max,scope=cpu
-
-      - name: Build CUDA candidate locally
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ./Dockerfile
           load: true
           build-args: |
-            LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda
+            LLAMA_IMAGE=${{ needs.resolve-runtime.outputs.cpu_image }}
+            LLAMARACK_VERSION=${{ needs.resolve-runtime.outputs.version }}
+            LLAMARACK_COMMIT=${{ github.sha }}
+            LLAMARACK_BUILD_TIME=${{ needs.resolve-runtime.outputs.build_time }}
+            LLAMARACK_CHANNEL=${{ needs.resolve-runtime.outputs.channel }}
+            LLAMARACK_VARIANT=cpu
+            LLAMA_CPP_RELEASE=${{ needs.resolve-runtime.outputs.release_tag }}
+            LLAMA_CPP_BUILD=${{ needs.resolve-runtime.outputs.build_tag }}
+            LLAMA_CPP_IMAGE=${{ needs.resolve-runtime.outputs.cpu_image }}
+          tags: llamarack-candidate-cpu:${{ github.sha }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            io.llamarack.build.reason=release
+            io.llamarack.runtime.variant=cpu
+            io.llamarack.llama.cpp.release=${{ needs.resolve-runtime.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.resolve-runtime.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.resolve-runtime.outputs.cpu_image }}
+          cache-from: type=gha,scope=cpu
+          cache-to: type=gha,mode=max,scope=cpu
+
+      - name: Build CUDA candidate locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          build-args: |
+            LLAMA_IMAGE=${{ needs.resolve-runtime.outputs.cuda_image }}
+            LLAMARACK_VERSION=${{ needs.resolve-runtime.outputs.version }}
+            LLAMARACK_COMMIT=${{ github.sha }}
+            LLAMARACK_BUILD_TIME=${{ needs.resolve-runtime.outputs.build_time }}
+            LLAMARACK_CHANNEL=${{ needs.resolve-runtime.outputs.channel }}
+            LLAMARACK_VARIANT=cuda
+            LLAMA_CPP_RELEASE=${{ needs.resolve-runtime.outputs.release_tag }}
+            LLAMA_CPP_BUILD=${{ needs.resolve-runtime.outputs.build_tag }}
+            LLAMA_CPP_IMAGE=${{ needs.resolve-runtime.outputs.cuda_image }}
           tags: llamarack-candidate-cuda:${{ github.sha }}
           labels: |
             ${{ steps.meta-cuda.outputs.labels }}
             io.llamarack.build.reason=release
+            io.llamarack.runtime.variant=cuda
+            io.llamarack.llama.cpp.release=${{ needs.resolve-runtime.outputs.release_tag }}
+            io.llamarack.llama.cpp.build=${{ needs.resolve-runtime.outputs.build_tag }}
+            io.llamarack.llama.cpp.image=${{ needs.resolve-runtime.outputs.cuda_image }}
           cache-from: type=gha,scope=cuda
           cache-to: type=gha,mode=max,scope=cuda
 
       - name: Smoke exact CPU build before publication
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/prepublish
+          EXPECTED_LLAMARACK_VERSION: ${{ needs.resolve-runtime.outputs.version }}
+          EXPECTED_LLAMARACK_COMMIT: ${{ github.sha }}
+          EXPECTED_LLAMARACK_CHANNEL: ${{ needs.resolve-runtime.outputs.channel }}
+          EXPECTED_RUNTIME_VARIANT: cpu
+          EXPECTED_LLAMA_CPP_RELEASE: ${{ needs.resolve-runtime.outputs.release_tag }}
+          EXPECTED_LLAMA_CPP_BUILD: ${{ needs.resolve-runtime.outputs.build_tag }}
+          EXPECTED_LLAMA_CPP_IMAGE: ${{ needs.resolve-runtime.outputs.cpu_image }}
+          EXPECTED_RELEASE_BUILD: ${{ github.event_name == 'release' }}
         run: bash scripts/release-qualification/container-smoke.sh 'llamarack-candidate-cpu:${{ github.sha }}' cpu
 
       - name: Smoke exact CUDA build before publication
         env:
           QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/prepublish
+          EXPECTED_LLAMARACK_VERSION: ${{ needs.resolve-runtime.outputs.version }}
+          EXPECTED_LLAMARACK_COMMIT: ${{ github.sha }}
+          EXPECTED_LLAMARACK_CHANNEL: ${{ needs.resolve-runtime.outputs.channel }}
+          EXPECTED_RUNTIME_VARIANT: cuda
+          EXPECTED_LLAMA_CPP_RELEASE: ${{ needs.resolve-runtime.outputs.release_tag }}
+          EXPECTED_LLAMA_CPP_BUILD: ${{ needs.resolve-runtime.outputs.build_tag }}
+          EXPECTED_LLAMA_CPP_IMAGE: ${{ needs.resolve-runtime.outputs.cuda_image }}
+          EXPECTED_RELEASE_BUILD: ${{ github.event_name == 'release' }}
         run: bash scripts/release-qualification/container-smoke.sh 'llamarack-candidate-cuda:${{ github.sha }}' cuda
 
       - name: Push qualified candidate images
@@ -142,7 +249,7 @@ jobs:
 
       - name: Upload pre-publication smoke evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: prepublish-container-smoke-${{ github.run_id }}
           path: artifacts/release-qualification/prepublish
@@ -155,7 +262,7 @@ jobs:
     with:
       cpu_image: ${{ needs.build-candidates.outputs.cpu_image }}
       cuda_image: ${{ needs.build-candidates.outputs.cuda_image }}
-      run_gpu: ${{ github.event_name == 'release' || github.ref == 'refs/heads/feat/issue-120-release-qualification' }}
+      run_gpu: ${{ github.event_name == 'release' }}
       run_compat: ${{ github.event_name == 'release' }}
       gpu_models_dir: ${{ vars.GPU_QUALIFICATION_MODELS_DIR || '/home/node/github-runners/models' }}
       gpu_cycles: 8
@@ -163,43 +270,60 @@ jobs:
 
   publish:
     name: Publish qualified tags
-    if: ${{ github.event_name == 'release' || github.ref == 'refs/heads/main' }}
-    needs: [build-candidates, qualify]
+    if: ${{ github.event_name == 'push' || github.event.release.prerelease == true }}
+    needs: [resolve-runtime, build-candidates, qualify]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Guard immutable release tags
+        if: ${{ github.event_name == 'release' }}
+        env:
+          VERSION: ${{ needs.resolve-runtime.outputs.version }}
+        run: |
+          set -euo pipefail
+          for tag in "ghcr.io/brantje/llamarack:${VERSION}" "ghcr.io/brantje/llamarack:${VERSION}-cuda"; do
+            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "immutable release tag already exists: $tag" >&2
+              exit 1
+            fi
+          done
+
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/brantje/llamarack
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=raw,value=main,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       - name: Docker metadata (CUDA)
         id: meta-cuda
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/brantje/llamarack
           flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}-cuda
-            type=semver,pattern=v{{major}}.{{minor}}-cuda
-            type=semver,pattern=v{{major}}-cuda
-            type=raw,value=latest-cuda,enable=${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+            type=semver,pattern={{version}}-cuda
+            type=semver,pattern={{major}}.{{minor}}-cuda
+            type=semver,pattern={{major}}-cuda
             type=raw,value=main-cuda,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,suffix=-cuda,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
@@ -232,3 +356,339 @@ jobs:
             docker tag "$CUDA_IMAGE" "$tag"
             docker push "$tag"
           done <<< "$TAGS"
+
+      - name: Record release build identity
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.resolve-runtime.outputs.version }}
+          LLAMA_RELEASE: ${{ needs.resolve-runtime.outputs.release_tag }}
+          LLAMA_BUILD: ${{ needs.resolve-runtime.outputs.build_tag }}
+          CPU_RUNTIME: ${{ needs.resolve-runtime.outputs.cpu_image }}
+          CUDA_RUNTIME: ${{ needs.resolve-runtime.outputs.cuda_image }}
+          CPU_IMAGE: ${{ needs.build-candidates.outputs.cpu_image }}
+          CUDA_IMAGE: ${{ needs.build-candidates.outputs.cuda_image }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+          jq -n \
+            --arg version "$VERSION" \
+            --arg commit "$GITHUB_SHA" \
+            --arg llama_release "$LLAMA_RELEASE" \
+            --arg llama_build "$LLAMA_BUILD" \
+            --arg cpu_runtime "$CPU_RUNTIME" \
+            --arg cuda_runtime "$CUDA_RUNTIME" \
+            --arg cpu_image "$CPU_IMAGE" \
+            --arg cuda_image "$CUDA_IMAGE" \
+            '{llamarack:{version:$version,commit:$commit},llama_cpp:{release:$llama_release,build:$llama_build,cpu_runtime:$cpu_runtime,cuda_runtime:$cuda_runtime},images:{cpu:$cpu_image,cuda:$cuda_image}}' \
+            > artifacts/release/build-identity.json
+          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber
+
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""')"
+          marker='<!-- llamarack-runtime-identity -->'
+          if ! grep -Fq "$marker" <<< "$body"; then
+            section="$(cat <<EOF
+          
+          ${marker}
+          ## Bundled runtime
+          
+          - LlamaRack commit: \`${GITHUB_SHA}\`
+          - llama.cpp release: \`${LLAMA_RELEASE}\`
+          - llama.cpp build: \`${LLAMA_BUILD}\`
+          - CPU image: \`${CPU_IMAGE}\`
+          - CUDA image: \`${CUDA_IMAGE}\`
+          EOF
+          )"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f body="${body}${section}" >/dev/null
+          fi
+
+  promote-stable:
+    name: Promote qualified final RC to stable
+    if: ${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout stable release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve qualified final RC
+        id: source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          stable_version="${STABLE_TAG#v}"
+          if [[ ! "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "stable release tag must be SemVer without prerelease suffix: ${STABLE_TAG}" >&2
+            exit 1
+          fi
+          stable_commit="$(git rev-parse HEAD)"
+          build_time="$(git show -s --format=%cI "$stable_commit")"
+
+          releases_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
+          rc_tag="$(jq -r --arg base "$stable_version" '
+            [ .[]
+              | select(.draft == false and .prerelease == true)
+              | . as $release
+              | ($release.tag_name | ltrimstr("v")) as $tag
+              | select($tag | startswith($base + "-rc."))
+              | select(($tag | split("-rc.")[1]) | test("^[0-9]+$"))
+              | {tag_name:$release.tag_name, rc:($tag | split("-rc.")[1] | tonumber)}
+            ] | sort_by(.rc) | last | .tag_name // empty
+          ' <<< "$releases_json")"
+          if [[ -z "$rc_tag" ]]; then
+            echo "no published qualified RC found for ${stable_version}" >&2
+            exit 1
+          fi
+          is_highest="$(jq -r --arg current "$stable_version" '
+            ([ .[]
+              | select(.draft == false and .prerelease == false)
+              | (.tag_name | ltrimstr("v")) as $tag
+              | select($tag | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+              | $tag
+            ] + [$current])
+            | map({version:., parts:(split(".") | map(tonumber))})
+            | sort_by(.parts)
+            | last.version == $current
+          ' <<< "$releases_json")"
+
+          rc_version="${rc_tag#v}"
+          cpu_source="ghcr.io/brantje/llamarack:${rc_version}"
+          cuda_source="ghcr.io/brantje/llamarack:${rc_version}-cuda"
+          docker pull "$cpu_source"
+          docker pull "$cuda_source"
+
+          label() {
+            docker image inspect "$1" --format "{{ index .Config.Labels \"$2\" }}"
+          }
+          cpu_commit="$(label "$cpu_source" org.opencontainers.image.revision)"
+          cuda_commit="$(label "$cuda_source" org.opencontainers.image.revision)"
+          cpu_variant="$(label "$cpu_source" io.llamarack.runtime.variant)"
+          cuda_variant="$(label "$cuda_source" io.llamarack.runtime.variant)"
+          llama_release="$(label "$cpu_source" io.llamarack.llama.cpp.release)"
+          cuda_llama_release="$(label "$cuda_source" io.llamarack.llama.cpp.release)"
+          llama_build="$(label "$cpu_source" io.llamarack.llama.cpp.build)"
+          cuda_llama_build="$(label "$cuda_source" io.llamarack.llama.cpp.build)"
+          cpu_runtime="$(label "$cpu_source" io.llamarack.llama.cpp.image)"
+          cuda_runtime="$(label "$cuda_source" io.llamarack.llama.cpp.image)"
+
+          [[ "$cpu_commit" == "$stable_commit" && "$cuda_commit" == "$stable_commit" ]] \
+            || { echo "final RC was not built from stable commit ${stable_commit}" >&2; exit 1; }
+          [[ "$cpu_variant" == 'cpu' && "$cuda_variant" == 'cuda' ]] \
+            || { echo 'final RC runtime variants are inconsistent' >&2; exit 1; }
+          [[ -n "$llama_release" && "$llama_release" == "$cuda_llama_release" ]] \
+            || { echo 'CPU/CUDA final RC llama.cpp releases do not match' >&2; exit 1; }
+          [[ -n "$llama_build" && "$llama_build" == "$cuda_llama_build" ]] \
+            || { echo 'CPU/CUDA final RC llama.cpp builds do not match' >&2; exit 1; }
+          [[ -n "$cpu_runtime" && -n "$cuda_runtime" ]] \
+            || { echo 'final RC is missing immutable llama.cpp runtime image metadata' >&2; exit 1; }
+
+          major="${stable_version%%.*}"
+          minor="${stable_version%.*}"
+          echo "stable_version=${stable_version}" >> "$GITHUB_OUTPUT"
+          echo "stable_commit=${stable_commit}" >> "$GITHUB_OUTPUT"
+          echo "build_time=${build_time}" >> "$GITHUB_OUTPUT"
+          echo "major=${major}" >> "$GITHUB_OUTPUT"
+          echo "minor=${minor}" >> "$GITHUB_OUTPUT"
+          echo "is_highest=${is_highest}" >> "$GITHUB_OUTPUT"
+          echo "rc_tag=${rc_tag}" >> "$GITHUB_OUTPUT"
+          echo "llama_release=${llama_release}" >> "$GITHUB_OUTPUT"
+          echo "llama_build=${llama_build}" >> "$GITHUB_OUTPUT"
+          echo "cpu_runtime=${cpu_runtime}" >> "$GITHUB_OUTPUT"
+          echo "cuda_runtime=${cuda_runtime}" >> "$GITHUB_OUTPUT"
+
+      - name: Guard immutable stable tags
+        env:
+          VERSION: ${{ steps.source.outputs.stable_version }}
+        run: |
+          set -euo pipefail
+          for tag in "ghcr.io/brantje/llamarack:${VERSION}" "ghcr.io/brantje/llamarack:${VERSION}-cuda"; do
+            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "immutable stable tag already exists: $tag" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build stable CPU image from qualified runtime
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          build-args: |
+            LLAMA_IMAGE=${{ steps.source.outputs.cpu_runtime }}
+            LLAMARACK_VERSION=${{ steps.source.outputs.stable_version }}
+            LLAMARACK_COMMIT=${{ steps.source.outputs.stable_commit }}
+            LLAMARACK_BUILD_TIME=${{ steps.source.outputs.build_time }}
+            LLAMARACK_CHANNEL=release
+            LLAMARACK_VARIANT=cpu
+            LLAMA_CPP_RELEASE=${{ steps.source.outputs.llama_release }}
+            LLAMA_CPP_BUILD=${{ steps.source.outputs.llama_build }}
+            LLAMA_CPP_IMAGE=${{ steps.source.outputs.cpu_runtime }}
+          tags: llamarack-stable-cpu:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.source.outputs.stable_version }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.stable_commit }}
+            io.llamarack.build.reason=stable-promotion
+            io.llamarack.promoted.from=${{ steps.source.outputs.rc_tag }}
+            io.llamarack.runtime.variant=cpu
+            io.llamarack.llama.cpp.release=${{ steps.source.outputs.llama_release }}
+            io.llamarack.llama.cpp.build=${{ steps.source.outputs.llama_build }}
+            io.llamarack.llama.cpp.image=${{ steps.source.outputs.cpu_runtime }}
+          cache-from: type=gha,scope=cpu
+
+      - name: Build stable CUDA image from qualified runtime
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          build-args: |
+            LLAMA_IMAGE=${{ steps.source.outputs.cuda_runtime }}
+            LLAMARACK_VERSION=${{ steps.source.outputs.stable_version }}
+            LLAMARACK_COMMIT=${{ steps.source.outputs.stable_commit }}
+            LLAMARACK_BUILD_TIME=${{ steps.source.outputs.build_time }}
+            LLAMARACK_CHANNEL=release
+            LLAMARACK_VARIANT=cuda
+            LLAMA_CPP_RELEASE=${{ steps.source.outputs.llama_release }}
+            LLAMA_CPP_BUILD=${{ steps.source.outputs.llama_build }}
+            LLAMA_CPP_IMAGE=${{ steps.source.outputs.cuda_runtime }}
+          tags: llamarack-stable-cuda:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.source.outputs.stable_version }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.stable_commit }}
+            io.llamarack.build.reason=stable-promotion
+            io.llamarack.promoted.from=${{ steps.source.outputs.rc_tag }}
+            io.llamarack.runtime.variant=cuda
+            io.llamarack.llama.cpp.release=${{ steps.source.outputs.llama_release }}
+            io.llamarack.llama.cpp.build=${{ steps.source.outputs.llama_build }}
+            io.llamarack.llama.cpp.image=${{ steps.source.outputs.cuda_runtime }}
+          cache-from: type=gha,scope=cuda
+
+      - name: Smoke stable CPU image
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/stable
+          EXPECTED_LLAMARACK_VERSION: ${{ steps.source.outputs.stable_version }}
+          EXPECTED_LLAMARACK_COMMIT: ${{ steps.source.outputs.stable_commit }}
+          EXPECTED_LLAMARACK_CHANNEL: release
+          EXPECTED_RUNTIME_VARIANT: cpu
+          EXPECTED_LLAMA_CPP_RELEASE: ${{ steps.source.outputs.llama_release }}
+          EXPECTED_LLAMA_CPP_BUILD: ${{ steps.source.outputs.llama_build }}
+          EXPECTED_LLAMA_CPP_IMAGE: ${{ steps.source.outputs.cpu_runtime }}
+          EXPECTED_RELEASE_BUILD: 'true'
+        run: bash scripts/release-qualification/container-smoke.sh 'llamarack-stable-cpu:${{ github.sha }}' cpu
+
+      - name: Smoke stable CUDA image
+        env:
+          QUALIFICATION_ARTIFACT_DIR: artifacts/release-qualification/stable
+          EXPECTED_LLAMARACK_VERSION: ${{ steps.source.outputs.stable_version }}
+          EXPECTED_LLAMARACK_COMMIT: ${{ steps.source.outputs.stable_commit }}
+          EXPECTED_LLAMARACK_CHANNEL: release
+          EXPECTED_RUNTIME_VARIANT: cuda
+          EXPECTED_LLAMA_CPP_RELEASE: ${{ steps.source.outputs.llama_release }}
+          EXPECTED_LLAMA_CPP_BUILD: ${{ steps.source.outputs.llama_build }}
+          EXPECTED_LLAMA_CPP_IMAGE: ${{ steps.source.outputs.cuda_runtime }}
+          EXPECTED_RELEASE_BUILD: 'true'
+        run: bash scripts/release-qualification/container-smoke.sh 'llamarack-stable-cuda:${{ github.sha }}' cuda
+
+      - name: Publish stable tags
+        env:
+          VERSION: ${{ steps.source.outputs.stable_version }}
+          MINOR: ${{ steps.source.outputs.minor }}
+          MAJOR: ${{ steps.source.outputs.major }}
+          IS_HIGHEST: ${{ steps.source.outputs.is_highest }}
+        run: |
+          set -euo pipefail
+          cpu_tags=("$VERSION" "$MINOR")
+          cuda_tags=("${VERSION}-cuda" "${MINOR}-cuda")
+          if [[ "$IS_HIGHEST" == 'true' ]]; then
+            cpu_tags+=("$MAJOR" latest)
+            cuda_tags+=("${MAJOR}-cuda" latest-cuda)
+          fi
+          for tag in "${cpu_tags[@]}"; do
+            docker tag 'llamarack-stable-cpu:${{ github.sha }}' "ghcr.io/brantje/llamarack:${tag}"
+            docker push "ghcr.io/brantje/llamarack:${tag}"
+          done
+          for tag in "${cuda_tags[@]}"; do
+            docker tag 'llamarack-stable-cuda:${{ github.sha }}' "ghcr.io/brantje/llamarack:${tag}"
+            docker push "ghcr.io/brantje/llamarack:${tag}"
+          done
+
+      - name: Record stable build identity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.source.outputs.stable_version }}
+          SOURCE_RC: ${{ steps.source.outputs.rc_tag }}
+          LLAMA_RELEASE: ${{ steps.source.outputs.llama_release }}
+          LLAMA_BUILD: ${{ steps.source.outputs.llama_build }}
+          CPU_RUNTIME: ${{ steps.source.outputs.cpu_runtime }}
+          CUDA_RUNTIME: ${{ steps.source.outputs.cuda_runtime }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+          cpu_tag="ghcr.io/brantje/llamarack:${VERSION}"
+          cuda_tag="ghcr.io/brantje/llamarack:${VERSION}-cuda"
+          docker pull "$cpu_tag" >/dev/null
+          docker pull "$cuda_tag" >/dev/null
+          cpu_digest="$(docker image inspect "$cpu_tag" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -E '^ghcr\.io/brantje/llamarack@sha256:' | head -n1)"
+          cuda_digest="$(docker image inspect "$cuda_tag" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -E '^ghcr\.io/brantje/llamarack@sha256:' | head -n1)"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg commit "$GITHUB_SHA" \
+            --arg source_rc "$SOURCE_RC" \
+            --arg llama_release "$LLAMA_RELEASE" \
+            --arg llama_build "$LLAMA_BUILD" \
+            --arg cpu_runtime "$CPU_RUNTIME" \
+            --arg cuda_runtime "$CUDA_RUNTIME" \
+            --arg cpu_image "$cpu_digest" \
+            --arg cuda_image "$cuda_digest" \
+            '{llamarack:{version:$version,commit:$commit,promoted_from:$source_rc},llama_cpp:{release:$llama_release,build:$llama_build,cpu_runtime:$cpu_runtime,cuda_runtime:$cuda_runtime},images:{cpu:$cpu_image,cuda:$cuda_image}}' \
+            > artifacts/release/build-identity.json
+          gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber
+
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body // ""')"
+          marker='<!-- llamarack-runtime-identity -->'
+          if ! grep -Fq "$marker" <<< "$body"; then
+            section="$(cat <<EOF
+          
+          ${marker}
+          ## Bundled runtime
+          
+          - Promoted from qualified RC: \`${SOURCE_RC}\`
+          - LlamaRack commit: \`${GITHUB_SHA}\`
+          - llama.cpp release: \`${LLAMA_RELEASE}\`
+          - llama.cpp build: \`${LLAMA_BUILD}\`
+          - CPU image: \`${cpu_digest}\`
+          - CUDA image: \`${cuda_digest}\`
+          EOF
+          )"
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" -f body="${body}${section}" >/dev/null
+          fi
+
+      - name: Upload stable smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stable-container-smoke-${{ github.run_id }}
+          path: artifacts/release-qualification/stable
+          if-no-files-found: warn

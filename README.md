@@ -10,7 +10,7 @@ LlamaRack manages GGUF models, durable `llama-server` Instances, GPU placement, 
 [![Nuxt](https://img.shields.io/badge/frontend-Nuxt-00DC82?logo=nuxtdotjs&logoColor=white)](./frontend)
 
 > [!NOTE]
-> LlamaRack is under active development. Interfaces, configuration and persistence may still change before a stable release.
+> LlamaRack `1.x` follows a documented Semantic Versioning compatibility contract. See [`RELEASE.md`](./RELEASE.md) for the stable API, configuration, persistence, deployment, image-tag, and release guarantees.
 
 ---
 
@@ -541,7 +541,7 @@ Published images run as unprivileged UID/GID `1000:1000` by default. Set `PUID` 
 PUID=$(id -u) PGID=$(id -g) docker compose up -d
 ```
 
-Set `LLAMARACK_IMAGE_TAG` or `LLAMARACK_NVIDIA_IMAGE_TAG` to pin a specific published image instead of `latest` / `latest-cuda`.
+Set `LLAMARACK_IMAGE_TAG` or `LLAMARACK_NVIDIA_IMAGE_TAG` to pin a specific published image instead of `latest` / `latest-cuda`. Exact SemVer tags are immutable after publication; deploy by digest when byte-for-byte identity is required.
 
 ---
 
@@ -788,7 +788,7 @@ The major single-node control-plane foundation is implemented, including:
 - request observability and tracing;
 - metrics and runtime OpenAPI documentation.
 
-The project is still moving quickly and is not yet considered API-stable.
+The project is preparing the `1.0` release. Release candidates are qualified against the documented `1.x` contract in [`RELEASE.md`](./RELEASE.md); stable `1.x` releases follow that contract, while explicitly experimental surfaces may continue to evolve compatibly.
 
 ---
 

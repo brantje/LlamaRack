@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/brantje/llamarack/backend/internal/buildinfo"
 )
 
 const Version = "3.1.0"
@@ -96,7 +98,11 @@ type Schema struct {
 }
 
 func New(applicationVersion string) *Document {
-	if strings.TrimSpace(applicationVersion) == "" {
+	applicationVersion = strings.TrimSpace(applicationVersion)
+	if applicationVersion == "" || applicationVersion == "development" {
+		applicationVersion = buildinfo.Current().Version
+	}
+	if applicationVersion == "" {
 		applicationVersion = "development"
 	}
 	return &Document{

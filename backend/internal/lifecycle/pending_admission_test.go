@@ -258,10 +258,7 @@ func TestPendingAdmissionStartupFailureReleasesWaiters(t *testing.T) {
 	id := instanceID(t, s, m.ID)
 	s.SetPendingLimits(func(context.Context) (int, int) { return 4, 100 })
 	hold := make(chan struct{})
-	s.SetLoadHold(func(string) {
-		exec("UPDATE instances SET enabled=0 WHERE id=?", id)
-		<-hold
-	})
+	s.SetLoadHold(func(string) { <-hold })
 	results := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
@@ -273,6 +270,7 @@ func TestPendingAdmissionStartupFailureReleasesWaiters(t *testing.T) {
 		}()
 	}
 	waitPendingCount(t, s, id, 2)
+	exec("UPDATE instances SET enabled=0 WHERE id=?", id)
 	close(hold)
 	for i := 0; i < 2; i++ {
 		if err := <-results; err == nil {
