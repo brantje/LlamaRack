@@ -53,11 +53,11 @@ func (h *loginHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.auth.Bootstrap(r.Context(), in.Username, in.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrPasswordWorkBusy) {
-			writePasswordWorkUnavailable(w)
+		if r.Context().Err() != nil {
 			return
 		}
-		if r.Context().Err() != nil {
+		if errors.Is(err, auth.ErrPasswordWorkBusy) {
+			writePasswordWorkUnavailable(w)
 			return
 		}
 		writeErr(w, http.StatusBadRequest, err)
@@ -106,12 +106,12 @@ func (h *loginHandler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.auth.LoginBearerWithMetadata(r.Context(), in.Username, in.Password, address, r.UserAgent())
 	if err != nil {
+		if r.Context().Err() != nil {
+			return
+		}
 		if errors.Is(err, auth.ErrPasswordWorkBusy) {
 			slog.Warn("security event", "event", "auth.login_rate_limited", "remote_address", address, "reason", "password_work_capacity")
 			writeLoginPasswordWorkBusy(w)
-			return
-		}
-		if r.Context().Err() != nil {
 			return
 		}
 		locked = h.protector.Failure(r.Context(), in.Username, address)

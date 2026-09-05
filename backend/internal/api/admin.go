@@ -144,11 +144,11 @@ func (h *adminHandler) users(w http.ResponseWriter, r *http.Request, principal m
 		}
 		created, err := h.auth.CreateUser(r.Context(), in.Username, in.Password)
 		if err != nil {
-			if errors.Is(err, auth.ErrPasswordWorkBusy) {
-				writePasswordWorkUnavailable(w)
+			if r.Context().Err() != nil {
 				return
 			}
-			if r.Context().Err() != nil {
+			if errors.Is(err, auth.ErrPasswordWorkBusy) {
+				writePasswordWorkUnavailable(w)
 				return
 			}
 			writeErr(w, http.StatusBadRequest, err)
@@ -220,6 +220,9 @@ func (h *adminHandler) userRoute(w http.ResponseWriter, r *http.Request, princip
 			return
 		}
 		if err := h.auth.ResetPassword(r.Context(), id, in.Password); err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
 			writeUserMutationError(w, err)
 			return
 		}
@@ -254,11 +257,11 @@ func (h *adminHandler) changePassword(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	if err := h.auth.ChangePassword(r.Context(), user.ID, in.CurrentPassword, in.NewPassword, session.ID); err != nil {
-		if errors.Is(err, auth.ErrPasswordWorkBusy) {
-			writePasswordWorkUnavailable(w)
+		if r.Context().Err() != nil {
 			return
 		}
-		if r.Context().Err() != nil {
+		if errors.Is(err, auth.ErrPasswordWorkBusy) {
+			writePasswordWorkUnavailable(w)
 			return
 		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
