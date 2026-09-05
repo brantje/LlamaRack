@@ -20,7 +20,8 @@ python3 -m py_compile "$compat_dir"/*.py
 node --check "$compat_dir/node/openai-probe.mjs"
 
 tmp_dir="$(mktemp -d)"
-venv="$tmp_dir/venv"
+openai_venv="$tmp_dir/openai-venv"
+litellm_venv="$tmp_dir/litellm-venv"
 proxy_pid=""
 cleanup() {
   if [[ -n "$proxy_pid" ]]; then
@@ -31,18 +32,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 -m venv "$venv"
-"$venv/bin/python" -m pip install --disable-pip-version-check --no-input \
+# Keep the current OpenAI SDK isolated from LiteLLM's OpenAI <3 dependency.
+python3 -m venv "$openai_venv"
+"$openai_venv/bin/python" -m pip install --disable-pip-version-check --no-input \
   -r "$compat_dir/python/requirements.txt" \
   >"$artifact_dir/python-install.log" 2>&1
+
+python3 -m venv "$litellm_venv"
+"$litellm_venv/bin/python" -m pip install --disable-pip-version-check --no-input \
+  -r "$compat_dir/python/litellm-requirements.txt" \
+  >"$artifact_dir/litellm-install.log" 2>&1
 
 npm ci --prefix "$compat_dir/node" --ignore-scripts \
   >"$artifact_dir/node-install.log" 2>&1
 
 export PYTHONPATH="$compat_dir${PYTHONPATH:+:$PYTHONPATH}"
-"$venv/bin/python" "$compat_dir/openai_python_probe.py"
+"$openai_venv/bin/python" "$compat_dir/openai_python_probe.py"
 node "$compat_dir/node/openai-probe.mjs"
-"$venv/bin/python" "$compat_dir/protocol_lifecycle_probe.py"
+"$openai_venv/bin/python" "$compat_dir/protocol_lifecycle_probe.py"
 
 proxy_port="$(python3 - <<'PY'
 import socket
@@ -69,7 +76,7 @@ general_settings:
 EOF
 
 export LLAMARACK_LITELLM_MASTER_KEY="$proxy_master_key"
-"$venv/bin/litellm" --config "$proxy_config" --host 127.0.0.1 --port "$proxy_port" \
+"$litellm_venv/bin/litellm" --config "$proxy_config" --host 127.0.0.1 --port "$proxy_port" \
   >"$artifact_dir/litellm-proxy.log" 2>&1 &
 proxy_pid=$!
 proxy_url="http://127.0.0.1:${proxy_port}"
@@ -92,8 +99,8 @@ fi
 
 export LLAMARACK_LITELLM_PROXY_URL="$proxy_url/v1"
 export LLAMARACK_LITELLM_PROXY_KEY="$proxy_master_key"
-"$venv/bin/python" "$compat_dir/litellm_probe.py"
-"$venv/bin/python" "$compat_dir/summarize.py"
+"$litellm_venv/bin/python" "$compat_dir/litellm_probe.py"
+"$openai_venv/bin/python" "$compat_dir/summarize.py"
 
 # Keep logs/evidence but never retain the generated master key or proxy config.
 unset LLAMARACK_LITELLM_MASTER_KEY LLAMARACK_LITELLM_PROXY_KEY
