@@ -23,6 +23,7 @@ type RequestLogRecord struct {
 	SessionTotalCount int    `json:"session_total_count,omitempty"`
 	ModelID           string `json:"model_id,omitempty"`
 	ModelName         string `json:"model_name,omitempty"`
+	ModelSlug         string `json:"model_slug,omitempty"`
 }
 
 // RequestLogDetail exposes retained payloads only for the selected request.
@@ -98,7 +99,7 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
-		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),COALESCE(r.model_slug,''),
 		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
 		FROM inference_requests r
 		LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
@@ -138,8 +139,8 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 	}
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		like := "%" + search + "%"
-		whereSQL += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
-		for i := 0; i < 12; i++ {
+		whereSQL += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR r.model_slug LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		for i := 0; i < 13; i++ {
 			args = append(args, like)
 		}
 	}
@@ -180,7 +181,7 @@ func scanRequestLog(row interface{ Scan(...any) error }) (RequestLogRecord, erro
 		&item.RequestID, &item.ID, &item.TraceID, &item.CallType, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint,
 		&keyID, &keyName, &keyPrefix, &item.ClientIP, &item.UserAgent, &streaming, &item.StatusCode, &item.Result, &item.DurationMS,
 		&ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &promptTPS, &item.QueueDurationMS, &item.LoadDurationMS,
-		&autoloaded, &errText, &requestBody, &responseBody, &item.SessionID, &item.ModelID, &item.ModelName, &item.SessionTotalCount,
+		&autoloaded, &errText, &requestBody, &responseBody, &item.SessionID, &item.ModelID, &item.ModelName, &item.ModelSlug, &item.SessionTotalCount,
 	); err != nil {
 		return RequestLogRecord{}, err
 	}
@@ -229,7 +230,7 @@ func (s *Service) GetRequestLogByRequestID(ctx context.Context, requestID string
 		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
 		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
 		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body,
-		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),COALESCE(r.model_slug,''),
 		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
 		FROM inference_requests r
 		JOIN inference_request_correlations c ON c.inference_request_id=r.id
