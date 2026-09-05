@@ -9,6 +9,24 @@ artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$(pwd)/artifacts/release-qualificati
 gpu_soak_script="${GPU_SOAK_SCRIPT:-$script_dir/gpu-soak.sh}"
 monitor_script="${GPU_MONITOR_SCRIPT:-$script_dir/monitor-gpu-soak.sh}"
 real_curl="${GPU_REAL_CURL:-$(command -v curl)}"
+curl_connect_timeout="${GPU_CURL_CONNECT_TIMEOUT:-10}"
+curl_max_time="${GPU_CURL_MAX_TIME:-120}"
+inference_curl_max_time="${GPU_INFERENCE_CURL_MAX_TIME:-600}"
+
+# Reject timeout overrides that would disable curl deadlines or fail at runtime.
+validate_positive_duration() {
+  local name="$1" value="$2"
+  if [[ ! "$value" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+    || ! awk -v value="$value" 'BEGIN { exit !(value > 0) }'; then
+    echo "invalid ${name}: expected a positive numeric duration, got '${value}'" >&2
+    return 1
+  fi
+}
+
+validate_positive_duration GPU_CURL_CONNECT_TIMEOUT "$curl_connect_timeout"
+validate_positive_duration GPU_CURL_MAX_TIME "$curl_max_time"
+validate_positive_duration GPU_INFERENCE_CURL_MAX_TIME "$inference_curl_max_time"
+
 shim_dir="$(mktemp -d)"
 soak_pid=""
 monitor_pid=""
@@ -34,11 +52,11 @@ cat >"$shim_dir/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-request_timeout="${GPU_CURL_MAX_TIME:-120}"
+request_timeout="${GPU_CURL_MAX_TIME:?}"
 for arg in "$@"; do
   case "$arg" in
     */api/v1/playground/chat/completions*)
-      request_timeout="${GPU_INFERENCE_CURL_MAX_TIME:-600}"
+      request_timeout="${GPU_INFERENCE_CURL_MAX_TIME:?}"
       break
       ;;
   esac
@@ -48,12 +66,15 @@ done
 # per-call curl defaults inside the soak script.
 exec "${LLAMARACK_REAL_CURL:?}" \
   "$@" \
-  --connect-timeout "${GPU_CURL_CONNECT_TIMEOUT:-10}" \
+  --connect-timeout "${GPU_CURL_CONNECT_TIMEOUT:?}" \
   --max-time "$request_timeout"
 EOF
 chmod +x "$shim_dir/curl"
 
 LLAMARACK_REAL_CURL="$real_curl" \
+GPU_CURL_CONNECT_TIMEOUT="$curl_connect_timeout" \
+GPU_CURL_MAX_TIME="$curl_max_time" \
+GPU_INFERENCE_CURL_MAX_TIME="$inference_curl_max_time" \
 PATH="$shim_dir:$PATH" \
 QUALIFICATION_ARTIFACT_DIR="$artifact_dir" \
   bash "$gpu_soak_script" "$image" "$models_dir" "$cycles" &
