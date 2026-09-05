@@ -69,6 +69,55 @@ func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 	}
 }
 
+func TestPersistPasswordRehashRejectsStaleHash(t *testing.T) {
+	ctx := t.Context()
+	s := testService(t)
+	user, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := legacyPasswordHash("correct-horse-battery")
+	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", original, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	resetHash, err := hashPassword("replacement-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", resetHash, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	rehashed, err := hashPassword("correct-horse-battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := persistPasswordRehash(ctx, tx, user.ID, original, rehashed); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("stale rehash err=%v, want %v", err, ErrInvalidCredentials)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	var current string
+	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if current != resetHash {
+		t.Fatal("stale login rehash overwrote the reset password")
+	}
+	if !verifyPassword("replacement-password", current) {
+		t.Fatal("reset password no longer verifies")
+	}
+	if verifyPassword("correct-horse-battery", current) {
+		t.Fatal("old password was restored by stale rehash")
+	}
+}
+
 func TestBearerAdditionalValidationEdges(t *testing.T) {
 	s := testService(t)
 	if err := s.UsePersistentSigningKey(t.TempDir()); err != nil {
