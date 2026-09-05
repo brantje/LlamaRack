@@ -33,6 +33,12 @@ jobs:
           path: |
             /tmp/backend-tests.log
             /tmp/backend-tests.status
+            backend/internal/api
+            backend/internal/gateway
+            backend/internal/instances
+            backend/internal/lifecycle
+            backend/internal/litellm
+            backend/internal/models
 
   frontend-tests:
     runs-on: ubuntu-latest
@@ -63,3 +69,5 @@ jobs:
           path: |
             /tmp/frontend-tests.log
             /tmp/frontend-tests.status
+            frontend/app
+            frontend/test
