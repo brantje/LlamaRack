@@ -15,9 +15,13 @@ The format is based on Keep a Changelog and releases follow Semantic Versioning.
 
 ### Changed
 
-- Official release candidates resolve the latest stable llama.cpp release at candidate-cut time and pin its immutable build for CPU and CUDA images.
+- Official release candidates pin the current published llama.cpp GHCR server images by digest and record that build's identity. When those images match GitHub `releases/latest`, the GitHub stable release name is recorded; otherwise the published GHCR `bNNNN` is recorded instead of waiting for unpublished `server-bNNNN` tags.
 - Stable LlamaRack releases are promoted from the already-qualified final RC runtime instead of silently selecting a newer llama.cpp build.
 - Official container tags publish the exact SemVer tag `1.0.0` without a leading `v`, plus moving aliases `1.0`, `1`, and `latest` (`latest` is not SemVer), with corresponding `-cuda` variants.
+
+### Fixed
+
+- Release-container runtime resolution no longer spends a 10-minute retry budget on llama.cpp GitHub stable tags that GHCR has not published.
 
 ## Release-entry convention
 

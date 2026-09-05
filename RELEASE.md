@@ -69,17 +69,17 @@ Rebuilding a release from the same source inputs must not silently choose a diff
 
 Every `1.0.0-rc.N` (and later release candidate following this policy) performs a fresh upstream lookup when that candidate is cut:
 
-1. query `ggml-org/llama.cpp` for the latest normal/stable GitHub release;
-2. reject drafts and prereleases;
-3. resolve the release's immutable `bNNNN` build identifier;
-4. require the corresponding CPU image;
-5. require a corresponding supported CUDA image from the same `bNNNN` build;
-6. build LlamaRack CPU/CUDA candidates with those exact runtime references;
+1. pin the current published `ghcr.io/ggml-org/llama.cpp` `server` and supported `server-cuda*` images to immutable digests;
+2. read the CPU/CUDA images' `org.opencontainers.image.version` and require the same `bNNNN` build;
+3. query `ggml-org/llama.cpp` for the latest normal/stable GitHub release (reject drafts and prereleases);
+4. if that GitHub release's immutable `bNNNN` matches the published GHCR images, record the GitHub release name;
+5. otherwise record the published GHCR `bNNNN` as the bundled runtime identity (upstream container images are published on a different cadence than GitHub stable releases, so `server-bNNNN` tags for `releases/latest` may never exist);
+6. build LlamaRack CPU/CUDA candidates with those exact digest references;
 7. verify `/api/v1/system` reports the expected LlamaRack and llama.cpp identity;
 8. run release qualification against the exact candidate image digests;
 9. only after qualification succeeds, publish the RC semantic tags.
 
-There is no fallback to an older stable llama.cpp release. If the newest stable upstream release cannot be resolved, lacks a required runtime variant, or is incompatible with LlamaRack, the LlamaRack release candidate is blocked until compatibility is restored or a newer stable upstream release supersedes it.
+There is no fallback to a different GitHub stable llama.cpp release by name. If the current GHCR CPU/CUDA server images cannot be resolved, report different `bNNNN` builds, or are incompatible with LlamaRack, the LlamaRack release candidate is blocked until compatibility is restored.
 
 A later RC repeats the lookup. Therefore RC2 may intentionally bundle a newer stable llama.cpp release than RC1 if upstream published one in between.
 
