@@ -119,7 +119,7 @@ func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec r
 	g.captureModelSlug(r.Context(), requestID, model)
 	instance, ok := g.resolveInstanceBySlug(observed, r, record, model)
 	if !ok { return }
-	setProductHeader(wHeader(observed), headerInstance, instance.ID)
+	setProductHeader(wHeader(observed), headerInstance, instance.Slug)
 
 	upstreamPath := slots.UpstreamPath(r.Method, params["slot_id"])
 	if r.Method == http.MethodPost {
@@ -221,7 +221,7 @@ func requestInstanceAllowed(r *http.Request, instanceID string) bool {
 
 func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spec routeSpec, requestID string, record *observability.RequestRecord, instance instances.Instance, body []byte, stream bool, started time.Time, promptTPS **float64, proxyPanic *any) {
 	record.InstanceID = instance.ID
-	setProductHeader(wHeader(observed), headerInstance, instance.ID)
+	setProductHeader(wHeader(observed), headerInstance, instance.Slug)
 	preRuntime, _ := g.lifecycle.RuntimeInstance(r.Context(), instance.ID)
 	record.Autoloaded = preRuntime.State != supervisor.Ready
 	setProductHeader(wHeader(observed), headerAutoloaded, strconv.FormatBool(record.Autoloaded))

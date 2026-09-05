@@ -43,7 +43,7 @@ func TestSlugifyAndValidation(t *testing.T) {
 		{ModelID: "m1", Name: "One", IdleUnloadSeconds: -1},
 		{ModelID: "m1", Name: "One", MaxPendingRequests: intp(-1)},
 	} {
-		if _, err := normalize(in); err == nil {
+		if _, err := normalizeCreate(in); err == nil {
 			t.Fatalf("expected validation error for %+v", in)
 		}
 	}
@@ -61,12 +61,16 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i.ID != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || i.MaxPendingRequests != 8 || len(i.GPUDevices) != 2 {
+	if i.ID == "" || i.ID == i.Slug || i.Slug != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || i.MaxPendingRequests != 8 || len(i.GPUDevices) != 2 {
 		t.Fatalf("created=%+v", i)
 	}
-	got, err := s.Get(ctx, i.ID)
+	got, err := s.GetByID(ctx, i.ID)
 	if err != nil || got.TensorSplit != "1,1" || len(got.GPUDevices) != 2 {
-		t.Fatalf("get=%+v err=%v", got, err)
+		t.Fatalf("get by id=%+v err=%v", got, err)
+	}
+	bySlug, err := s.GetBySlug(ctx, i.Slug)
+	if err != nil || bySlug.ID != i.ID {
+		t.Fatalf("get by slug=%+v err=%v", bySlug, err)
 	}
 	items, err := s.List(ctx)
 	if err != nil || len(items) != 1 {
@@ -85,14 +89,17 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != "renamed-api" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload {
+	if updated.ID != i.ID || updated.Slug != "renamed-api" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload {
 		t.Fatalf("updated=%+v", updated)
 	}
 	if updated.MaxPendingRequests != 8 {
 		t.Fatalf("omitted pending limit should keep override=%+v", updated)
 	}
-	if _, err := s.Get(ctx, i.ID); err == nil {
-		t.Fatal("old id should no longer resolve")
+	if _, err := s.GetBySlug(ctx, "coding-api"); err == nil {
+		t.Fatal("old slug should no longer resolve")
+	}
+	if stable, err := s.GetByID(ctx, i.ID); err != nil || stable.Slug != "renamed-api" {
+		t.Fatalf("durable id should still resolve after slug change: %+v err=%v", stable, err)
 	}
 	opts, _ = s.Options(ctx, updated.ID)
 	if len(opts) != 1 || opts["flash-attn"] != "true" {
@@ -103,11 +110,11 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copy.ID != "coder-renamed-copy" || copy.ModelID != updated.ModelID {
+	if copy.ID == updated.ID || copy.Slug != "coder-renamed-copy" || copy.ModelID != updated.ModelID {
 		t.Fatalf("copy=%+v", copy)
 	}
 	copy2, err := s.Duplicate(ctx, updated.ID)
-	if err != nil || copy2.ID != "coder-renamed-copy-2" {
+	if err != nil || copy2.ID == copy.ID || copy2.Slug != "coder-renamed-copy-2" {
 		t.Fatalf("copy2=%+v err=%v", copy2, err)
 	}
 
@@ -128,7 +135,8 @@ func TestCreateAndUpdateErrors(t *testing.T) {
 	if _, err := s.Update(ctx, "missing", UpdateInput{Name: "Nope", ModelID: "m1"}); err == nil {
 		t.Fatal("missing instance update should fail")
 	}
-	if _, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "One"}); err != nil {
+	created, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "One"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Different Name", Slug: "One"}); err == nil {
@@ -140,10 +148,10 @@ func TestCreateAndUpdateErrors(t *testing.T) {
 	if _, err := s.List(ctx); err == nil {
 		t.Fatal("closed db list should fail")
 	}
-	if _, err := s.Options(ctx, "one"); err == nil {
+	if _, err := s.Options(ctx, created.ID); err == nil {
 		t.Fatal("closed db options should fail")
 	}
-	if err := s.Delete(ctx, "one"); err == nil {
+	if err := s.Delete(ctx, created.ID); err == nil {
 		t.Fatal("closed db delete should fail")
 	}
 }
