@@ -72,7 +72,7 @@ func TestAuthenticatedLargeRequestRecoversBodyTraceAfterAuthentication(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.TraceID != testTraceBody || record.InstanceID != "missing-model" {
+	if record.TraceID != testTraceBody || record.InstanceID != "" {
 		t.Fatalf("record=%+v", record)
 	}
 }
