@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRequestURL, useRuntimeConfig } from '#app'
-import { clearManagementToken, readManagementToken, storeManagementToken, useManagerApi } from '~/composables/useManagerApi'
+import {
+  clearManagementToken,
+  readManagementToken,
+  resolveManagerApiBase,
+  storeManagementToken,
+  useManagerApi
+} from '~/composables/useManagerApi'
 
 const fetchMock = vi.fn()
 
@@ -12,10 +18,17 @@ beforeEach(() => {
 })
 
 describe('useManagerApi', () => {
-  it('derives the API URL from the current request host', () => {
+  it('uses port 8888 for an unconfigured local development API', () => {
     const requestURL = useRequestURL()
-    const { apiBase } = useManagerApi(fetchMock as any)
-    expect(apiBase.value).toBe(`${requestURL.protocol}//${requestURL.hostname}:8888`)
+    const expected = new URL(requestURL.origin)
+    expected.port = '8888'
+
+    expect(resolveManagerApiBase('', requestURL, true)).toBe(expected.origin)
+  })
+
+  it('uses the current request origin for an unconfigured production API', () => {
+    const requestURL = useRequestURL()
+    expect(resolveManagerApiBase('', requestURL, false)).toBe(requestURL.origin)
   })
 
   it('prefers and normalizes an explicitly configured API URL', () => {
