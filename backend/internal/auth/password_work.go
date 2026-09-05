@@ -49,6 +49,9 @@ func (g *passwordWorkGate) reserve() (*passwordWorkReservation, error) {
 }
 
 func (r *passwordWorkReservation) run(ctx context.Context, work func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case r.gate.active <- struct{}{}:
 		defer func() { <-r.gate.active }()
