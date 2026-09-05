@@ -154,10 +154,10 @@ func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec r
 func (g *Gateway) resolveInstanceBySlug(observed *responseObserver, r *http.Request, record *observability.RequestRecord, slug string) (instances.Instance, bool) {
 	instance, err := g.lifecycle.Instances().GetBySlug(r.Context(), slug)
 	if err != nil {
-		record.Error = sanitizeError(err.Error())
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
+			record.Error = sanitizeError(err.Error())
 			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		}
 		return instances.Instance{}, false
@@ -168,10 +168,10 @@ func (g *Gateway) resolveInstanceBySlug(observed *responseObserver, r *http.Requ
 func (g *Gateway) resolveInstanceByID(observed *responseObserver, r *http.Request, record *observability.RequestRecord, id string) (instances.Instance, bool) {
 	instance, err := g.lifecycle.Instances().GetByID(r.Context(), id)
 	if err != nil {
-		record.Error = sanitizeError(err.Error())
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
+			record.Error = sanitizeError(err.Error())
 			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
 		}
 		return instances.Instance{}, false
