@@ -14,24 +14,9 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 	}
 	defer work.Release()
 
-	var user User
-	var hash string
-	var enabled int
-	var lastLogin sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled, &user.CreatedAt, &lastLogin); err != nil || enabled == 0 {
-		return "", "", User{}, ErrInvalidCredentials
-	}
-	verified, err := verifyPasswordWithReservation(ctx, work, password, hash)
+	user, hash, err := s.verifyLoginCredentials(ctx, work, username, password)
 	if err != nil {
 		return "", "", User{}, err
-	}
-	if !verified {
-		return "", "", User{}, ErrInvalidCredentials
-	}
-	user.Enabled = true
-	if lastLogin.Valid {
-		value := lastLogin.Int64
-		user.LastLoginAt = &value
 	}
 
 	var rehashed string
