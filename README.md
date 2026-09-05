@@ -788,19 +788,25 @@ The major single-node control-plane foundation is implemented, including:
 - request observability and tracing;
 - metrics and runtime OpenAPI documentation.
 
-The project is preparing the `1.0` release. Release candidates are qualified against the documented `1.x` contract in [`RELEASE.md`](./RELEASE.md); stable `1.x` releases follow that contract, while explicitly experimental surfaces may continue to evolve compatibly.
+`v1.0.1` is the current stable baseline. Stable `1.x` releases follow the compatibility contract in [`RELEASE.md`](./RELEASE.md). Post-1.0 work is split between compatible `1.0.x` maintenance and versioned `1.x` feature releases.
 
 ---
 
 ## Roadmap
 
-Planned and ongoing work includes:
+The roadmap is directional rather than a promise that every listed issue will ship in exactly that release. `1.0.x` remains the maintenance line for compatible bug, security, compatibility, release-engineering and documentation fixes; backward-compatible feature work moves through later `1.x` releases.
 
-- Controlled `llama-bench` benchmarking and hardware-specific configuration recommendations.
-- Persistent prompt/KV cache across Instance restarts once upstream llama.cpp support is reliable.
-- Multi-node / clustered operation.
-- Faster local GGUF discovery and metadata indexing.
-- Continued OpenAI, LiteLLM, multimodal and llama.cpp compatibility testing.
+| Target | Theme | Representative work |
+| --- | --- | --- |
+| **1.0.2** | Security + stability | Authentication hardening and remotely relevant audit fixes: [#137](https://github.com/brantje/LlamaRack/issues/137), [#136](https://github.com/brantje/LlamaRack/issues/136), [#144](https://github.com/brantje/LlamaRack/issues/144), [#138](https://github.com/brantje/LlamaRack/issues/138), [#139](https://github.com/brantje/LlamaRack/issues/139), [#140](https://github.com/brantje/LlamaRack/issues/140), [#141](https://github.com/brantje/LlamaRack/issues/141). |
+| **1.0.3** | Security cleanup | Remaining 1.0 security-audit cleanup and normal maintenance, including [#130](https://github.com/brantje/LlamaRack/issues/130), [#131](https://github.com/brantje/LlamaRack/issues/131), [#135](https://github.com/brantje/LlamaRack/issues/135), [#142](https://github.com/brantje/LlamaRack/issues/142), [#143](https://github.com/brantje/LlamaRack/issues/143), [#145](https://github.com/brantje/LlamaRack/issues/145), [#146](https://github.com/brantje/LlamaRack/issues/146), [#147](https://github.com/brantje/LlamaRack/issues/147) and [#148](https://github.com/brantje/LlamaRack/issues/148). |
+| **1.1.0** | Storage foundation | [#164](https://github.com/brantje/LlamaRack/issues/164): store/repository abstraction [#165](https://github.com/brantje/LlamaRack/issues/165), GORM-backed SQLite [#166](https://github.com/brantje/LlamaRack/issues/166), PostgreSQL [#167](https://github.com/brantje/LlamaRack/issues/167), dual-database qualification [#168](https://github.com/brantje/LlamaRack/issues/168), plus optional non-authoritative Redis caching [#162](https://github.com/brantje/LlamaRack/issues/162). |
+| **1.2.0** | Smarter hardware + runtime | Visual tensor split/GPU allocation [#16](https://github.com/brantje/LlamaRack/issues/16), configurable memory reserves [#117](https://github.com/brantje/LlamaRack/issues/117), RAM spillover [#98](https://github.com/brantje/LlamaRack/issues/98), learned VRAM estimates [#85](https://github.com/brantje/LlamaRack/issues/85), worker adoption after manager restart [#125](https://github.com/brantje/LlamaRack/issues/125), and controlled `llama-bench`-based recommendations. |
+| **1.3.0** | llama.cpp + model capabilities | Additional speculative-draft/projector support [#105](https://github.com/brantje/LlamaRack/issues/105), `draft-simple` GGUF selection [#106](https://github.com/brantje/LlamaRack/issues/106), model capability metadata [#160](https://github.com/brantje/LlamaRack/issues/160), and continued visual exposure of useful llama.cpp capabilities. |
+| **1.4.0+** | Multi-node | [#76](https://github.com/brantje/LlamaRack/issues/76): controller/node operation, node-local model availability, cluster routing and scheduling, distribution, failover, leases and fencing. |
+| **Upstream-gated** | Persistent prompt/KV cache | [#62](https://github.com/brantje/LlamaRack/issues/62) once llama.cpp provides a reliable cache persistence/restore contract across `llama-server` restarts. |
+
+The storage and runtime work intentionally precedes production-ready clustering: multi-node operation benefits from clear persistence boundaries, mature resource accounting and safe worker adoption. LlamaRack will continue using backward-compatible `1.x` releases for this growth; `2.0` is reserved for intentional breaking changes to the documented stable contract.
 
 ---
 
