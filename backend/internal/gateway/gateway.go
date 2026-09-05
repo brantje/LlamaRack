@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -468,7 +469,11 @@ func (g *Gateway) resolveInstance(observed *responseObserver, r *http.Request, r
 	instance, err := g.lifecycle.Instances().Get(r.Context(), instanceID)
 	if err != nil {
 		record.Error = sanitizeError(err.Error())
-		writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+		} else {
+			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+		}
 		return instances.Instance{}, false
 	}
 	return instance, true

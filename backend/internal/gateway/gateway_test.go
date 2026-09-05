@@ -271,7 +271,7 @@ func TestAuthenticationSupportedAndErrorResponses(t *testing.T) {
 		t.Fatalf("missing model=%d %s", w.Code, w.Body.String())
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, `{"model":"missing"}`)
-	if w.Code != 503 || !strings.Contains(w.Body.String(), "model_unavailable") || w.Header().Get(headerRequestID) == "" {
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "model_not_found") || w.Header().Get(headerRequestID) == "" {
 		t.Fatalf("missing model=%d %s headers=%v", w.Code, w.Body.String(), w.Header())
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/chat/completions", f.secret, "{\"model\":\"gateway-model\"}")
