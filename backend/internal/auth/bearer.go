@@ -84,11 +84,24 @@ func loadOrCreateEd25519Key(path string) (ed25519.PrivateKey, error) {
 }
 
 func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, password, remoteAddress, userAgent string) (LoginResult, error) {
+	work, err := reservePasswordWork()
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer work.Release()
+
 	var user User
 	var hash string
 	var enabled int
 	var lastLogin sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled, &user.CreatedAt, &lastLogin); err != nil || enabled == 0 || !verifyPassword(password, hash) {
+	if err := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(&user.ID, &user.Username, &hash, &enabled, &user.CreatedAt, &lastLogin); err != nil || enabled == 0 {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+	verified, err := verifyPasswordWithReservation(ctx, work, password, hash)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if !verified {
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	user.Enabled = true
@@ -96,17 +109,23 @@ func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, passwor
 		value := lastLogin.Int64
 		user.LastLoginAt = &value
 	}
+
+	var rehashed string
+	if passwordNeedsRehash(hash) {
+		rehashed, err = hashPasswordWithReservation(ctx, work, password)
+		if err != nil {
+			return LoginResult{}, err
+		}
+	}
+	work.Release()
+
 	now := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return LoginResult{}, err
 	}
 	defer tx.Rollback()
-	if passwordNeedsRehash(hash) {
-		rehashed, err := hashPassword(password)
-		if err != nil {
-			return LoginResult{}, err
-		}
+	if rehashed != "" {
 		if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", rehashed, user.ID); err != nil {
 			return LoginResult{}, err
 		}
