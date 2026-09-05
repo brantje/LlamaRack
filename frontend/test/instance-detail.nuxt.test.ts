@@ -10,18 +10,20 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 const gib = 1024 ** 3
 const now = Date.parse('2026-09-01T12:00:00.000Z')
 const bucket = Math.floor(now / 60_000) * 60_000
+const instanceID = 'instance-gemma-uuid'
+const instanceSlug = 'gemma-4'
 
 function seed() {
   const manager = useManager()
   manager.disconnectRuntimeEvents()
   manager.initialized.value = true
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Gemma', gguf_path: 'gemma.gguf', total_bytes: 1, context_length: 32768 }]
-  manager.instances.value = [{ id: 'gemma-4', model_id: 'm1', name: 'Gemma 4', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata' }]
-  manager.runtimes.value = { m1: [{ instance_id: 'gemma-4', model_id: 'm1', state: 'READY', pid: 308, port: 12001, started_at: new Date(now - 65_000).toISOString() } as any] }
+  manager.models.value = [{ id: 'm1', slug: 'gemma', name: 'Gemma', gguf_path: 'gemma.gguf', total_bytes: 1, context_length: 32768 }]
+  manager.instances.value = [{ id: instanceID, slug: instanceSlug, model_id: 'm1', name: 'Gemma 4', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata' }]
+  manager.runtimes.value = { m1: [{ instance_id: instanceID, model_id: 'm1', state: 'READY', pid: 308, port: 12001, started_at: new Date(now - 65_000).toISOString() } as any] }
   manager.runtimeTelemetry.value = {
-    'gemma-4': {
-      instance_id: 'gemma-4', pid: 308, gpu_devices: ['CUDA0'],
+    [instanceID]: {
+      instance_id: instanceID, pid: 308, gpu_devices: ['CUDA0'],
       gpus: [{ device_id: 'CUDA0', vram_used_bytes: 14 * gib }],
       vram_used_bytes: 14 * gib, gpu_utilization_pct: 97, cpu_percent: 125, memory_used_bytes: 2.5 * gib,
       collected_at: '2026-08-27T18:30:00Z',
@@ -41,7 +43,7 @@ function seed() {
       ram_total_bytes: 32 * gib, ram_available_bytes: 16 * gib, collected_at: new Date(now).toISOString(), processes: [],
       gpus: [{ id: 'CUDA0', backend: 'cuda', index: 0, name: 'RTX', total_bytes: 16 * gib, used_bytes: 15 * gib, free_bytes: 1 * gib, utilization_pct: 80 }]
     },
-    telemetry: [manager.runtimeTelemetry.value['gemma-4']!],
+    telemetry: [manager.runtimeTelemetry.value[instanceID]!],
     gateway: { since: 0, requests: 0, successes: 0, errors: 0, active: 0, queued: 0, active_api_keys: 0, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, latency_ms: {}, ttft_ms: {} },
     requests: []
   }
@@ -70,7 +72,7 @@ beforeEach(() => {
       const metric = new URL(`http://x${path}`).searchParams.get('metric') || ''
       return series(metric)
     }
-    if (path.startsWith('/api/v1/logs?')) return { instance_id: 'gemma-4', entries: [] }
+    if (path.startsWith('/api/v1/logs?')) return { instance_id: instanceID, entries: [] }
     return []
   })
   vi.stubGlobal('EventSource', undefined)
@@ -79,7 +81,7 @@ beforeEach(() => {
 
 describe('Instance detail page', () => {
   it('renders the live summary, bounded history charts, VRAM map and llama.cpp metrics', async () => {
-    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: `/instances/${instanceSlug}/detail` })
     await flushPromises()
     const text = wrapper.text()
     expect(text).toContain('Gemma 4')
@@ -103,32 +105,32 @@ describe('Instance detail page', () => {
     expect(wrapper.get('[data-testid="instance-detail-chart-tokens"]').text()).toContain('Prompt / input')
     expect(wrapper.get('[data-testid="instance-detail-chart-latency"]').text()).toContain('p95')
     expect(wrapper.get('[data-testid="instance-detail-chart-context"]').text()).toContain('Context utilization')
-    expect(wrapper.get('[data-testid="instance-detail-vram-allocation"]').text()).toContain('gemma-4 (this Instance)')
+    expect(wrapper.get('[data-testid="instance-detail-vram-allocation"]').text()).toContain(`${instanceID} (this Instance)`)
     expect(wrapper.get('[data-testid="instance-detail-spec-positions"]').text()).toContain('Position 1: 18')
 
     const historyCalls = mocks.request.mock.calls.map(([path]) => String(path)).filter(path => path.startsWith('/api/v1/observability/timeseries?'))
     expect(historyCalls).toHaveLength(7)
     for (const path of historyCalls) {
       const params = new URL(`http://x${path}`).searchParams
-      expect(params.get('instance_id')).toBe('gemma-4')
+      expect(params.get('instance_id')).toBe(instanceID)
       expect(params.get('window_seconds')).toBe('900')
       expect(params.get('bucket_seconds')).toBe('60')
     }
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/logs?instance_id=gemma-4&limit=2000')
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/logs?instance_id=${instanceID}&limit=2000`)
   })
 
   it('shows stopped-state guidance and leaves missing history as gaps/zeros', async () => {
     const manager = seed()
-    manager.runtimes.value = { m1: [{ instance_id: 'gemma-4', model_id: 'm1', state: 'UNLOADED' }] }
+    manager.runtimes.value = { m1: [{ instance_id: instanceID, model_id: 'm1', state: 'UNLOADED' }] }
     manager.runtimeTelemetry.value = {}
     manager.observabilityLive.value = null
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') return { observability_retention_days: { value: 1 } }
       if (path.startsWith('/api/v1/observability/timeseries?')) return { metric: 'empty', bucket_seconds: 60, items: [] }
-      if (path.startsWith('/api/v1/logs?')) return { instance_id: 'gemma-4', entries: [] }
+      if (path.startsWith('/api/v1/logs?')) return { instance_id: instanceID, entries: [] }
       return []
     })
-    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: `/instances/${instanceSlug}/detail` })
     await flushPromises()
     expect(wrapper.text()).toContain('llama.cpp metrics unavailable while stopped')
     expect(wrapper.text()).toContain('Launch the Instance to populate throughput')
@@ -139,7 +141,7 @@ describe('Instance detail page', () => {
   it('shows startup backoff and last error on the runtime snapshot', async () => {
     const manager = seed()
     manager.runtimes.value = { m1: [{
-      instance_id: 'gemma-4',
+      instance_id: instanceID,
       model_id: 'm1',
       state: 'FAILED',
       last_error: 'CUDA allocation failed',
@@ -147,7 +149,7 @@ describe('Instance detail page', () => {
       retry_after: new Date(now + 45_000).toISOString()
     }] }
     manager.runtimeTelemetry.value = {}
-    const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/gemma-4/detail' })
+    const wrapper = await mountSuspended(InstanceDetailPage, { route: `/instances/${instanceSlug}/detail` })
     await flushPromises()
     expect(wrapper.get('[data-testid="instance-detail-startup-backoff"]').text()).toContain('CUDA allocation failed')
     expect(wrapper.get('[data-testid="instance-detail-startup-backoff"]').text()).toContain('Retry in 45s (2 consecutive start failures)')
