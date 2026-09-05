@@ -1,0 +1,67 @@
+name: Apply release publish fix
+
+on:
+  push:
+    branches:
+      - fix/release-rc-publish
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: fix/release-rc-publish
+
+      - name: Patch and validate release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release-container.yml')
+          text = path.read_text()
+          replacements = {
+              'type=semver,pattern={{version}}-cuda': ('type=semver,pattern={{version}},suffix=-cuda', 2),
+              'type=semver,pattern={{major}}.{{minor}}-cuda': ('type=semver,pattern={{major}}.{{minor}},suffix=-cuda', 2),
+              'type=semver,pattern={{major}}-cuda': ('type=semver,pattern={{major}},suffix=-cuda', 2),
+              'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber': (
+                  'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"',
+                  1,
+              ),
+          }
+
+          for old, (new, expected) in replacements.items():
+              actual = text.count(old)
+              if actual != expected:
+                  raise SystemExit(f'expected {expected} occurrences of {old!r}, found {actual}')
+              text = text.replace(old, new)
+
+          path.write_text(text)
+
+          for old in replacements:
+              if old in text:
+                  raise SystemExit(f'old workflow pattern still present: {old}')
+          PY
+
+          git diff --check
+          test "$(grep -Fc 'type=semver,pattern={{version}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
+          test "$(grep -Fc 'type=semver,pattern={{major}}.{{minor}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
+          test "$(grep -Fc 'type=semver,pattern={{major}},suffix=-cuda' .github/workflows/release-container.yml)" -eq 2
+          grep -Fq 'gh release upload "$RELEASE_TAG" artifacts/release/build-identity.json --clobber --repo "$GITHUB_REPOSITORY"' .github/workflows/release-container.yml
+
+      - name: Commit fix and remove maintenance workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-release-publish-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/release-container.yml .github/workflows/apply-release-publish-fix.yml
+          git commit -m 'fix: correct RC container publication'
+          git push origin HEAD:fix/release-rc-publish
