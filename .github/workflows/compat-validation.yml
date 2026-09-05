@@ -1,46 +1,39 @@
-name: Temporary PR feedback patch
+name: Compatibility suite validation
 
 on:
   push:
-    branches:
-      - fix/openai-compat-response-models
+  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
         with:
-          go-version-file: backend/go.mod
-      - name: Apply patch
-        run: python3 .github/pr161_feedback_fix.py
-      - name: Format
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/compat/node/package-lock.json
+      - name: Validate compatibility contract and Python probes
         run: |
-          gofmt -w \
-            backend/internal/gateway/gateway.go \
-            backend/internal/gateway/gateway_test.go \
-            backend/internal/gateway/request_body_limit_test.go \
-            backend/internal/supervisor/security_test.go
-      - name: Test focused packages
-        working-directory: backend
-        run: go test ./internal/gateway ./internal/supervisor ./internal/llamacpp
-      - name: Commit clean fix
+          python3 tests/compat/validate_contract.py
+          python3 -m py_compile tests/compat/*.py
+          python3 -m unittest discover -s tests/compat -p 'test_*.py'
+      - name: Validate qualification shell runners
         run: |
-          git show 5c77b0e2703d6b6902f57109cc7bfb123ed0c1de:.github/workflows/compat-validation.yml > .github/workflows/compat-validation.yml
-          rm .github/pr161_feedback_fix.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/internal/gateway/gateway.go \
-                  backend/internal/gateway/gateway_test.go \
-                  backend/internal/gateway/request_body_limit_test.go \
-                  backend/internal/supervisor/security_test.go \
-                  .github/workflows/compat-validation.yml \
-                  .github/pr161_feedback_fix.py
-          git commit -m "fix: address PR review feedback"
-          git push origin HEAD:fix/openai-compat-response-models
+          bash -n scripts/release-qualification/compat.sh
+          bash -n scripts/release-qualification/compat-gpu.sh
+      - name: Validate pinned OpenAI Node client
+        working-directory: tests/compat/node
+        run: |
+          npm ci --ignore-scripts
+          node --check openai-probe.mjs
+          node -e "const p=require('./node_modules/openai/package.json'); if (p.version !== '7.9.0') throw new Error('unexpected OpenAI Node version '+p.version)"

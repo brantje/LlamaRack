@@ -458,6 +458,10 @@ func TestListModelsDatabaseError(t *testing.T) {
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {
 		t.Fatalf("models database failure=%d %s", w.Code, w.Body.String())
 	}
+	w = gatewayRequest(t, g, http.MethodGet, "/v1/models/gateway-model", secret, "")
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "model_unavailable") {
+		t.Fatalf("model lookup database failure=%d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestAuthenticateAndJSONHelpers(t *testing.T) {

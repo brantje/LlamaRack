@@ -59,6 +59,7 @@ func TestStartEnforcesSecureManagerOwnedArgs(t *testing.T) {
 	rt, err := s.Start(ctx, "secure-instance", "model-1", "/tmp/model.gguf", []string{
 		"--ctx-size", "1024",
 		"--model", "/tmp/other.gguf",
+		"--alias", "user-alias",
 		"--host", "0.0.0.0",
 		"--port", "9999",
 		"--cors-origins", "*",

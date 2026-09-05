@@ -8,26 +8,26 @@ import (
 	"testing"
 )
 
-type countingBody struct {
+type trackingBody struct {
 	reader *strings.Reader
 	read   int
 }
 
-func newCountingBody(value string) *countingBody {
-	return &countingBody{reader: strings.NewReader(value)}
+func newTrackingBody(value string) *trackingBody {
+	return &trackingBody{reader: strings.NewReader(value)}
 }
 
-func (b *countingBody) Read(p []byte) (int, error) {
+func (b *trackingBody) Read(p []byte) (int, error) {
 	n, err := b.reader.Read(p)
 	b.read += n
 	return n, err
 }
 
-func (b *countingBody) Close() error { return nil }
+func (b *trackingBody) Close() error { return nil }
 
 func TestUnauthenticatedLargeRequestDoesNotReadPastPreAuthLimit(t *testing.T) {
 	f := newGatewayFixture(t, true)
-	body := newCountingBody(`{"model":"missing-model","padding":"` + strings.Repeat("x", preAuthRequestBodyBytes*2) + `"}`)
+	body := newTrackingBody(`{"model":"missing-model","padding":"` + strings.Repeat("x", preAuthRequestBodyBytes*2) + `"}`)
 	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
 	r.Header.Set("Authorization", "Bearer invalid")
 	w := httptest.NewRecorder()
