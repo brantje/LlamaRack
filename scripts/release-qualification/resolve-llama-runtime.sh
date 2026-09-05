@@ -4,10 +4,21 @@ set -euo pipefail
 output_file="${1:-}"
 repository="${LLAMA_CPP_REPOSITORY:-ggml-org/llama.cpp}"
 api_url="${GITHUB_API_URL:-https://api.github.com}"
+resolve_attempts="${LLAMA_RUNTIME_RESOLVE_ATTEMPTS:-20}"
+resolve_delay_seconds="${LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS:-30}"
 
 for command in curl jq docker; do
   command -v "$command" >/dev/null || { echo "missing command: $command" >&2; exit 1; }
 done
+
+if [[ ! "$resolve_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "LLAMA_RUNTIME_RESOLVE_ATTEMPTS must be a positive integer: ${resolve_attempts}" >&2
+  exit 1
+fi
+if [[ ! "$resolve_delay_seconds" =~ ^[0-9]+$ ]]; then
+  echo "LLAMA_RUNTIME_RESOLVE_DELAY_SECONDS must be a non-negative integer: ${resolve_delay_seconds}" >&2
+  exit 1
+fi
 
 github_headers=(
   -H 'Accept: application/vnd.github+json'
@@ -57,23 +68,41 @@ pin_digest() {
 }
 
 cpu_tag="ghcr.io/ggml-org/llama.cpp:server-${build_tag}"
-cpu_image="$(pin_digest "$cpu_tag")" || {
-  echo "Missing or unresolved llama.cpp CPU runtime image: ${cpu_tag}" >&2
-  exit 1
-}
+cuda_candidates=(
+  "ghcr.io/ggml-org/llama.cpp:server-cuda-${build_tag}"
+  "ghcr.io/ggml-org/llama.cpp:server-cuda13-${build_tag}"
+  "ghcr.io/ggml-org/llama.cpp:server-cuda12-${build_tag}"
+)
 
+cpu_image=''
 cuda_image=''
-for candidate in \
-  "ghcr.io/ggml-org/llama.cpp:server-cuda-${build_tag}" \
-  "ghcr.io/ggml-org/llama.cpp:server-cuda13-${build_tag}" \
-  "ghcr.io/ggml-org/llama.cpp:server-cuda12-${build_tag}"; do
-  if resolved="$(pin_digest "$candidate")"; then
-    cuda_image="$resolved"
+for ((attempt = 1; attempt <= resolve_attempts; attempt++)); do
+  cpu_image="$(pin_digest "$cpu_tag")" || cpu_image=''
+
+  cuda_image=''
+  for candidate in "${cuda_candidates[@]}"; do
+    if resolved="$(pin_digest "$candidate")"; then
+      cuda_image="$resolved"
+      break
+    fi
+  done
+
+  if [[ -n "$cpu_image" && -n "$cuda_image" ]]; then
     break
   fi
+
+  if (( attempt < resolve_attempts )); then
+    echo "llama.cpp ${build_tag} runtime images are not fully published yet (attempt ${attempt}/${resolve_attempts}); retrying in ${resolve_delay_seconds}s." >&2
+    sleep "$resolve_delay_seconds"
+  fi
 done
+
+if [[ -z "$cpu_image" ]]; then
+  echo "Missing or unresolved llama.cpp CPU runtime image after ${resolve_attempts} attempts: ${cpu_tag}" >&2
+  exit 1
+fi
 if [[ -z "$cuda_image" ]]; then
-  echo "No supported llama.cpp CUDA runtime image found for ${build_tag}." >&2
+  echo "No supported llama.cpp CUDA runtime image found for ${build_tag} after ${resolve_attempts} attempts." >&2
   exit 1
 fi
 
