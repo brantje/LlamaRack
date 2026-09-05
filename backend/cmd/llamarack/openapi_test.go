@@ -74,6 +74,9 @@ func TestInferenceOpenAPIResponseHeaders(t *testing.T) {
 			t.Fatalf("missing documented inference header %s", header)
 		}
 	}
+	if _, ok := response.Headers["x-llamarack-upstream-port"]; ok {
+		t.Fatal("OpenAPI must not document the internal worker port")
+	}
 	embeddings := doc.Paths["/v1/embeddings"]["post"].Responses["200"].Headers
 	if _, ok := embeddings["x-llamarack-generation-tokens-per-second"]; ok {
 		t.Fatal("embeddings should not document generation throughput")

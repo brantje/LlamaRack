@@ -330,6 +330,7 @@ func TestListModelsAndSuccessfulProxy(t *testing.T) {
 				t.Fatalf("%s previous product headers present: %v", path, w.Header())
 			}
 		}
+		assertNoUpstreamPortHeader(t, w.Header())
 		if requestID := w.Header().Get(headerRequestID); !strings.HasPrefix(requestID, "lr_") {
 			t.Fatalf("%s request id %q", path, requestID)
 		}
