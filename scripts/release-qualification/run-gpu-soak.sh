@@ -33,10 +33,23 @@ mkdir -p "$artifact_dir"
 cat >"$shim_dir/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+request_timeout="${GPU_CURL_MAX_TIME:-120}"
+for arg in "$@"; do
+  case "$arg" in
+    */api/v1/playground/chat/completions*)
+      request_timeout="${GPU_INFERENCE_CURL_MAX_TIME:-600}"
+      break
+      ;;
+  esac
+done
+
+# Append qualification-owned deadlines last so they override any shorter
+# per-call curl defaults inside the soak script.
 exec "${LLAMARACK_REAL_CURL:?}" \
+  "$@" \
   --connect-timeout "${GPU_CURL_CONNECT_TIMEOUT:-10}" \
-  --max-time "${GPU_CURL_MAX_TIME:-120}" \
-  "$@"
+  --max-time "$request_timeout"
 EOF
 chmod +x "$shim_dir/curl"
 
