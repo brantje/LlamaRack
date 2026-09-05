@@ -1,6 +1,7 @@
 <script setup lang="ts">
 type ModelSummary = {
   id: string
+  slug: string
   name: string
   gguf_path: string
   total_bytes: number
@@ -48,7 +49,7 @@ type MetadataValuePage = {
 
 const manager = useManager()
 const route = useRoute()
-const id = computed(() => String(route.params.id || ''))
+const slug = computed(() => String(route.params.id || ''))
 const details = ref<ModelDetails | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -96,13 +97,13 @@ function formatPositiveNumber(value?: number) {
 }
 
 async function load() {
-  if (!id.value) return
+  if (!slug.value) return
   busy.value = true
   error.value = ''
   try {
     const params = new URLSearchParams({ offset: String(offset.value), limit: String(limit) })
     if (appliedQuery.value) params.set('q', appliedQuery.value)
-    details.value = await manager.request<ModelDetails>(`/api/v1/models/${encodeURIComponent(id.value)}/details?${params.toString()}`)
+    details.value = await manager.request<ModelDetails>(`/api/v1/models/${encodeURIComponent(slug.value)}/details?${params.toString()}`)
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || 'Unable to load GGUF metadata'
   } finally {
@@ -135,12 +136,12 @@ function nextPage() {
 }
 
 async function loadValuePage(nextOffset: number) {
-  if (!selectedEntry.value || !id.value) return
+  if (!selectedEntry.value || !slug.value) return
   valueBusy.value = true
   valueError.value = ''
   try {
     const params = new URLSearchParams({ key: selectedEntry.value.key, offset: String(Math.max(0, nextOffset)) })
-    valuePage.value = await manager.request<MetadataValuePage>(`/api/v1/models/${encodeURIComponent(id.value)}/details/value?${params.toString()}`)
+    valuePage.value = await manager.request<MetadataValuePage>(`/api/v1/models/${encodeURIComponent(slug.value)}/details/value?${params.toString()}`)
   } catch (e: any) {
     valueError.value = e?.data?.error || e?.message || 'Unable to expand GGUF metadata value'
   } finally {
@@ -180,7 +181,7 @@ onMounted(() => void load())
       />
       <div class="flex w-full flex-wrap justify-start gap-2 sm:w-auto sm:justify-end" data-testid="model-details-actions">
         <AppButton to="/models" intent="secondary">Back to models</AppButton>
-        <AppButton v-if="details?.model.id" :to="`/models/${details.model.id}/edit`" intent="primary">Edit</AppButton>
+        <AppButton v-if="details?.model.slug" :to="`/models/${encodeURIComponent(details.model.slug)}/edit`" intent="primary">Edit</AppButton>
       </div>
     </div>
 
