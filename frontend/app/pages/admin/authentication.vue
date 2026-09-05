@@ -110,8 +110,13 @@ async function saveSettings() {
   savingSettings.value = true
   errorMessage.value = ''
   successMessage.value = ''
+  const body: Record<string, unknown> = {}
+  for (const key of Object.keys(settingsForm) as Array<keyof typeof settingsForm>) {
+    const setting = settings.value?.[key as keyof AuthSettings]
+    if (setting?.editable) body[key] = settingsForm[key]
+  }
   try {
-    await manager.request('/api/v1/admin/auth/settings', { method: 'PUT', body: { ...settingsForm } })
+    await manager.request('/api/v1/admin/auth/settings', { method: 'PUT', body })
     successMessage.value = 'Authentication settings saved.'
     await manager.refreshAuthProviders()
     await load()
