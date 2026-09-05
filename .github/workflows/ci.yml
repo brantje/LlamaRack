@@ -85,6 +85,7 @@ jobs:
           bash -n scripts/release-qualification/*.sh
           python3 -m py_compile scripts/release-qualification/*.py
           bash scripts/release-qualification/test-resolve-llama-runtime.sh
+          bash scripts/release-qualification/test-run-gpu-soak.sh
 
   frontend:
     runs-on: ubuntu-latest
@@ -164,10 +165,7 @@ jobs:
   #       run: |
   #         set -euo pipefail
   #         mkdir -p "$QUALIFICATION_ARTIFACT_DIR"
-  #         bash scripts/release-qualification/monitor-gpu-soak.sh "$QUALIFICATION_ARTIFACT_DIR" &
-  #         monitor_pid=$!
-  #         trap 'kill "$monitor_pid" >/dev/null 2>&1 || true' EXIT
-  #         bash scripts/release-qualification/gpu-soak.sh \
+  #         bash scripts/release-qualification/run-gpu-soak.sh \
   #           "$CUDA_TAG" \
   #           "$GPU_MODELS_DIR" \
   #           "$GPU_CYCLES"
@@ -179,11 +177,9 @@ jobs:
   #           python3 scripts/release-qualification/verify-dense-multi-evidence.py \
   #             "$QUALIFICATION_ARTIFACT_DIR/dense-multi-worker-args.txt"
   #         fi
-  #         wait "$monitor_pid"
   #         python3 scripts/release-qualification/analyze-manager-growth.py \
   #           "$QUALIFICATION_ARTIFACT_DIR/manager-resource-samples.tsv" \
   #           "$QUALIFICATION_ARTIFACT_DIR/manager-growth-summary.json"
-  #         trap - EXIT
 
   #     - name: Upload GPU qualification evidence
   #       if: always()
