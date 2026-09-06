@@ -112,7 +112,7 @@ replace_once(
 )
 
 writeback_test = Path("backend/internal/observability/writeback_test.go")
-writeback_test.write_text(writeback_test.read_text() + r'''
+writeback_test.write_text(writeback_test.read_text() + '''
 
 func TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches(t *testing.T) {
 \ts := testService(t)
