@@ -34,18 +34,18 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bo
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
 }
 
-func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, requestID string, record *observability.RequestRecord, modelSlug string) {
+func (g *Gateway) getModel(observed *responseObserver, r *http.Request, requestID string, record *observability.RequestRecord, modelSlug string) {
 	modelSlug = strings.TrimSpace(modelSlug)
 	g.captureModelSlug(r.Context(), requestID, modelSlug)
-	instance, ok := g.resolveInstanceBySlug(wHeaderFromResponse(w), r, record, modelSlug)
+	instance, ok := g.resolveInstanceBySlug(observed, r, record, modelSlug)
 	if !ok {
 		return
 	}
 	if !instance.Enabled {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
+		writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		return
 	}
-	writeJSON(w, http.StatusOK, openaiModelObject(instance.Slug))
+	writeJSON(observed, http.StatusOK, openaiModelObject(instance.Slug))
 }
 
 func openaiModelObject(id string) map[string]any {
@@ -255,10 +255,3 @@ func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spe
 }
 
 func wHeader(observed *responseObserver) http.Header { return observed.Header() }
-
-func wHeaderFromResponse(w http.ResponseWriter) *responseObserver {
-	if observed, ok := w.(*responseObserver); ok {
-		return observed
-	}
-	return newResponseObserver(w, false)
-}
