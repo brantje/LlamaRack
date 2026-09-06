@@ -77,7 +77,7 @@ describe('Playground edge branches', () => {
     })
     const publicFetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ text: 'legacy text choice' }] }), {
       status: 200,
-      headers: { 'X-LlamaRack-Request-ID': 'raw-all', 'X-LlamaRack-Upstream-Port': '9101' }
+      headers: { 'X-LlamaRack-Request-ID': 'raw-all', 'X-LlamaRack-Instance': 'coder', 'X-LlamaRack-Upstream-Port': '9101' }
     }))
     vi.stubGlobal('fetch', publicFetch)
 
@@ -103,7 +103,8 @@ describe('Playground edge branches', () => {
     expect(wrapper.text()).toContain('2.20 s')
     expect(wrapper.text()).toContain('—')
     await activateTab(wrapper, 'Response')
-    expect(wrapper.text()).toContain('x-llamarack-upstream-port: 9101')
+    expect(wrapper.text()).toContain('x-llamarack-instance: coder')
+    expect(wrapper.text()).not.toContain('x-llamarack-upstream-port')
     wrapper.unmount()
   })
 

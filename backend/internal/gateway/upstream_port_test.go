@@ -2,47 +2,27 @@ package gateway
 
 import (
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-func TestUpstreamPortHeaderUsesResolvedRuntime(t *testing.T) {
+func TestInferenceResponsesDoNotExposeUpstreamPort(t *testing.T) {
 	fixture := newGatewayFixture(t, true)
-	handler := WithUpstreamPortHeader(fixture.gateway.lifecycle, fixture.gateway)
-	response := gatewayRequest(t, handler, http.MethodPost, "/v1/chat/completions", fixture.secret, `{"model":"gateway-model"}`)
+	response := gatewayRequest(t, fixture.gateway, http.MethodPost, "/v1/chat/completions", fixture.secret, `{"model":"gateway-model"}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if response.Header().Get(headerInstance) != "gateway-model" {
 		t.Fatalf("instance headers=%v", response.Header())
 	}
-	if response.Header().Get(headerUpstreamPort) == "" {
-		t.Fatalf("upstream port missing: %v", response.Header())
-	}
+	assertNoUpstreamPortHeader(t, response.Header())
 }
 
-func TestUpstreamPortHeaderPassThroughBranches(t *testing.T) {
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-	if got := WithUpstreamPortHeader(nil, next); got == nil {
-		t.Fatal("nil lifecycle should return the original handler")
-	}
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	writer := &upstreamPortResponseWriter{ResponseWriter: recorder, request: request}
-	writer.WriteHeader(http.StatusAccepted)
-	if recorder.Code != http.StatusAccepted || recorder.Header().Get(headerUpstreamPort) != "" {
-		t.Fatalf("unexpected response: code=%d headers=%v", recorder.Code, recorder.Header())
-	}
-
-	recorder = httptest.NewRecorder()
-	request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	writer = &upstreamPortResponseWriter{ResponseWriter: recorder, request: request}
-	_, _ = writer.Write([]byte("ok"))
-	writer.Flush()
-	if recorder.Body.String() != "ok" || writer.Unwrap() != recorder {
-		t.Fatalf("writer passthrough body=%q", recorder.Body.String())
+func assertNoUpstreamPortHeader(t *testing.T, header http.Header) {
+	t.Helper()
+	for name := range header {
+		if strings.Contains(strings.ToLower(name), "upstream-port") {
+			t.Fatalf("worker port header leaked: %s=%q", name, header.Get(name))
+		}
 	}
 }

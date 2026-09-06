@@ -17,25 +17,10 @@ func TestSetProductHeaderWritesCanonicalName(t *testing.T) {
 	}
 }
 
-func TestGetProductHeaderReadsCanonicalName(t *testing.T) {
-	header := http.Header{}
-	if got := getProductHeader(header, headerInstance); got != "" {
-		t.Fatalf("empty header = %q", got)
-	}
-	header.Set("X-LlamaCPP-Manager-Instance", "previous-instance")
-	if got := getProductHeader(header, headerInstance); got != "" {
-		t.Fatalf("previous product header = %q", got)
-	}
-	header.Set(headerInstance, "canonical-instance")
-	if got := getProductHeader(header, headerInstance); got != "canonical-instance" {
-		t.Fatalf("canonical read = %q", got)
-	}
-}
-
 func TestCORSExposeHeadersIncludesCanonicalProductNames(t *testing.T) {
 	exposed := CORSExposeHeaders()
 	for _, name := range []string{
-		headerRequestID, headerInstance, headerUpstreamPort,
+		headerRequestID, headerInstance,
 		"X-LiteLLM-Trace-ID", "X-LiteLLM-Session-ID",
 	} {
 		if !strings.Contains(exposed, name) {
@@ -44,5 +29,8 @@ func TestCORSExposeHeadersIncludesCanonicalProductNames(t *testing.T) {
 	}
 	if strings.Contains(exposed, "X-LlamaCPP-Manager-") {
 		t.Fatalf("previous product headers still exposed: %q", exposed)
+	}
+	if strings.Contains(strings.ToLower(exposed), "upstream-port") {
+		t.Fatalf("worker port still exposed: %q", exposed)
 	}
 }

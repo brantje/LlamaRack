@@ -440,12 +440,11 @@ func managerMetricHeaders(embeddings bool) map[string]manageropenapi.Header {
 
 func preResponseMetricHeaders() map[string]manageropenapi.Header {
 	return map[string]manageropenapi.Header{
-		"x-llamarack-request-id":    {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamarack-instance":      {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
-		"x-llamarack-autoloaded":    {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
-		"x-llamarack-upstream-port": {Description: "Resolved internal llama.cpp worker port. This is diagnostic metadata only; clients must continue to use the manager gateway.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
-		"x-llamarack-queue-ms":      numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
-		"x-llamarack-load-ms":       numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
+		"x-llamarack-request-id": {Description: "Stable, non-secret manager correlation ID. The same ID identifies the persisted observability request record.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamarack-instance":   {Description: "Selected addressable Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
+		"x-llamarack-autoloaded": {Description: "Whether this request had to load/start the selected Instance.", Schema: manageropenapi.Schema{Type: "boolean"}},
+		"x-llamarack-queue-ms":   numberHeader("Time spent waiting for Instance acquisition, in milliseconds."),
+		"x-llamarack-load-ms":    numberHeader("Autoload/model-load time in milliseconds. Omitted when no load occurred."),
 	}
 }
 
