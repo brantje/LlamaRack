@@ -388,7 +388,7 @@ func TestInsufficientVRAMDoesNotEnterStartupBackoff(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	if _, ok := s.startFailureState(instance.ID); ok {
-		t.Fatal("eviction-exhausted wait counted as crash-loop failure")
+		t.Fatal("resource-pressure wait counted as crash-loop failure")
 	}
 
 	_, release, acquireErr := s.Acquire(ctx, instance.ID)
