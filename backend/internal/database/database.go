@@ -11,8 +11,14 @@ import (
 )
 
 func Open(ctx context.Context, path string) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, privateDirPerm); err != nil {
 		return nil, err
+	}
+	if shouldRestrictDir(dir) {
+		if err := restrictMode(dir, privateDirPerm, false); err != nil {
+			return nil, err
+		}
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -26,6 +32,10 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		}
 	}
 	if _, err := migrate(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := restrictSQLiteFiles(path); err != nil {
 		db.Close()
 		return nil, err
 	}

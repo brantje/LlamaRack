@@ -51,6 +51,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err := os.MkdirAll(cfg.ModelsDir, 0o755); err != nil {
 		return fmt.Errorf("create models dir: %w", err)
 	}
+	if err := database.EnsurePrivateDir(cfg.DataDir); err != nil {
+		return fmt.Errorf("restrict data dir: %w", err)
+	}
 	db, err := database.Open(ctx, cfg.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
