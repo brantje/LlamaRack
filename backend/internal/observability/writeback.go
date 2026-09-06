@@ -27,6 +27,12 @@ type writebackState struct {
 	limit             int
 	entries           map[string]*writebackEntry
 	openAIToRequest   map[string]string
+	modelIdentities   map[string]writebackModelIdentity
+}
+
+type writebackModelIdentity struct {
+	modelID   string
+	modelName string
 }
 
 type writebackEntry struct {
@@ -50,6 +56,7 @@ func writebackStateFor(s *Service) *writebackState {
 		limit:           writebackMaxEntries,
 		entries:         map[string]*writebackEntry{},
 		openAIToRequest: map[string]string{},
+		modelIdentities: map[string]writebackModelIdentity{},
 	}
 	actual, _ := writebackStates.LoadOrStore(s, state)
 	return actual.(*writebackState)
@@ -474,7 +481,7 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 			return err
 		}
 		if entry.contextReady {
-			modelID, modelName, err := resolveWritebackModelIdentity(ctx, tx, record.InstanceID, entry.contextInstanceID)
+			modelID, modelName, err := s.resolveWritebackModelIdentity(ctx, tx, record.InstanceID, entry.contextInstanceID)
 			if err != nil {
 				return err
 			}
@@ -489,16 +496,33 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 	return tx.Commit()
 }
 
-func resolveWritebackModelIdentity(ctx context.Context, tx *sql.Tx, durableID, publicID string) (string, string, error) {
+func (s *Service) resolveWritebackModelIdentity(ctx context.Context, tx *sql.Tx, durableID, publicID string) (string, string, error) {
 	durableID = strings.TrimSpace(durableID)
 	publicID = strings.TrimSpace(publicID)
 	if durableID == "" && publicID == "" {
 		return "", "", nil
+	}
+	cacheKey := durableID
+	if cacheKey == "" {
+		cacheKey = "slug:" + publicID
+	}
+	state := writebackStateFor(s)
+	state.mu.Lock()
+	cached, ok := state.modelIdentities[cacheKey]
+	state.mu.Unlock()
+	if ok {
+		return cached.modelID, cached.modelName, nil
 	}
 	var modelID, modelName string
 	err := tx.QueryRowContext(ctx, `SELECT i.model_id,m.name FROM instances i JOIN models m ON m.id=i.model_id WHERE i.id=? OR i.slug=? LIMIT 1`, durableID, publicID).Scan(&modelID, &modelName)
 	if err == sql.ErrNoRows {
 		return "", "", nil
 	}
-	return modelID, modelName, err
+	if err != nil {
+		return "", "", err
+	}
+	state.mu.Lock()
+	state.modelIdentities[cacheKey] = writebackModelIdentity{modelID: modelID, modelName: modelName}
+	state.mu.Unlock()
+	return modelID, modelName, nil
 }
