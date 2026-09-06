@@ -130,7 +130,7 @@ func (s *Sampler) Run(ctx context.Context) {
 	requests := []RequestRecord{}
 	collect := func() {
 		s.refreshRuntimeStates(ctx, current)
-		snapshot, err := s.lifecycle.HardwareSnapshot(ctx)
+		snapshot, err := s.lifecycle.HostHardwareSnapshot(ctx)
 		if err != nil {
 			return
 		}
