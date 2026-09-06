@@ -257,6 +257,10 @@ func collectLegacyInstanceIDs(ctx context.Context, tx *sql.Tx) ([]string, error)
 			}
 			seen[id] = struct{}{}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
