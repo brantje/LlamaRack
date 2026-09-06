@@ -1,0 +1,90 @@
+name: Apply PR183 CodeRabbit follow-up fixes
+
+on:
+  push:
+    branches:
+      - fix/180-stable-resource-identities
+    paths:
+      - .github/workflows/apply-pr183-cr-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/180-stable-resource-identities
+          fetch-depth: 0
+      - name: Apply guarded replacements
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              'backend/internal/api/server.go',
+              '''\tinstance, err := s.lifecycle.Instances().GetBySlug(r.Context(), parts[0])
+\tif err != nil {
+\t\twriteResourceLookupError(w, "instance", err)
+\t\treturn
+\t}
+''',
+              '''\tinstance, err := s.lifecycle.Instances().GetBySlug(r.Context(), parts[0])
+\tif errors.Is(err, sql.ErrNoRows) {
+\t\t// Transitional compatibility for durable-ID management links. Frontend
+\t\t// navigation remains canonical on the public slug route.
+\t\tinstance, err = s.lifecycle.Instances().GetByID(r.Context(), parts[0])
+\t}
+\tif err != nil {
+\t\twriteResourceLookupError(w, "instance", err)
+\t\treturn
+\t}
+''',
+          )
+
+          replace_once(
+              'backend/internal/database/resource_identity_migration_failures_test.go',
+              '''\t\tif err := backfillModelSlugs(ctx, tx); err == nil || !strings.Contains(strings.ToLower(err.Error()), "slug") {
+\t\t\tt.Fatalf("backfillModelSlugs write error=%v", err)
+\t\t}
+''',
+              '''\t\tif err := backfillModelSlugs(ctx, tx); err == nil || strings.ToLower(err.Error()) != "sql logic error: no such column: slug (1)" {
+\t\t\tt.Fatalf("backfillModelSlugs write error=%v", err)
+\t\t}
+''',
+          )
+
+          p = Path('backend/internal/database/resource_identity_migration_test.go')
+          text = p.read_text()
+          replacements = [
+              ('''\t}\n\trows.Close()\n\tif len(instances) != 2''', '''\t}\n\tif err := rows.Err(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\trows.Close()\n\tif len(instances) != 2'''),
+              ('''\t}\n\trows.Close()\n\tif models["model-a"] != "qwen-coder"''', '''\t}\n\tif err := rows.Err(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\trows.Close()\n\tif models["model-a"] != "qwen-coder"'''),
+              ('''\tfor rows.Next() {\n\t\tviolations++\n\t}\n\trows.Close()''', '''\tfor rows.Next() {\n\t\tviolations++\n\t}\n\tif err := rows.Err(); err != nil {\n\t\tt.Fatal(err)\n\t}\n\trows.Close()'''),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'resource_identity_migration_test.go: expected one match, found {count}: {old!r}')
+              text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-pr183-cr-followup.yml
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/internal/api/server.go backend/internal/database/resource_identity_migration_failures_test.go backend/internal/database/resource_identity_migration_test.go .github/workflows/apply-pr183-cr-followup.yml
+          git diff --cached --check
+          git commit -m "Fix CodeRabbit follow-up feedback"
+          git push origin HEAD:fix/180-stable-resource-identities
