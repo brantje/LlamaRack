@@ -79,7 +79,7 @@ func TestResolveInstanceStorageFailureReturnsGenericResponse(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	observed := newResponseObserver(recorder, false)
-	request := httptest.NewRequest(http.MethodGet, "/v1/models/gateway-model", nil)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/models/gateway-model", nil)
 	record := observability.RequestRecord{}
 	if _, ok := fixture.gateway.resolveInstanceBySlug(observed, request, &record, "gateway-model"); ok {
 		t.Fatal("storage failure unexpectedly resolved instance")
