@@ -149,16 +149,15 @@ A `session_id=<id>` request-history query returns the individual retained reques
 
 Persist `client_ip` and `user_agent` for request debugging.
 
-Resolve client IP in this precedence order:
+Resolve client IP using the manager's configured trusted-proxy boundary:
 
-1. `Forwarded`;
-2. `X-Forwarded-For` (first/leftmost address);
-3. `X-Real-IP`;
-4. direct TCP peer address.
+- when the direct TCP peer is not in a configured trusted-proxy range, ignore `Forwarded`, `X-Forwarded-For`, and `X-Real-IP` and persist the direct peer address;
+- when the direct peer is trusted, prefer `Forwarded`, then `X-Forwarded-For`, then `X-Real-IP`;
+- for `Forwarded` and `X-Forwarded-For`, resolve the forwarding chain against configured trusted-proxy ranges and persist the first untrusted source when walking from the manager toward the original client.
 
-Strip source ports and store valid IPv6 in canonical parsed form. Forwarding headers are accepted without a configured trusted-proxy list for this observability feature.
+Strip source ports and store valid IPv4/IPv6 in canonical parsed form. Invalid or unusable forwarding metadata falls back through the remaining trusted sources and ultimately to the direct peer.
 
-Forwarding metadata is **not a security boundary**. A directly connected client can spoof forwarding headers, so `client_ip` must never be used by this feature to authorize requests or change routing decisions.
+`client_ip` remains observability metadata and must never be used by this feature to authorize requests or change routing decisions. Forwarding headers affect this metadata only after the direct peer has passed trusted-proxy validation.
 
 ## Request-content logging policy
 
@@ -314,7 +313,7 @@ Pending-request admission must remain visible:
 - Historical queries are indexed, bounded, and paginated.
 - Main request history paginates individual requests; session grouping is sidepanel-only.
 - Retention cleanup runs in the background.
-- Forwarded IP metadata is spoofable and must remain observability-only.
+- Forwarded IP metadata is honored only from configured trusted proxies and remains observability-only.
 
 ## Implementation slices
 
