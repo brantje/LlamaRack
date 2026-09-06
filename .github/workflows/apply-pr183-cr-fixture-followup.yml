@@ -1,0 +1,47 @@
+name: Finish PR183 distinct identity fixture
+
+on:
+  push:
+    branches:
+      - fix/180-stable-resource-identities
+    paths:
+      - .github/workflows/apply-pr183-cr-fixture-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/180-stable-resource-identities
+          fetch-depth: 0
+      - name: Apply guarded replacements
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('frontend/test/instances-redesign.nuxt.test.ts')
+          text = p.read_text()
+          replacements = [
+              ("telemetry: [manager.runtimeTelemetry.value.ready!]", "telemetry: [manager.runtimeTelemetry.value[durableID('ready')]!]"),
+              ("return { instance_id: 'manual-launch', model_id: 'm1', state: 'UNLOADED' }", "return { instance_id: durableID('manual-launch'), model_id: 'm1', state: 'UNLOADED' }"),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one match for {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-pr183-cr-fixture-followup.yml
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/test/instances-redesign.nuxt.test.ts .github/workflows/apply-pr183-cr-fixture-followup.yml
+          git diff --cached --check
+          git commit -m "Finish distinct identity frontend fixture"
+          git push origin HEAD:fix/180-stable-resource-identities
