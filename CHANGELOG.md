@@ -19,6 +19,10 @@ The format is based on Keep a Changelog and releases follow Semantic Versioning.
 - Stable LlamaRack releases are promoted from the already-qualified final RC runtime instead of silently selecting a newer llama.cpp build.
 - Official container tags publish the exact SemVer tag `1.0.0` without a leading `v`, plus moving aliases `1.0`, `1`, and `latest` (`latest` is not SemVer), with corresponding `-cuda` variants.
 
+### Security
+
+- Startup now enforces private Unix modes on the configuration directory (`0700`) and SQLite database plus WAL/SHM sidecars (`0600`), including repair of existing overly permissive files, and fails clearly when the filesystem cannot honor `chmod` ([#135](https://github.com/brantje/LlamaRack/issues/135)).
+
 ### Fixed
 
 - Release-container runtime resolution no longer spends a 10-minute retry budget on llama.cpp GitHub stable tags that GHCR has not published.
