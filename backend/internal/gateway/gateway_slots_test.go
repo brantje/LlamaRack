@@ -164,3 +164,51 @@ func TestSlotsDoesNotConsumePendingAdmission(t *testing.T) {
 		t.Fatalf("admitted request=%d", code)
 	}
 }
+
+func TestSlotsGatewayRejectsPathEscapeAndCanonicalizesIDs(t *testing.T) {
+	f := newGatewayFixture(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	instance, err := f.lifecycle.Instances().GetBySlug(ctx, "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lifecycle.StartInstance(ctx, instance.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	w := gatewayRequest(t, f.gateway, http.MethodPost, "/v1/slots/7?model=gateway-model&action=erase", f.secret, `{}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"path":"/slots/7"`) {
+		t.Fatalf("slot 7=%d %s", w.Code, w.Body.String())
+	}
+
+	w = gatewayRequest(t, f.gateway, http.MethodPost, "/v1/slots/001?model=gateway-model&action=erase", f.secret, `{}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"path":"/slots/1"`) || strings.Contains(w.Body.String(), `"/slots/001"`) {
+		t.Fatalf("canonical 001=%d %s", w.Code, w.Body.String())
+	}
+
+	malformed := []struct {
+		path string
+		code int
+	}{
+		{"/v1/slots/-1?model=gateway-model&action=erase", http.StatusBadRequest},
+		{"/v1/slots/abc?model=gateway-model&action=erase", http.StatusBadRequest},
+		{"/v1/slots/1%252F2?model=gateway-model&action=erase", http.StatusBadRequest},
+		{"/v1/slots/%252e%252e%252fprobe?model=gateway-model&action=erase", http.StatusBadRequest},
+		{"/v1/slots/../1?model=gateway-model&action=erase", http.StatusNotFound},
+		{"/v1/slots/%2e%2e%2fprobe?model=gateway-model&action=erase", http.StatusNotFound},
+		{"/v1/slots/1%2F2?model=gateway-model&action=erase", http.StatusNotFound},
+	}
+	for _, tc := range malformed {
+		w := gatewayRequest(t, f.gateway, http.MethodPost, tc.path, f.secret, `{}`)
+		if w.Code != tc.code {
+			t.Fatalf("%s: status=%d want=%d body=%s", tc.path, w.Code, tc.code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), `"proxied":true`) {
+			t.Fatalf("%s: leaked to worker: %s", tc.path, w.Body.String())
+		}
+		if w.Code == http.StatusBadRequest && !strings.Contains(w.Body.String(), "slot_id must be a non-negative integer") {
+			t.Fatalf("%s: unexpected 400 body=%s", tc.path, w.Body.String())
+		}
+	}
+}
