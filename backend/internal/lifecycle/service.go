@@ -1031,7 +1031,9 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 			return
 		}
 		if errors.Is(err, errResourcePressureBlocked) || isStartupInterrupt(err) {
-			if errors.Is(err, errStartupKilled) || errors.Is(err, supervisor.ErrKilled) {
+			if errors.Is(err, errResourcePressureBlocked) {
+				s.AddManagerLog(i.ID, "worker failed to start: "+err.Error())
+			} else if errors.Is(err, errStartupKilled) || errors.Is(err, supervisor.ErrKilled) {
 				s.AddManagerLog(i.ID, "startup killed")
 			}
 			return
@@ -1177,7 +1179,7 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 		shortfall = requiredBytes
 	}
 	insufficient := func(plan scheduler.Plan) error {
-		return fmt.Errorf("insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", shortfall, plan.FreedBytes)
+		return fmt.Errorf("%w: insufficient usable VRAM: need %d more bytes and eligible eviction victims can free only %d", errResourcePressureBlocked, shortfall, plan.FreedBytes)
 	}
 
 	var stopped []scheduler.Candidate
@@ -1253,7 +1255,7 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 			return ghost.Placement, nil
 		}
 	}
-	return scheduler.Placement{}, fmt.Errorf("evict: %w", errEvictionIneligible)
+	return scheduler.Placement{}, fmt.Errorf("%w: evict: %w", errResourcePressureBlocked, errEvictionIneligible)
 }
 
 func (s *Service) victimPlacementCurrent(candidate scheduler.Candidate, snapshot hardware.Snapshot) bool {
