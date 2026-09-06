@@ -568,6 +568,8 @@ Mounted inside the container as:
 
 The configuration volume contains manager persistence, application configuration and stored credentials. GGUF artifacts live under the models volume.
 
+At startup LlamaRack creates or repairs the configuration directory to mode `0700` and the SQLite database plus `-wal`/`-shm` sidecars to mode `0600`. It does not rely on process umask. If the underlying filesystem cannot honor Unix permission bits (for example some FAT/NTFS/CIFS volume mounts), startup fails with an error asking you to place `LLAMARACK_DATA_DIR` and `LLAMARACK_DATABASE_PATH` on a Unix filesystem that supports `chmod`, or to fix the volume mount. The models volume is left at `0755`.
+
 ### Database backup and upgrades
 
 SQLite state lives at `{dataDir}/manager.db` (default `/config/manager.db` in containers). Before upgrading LlamaRack across releases:

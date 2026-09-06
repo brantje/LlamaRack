@@ -113,6 +113,20 @@ func TestRunStartsEndpointsAndShutsDown(t *testing.T) {
 	client := testHTTPClient(t)
 	base := "http://" + cfg.ListenAddr
 	waitHealthy(t, client, base)
+	info, err := os.Stat(cfg.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("data dir mode=%04o want=0700", got)
+	}
+	dbInfo, err := os.Stat(cfg.DatabasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dbInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("database mode=%04o want=0600", got)
+	}
 	for _, path := range []string{"/health", "/", "/api/v1/health"} {
 		resp, err := client.Get(base + path)
 		if err != nil {

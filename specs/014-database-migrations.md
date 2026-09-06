@@ -52,12 +52,13 @@ After the baseline lands:
 
 `database.Open`:
 
-1. creates the parent directory;
+1. creates the parent directory as `0700` and repairs an existing parent to `0700` when it is not `.` or `/`;
 2. opens SQLite with WAL, foreign keys, and busy timeout;
 3. classifies the database (`empty`, `goose-managed`, or `unsupported`);
 4. refuses databases whose Goose version is newer than the embedded migration set;
 5. runs Goose `Up` before returning the connection;
-6. logs the resulting schema version.
+6. logs the resulting schema version;
+7. restricts the database file and any `-wal`/`-shm` sidecars to `0600`, and fails startup if the filesystem cannot honor those modes.
 
 Supported inputs:
 
