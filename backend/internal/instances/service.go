@@ -52,7 +52,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil { return Instance{}, err }
 	if err := replaceOptions(ctx, tx, i.ID, in.Options); err != nil { return Instance{}, err }
 	if err := tx.Commit(); err != nil { return Instance{}, err }
-	resourceid.RememberInstanceSlug(i.ID, i.Slug); s.notifyChange(ctx, i.ID); return i, nil
+	resourceid.RememberInstanceSlug(i.ID, i.Slug); s.rememberHot(i); s.notifyChange(ctx, i.ID); return cloneInstance(i), nil
 }
 
 func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) (Instance, error) {
@@ -63,7 +63,7 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err != nil { return Instance{}, err }; if n, _ := result.RowsAffected(); n == 0 { return Instance{}, sql.ErrNoRows }
 	if in.Options != nil { if err := replaceOptions(ctx, tx, currentID, in.Options); err != nil { return Instance{}, err } }
 	if err := tx.Commit(); err != nil { return Instance{}, err }
-	resourceid.RememberInstanceSlug(i.ID, i.Slug); s.notifyChange(ctx, currentID); return i, nil
+	s.forgetHot(currentID); resourceid.RememberInstanceSlug(i.ID, i.Slug); s.rememberHot(i); s.notifyChange(ctx, currentID); return cloneInstance(i), nil
 }
 
 func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
@@ -74,13 +74,13 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 
 const instanceColumns = `id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode`
 func (s *Service) Get(ctx context.Context, id string) (Instance, error) { return s.GetByID(ctx, id) }
-func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) { return scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE id=?`, strings.TrimSpace(id))) }
-func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) { return scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE slug=?`, resourceid.Slugify(slug))) }
+func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) { id = strings.TrimSpace(id); if item, ok := s.cachedByID(id); ok { return item, nil }; item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE id=?`, id)); if err != nil { return Instance{}, err }; s.rememberHot(item); return cloneInstance(item), nil }
+func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) { slug = resourceid.Slugify(slug); if item, ok := s.cachedBySlug(slug); ok { return item, nil }; item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE slug=?`, slug)); if err != nil { return Instance{}, err }; s.rememberHot(item); return cloneInstance(item), nil }
 func (s *Service) List(ctx context.Context) ([]Instance, error) { return s.list(ctx, `SELECT `+instanceColumns+` FROM instances ORDER BY name,id`) }
 func (s *Service) ListByModel(ctx context.Context, modelID string) ([]Instance, error) { return s.list(ctx, `SELECT `+instanceColumns+` FROM instances WHERE model_id=? ORDER BY name,id`, modelID) }
 func (s *Service) list(ctx context.Context, query string, args ...any) ([]Instance, error) { rows, err := s.db.QueryContext(ctx, query, args...); if err != nil { return nil, err }; defer rows.Close(); var out []Instance; for rows.Next() { i, err := scan(rows); if err != nil { return nil, err }; out = append(out, i) }; return out, rows.Err() }
 func (s *Service) Options(ctx context.Context, id string) (map[string]string, error) { rows, err := s.db.QueryContext(ctx, `SELECT option_key,option_value FROM instance_options WHERE instance_id=? ORDER BY option_key`, id); if err != nil { return nil, err }; defer rows.Close(); out := map[string]string{}; for rows.Next() { var key, value string; if err := rows.Scan(&key, &value); err != nil { return nil, err }; out[key] = value }; return out, rows.Err() }
-func (s *Service) Delete(ctx context.Context, id string) error { result, err := s.db.ExecContext(ctx, `DELETE FROM instances WHERE id=?`, id); if err != nil { return err }; if n, _ := result.RowsAffected(); n == 0 { return sql.ErrNoRows }; resourceid.ForgetInstanceSlug(id); s.notifyChange(ctx, id); return nil }
+func (s *Service) Delete(ctx context.Context, id string) error { result, err := s.db.ExecContext(ctx, `DELETE FROM instances WHERE id=?`, id); if err != nil { return err }; if n, _ := result.RowsAffected(); n == 0 { return sql.ErrNoRows }; s.forgetHot(id); resourceid.ForgetInstanceSlug(id); s.notifyChange(ctx, id); return nil }
 
 type scanner interface{ Scan(...any) error }
 func scan(row scanner) (Instance, error) {

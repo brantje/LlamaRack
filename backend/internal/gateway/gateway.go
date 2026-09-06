@@ -50,6 +50,9 @@ type requestEnvelope struct {
 }
 
 func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*observability.Service) *Gateway {
+	if l != nil {
+		l.Instances().EnableHotCache()
+	}
 	g := &Gateway{auth: a, lifecycle: l, active: newActiveRegistry()}
 	if len(services) > 0 {
 		g.observability = services[0]
