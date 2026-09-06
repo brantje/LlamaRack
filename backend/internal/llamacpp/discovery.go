@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -100,6 +101,7 @@ func parseListDevices(text string) ([]string, error) {
 		seen[device] = true
 		devices = append(devices, device)
 	}
+	sort.Strings(devices)
 	return devices, nil
 }
 
