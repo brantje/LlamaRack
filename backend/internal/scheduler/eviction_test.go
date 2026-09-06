@@ -276,6 +276,64 @@ func TestAttributeResourcesPrefersObservedThenLeaseThenDevices(t *testing.T) {
 	}
 }
 
+func TestAttributeResourcesUnionsObservedWithLeaseDevices(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	got := AttributeResources(ResourceAttribution{
+		EstimatedBytes: 21 * gib,
+		PID:            42,
+		Processes:      []hardware.GPUProcess{{PID: 42, DeviceID: "CUDA0", UsedBytes: 15 * gib}},
+		LeaseGPUs: []GPUReservation{
+			{DeviceID: "CUDA0", Bytes: 15 * gib},
+			{DeviceID: "CUDA1", Bytes: 6 * gib},
+		},
+	})
+	if len(got.GPU) != 2 {
+		t.Fatalf("expected CUDA0+CUDA1, got %+v", got)
+	}
+	byID := map[string]int64{}
+	for _, gpu := range got.GPU {
+		byID[gpu.DeviceID] = gpu.Bytes
+	}
+	if byID["CUDA0"] != 15*gib {
+		t.Fatalf("CUDA0 must keep observed bytes, got %+v", got)
+	}
+	if byID["CUDA1"] != 6*gib {
+		t.Fatalf("CUDA1 must use lease bytes, got %+v", got)
+	}
+
+	remainder := AttributeResources(ResourceAttribution{
+		EstimatedBytes: 20 * gib,
+		PID:            7,
+		Processes:      []hardware.GPUProcess{{PID: 7, DeviceID: "CUDA0", UsedBytes: 14 * gib}},
+		Devices:        []string{"CUDA0", "CUDA1"},
+	})
+	byID = map[string]int64{}
+	for _, gpu := range remainder.GPU {
+		byID[gpu.DeviceID] = gpu.Bytes
+	}
+	if byID["CUDA0"] != 14*gib || byID["CUDA1"] != 6*gib {
+		t.Fatalf("missing lease device should take leftover estimate, got %+v", remainder)
+	}
+
+	mixed := AttributeResources(ResourceAttribution{
+		EstimatedBytes: 20 * gib,
+		PID:            9,
+		Processes:      []hardware.GPUProcess{{PID: 9, DeviceID: "CUDA0", UsedBytes: 10 * gib}},
+		Devices:        []string{"CUDA0", "CUDA1", "CUDA2"},
+		LeaseGPUs: []GPUReservation{
+			{DeviceID: "CUDA0", Bytes: 10 * gib},
+			{DeviceID: "CUDA1", Bytes: 6 * gib},
+		},
+	})
+	byID = map[string]int64{}
+	for _, gpu := range mixed.GPU {
+		byID[gpu.DeviceID] = gpu.Bytes
+	}
+	if byID["CUDA0"] != 10*gib || byID["CUDA1"] != 6*gib || byID["CUDA2"] != 4*gib {
+		t.Fatalf("lease bytes must be subtracted from leftover estimate, got %+v", mixed)
+	}
+}
+
 func TestCreditsFromCandidatesOmitsUnassignedBytes(t *testing.T) {
 	credits := CreditsFromCandidates([]Candidate{
 		{InstanceID: "a", Resources: CandidateResources{GPU: []GPUResource{{DeviceID: "CUDA0", Bytes: 4}}}},

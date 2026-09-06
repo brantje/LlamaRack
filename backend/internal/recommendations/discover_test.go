@@ -184,7 +184,7 @@ func TestAssumeIdleSnapshotDoesNotMutateCaller(t *testing.T) {
 		RAMTotalBytes:     32 * gib,
 		GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 1 * gib, TotalBytes: 8 * gib}},
 	}
-	idle := assumeIdleSnapshot(snapshot)
+	idle := AssumeIdleSnapshot(snapshot)
 	if idle.RAMAvailableBytes != 32*gib || idle.GPUs[0].FreeBytes != 8*gib {
 		t.Fatalf("idle=%+v", idle)
 	}

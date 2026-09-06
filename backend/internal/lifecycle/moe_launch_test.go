@@ -76,6 +76,33 @@ func TestPrepareAutoMoELaunchRespectsUserOverrides(t *testing.T) {
 	}
 }
 
+func TestPrepareAutoMoELaunchSkipsLeftoverPinWhenIdleFitsMultiGPU(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	path := writeLifecycleMoEGGUF(t, 40, 64)
+	s := &Service{
+		hardware: moeStaticHardware{snapshot: hardware.Snapshot{
+			RAMAvailableBytes: 64 * gib,
+			RAMTotalBytes:     64 * gib,
+			GPUs: []hardware.GPU{
+				{ID: "CUDA0", FreeBytes: 512 * 1024 * 1024, TotalBytes: 16 * gib},
+				{ID: "CUDA1", FreeBytes: 9 * gib, TotalBytes: 16 * gib},
+			},
+		}},
+		profile: func() (llamacpp.Profile, error) {
+			return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"}}}, nil
+		},
+	}
+	model := models.Model{ID: "moe", TotalBytes: 20 * gib, ContextLength: 32768}
+	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "auto"}
+	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, map[string]string{"ctx-size": "4096"}, map[string]string{"ctx-size": "4096"})
+	if plan.Applied || len(plan.Devices) != 0 {
+		t.Fatalf("idle multi-GPU fit must not pin leftover devices, plan=%+v", plan)
+	}
+	if plan.Options["n-cpu-moe"] != "" || plan.Options["cpu-moe"] != "" {
+		t.Fatalf("idle multi-GPU fit must not inject expert spill, options=%v", plan.Options)
+	}
+}
+
 func TestPrepareAutoMoELaunchDoesNotInventManualDevices(t *testing.T) {
 	const gib = int64(1024 * 1024 * 1024)
 	path := writeLifecycleMoEGGUF(t, 40, 64)
