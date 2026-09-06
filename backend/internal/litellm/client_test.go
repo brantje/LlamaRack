@@ -173,6 +173,64 @@ func TestClientReconcileLifecycle(t *testing.T) {
 	}
 }
 
+func TestClientListModelsReadsCatalogLargerThanOneMiB(t *testing.T) {
+	entry := BuildModelEntry("alpha", "http://llamarack/v1", "sk-testsecret", "litellm-alpha")
+	payload, err := json.Marshal(map[string]any{
+		"data": []ModelEntry{entry},
+		"pad":  strings.Repeat("x", (1<<20)+64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) <= 1<<20 {
+		t.Fatalf("expected oversized catalog fixture, got %d bytes", len(payload))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer proxy-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL, "proxy-key", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := client.ListModels(t.Context())
+	if err != nil {
+		t.Fatalf("list oversized catalog: %v", err)
+	}
+	if len(models) != 1 || models[0].ModelName != "alpha" {
+		t.Fatalf("models=%#v", models)
+	}
+}
+
+func TestReadBoundedProxyResponseRejectsTruncation(t *testing.T) {
+	raw, err := readBoundedProxyResponse(nil, 64)
+	if err != nil || raw != nil {
+		t.Fatalf("nil body raw=%q err=%v", raw, err)
+	}
+	raw, err = readBoundedProxyResponse(strings.NewReader(strings.Repeat("x", 8)), 7)
+	if err == nil || !strings.Contains(err.Error(), "exceeds 7 bytes") {
+		t.Fatalf("raw=%q err=%v", raw, err)
+	}
+	raw, err = readBoundedProxyResponse(strings.NewReader(`{"data":[]}`), 64)
+	if err != nil || string(raw) != `{"data":[]}` {
+		t.Fatalf("raw=%q err=%v", raw, err)
+	}
+	if _, err = readBoundedProxyResponse(errReader{io.ErrUnexpectedEOF}, 64); err != io.ErrUnexpectedEOF {
+		t.Fatalf("expected read error, got %v", err)
+	}
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
 func TestClientStoreModelInDBError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "STORE_MODEL_IN_DB must be enabled", http.StatusBadRequest)

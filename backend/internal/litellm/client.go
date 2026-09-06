@@ -113,7 +113,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 		return err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := readBoundedProxyResponse(resp.Body, maxProxyResponseBytes)
 	if err != nil {
 		return err
 	}
@@ -124,6 +124,22 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+const maxProxyResponseBytes int64 = 16 << 20
+
+func readBoundedProxyResponse(body io.Reader, limit int64) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("litellm proxy response exceeds %d bytes", limit)
+	}
+	return raw, nil
 }
 
 func parseAPIError(status int, raw []byte) error {
