@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
@@ -30,14 +29,7 @@ func TestHuggingFaceRemoveDownloadRoutes(t *testing.T) {
 		t.Fatalf("job = %+v err=%v", job, err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		w = huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/downloads/"+job.ID, nil, true)
-		if strings.Contains(w.Body.String(), downloads.StateCompleted) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitHuggingFaceDownloadState(t, fixture, job.ID, downloads.StateCompleted)
 	w = huggingFaceRequest(t, fixture, http.MethodDelete, "/api/v1/downloads/"+job.ID, nil, true)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "only cancelled downloads") {
 		t.Fatalf("completed removal status=%d body=%s", w.Code, w.Body.String())
