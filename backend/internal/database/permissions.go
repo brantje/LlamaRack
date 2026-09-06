@@ -77,11 +77,11 @@ func restrictModeWith(path string, perm os.FileMode, optional bool, stat fileSta
 		return err
 	}
 	current := info.Mode().Perm()
-	if current == perm {
-		return nil
-	}
 	if isSharedDir(path, info) {
 		return fmt.Errorf("%s is a sticky shared directory (mode %04o); put LLAMARACK_DATA_DIR and LLAMARACK_DATABASE_PATH in a dedicated LlamaRack data directory instead of a path such as /tmp", path, current)
+	}
+	if current == perm {
+		return nil
 	}
 	if err := chmod(path, perm); err != nil {
 		return fmt.Errorf("restrict permissions on %s: %w; %s", path, err, permissionRemediation)

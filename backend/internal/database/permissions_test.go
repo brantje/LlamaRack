@@ -170,6 +170,19 @@ func TestRestrictModeRejectsStickyDirectory(t *testing.T) {
 	}
 }
 
+func TestRestrictModeRejectsStickyPrivateDirectory(t *testing.T) {
+	info := fakeDirInfo(os.ModeDir | os.ModeSticky | 0o700)
+	err := restrictModeWith("/var/data", privateDirPerm, false, func(string) (os.FileInfo, error) {
+		return info, nil
+	}, func(string, os.FileMode) error {
+		t.Fatal("must not chmod a sticky 0700 directory")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected sticky 01700 directory error, got %v", err)
+	}
+}
+
 func TestRestrictModeRejectsSystemTempDirectory(t *testing.T) {
 	info := fakeDirInfo(os.ModeDir | 0o777)
 	err := restrictModeWith("/tmp", privateDirPerm, false, func(string) (os.FileInfo, error) {
@@ -180,6 +193,19 @@ func TestRestrictModeRejectsSystemTempDirectory(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
 		t.Fatalf("expected system temp directory error, got %v", err)
+	}
+}
+
+func TestRestrictModeRejectsSystemTempDirectoryAlreadyPrivate(t *testing.T) {
+	info := fakeDirInfo(os.ModeDir | 0o700)
+	err := restrictModeWith("/tmp", privateDirPerm, false, func(string) (os.FileInfo, error) {
+		return info, nil
+	}, func(string, os.FileMode) error {
+		t.Fatal("must not chmod /tmp even when it reports 0700")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected /tmp at 0700 to be refused, got %v", err)
 	}
 }
 
