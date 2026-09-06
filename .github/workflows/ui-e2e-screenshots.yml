@@ -40,7 +40,7 @@ jobs:
       - name: Capture UI pages
         env:
           NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
-        run: npm run test:e2e:screenshots
+        run: npm run test:e2e:screenshots -- --project=desktop-wide-1920x1080
 
       - name: Prepare exact 1920x1080 screenshots
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
