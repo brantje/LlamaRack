@@ -28,9 +28,15 @@ jobs:
             backend/internal/observability/writeback_test.go \
             backend/internal/observability/writeback_coverage_test.go \
             backend/internal/gateway/overhead_locust_test.go
-      - name: Test affected packages
+      - name: Test final writeback regressions
         working-directory: backend
-        run: go test -v ./internal/observability ./internal/gateway
+        run: go test -v ./internal/observability -run 'TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches|TestWritebackPersistsRichContextAndResponseState'
+      - name: Test observability package
+        working-directory: backend
+        run: go test ./internal/observability
+      - name: Test gateway package
+        working-directory: backend
+        run: go test ./internal/gateway
       - name: Race affected packages
         working-directory: backend
         run: go test -race ./internal/observability ./internal/gateway
