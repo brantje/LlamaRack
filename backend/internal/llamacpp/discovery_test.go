@@ -116,7 +116,7 @@ func TestDiscoverHelpFailure(t *testing.T) {
 }
 
 func TestParseListDevices(t *testing.T) {
-	devices, err := parseListDevices("ggml_cuda_init: found 2 CUDA devices:\nAvailable devices:\n  CUDA0: NVIDIA A (100 MiB, 90 MiB free)\nCUDA1: NVIDIA B (100 MiB, 80 MiB free)\n  CUDA0: duplicate\n")
+	devices, err := parseListDevices("ggml_cuda_init: found 2 CUDA devices:\nAvailable devices:\n  CUDA1: NVIDIA B (100 MiB, 80 MiB free)\nCUDA0: NVIDIA A (100 MiB, 90 MiB free)\n  CUDA1: duplicate\n")
 	if err != nil || strings.Join(devices, ",") != "CUDA0,CUDA1" {
 		t.Fatalf("devices=%v err=%v", devices, err)
 	}
