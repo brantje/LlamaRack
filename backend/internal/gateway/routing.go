@@ -34,18 +34,11 @@ func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bo
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
 }
 
-func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, modelSlug string) {
-	instance, err := g.lifecycle.Instances().GetBySlug(r.Context(), strings.TrimSpace(modelSlug))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
-		} else {
-			writeError(w, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
-		}
-		return
-	}
-	if !requestInstanceAllowed(r, instance.ID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+func (g *Gateway) getModel(w http.ResponseWriter, r *http.Request, requestID string, record *observability.RequestRecord, modelSlug string) {
+	modelSlug = strings.TrimSpace(modelSlug)
+	g.captureModelSlug(r.Context(), requestID, modelSlug)
+	instance, ok := g.resolveInstanceBySlug(wHeaderFromResponse(w), r, record, modelSlug)
+	if !ok {
 		return
 	}
 	if !instance.Enabled {
@@ -158,7 +151,7 @@ func (g *Gateway) resolveInstanceBySlug(observed *responseObserver, r *http.Requ
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
 			record.Error = sanitizeError(err.Error())
-			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", "The model is temporarily unavailable")
 		}
 		return instances.Instance{}, false
 	}
@@ -172,7 +165,7 @@ func (g *Gateway) resolveInstanceByID(observed *responseObserver, r *http.Reques
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
 			record.Error = sanitizeError(err.Error())
-			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", err.Error())
+			writeError(observed, http.StatusServiceUnavailable, "server_error", "model_unavailable", "The model is temporarily unavailable")
 		}
 		return instances.Instance{}, false
 	}
@@ -262,3 +255,10 @@ func (g *Gateway) proxyAcquired(observed *responseObserver, r *http.Request, spe
 }
 
 func wHeader(observed *responseObserver) http.Header { return observed.Header() }
+
+func wHeaderFromResponse(w http.ResponseWriter) *responseObserver {
+	if observed, ok := w.(*responseObserver); ok {
+		return observed
+	}
+	return newResponseObserver(w, false)
+}
