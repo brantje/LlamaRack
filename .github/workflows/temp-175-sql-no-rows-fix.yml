@@ -28,17 +28,67 @@ jobs:
           path = Path('backend/internal/observability/writeback.go')
           text = path.read_text()
 
-          old_update = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize'''
-          new_update = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize'''
-          if old_update not in text:
-              raise SystemExit('bufferUpdate target not found exactly once')
-          text = text.replace(old_update, new_update, 1)
+          replacements = [
+              (
+                  '''\tentries         map[string]*writebackEntry\n\topenAIToRequest map[string]string\n\tmodelIdentities map[string]writebackModelIdentity''',
+                  '''\tentries         map[string]*writebackEntry\n\tactiveEntries   map[string]*writebackEntry\n\topenAIToRequest map[string]string\n\tmodelIdentities map[string]writebackModelIdentity''',
+              ),
+              (
+                  '''\t\tlimit:           writebackMaxEntries,\n\t\tentries:         map[string]*writebackEntry{},\n\t\topenAIToRequest: map[string]string{},''',
+                  '''\t\tlimit:           writebackMaxEntries,\n\t\tentries:         map[string]*writebackEntry{},\n\t\tactiveEntries:   map[string]*writebackEntry{},\n\t\topenAIToRequest: map[string]string{},''',
+              ),
+              (
+                  '''func (s *Service) bufferBegin(requestID string, record RequestRecord) (bool, error) {\n\tstate := writebackStateFor(s)\n\tstate.mu.Lock()\n\tdefer state.mu.Unlock()\n\tif !state.enabled {\n\t\treturn false, nil\n\t}\n\tif _, exists := state.entries[requestID]; exists {\n\t\treturn true, errors.New("duplicate request_id")\n\t}\n\tif len(state.entries) >= state.limit {\n\t\treturn true, ErrWritebackOverflow\n\t}\n\tstate.entries[requestID] = &writebackEntry{requestID: requestID, record: cloneRequestRecord(record)}\n\treturn true, nil\n}\n\nfunc (s *Service) bufferUpdate''',
+                  '''func (s *Service) bufferBegin(requestID string, record RequestRecord) (bool, error) {\n\tstate := writebackStateFor(s)\n\tstate.mu.Lock()\n\tdefer state.mu.Unlock()\n\tif !state.enabled {\n\t\treturn false, nil\n\t}\n\tif _, exists := state.activeEntries[requestID]; exists {\n\t\treturn true, errors.New("duplicate request_id")\n\t}\n\tif len(state.entries) >= state.limit {\n\t\treturn true, ErrWritebackOverflow\n\t}\n\tentry := &writebackEntry{requestID: requestID, record: cloneRequestRecord(record)}\n\tstate.entries[requestID] = entry\n\tstate.activeEntries[requestID] = entry\n\treturn true, nil\n}\n\nfunc recoverActiveWritebackEntryLocked(state *writebackState, requestID string) (*writebackEntry, bool, error) {\n\tif entry, exists := state.entries[requestID]; exists {\n\t\treturn entry, true, nil\n\t}\n\tentry, active := state.activeEntries[requestID]\n\tif !active {\n\t\treturn nil, false, nil\n\t}\n\tif len(state.entries) >= state.limit {\n\t\treturn nil, true, ErrWritebackOverflow\n\t}\n\tstate.entries[requestID] = entry\n\tif entry.openAIResponseID != "" {\n\t\tstate.openAIToRequest[entry.openAIResponseID] = requestID\n\t}\n\treturn entry, true, nil\n}\n\nfunc (s *Service) bufferUpdate''',
+              ),
+              (
+                  '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize''',
+                  '''\tentry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)\n\tif err != nil || !handled {\n\t\treturn handled, err\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize''',
+              ),
+              (
+                  '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t}\n\tentry.record = cloneRequestRecord(record)\n\tentry.promptTPS = cloneFloat64(promptTPS)\n\tentry.finalized = true\n\treturn true, nil\n}\n\nfunc (s *Service) bufferRecordCorrelated''',
+                  '''\tentry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)\n\tif err != nil {\n\t\treturn true, err\n\t}\n\tif !handled {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t\tstate.activeEntries[requestID] = entry\n\t}\n\tentry.record = cloneRequestRecord(record)\n\tentry.promptTPS = cloneFloat64(promptTPS)\n\tentry.finalized = true\n\treturn true, nil\n}\n\nfunc (s *Service) bufferRecordCorrelated''',
+              ),
+              (
+                  '''\tif _, exists := state.entries[requestID]; exists {\n\t\treturn true, errors.New("duplicate request_id")\n\t}\n\tif len(state.entries) >= state.limit {\n\t\treturn true, ErrWritebackOverflow\n\t}\n\tstate.entries[requestID] = &writebackEntry{\n\t\trequestID:    requestID,\n\t\trecord:       cloneRequestRecord(record),\n\t\tpromptTPS:    cloneFloat64(promptTPS),\n\t\tfinalized:    true,\n\t\tcontextReady: true,\n\t}\n\treturn true, nil''',
+                  '''\tif _, exists := state.activeEntries[requestID]; exists {\n\t\treturn true, errors.New("duplicate request_id")\n\t}\n\tif len(state.entries) >= state.limit {\n\t\treturn true, ErrWritebackOverflow\n\t}\n\tentry := &writebackEntry{\n\t\trequestID:    requestID,\n\t\trecord:       cloneRequestRecord(record),\n\t\tpromptTPS:    cloneFloat64(promptTPS),\n\t\tfinalized:    true,\n\t\tcontextReady: true,\n\t}\n\tstate.entries[requestID] = entry\n\tstate.activeEntries[requestID] = entry\n\treturn true, nil''',
+              ),
+              (
+                  '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID''',
+                  '''\tentry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)\n\tif err != nil || !handled {\n\t\treturn handled, err\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID''',
+              ),
+              (
+                  '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tif owner, exists := state.openAIToRequest[openAIID]; exists && owner != requestID {''',
+                  '''\tentry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)\n\tif err != nil || !handled {\n\t\treturn handled, err\n\t}\n\tif owner, exists := state.openAIToRequest[openAIID]; exists && owner != requestID {''',
+              ),
+              (
+                  '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.sessionID = strings.TrimSpace(sessionID)''',
+                  '''\tentry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)\n\tif err != nil || !handled {\n\t\treturn handled, err\n\t}\n\tentry.sessionID = strings.TrimSpace(sessionID)''',
+              ),
+              (
+                  '''\tif err := s.persistWritebackBatch(ctx, batch); err == nil {\n\t\treturn len(batch), nil\n\t}\n''',
+                  '''\tif err := s.persistWritebackBatch(ctx, batch); err == nil {\n\t\ts.finishWritebackEntries(batch)\n\t\treturn len(batch), nil\n\t}\n''',
+              ),
+              (
+                  '''\t\t\tif isPermanentWritebackError(err) {\n\t\t\t\tslog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)\n\t\t\t\tprocessed++\n\t\t\t\tcontinue\n\t\t\t}''',
+                  '''\t\t\tif isPermanentWritebackError(err) {\n\t\t\t\tslog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)\n\t\t\t\ts.finishWritebackEntries([]writebackEntry{entry})\n\t\t\t\tprocessed++\n\t\t\t\tcontinue\n\t\t\t}''',
+              ),
+              (
+                  '''\t\t\tif _, exists := state.entries[entry.requestID]; !exists {\n\t\t\t\tcopyEntry := entry\n\t\t\t\tstate.entries[entry.requestID] = &copyEntry\n\t\t\t\tif entry.openAIResponseID != "" {''',
+                  '''\t\t\tif _, exists := state.entries[entry.requestID]; !exists {\n\t\t\t\tcopyEntry := entry\n\t\t\t\tstate.entries[entry.requestID] = &copyEntry\n\t\t\t\tstate.activeEntries[entry.requestID] = &copyEntry\n\t\t\t\tif entry.openAIResponseID != "" {''',
+              ),
+              (
+                  '''\t\tprocessed++\n\t}\n\treturn processed, firstErr\n}\n\nfunc isPermanentWritebackError''',
+                  '''\t\ts.finishWritebackEntries([]writebackEntry{entry})\n\t\tprocessed++\n\t}\n\treturn processed, firstErr\n}\n\nfunc (s *Service) finishWritebackEntries(batch []writebackEntry) {\n\tstate := writebackStateFor(s)\n\tstate.mu.Lock()\n\tdefer state.mu.Unlock()\n\tfor i := range batch {\n\t\trequestID := batch[i].requestID\n\t\tif _, exists := state.entries[requestID]; !exists {\n\t\t\tdelete(state.activeEntries, requestID)\n\t\t}\n\t}\n}\n\nfunc isPermanentWritebackError''',
+              ),
+          ]
 
-          old_slug = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID'''
-          new_slug = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID'''
-          if old_slug not in text:
-              raise SystemExit('bufferModelSlug target not found exactly once')
-          text = text.replace(old_slug, new_slug, 1)
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'exact replacement count={count} for:\n{old[:120]}')
+              text = text.replace(old, new, 1)
+
           path.write_text(text)
           PY
 
@@ -51,7 +101,7 @@ jobs:
           	"time"
           )
 
-          func TestWritebackMissingInFlightEntryDoesNotFallBackToSQLite(t *testing.T) {
+          func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
           	s := testService(t)
           	ctx, cancel := context.WithCancel(context.Background())
           	defer cancel()
@@ -65,8 +115,13 @@ jobs:
 
           	state := writebackStateFor(s)
           	state.mu.Lock()
+          	original := state.entries["req-missing-active"]
           	delete(state.entries, "req-missing-active")
+          	active := state.activeEntries["req-missing-active"]
           	state.mu.Unlock()
+          	if original == nil || active != original {
+          		t.Fatal("begin did not retain the active entry snapshot")
+          	}
 
           	conn, err := s.db.Conn(ctx)
           	if err != nil {
@@ -74,31 +129,32 @@ jobs:
           	}
 
           	hotCtx, hotCancel := context.WithTimeout(ctx, 200*time.Millisecond)
-          	defer hotCancel()
           	if err := s.SetRequestModelSlug(hotCtx, "req-missing-active", "public-model"); err != nil {
+          		hotCancel()
           		_ = conn.Close()
           		t.Fatalf("model slug unexpectedly touched SQLite: %v", err)
           	}
           	record.InstanceID = "instance-a"
           	if err := s.UpdateCorrelatedRequest(hotCtx, "req-missing-active", record); err != nil {
+          		hotCancel()
           		_ = conn.Close()
           		t.Fatalf("update unexpectedly touched SQLite: %v", err)
           	}
+          	hotCancel()
           	if err := conn.Close(); err != nil {
           		t.Fatal(err)
           	}
 
           	state.mu.Lock()
           	entry, exists := state.entries["req-missing-active"]
-          	if !exists {
-          		state.mu.Unlock()
-          		t.Fatal("missing in-flight entry was not recreated")
+          	gotInstance, gotSlug := "", ""
+          	if exists {
+          		gotInstance = entry.record.InstanceID
+          		gotSlug = entry.modelSlug
           	}
-          	gotInstance := entry.record.InstanceID
-          	gotSlug := entry.modelSlug
           	state.mu.Unlock()
-          	if gotInstance != "instance-a" || gotSlug != "public-model" {
-          		t.Fatalf("recovered entry instance=%q slug=%q", gotInstance, gotSlug)
+          	if !exists || gotInstance != "instance-a" || gotSlug != "public-model" {
+          		t.Fatalf("recovered entry exists=%v instance=%q slug=%q", exists, gotInstance, gotSlug)
           	}
 
           	record.StatusCode = 200
@@ -110,6 +166,13 @@ jobs:
           	}
           	if err := s.Flush(ctx); err != nil {
           		t.Fatal(err)
+          	}
+
+          	state.mu.Lock()
+          	_, stillActive := state.activeEntries["req-missing-active"]
+          	state.mu.Unlock()
+          	if stillActive {
+          		t.Fatal("persisted request remained marked active")
           	}
 
           	var instanceID, modelSlug string
