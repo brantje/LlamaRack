@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 )
 
 func suppliedTraceID(r *http.Request, bodyTraceID string) (string, bool) {
@@ -44,25 +46,11 @@ func newTraceID() string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", hexValue[0:8], hexValue[8:12], hexValue[12:16], hexValue[16:20], hexValue[20:32])
 }
 
-func clientIP(r *http.Request) string {
-	if value := forwardedClientIP(r.Header.Values("Forwarded")); value != "" { return value }
-	for _, part := range strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",") {
-		if value := canonicalIP(part); value != "" { return value }
-	}
-	if value := canonicalIP(r.Header.Get("X-Real-IP")); value != "" { return value }
-	return canonicalIP(r.RemoteAddr)
-}
+func (g *Gateway) SetNetwork(network *managersecurity.Network) { g.network = network }
 
-func forwardedClientIP(values []string) string {
-	raw := strings.Join(values, ",")
-	for _, element := range strings.Split(raw, ",") {
-		for _, parameter := range strings.Split(element, ";") {
-			key, value, ok := strings.Cut(parameter, "=")
-			if !ok || !strings.EqualFold(strings.TrimSpace(key), "for") { continue }
-			if ip := canonicalIP(strings.Trim(strings.TrimSpace(value), `"`)); ip != "" { return ip }
-		}
-	}
-	return ""
+func (g *Gateway) clientIP(r *http.Request) string {
+	if g.network != nil { return g.network.EffectiveRemoteAddress(r) }
+	return canonicalIP(r.RemoteAddr)
 }
 
 func canonicalIP(value string) string {

@@ -16,6 +16,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 )
 
 const (
@@ -38,6 +39,7 @@ type Gateway struct {
 	auth          *auth.Service
 	lifecycle     *lifecycle.Service
 	observability *observability.Service
+	network       *managersecurity.Network
 	active        *activeRegistry
 }
 
@@ -94,7 +96,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	record := observability.RequestRecord{
 		StartedAt: started.UnixMilli(), Endpoint: r.URL.Path, TraceID: traceID,
-		CallType: callTypeValue, ClientIP: clientIP(r), UserAgent: boundedMetadata(r.UserAgent(), 2048), Streaming: envelope.Stream,
+		CallType: callTypeValue, ClientIP: g.clientIP(r), UserAgent: boundedMetadata(r.UserAgent(), 2048), Streaming: envelope.Stream,
 	}
 	observed := newResponseObserver(w, false)
 	g.begin(r.Context(), requestID, record)
@@ -300,7 +302,7 @@ func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *flo
 	}
 }
 
-func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
+func (g *Gateway) captureModelSlug(ctx context.Context, requestID string, slug string) {
 	slug = boundedMetadata(slug, modelSlugCaptureLimit)
 	if g.observability == nil || slug == "" {
 		return

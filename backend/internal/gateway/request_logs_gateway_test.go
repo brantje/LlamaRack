@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/observability"
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 const (
@@ -80,30 +82,72 @@ func TestCallTypeMapping(t *testing.T) {
 	}
 }
 
-func TestClientIPForwardingPrecedenceAndCanonicalization(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	r.RemoteAddr = "10.0.0.8:1234"
-	r.Header.Set("X-Real-IP", "198.51.100.10:777")
-	r.Header.Set("X-Forwarded-For", "203.0.113.9:555, 10.0.0.2")
-	r.Header.Set("Forwarded", `for="[2001:0db8::1]:444";proto=https, for=10.0.0.1`)
-	if got := clientIP(r); got != "2001:db8::1" {
-		t.Fatalf("forwarded IPv6=%q", got)
+func TestPersistedClientIPUsesTrustedProxyResolver(t *testing.T) {
+	f := newGatewayFixture(t, false)
+	ctx := context.Background()
+	store := settings.New(f.db, settings.Defaults{})
+	if _, err := store.Set(ctx, settings.TrustedProxies, "10.0.0.0/8"); err != nil {
+		t.Fatal(err)
 	}
-	r.Header.Del("Forwarded")
-	if got := clientIP(r); got != "203.0.113.9" {
-		t.Fatalf("xff=%q", got)
+	f.gateway.SetNetwork(managersecurity.NewNetwork(store))
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		headers    map[string]string
+		want       string
+	}{
+		{
+			name:       "untrusted direct client cannot spoof forwarding headers",
+			remoteAddr: "203.0.113.10:4444",
+			headers: map[string]string{
+				"Forwarded":       "for=198.51.100.1",
+				"X-Forwarded-For": "198.51.100.2",
+				"X-Real-IP":       "198.51.100.3",
+			},
+			want: "203.0.113.10",
+		},
+		{
+			name:       "trusted proxy uses forwarded",
+			remoteAddr: "10.0.0.2:1234",
+			headers:    map[string]string{"Forwarded": `for="[2001:0db8::1]:444";proto=https, for=10.0.0.3`},
+			want:       "2001:db8::1",
+		},
+		{
+			name:       "trusted proxy uses x forwarded for",
+			remoteAddr: "10.0.0.2:1234",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.9:555, 10.0.0.3"},
+			want:       "203.0.113.9",
+		},
+		{
+			name:       "trusted proxy uses x real ip fallback",
+			remoteAddr: "10.0.0.2:1234",
+			headers:    map[string]string{"X-Real-IP": "198.51.100.10:777"},
+			want:       "198.51.100.10",
+		},
 	}
-	r.Header.Del("X-Forwarded-For")
-	if got := clientIP(r); got != "198.51.100.10" {
-		t.Fatalf("real-ip=%q", got)
-	}
-	r.Header.Del("X-Real-IP")
-	if got := clientIP(r); got != "10.0.0.8" {
-		t.Fatalf("peer=%q", got)
-	}
-	r.Header.Set("Forwarded", `for=unknown`)
-	if got := clientIP(r); got != "10.0.0.8" {
-		t.Fatalf("invalid forwarded fallback=%q", got)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model"}`))
+			r.RemoteAddr = tc.remoteAddr
+			r.Header.Set("Authorization", "Bearer wrong")
+			for key, value := range tc.headers {
+				r.Header.Set(key, value)
+			}
+			w := httptest.NewRecorder()
+			f.gateway.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			record, err := f.observability.GetRequestByRequestID(ctx, w.Header().Get(headerRequestID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record.ClientIP != tc.want {
+				t.Fatalf("persisted client ip=%q want=%q", record.ClientIP, tc.want)
+			}
+		})
 	}
 }
 
@@ -124,7 +168,6 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 			w := gatewayRequestWithHeaders(t, f.gateway, http.MethodPost, tc.path, tc.secret, tc.body, map[string]string{
 				headerTraceID: testTraceHeader,
 				"User-Agent":  "request-log-test/1.0",
-				"Forwarded":   "for=203.0.113.20",
 			})
 			if w.Code != tc.want {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -140,7 +183,7 @@ func TestEarlyGatewayFailuresArePersistedWithRequestAndTraceIDs(t *testing.T) {
 			if record.StatusCode != tc.want || record.Result != "error" || record.TraceID != testTraceHeader || record.InstanceID != tc.wantInstance {
 				t.Fatalf("record=%+v", record)
 			}
-			if record.ClientIP != "203.0.113.20" || record.UserAgent != "request-log-test/1.0" {
+			if record.ClientIP != "192.0.2.1" || record.UserAgent != "request-log-test/1.0" {
 				t.Fatalf("client metadata=%+v", record)
 			}
 			if tc.name == "invalid-key" && record.APIKey != nil {
