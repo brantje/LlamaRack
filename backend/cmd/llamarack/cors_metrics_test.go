@@ -36,4 +36,7 @@ func TestDynamicCORSExposesInferenceMetricHeaders(t *testing.T) {
 	if strings.Contains(exposed, "X-LlamaCPP-Manager-") {
 		t.Fatalf("previous product headers still exposed: %q", exposed)
 	}
+	if strings.Contains(strings.ToLower(exposed), "upstream-port") {
+		t.Fatalf("worker port still exposed: %q", exposed)
+	}
 }

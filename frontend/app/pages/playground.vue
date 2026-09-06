@@ -755,7 +755,7 @@ const gpuAllocation = computed(() => {
   return devices.length ? `${devices.join(', ')} · ${formatBytes(telemetry.vram_used_bytes)}` : '—'
 })
 
-const capturedHeaders = computed(() => responseHeaders.value)
+const capturedHeaders = computed(() => responseHeaders.value.filter(([key]) => key.toLowerCase() !== 'x-llamarack-upstream-port'))
 
 watch(() => manager.instances.value, instances => {
   if (!instances.length) {
