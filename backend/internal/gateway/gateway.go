@@ -178,7 +178,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			recordSessionCapture(r, envelope)
 			g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 			if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
-				traceID = suppliedTraceID
 				record.TraceID = suppliedTraceID
 				w.Header().Set(headerTraceID, suppliedTraceID)
 			}
