@@ -76,18 +76,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		spec.CallType = callType(r.URL.Path)
 	}
 
-	var prefix []byte
-	var bodyReadErr error
-	if r.Body != nil {
-		prefix, bodyReadErr = io.ReadAll(io.LimitReader(r.Body, preAuthRequestBodyBytes))
-	}
-	var envelope requestEnvelope
-	parseErr := error(nil)
-	if spec.Body != bodyMultipart && looksLikeJSON(prefix) {
-		parseErr = json.Unmarshal(prefix, &envelope)
-	}
-	recordSessionCapture(r, envelope)
-	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
+	traceID := resolveTraceID(r, "")
 	w.Header().Set(headerTraceID, traceID)
 
 	callTypeValue := spec.CallType
@@ -96,11 +85,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	record := observability.RequestRecord{
 		StartedAt: started.UnixMilli(), Endpoint: r.URL.Path, TraceID: traceID,
-		CallType: callTypeValue, ClientIP: g.clientIP(r), UserAgent: boundedMetadata(r.UserAgent(), 2048), Streaming: envelope.Stream,
+		CallType: callTypeValue, ClientIP: g.clientIP(r), UserAgent: boundedMetadata(r.UserAgent(), 2048),
 	}
 	observed := newResponseObserver(w, false)
 	g.begin(r.Context(), requestID, record)
-	g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 
 	var promptTPS *float64
 	var proxyPanic any
@@ -173,36 +161,26 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(context.WithValue(r.Context(), gatewayAllowlistKey{}, gatewayAllowlist{all: allowAll, ids: allowedIDs}))
 
-	body := append([]byte(nil), prefix...)
+	var body []byte
+	var envelope requestEnvelope
+	var parseErr error
+	var bodyReadErr error
 	bodyTooLarge := false
-	if spec.Body != bodyNone && bodyReadErr == nil && r.Body != nil {
-		remaining := int64(maxRequestBodyBytes + 1 - len(body))
-		if remaining > 0 {
-			rest, readErr := io.ReadAll(io.LimitReader(r.Body, remaining))
-			body = append(body, rest...)
-			bodyReadErr = readErr
-		}
-	}
-	if len(body) > maxRequestBodyBytes {
-		bodyTooLarge = true
-		body = nil
-	}
-	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge && len(body) > len(prefix) {
-		var fullEnvelope requestEnvelope
-		parseErr = nil
-		if looksLikeJSON(body) {
-			parseErr = json.Unmarshal(body, &fullEnvelope)
-		} else if len(bytes.TrimSpace(body)) > 0 {
-			parseErr = errors.New("invalid json")
-		}
-		envelope = fullEnvelope
-		record.Streaming = envelope.Stream
-		recordSessionCapture(r, envelope)
-		g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
-		if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
-			traceID = suppliedTraceID
-			record.TraceID = suppliedTraceID
-			w.Header().Set(headerTraceID, suppliedTraceID)
+	if spec.Body != bodyNone {
+		body, bodyReadErr, bodyTooLarge = readBoundedRequestBody(r.Body)
+		if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge {
+			if looksLikeJSON(body) {
+				parseErr = json.Unmarshal(body, &envelope)
+			} else if len(bytes.TrimSpace(body)) > 0 {
+				parseErr = errors.New("invalid json")
+			}
+			record.Streaming = envelope.Stream
+			recordSessionCapture(r, envelope)
+			g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
+			if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
+				record.TraceID = suppliedTraceID
+				w.Header().Set(headerTraceID, suppliedTraceID)
+			}
 		}
 	}
 	g.update(r.Context(), requestID, record)
@@ -259,6 +237,17 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func looksLikeJSON(body []byte) bool {
 	trimmed := bytes.TrimSpace(body)
 	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
+func readBoundedRequestBody(body io.Reader) ([]byte, error, bool) {
+	if body == nil {
+		return nil, nil, false
+	}
+	payload, err := io.ReadAll(io.LimitReader(body, int64(maxRequestBodyBytes)+1))
+	if len(payload) > maxRequestBodyBytes {
+		return nil, err, true
+	}
+	return payload, err, false
 }
 
 func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
