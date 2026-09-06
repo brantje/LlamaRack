@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,10 +31,22 @@ type sessionEnvelope struct {
 	} `json:"litellm_metadata"`
 }
 
-type requestLogMetadata struct {
+type sessionCaptureKey struct{}
+
+type sessionCapture struct {
 	sessionID string
 	model     string
 	stream    bool
+}
+
+func recordSessionCapture(r *http.Request, envelope requestEnvelope) {
+	capture, _ := r.Context().Value(sessionCaptureKey{}).(*sessionCapture)
+	if capture == nil {
+		return
+	}
+	capture.model = strings.TrimSpace(envelope.Model)
+	capture.stream = envelope.Stream
+	capture.sessionID = sessionIDFromValues(envelope.LiteLLMMetadata.SessionID, envelope.Metadata.SessionID, envelope.SessionID)
 }
 
 type sessionCaptureBody struct {
@@ -107,31 +118,9 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 			traceID = newTraceID()
 			r.Header.Set(headerTraceID, traceID)
 		}
-		r = r.WithContext(lifecycle.WithRequestCorrelation(r.Context(), traceID))
+		capture := &sessionCapture{}
+		r = r.WithContext(context.WithValue(lifecycle.WithRequestCorrelation(r.Context(), traceID), sessionCaptureKey{}, capture))
 		sessionFromHeader := sessionIDFromHeaders(r)
-		bodyMetadata := make(chan requestLogMetadata, 1)
-		if r.Body == nil {
-			bodyMetadata <- requestLogMetadata{}
-		} else {
-			reader, writer := io.Pipe()
-			r.Body = &sessionCaptureBody{source: r.Body, pipe: writer}
-			go func() {
-				defer reader.Close()
-				var envelope sessionEnvelope
-				decoder := json.NewDecoder(reader)
-				if err := decoder.Decode(&envelope); err != nil {
-					bodyMetadata <- requestLogMetadata{}
-					_, _ = io.Copy(io.Discard, reader)
-					return
-				}
-				bodyMetadata <- requestLogMetadata{
-					sessionID: sessionIDFromEnvelope(envelope),
-					model:     strings.TrimSpace(envelope.Model),
-					stream:    envelope.Stream,
-				}
-				_, _ = io.Copy(io.Discard, reader)
-			}()
-		}
 
 		if sessionFromHeader != "" {
 			w.Header().Set(headerSessionID, sessionFromHeader)
@@ -141,16 +130,11 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 		observed := &diagnosticResponseWriter{ResponseWriter: w}
 		next.ServeHTTP(observed, r)
 
-		metadata := requestLogMetadata{}
-		select {
-		case metadata = <-bodyMetadata:
-		case <-time.After(100 * time.Millisecond):
-		}
-		systemlog.Log(systemlog.Info, "gateway", gatewayDiagnosticMessage(r.Method, r.URL.Path, metadata.model, metadata.stream, observed.StatusCode(), time.Since(started), keyPrefix))
+		systemlog.Log(systemlog.Info, "gateway", gatewayDiagnosticMessage(r.Method, r.URL.Path, capture.model, capture.stream, observed.StatusCode(), time.Since(started), keyPrefix))
 
 		sessionID := sessionFromHeader
 		if sessionID == "" {
-			sessionID = metadata.sessionID
+			sessionID = capture.sessionID
 		}
 		if sessionID == "" {
 			sessionID = newTraceID()
@@ -160,7 +144,11 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 			return
 		}
 		instanceID := strings.TrimSpace(w.Header().Get(headerInstance))
-		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		persistCtx := context.WithoutCancel(r.Context())
+		cancel := func() {}
+		if !service.WritebackEnabled() {
+			persistCtx, cancel = context.WithTimeout(persistCtx, 5*time.Second)
+		}
 		defer cancel()
 		if err := service.AttachRequestLogContext(persistCtx, requestID, sessionID, instanceID); err != nil {
 			slog.Warn("update inference request log context failed", "request_id", requestID, "session_id", sessionID, "instance_id", instanceID, "error", err)
@@ -195,13 +183,17 @@ func gatewayDiagnosticMessage(method, path, model string, stream bool, status in
 	return strings.Join(parts, " ")
 }
 
-func sessionIDFromEnvelope(envelope sessionEnvelope) string {
-	for _, value := range []string{envelope.LiteLLMMetadata.SessionID, envelope.Metadata.SessionID, envelope.SessionID} {
+func sessionIDFromValues(values ...string) string {
+	for _, value := range values {
 		if normalized := normalizeSessionID(value); normalized != "" {
 			return normalized
 		}
 	}
 	return ""
+}
+
+func sessionIDFromEnvelope(envelope sessionEnvelope) string {
+	return sessionIDFromValues(envelope.LiteLLMMetadata.SessionID, envelope.Metadata.SessionID, envelope.SessionID)
 }
 
 func sessionIDFromHeaders(r *http.Request) string {

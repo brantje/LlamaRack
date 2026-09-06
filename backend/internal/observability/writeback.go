@@ -161,11 +161,18 @@ func (s *Service) Flush(ctx context.Context) error {
 }
 
 func (s *Service) writebackEnabled() bool {
+	if s == nil {
+		return false
+	}
 	state := writebackStateFor(s)
 	state.mu.Lock()
 	enabled := state.enabled
 	state.mu.Unlock()
 	return enabled
+}
+
+func (s *Service) WritebackEnabled() bool {
+	return s.writebackEnabled()
 }
 
 func (s *Service) bufferBegin(requestID string, record RequestRecord) (bool, error) {

@@ -42,10 +42,15 @@ type Gateway struct {
 }
 
 type requestEnvelope struct {
-	Model           string `json:"model"`
-	Stream          bool   `json:"stream"`
+	Model     string `json:"model"`
+	Stream    bool   `json:"stream"`
+	SessionID string `json:"session_id"`
+	Metadata  struct {
+		SessionID string `json:"session_id"`
+	} `json:"metadata"`
 	LiteLLMMetadata struct {
-		TraceID string `json:"trace_id"`
+		TraceID   string `json:"trace_id"`
+		SessionID string `json:"session_id"`
 	} `json:"litellm_metadata"`
 }
 
@@ -79,6 +84,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if spec.Body != bodyMultipart && looksLikeJSON(prefix) {
 		parseErr = json.Unmarshal(prefix, &envelope)
 	}
+	recordSessionCapture(r, envelope)
 	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
 	w.Header().Set(headerTraceID, traceID)
 
@@ -179,7 +185,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyTooLarge = true
 		body = nil
 	}
-	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge {
+	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge && len(body) > len(prefix) {
 		var fullEnvelope requestEnvelope
 		parseErr = nil
 		if looksLikeJSON(body) {
@@ -189,6 +195,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		envelope = fullEnvelope
 		record.Streaming = envelope.Stream
+		recordSessionCapture(r, envelope)
 		g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 		if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
 			traceID = suppliedTraceID
@@ -253,7 +260,11 @@ func looksLikeJSON(body []byte) bool {
 }
 
 func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	detached := context.WithoutCancel(ctx)
+	if g.observability != nil && g.observability.WritebackEnabled() {
+		return detached, func() {}
+	}
+	return context.WithTimeout(detached, 5*time.Second)
 }
 
 func (g *Gateway) begin(ctx context.Context, requestID string, record observability.RequestRecord) {

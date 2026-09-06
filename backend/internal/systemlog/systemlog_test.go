@@ -85,3 +85,14 @@ func TestStoreSnapshotKeepsLastNPerSource(t *testing.T) {
 		t.Fatalf("unlimited subscribe=%+v", full)
 	}
 }
+
+func TestStoreRingOverwritesOldestInConstantTime(t *testing.T) {
+	store := New(4)
+	for i := 1; i <= 10; i++ {
+		store.Add(Info, "gateway", "e"+strconv.Itoa(i))
+	}
+	got := store.Snapshot(10)
+	if len(got) != 4 || got[0].Message != "e7" || got[3].Message != "e10" {
+		t.Fatalf("ring snapshot=%+v", got)
+	}
+}

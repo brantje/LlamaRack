@@ -24,18 +24,20 @@ type Entry struct {
 }
 
 type Store struct {
-	mu   sync.Mutex
-	max  int
-	data []Entry
-	subs map[chan Entry]struct{}
-	now  func() time.Time
+	mu     sync.Mutex
+	max    int
+	data   []Entry
+	offset int
+	full   bool
+	subs   map[chan Entry]struct{}
+	now    func() time.Time
 }
 
 func New(max int) *Store {
 	if max < 1 {
 		max = 4000
 	}
-	return &Store{max: max, subs: map[chan Entry]struct{}{}, now: time.Now}
+	return &Store{max: max, data: make([]Entry, max), subs: map[chan Entry]struct{}{}, now: time.Now}
 }
 
 // Default is the manager-wide in-memory diagnostic stream. It deliberately
@@ -58,11 +60,11 @@ func (s *Store) Add(level Level, source, message string) {
 		Message:   message,
 	}
 	s.mu.Lock()
-	if len(s.data) >= s.max {
-		copy(s.data, s.data[1:])
-		s.data[len(s.data)-1] = entry
-	} else {
-		s.data = append(s.data, entry)
+	s.data[s.offset] = entry
+	s.offset++
+	if s.offset == s.max {
+		s.offset = 0
+		s.full = true
 	}
 	for ch := range s.subs {
 		select {
@@ -79,7 +81,7 @@ func (s *Store) Snapshot(limit int) []Entry {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return lastPerSource(s.data, limit)
+	return lastPerSource(s.entriesLocked(), limit)
 }
 
 func (s *Store) Subscribe(limit int) ([]Entry, <-chan Entry, func()) {
@@ -89,12 +91,12 @@ func (s *Store) Subscribe(limit int) ([]Entry, <-chan Entry, func()) {
 		return []Entry{}, ch, func() {}
 	}
 	s.mu.Lock()
+	entries := s.entriesLocked()
 	var snapshot []Entry
 	if limit > 0 {
-		snapshot = lastPerSource(s.data, limit)
+		snapshot = lastPerSource(entries, limit)
 	} else {
-		snapshot = make([]Entry, len(s.data))
-		copy(snapshot, s.data)
+		snapshot = entries
 	}
 	ch := make(chan Entry, 256)
 	s.subs[ch] = struct{}{}
@@ -116,8 +118,21 @@ func (s *Store) Reset() {
 		return
 	}
 	s.mu.Lock()
-	s.data = nil
+	s.offset = 0
+	s.full = false
 	s.mu.Unlock()
+}
+
+func (s *Store) entriesLocked() []Entry {
+	if !s.full {
+		out := make([]Entry, s.offset)
+		copy(out, s.data[:s.offset])
+		return out
+	}
+	out := make([]Entry, s.max)
+	n := copy(out, s.data[s.offset:])
+	copy(out[n:], s.data[:s.offset])
+	return out
 }
 
 // LimitPerSource keeps the newest `limit` entries for each source, preserving order.

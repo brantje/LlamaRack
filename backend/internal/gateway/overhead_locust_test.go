@@ -23,6 +23,7 @@ type gatewayLoadResult struct {
 	Elapsed  time.Duration
 	P95      time.Duration
 	QueueP95 time.Duration
+	FirstErr error
 }
 
 // TestGatewayOverheadLocust is an opt-in qualification harness, not a
@@ -42,6 +43,15 @@ func TestGatewayOverheadLocust(t *testing.T) {
 	}
 
 	fixture := newGatewayFixture(t, true)
+	fixture.lifecycle.SetPendingLimits(func(context.Context) (int, int) { return 0, 0 })
+	writebackCtx, cancelWriteback := context.WithCancel(context.Background())
+	fixture.observability.StartWriteback(writebackCtx)
+	t.Cleanup(func() {
+		cancelWriteback()
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelFlush()
+		_ = fixture.observability.Flush(flushCtx)
+	})
 	endpoint, err := fixture.lifecycle.EnsureReady(context.Background(), fixture.instanceID)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +87,11 @@ func requireGatewayLoadSuccess(t *testing.T, name string, result gatewayLoadResu
 		t.Fatalf("%s load completed without requests", name)
 	}
 	if result.Errors != 0 {
-		t.Fatalf("%s load had %d errors across %d requests", name, result.Errors, result.Requests)
+		detail := ""
+		if result.FirstErr != nil {
+			detail = " first=" + result.FirstErr.Error()
+		}
+		t.Fatalf("%s load had %d errors across %d requests%s", name, result.Errors, result.Requests, detail)
 	}
 }
 
@@ -91,6 +105,7 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	defer transport.CloseIdleConnections()
 
+	var firstErr atomic.Value
 	var requests atomic.Int64
 	var failures atomic.Int64
 	var mu sync.Mutex
@@ -139,6 +154,7 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 				requests.Add(1)
 				if err != nil {
 					failures.Add(1)
+					firstErr.CompareAndSwap(nil, err)
 				}
 				if collect {
 					mu.Lock()
@@ -157,12 +173,17 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
+	var first error
+	if v := firstErr.Load(); v != nil {
+		first, _ = v.(error)
+	}
 	return gatewayLoadResult{
 		Requests: requests.Load(),
 		Errors:   failures.Load(),
 		Elapsed:  elapsed,
 		P95:      durationP95(latencies),
 		QueueP95: durationP95(queues),
+		FirstErr: first,
 	}
 }
 

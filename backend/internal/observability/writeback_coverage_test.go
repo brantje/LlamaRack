@@ -78,7 +78,7 @@ func TestWritebackPublicLifecycleAndBufferEdges(t *testing.T) {
 	}
 
 	s.StartWriteback(ctx)
-	if !s.writebackEnabled() {
+	if !s.writebackEnabled() || !s.WritebackEnabled() {
 		t.Fatal("StartWriteback should enable buffering")
 	}
 	// Starting twice must be idempotent and must not create a second flusher.
