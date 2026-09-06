@@ -1,0 +1,168 @@
+name: Temporary #175 Begin Failure Fix
+
+on:
+  push:
+    branches:
+      - perf/175-sqlite-off-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'brantje'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Keep writeback-mode mutators off SQLite after failed Begin
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          patches = {
+              'backend/internal/observability/correlation.go': [
+                  (
+                      '''\tif handled, err := s.bufferUpdate(requestID, record); handled {\n\t\treturn err\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                      '''\tif handled, err := s.bufferUpdate(requestID, record); handled {\n\t\treturn err\n\t}\n\tif s.writebackEnabled() {\n\t\treturn nil\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                  ),
+                  (
+                      '''\tif handled, err := s.bufferOpenAIResponseID(requestID, openaiID); handled {\n\t\treturn err\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                      '''\tif handled, err := s.bufferOpenAIResponseID(requestID, openaiID); handled {\n\t\treturn err\n\t}\n\tif s.writebackEnabled() {\n\t\treturn nil\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                  ),
+              ],
+              'backend/internal/observability/model_slug.go': [
+                  (
+                      '''\tif handled, err := s.bufferModelSlug(requestID, modelSlug); handled {\n\t\treturn err\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                      '''\tif handled, err := s.bufferModelSlug(requestID, modelSlug); handled {\n\t\treturn err\n\t}\n\tif s.writebackEnabled() {\n\t\treturn nil\n\t}\n\tif err := s.EnsureCorrelationSchema(ctx); err != nil {''',
+                  ),
+              ],
+              'backend/internal/observability/writeback.go': [
+                  (
+                      '''\tif handled, err := s.bufferRequestLogContext(requestID, sessionID, instanceID); handled {\n\t\treturn err\n\t}\n\treturn s.UpdateRequestLogContext(ctx, requestID, sessionID, instanceID)''',
+                      '''\tif handled, err := s.bufferRequestLogContext(requestID, sessionID, instanceID); handled {\n\t\treturn err\n\t}\n\tif s.writebackEnabled() {\n\t\treturn nil\n\t}\n\treturn s.UpdateRequestLogContext(ctx, requestID, sessionID, instanceID)''',
+                  ),
+              ],
+          }
+
+          for filename, replacements in patches.items():
+              path = Path(filename)
+              text = path.read_text()
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{filename}: replacement count={count} for {old[:100]!r}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+
+          cat > backend/internal/observability/writeback_begin_failure_test.go <<'EOF'
+          package observability
+
+          import (
+          	"context"
+          	"errors"
+          	"testing"
+          	"time"
+          )
+
+          func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
+          	s := testService(t)
+          	ctx, cancel := context.WithCancel(context.Background())
+          	defer cancel()
+          	s.startWriteback(ctx, time.Hour)
+          	s.db.SetMaxOpenConns(1)
+
+          	state := writebackStateFor(s)
+          	state.mu.Lock()
+          	state.limit = 0
+          	state.mu.Unlock()
+
+          	record := RequestRecord{StartedAt: 1000, Endpoint: "/v1/chat/completions"}
+          	if err := s.BeginCorrelatedRequest(ctx, "req-begin-overflow", record); !errors.Is(err, ErrWritebackOverflow) {
+          		t.Fatalf("begin err=%v", err)
+          	}
+
+          	conn, err := s.db.Conn(ctx)
+          	if err != nil {
+          		t.Fatal(err)
+          	}
+          	hotCtx, hotCancel := context.WithTimeout(ctx, 200*time.Millisecond)
+          	defer hotCancel()
+
+          	if err := s.SetRequestModelSlug(hotCtx, "req-begin-overflow", "public-model"); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("model slug fell back to SQLite: %v", err)
+          	}
+          	record.InstanceID = "instance-a"
+          	if err := s.UpdateCorrelatedRequest(hotCtx, "req-begin-overflow", record); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("update fell back to SQLite: %v", err)
+          	}
+          	if err := s.SetOpenAIResponseID(hotCtx, "req-begin-overflow", "resp_overflow"); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("response id fell back to SQLite: %v", err)
+          	}
+          	if err := s.AttachRequestLogContext(hotCtx, "req-begin-overflow", "session-a", "public-model"); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("request context fell back to SQLite: %v", err)
+          	}
+          	if err := conn.Close(); err != nil {
+          		t.Fatal(err)
+          	}
+
+          	state.mu.Lock()
+          	state.limit = 1
+          	state.mu.Unlock()
+          	record.StatusCode = 200
+          	if err := s.FinalizeCorrelatedRequest(ctx, "req-begin-overflow", nil, record); err != nil {
+          		t.Fatal(err)
+          	}
+          	if err := s.AttachRequestLogContext(ctx, "req-begin-overflow", "session-a", "public-model"); err != nil {
+          		t.Fatal(err)
+          	}
+          	if err := s.Flush(ctx); err != nil {
+          		t.Fatal(err)
+          	}
+
+          	var instanceID string
+          	if err := s.db.QueryRowContext(ctx, `SELECT r.instance_id
+          		FROM inference_requests r
+          		JOIN inference_request_correlations c ON c.inference_request_id=r.id
+          		WHERE c.request_id=?`, "req-begin-overflow").Scan(&instanceID); err != nil {
+          		t.Fatal(err)
+          	}
+          	if instanceID != "instance-a" {
+          		t.Fatalf("persisted instance=%q", instanceID)
+          	}
+          }
+          EOF
+
+          gofmt -w \
+            backend/internal/observability/correlation.go \
+            backend/internal/observability/model_slug.go \
+            backend/internal/observability/writeback.go \
+            backend/internal/observability/writeback_begin_failure_test.go
+      - name: Validate targeted packages
+        working-directory: backend
+        run: |
+          go test ./internal/observability ./internal/gateway
+          go test -race ./internal/observability ./internal/gateway
+          go vet ./internal/observability ./internal/gateway
+      - name: Commit validated fix
+        run: |
+          git config user.name "Sander"
+          git config user.email "brantje@gmail.com"
+          git rm .github/workflows/temp-175-begin-failure-fix.yml
+          git add \
+            backend/internal/observability/correlation.go \
+            backend/internal/observability/model_slug.go \
+            backend/internal/observability/writeback.go \
+            backend/internal/observability/writeback_begin_failure_test.go
+          git commit -m "fix: avoid SQLite fallback after observability begin failure"
+          git push origin HEAD:perf/175-sqlite-off-v1
