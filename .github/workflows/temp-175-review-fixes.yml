@@ -1,0 +1,914 @@
+name: Temporary #175 review fixes
+
+on:
+  push:
+    branches:
+      - perf/175-sqlite-off-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: perf/175-sqlite-off-v1
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Apply reviewed fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"missing expected text in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_regex(path, pattern, replacement):
+              p = Path(path)
+              text = p.read_text()
+              text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"expected one regex match in {path}, got {count}: {pattern}")
+              p.write_text(text)
+
+          Path("backend/internal/auth/api_keys_cache.go").write_text(r'''package auth
+
+import (
+    "sync"
+    "time"
+)
+
+type apiKeyCacheState struct {
+    mu         sync.RWMutex
+    generation uint64
+    byHash     map[string]APIKey
+}
+
+func apiKeyCacheFor(s *Service) *apiKeyCacheState {
+    return &s.apiKeyCache
+}
+
+func cloneAPIKey(item APIKey) APIKey {
+    item.InstanceIDs = append([]string(nil), item.InstanceIDs...)
+    item.MissingInstanceIDs = append([]string(nil), item.MissingInstanceIDs...)
+    if item.ExpiresOn != nil {
+        value := *item.ExpiresOn
+        item.ExpiresOn = &value
+    }
+    if item.CreatedByUserID != nil {
+        value := *item.CreatedByUserID
+        item.CreatedByUserID = &value
+    }
+    if item.LastUsedAt != nil {
+        value := *item.LastUsedAt
+        item.LastUsedAt = &value
+    }
+    return item
+}
+
+func (s *Service) cachedAPIKey(hash string) (APIKey, uint64, bool) {
+    state := apiKeyCacheFor(s)
+    state.mu.RLock()
+    item, ok := state.byHash[hash]
+    generation := state.generation
+    state.mu.RUnlock()
+    if !ok {
+        return APIKey{}, generation, false
+    }
+    return cloneAPIKey(item), generation, true
+}
+
+func (s *Service) rememberAPIKey(hash string, item APIKey, generation uint64) bool {
+    state := apiKeyCacheFor(s)
+    state.mu.Lock()
+    defer state.mu.Unlock()
+    if state.generation != generation {
+        return false
+    }
+    state.byHash[hash] = cloneAPIKey(item)
+    return true
+}
+
+func (s *Service) stampCachedAPIKey(hash string, at int64, generation uint64) (APIKey, bool) {
+    state := apiKeyCacheFor(s)
+    state.mu.Lock()
+    defer state.mu.Unlock()
+    if state.generation != generation {
+        return APIKey{}, false
+    }
+    item, ok := state.byHash[hash]
+    if !ok {
+        return APIKey{}, false
+    }
+    value := at
+    item.LastUsedAt = &value
+    state.byHash[hash] = item
+    return cloneAPIKey(item), true
+}
+
+func (s *Service) clearAPIKeyCache() {
+    state := apiKeyCacheFor(s)
+    state.mu.Lock()
+    state.generation++
+    state.byHash = map[string]APIKey{}
+    state.mu.Unlock()
+}
+
+func (s *Service) seedAPIUseWrite(id string, lastUsedAt *int64) {
+    if lastUsedAt == nil || *lastUsedAt <= 0 {
+        return
+    }
+    seeded := time.Unix(*lastUsedAt, 0)
+    s.mu.Lock()
+    if current, ok := s.lastAPIKeyWrite[id]; !ok || seeded.After(current) {
+        s.lastAPIKeyWrite[id] = seeded
+    }
+    s.mu.Unlock()
+}
+''')
+
+          replace_once(
+              "backend/internal/auth/types.go",
+              "\tlastAPIKeyWrite map[string]time.Time\n\tjwtPrivate      ed25519.PrivateKey",
+              "\tlastAPIKeyWrite map[string]time.Time\n\tapiKeyCache     apiKeyCacheState\n\tjwtPrivate      ed25519.PrivateKey",
+          )
+          replace_once(
+              "backend/internal/auth/types.go",
+              "\t\tdb: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},\n\t\tjwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},",
+              "\t\tdb: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},\n\t\tapiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},\n\t\tjwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},",
+          )
+
+          auth_fn = r'''func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (APIKey, error) {
+    if trustedInferenceContext(ctx) {
+        return APIKey{Name: "Management Playground", Enabled: true, KeyType: APIKeyTypeFull, Status: APIKeyStatusEnabled, InstanceIDs: []string{}}, nil
+    }
+    if token == "" {
+        return APIKey{}, ErrAPIKeyMissing
+    }
+    if !strings.HasPrefix(token, apiKeySecretPrefix) {
+        return APIKey{}, ErrAPIKeyInvalid
+    }
+    hash := tokenHash(token)
+    for {
+        item, generation, cached := s.cachedAPIKey(hash)
+        if !cached {
+            var err error
+            item, err = s.lookupAPIKeyByHash(ctx, hash)
+            if err != nil {
+                if errors.Is(err, sql.ErrNoRows) {
+                    return APIKey{}, ErrAPIKeyInvalid
+                }
+                return APIKey{}, err
+            }
+            if !s.rememberAPIKey(hash, item, generation) {
+                continue
+            }
+            s.seedAPIUseWrite(item.ID, item.LastUsedAt)
+        }
+        if !item.Enabled || !item.OwnerEnabled || apiKeyExpired(item.ExpiresOn, time.Now().UTC()) {
+            return APIKey{}, ErrAPIKeyInvalid
+        }
+
+        now := time.Now()
+        stamped, ok := s.stampCachedAPIKey(hash, now.Unix(), generation)
+        if !ok {
+            continue
+        }
+        item = stamped
+        if !s.reserveAPIUseWrite(item.ID, now) {
+            return item, nil
+        }
+        if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=? AND enabled=1", now.Unix(), item.ID); err != nil {
+            s.releaseAPIUseWrite(item.ID, now)
+            return APIKey{}, err
+        }
+        return item, nil
+    }
+}
+
+'''
+          replace_regex(
+              "backend/internal/auth/api_keys.go",
+              r"func \(s \*Service\) AuthenticateAPIKeyInfo\(ctx context\.Context, token string\) \(APIKey, error\) \{.*?\n\}\n\n(?=func \(s \*Service\) reserveAPIUseWrite)",
+              auth_fn,
+          )
+
+          auth_test = r'''
+func TestAPIKeyCacheGenerationRejectsStalePopulationAndStamp(t *testing.T) {
+    s := testService(t)
+    state := apiKeyCacheFor(s)
+    state.mu.RLock()
+    generation := state.generation
+    state.mu.RUnlock()
+    item := APIKey{ID: "key-a", Enabled: true, OwnerEnabled: true}
+    if !s.rememberAPIKey("hash-a", item, generation) {
+        t.Fatal("initial cache population failed")
+    }
+    s.clearAPIKeyCache()
+    if s.rememberAPIKey("hash-a", item, generation) {
+        t.Fatal("stale generation repopulated invalidated cache")
+    }
+    if _, ok := s.stampCachedAPIKey("hash-a", time.Now().Unix(), generation); ok {
+        t.Fatal("stale generation stamped invalidated cache")
+    }
+}
+'''
+          p = Path("backend/internal/auth/api_keys_cache_test.go")
+          text = p.read_text()
+          if "TestAPIKeyCacheGenerationRejectsStalePopulationAndStamp" not in text:
+              p.write_text(text.rstrip() + "\n" + auth_test)
+
+          Path("backend/internal/instances/hot_cache.go").write_text(r'''package instances
+
+import "sync"
+
+type instanceHotCache struct {
+    mu         sync.RWMutex
+    enabled    bool
+    generation uint64
+    byID       map[string]Instance
+    slugToID   map[string]string
+}
+
+func hotCacheFor(s *Service) *instanceHotCache {
+    return &s.hotCache
+}
+
+func cloneInstance(item Instance) Instance {
+    item.GPUDevices = append([]string(nil), item.GPUDevices...)
+    return item
+}
+
+func (s *Service) EnableHotCache() {
+    state := hotCacheFor(s)
+    state.mu.Lock()
+    if !state.enabled {
+        state.enabled = true
+        state.generation++
+    }
+    state.mu.Unlock()
+}
+
+func (s *Service) cachedByIDAtGeneration(id string) (Instance, uint64, bool) {
+    state := hotCacheFor(s)
+    state.mu.RLock()
+    defer state.mu.RUnlock()
+    generation := state.generation
+    if !state.enabled {
+        return Instance{}, generation, false
+    }
+    item, ok := state.byID[id]
+    return cloneInstance(item), generation, ok
+}
+
+func (s *Service) cachedByID(id string) (Instance, bool) {
+    item, _, ok := s.cachedByIDAtGeneration(id)
+    return item, ok
+}
+
+func (s *Service) cachedBySlugAtGeneration(slug string) (Instance, uint64, bool) {
+    state := hotCacheFor(s)
+    state.mu.RLock()
+    defer state.mu.RUnlock()
+    generation := state.generation
+    if !state.enabled {
+        return Instance{}, generation, false
+    }
+    id, ok := state.slugToID[slug]
+    if !ok {
+        return Instance{}, generation, false
+    }
+    item, ok := state.byID[id]
+    return cloneInstance(item), generation, ok
+}
+
+func (s *Service) cachedBySlug(slug string) (Instance, bool) {
+    item, _, ok := s.cachedBySlugAtGeneration(slug)
+    return item, ok
+}
+
+func rememberHotLocked(state *instanceHotCache, item Instance) {
+    copyItem := cloneInstance(item)
+    if old, ok := state.byID[item.ID]; ok && old.Slug != item.Slug {
+        delete(state.slugToID, old.Slug)
+    }
+    state.byID[item.ID] = copyItem
+    state.slugToID[item.Slug] = item.ID
+}
+
+func (s *Service) rememberHotIfGeneration(item Instance, generation uint64) bool {
+    state := hotCacheFor(s)
+    state.mu.Lock()
+    defer state.mu.Unlock()
+    if !state.enabled {
+        return true
+    }
+    if state.generation != generation {
+        return false
+    }
+    rememberHotLocked(state, item)
+    return true
+}
+
+func (s *Service) rememberHot(item Instance) {
+    state := hotCacheFor(s)
+    state.mu.Lock()
+    defer state.mu.Unlock()
+    if !state.enabled {
+        return
+    }
+    state.generation++
+    rememberHotLocked(state, item)
+}
+
+func (s *Service) forgetHot(id string) {
+    state := hotCacheFor(s)
+    state.mu.Lock()
+    defer state.mu.Unlock()
+    if !state.enabled {
+        return
+    }
+    state.generation++
+    if item, ok := state.byID[id]; ok {
+        delete(state.slugToID, item.Slug)
+    }
+    delete(state.byID, id)
+}
+''')
+
+          replace_once(
+              "backend/internal/instances/service.go",
+              "type Service struct { db *sql.DB; onChange ChangeNotifier }\nfunc New(db *sql.DB) *Service { return &Service{db: db} }",
+              "type Service struct { db *sql.DB; onChange ChangeNotifier; hotCache instanceHotCache }\nfunc New(db *sql.DB) *Service { return &Service{db: db, hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}} }",
+          )
+          replace_once(
+              "backend/internal/instances/service.go",
+              "func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) { id = strings.TrimSpace(id); if item, ok := s.cachedByID(id); ok { return item, nil }; item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE id=?`, id)); if err != nil { return Instance{}, err }; s.rememberHot(item); return cloneInstance(item), nil }",
+              '''func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) {
+    id = strings.TrimSpace(id)
+    for {
+        if item, generation, ok := s.cachedByIDAtGeneration(id); ok {
+            return item, nil
+        } else {
+            item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE id=?`, id))
+            if err != nil {
+                return Instance{}, err
+            }
+            if s.rememberHotIfGeneration(item, generation) {
+                return cloneInstance(item), nil
+            }
+        }
+    }
+}''',
+          )
+          replace_once(
+              "backend/internal/instances/service.go",
+              "func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) { slug = resourceid.Slugify(slug); if item, ok := s.cachedBySlug(slug); ok { return item, nil }; item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE slug=?`, slug)); if err != nil { return Instance{}, err }; s.rememberHot(item); return cloneInstance(item), nil }",
+              '''func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) {
+    slug = resourceid.Slugify(slug)
+    for {
+        if item, generation, ok := s.cachedBySlugAtGeneration(slug); ok {
+            return item, nil
+        } else {
+            item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE slug=?`, slug))
+            if err != nil {
+                return Instance{}, err
+            }
+            if s.rememberHotIfGeneration(item, generation) {
+                return cloneInstance(item), nil
+            }
+        }
+    }
+}''',
+          )
+
+          instance_test = r'''
+func TestHotCacheGenerationRejectsReadAfterUpdateAndDelete(t *testing.T) {
+    s, _ := testService(t)
+    s.EnableHotCache()
+    stale := Instance{ID: "instance-a", Slug: "old", Name: "Old"}
+
+    _, updateGeneration, _ := s.cachedByIDAtGeneration(stale.ID)
+    updated := stale
+    updated.Slug = "new"
+    updated.Name = "New"
+    s.rememberHot(updated)
+    if s.rememberHotIfGeneration(stale, updateGeneration) {
+        t.Fatal("stale read repopulated cache after update")
+    }
+    if got, ok := s.cachedByID(stale.ID); !ok || got.Name != "New" || got.Slug != "new" {
+        t.Fatalf("updated cache=%+v ok=%v", got, ok)
+    }
+
+    _, deleteGeneration, _ := s.cachedByIDAtGeneration(stale.ID)
+    s.forgetHot(stale.ID)
+    if s.rememberHotIfGeneration(stale, deleteGeneration) {
+        t.Fatal("stale read repopulated cache after delete")
+    }
+    if _, ok := s.cachedByID(stale.ID); ok {
+        t.Fatal("deleted instance returned to cache")
+    }
+}
+'''
+          p = Path("backend/internal/instances/hot_cache_test.go")
+          text = p.read_text()
+          if "TestHotCacheGenerationRejectsReadAfterUpdateAndDelete" not in text:
+              p.write_text(text.rstrip() + "\n" + instance_test)
+
+          replace_once(
+              "backend/internal/observability/correlation.go",
+              "\trequestID = strings.TrimSpace(requestID)\n\tif requestID == \"\" {\n\t\treturn fmt.Errorf(\"request_id is required\")\n\t}\n\tif handled, err := s.bufferRecordCorrelated(requestID, promptTokensPerSecond, record); handled {",
+              "\trequestID = strings.TrimSpace(requestID)\n\tif requestID == \"\" {\n\t\treturn fmt.Errorf(\"request_id is required\")\n\t}\n\tif record.StartedAt <= 0 {\n\t\treturn fmt.Errorf(\"started_at is required\")\n\t}\n\tif handled, err := s.bufferRecordCorrelated(requestID, promptTokensPerSecond, record); handled {",
+          )
+
+          writeback_block = r'''func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, error) {
+    state := writebackStateFor(s)
+    state.mu.Lock()
+    if !state.enabled {
+        state.mu.Unlock()
+        return 0, nil
+    }
+    batch := make([]writebackEntry, 0, writebackBatchSize)
+    for requestID, entry := range state.entries {
+        if !entry.finalized || (onlyReady && !entry.contextReady) {
+            continue
+        }
+        batch = append(batch, cloneWritebackEntry(entry))
+        delete(state.entries, requestID)
+        if entry.openAIResponseID != "" {
+            delete(state.openAIToRequest, entry.openAIResponseID)
+        }
+        if len(batch) >= writebackBatchSize {
+            break
+        }
+    }
+    state.mu.Unlock()
+    if len(batch) == 0 {
+        return 0, nil
+    }
+
+    if err := s.persistWritebackBatch(ctx, batch); err == nil {
+        return len(batch), nil
+    }
+
+    persisted := 0
+    var firstErr error
+    for i := range batch {
+        entry := batch[i]
+        if err := s.persistWritebackBatch(ctx, []writebackEntry{entry}); err != nil {
+            if firstErr == nil {
+                firstErr = err
+            }
+            if isPermanentWritebackError(err) {
+                slog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)
+                continue
+            }
+            state.mu.Lock()
+            if _, exists := state.entries[entry.requestID]; !exists {
+                copyEntry := entry
+                state.entries[entry.requestID] = &copyEntry
+                if entry.openAIResponseID != "" {
+                    state.openAIToRequest[entry.openAIResponseID] = entry.requestID
+                }
+            }
+            state.mu.Unlock()
+            continue
+        }
+        persisted++
+    }
+    return persisted, firstErr
+}
+
+func isPermanentWritebackError(err error) bool {
+    if err == nil {
+        return false
+    }
+    message := strings.ToLower(err.Error())
+    return strings.Contains(message, "constraint failed") || strings.Contains(message, "constraint violation")
+}
+
+func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEntry) error {
+    if err := s.EnsureCorrelationSchema(ctx); err != nil {
+        return err
+    }
+    tx, err := s.db.BeginTx(ctx, nil)
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+    for i := range batch {
+        if err := s.persistWritebackEntry(ctx, tx, batch[i]); err != nil {
+            return err
+        }
+    }
+    return tx.Commit()
+}
+
+func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry writebackEntry) error {
+    record := normalizeFinalRecord(entry.record)
+    keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody := requestValues(record)
+    var promptTPS any
+    if entry.promptTPS != nil {
+        promptTPS = *entry.promptTPS
+    }
+
+    var rowID int64
+    var existingFinishedAt int64
+    err := tx.QueryRowContext(ctx, `SELECT r.id,r.finished_at
+        FROM inference_request_correlations c
+        JOIN inference_requests r ON r.id=c.inference_request_id
+        WHERE c.request_id=?`, entry.requestID).Scan(&rowID, &existingFinishedAt)
+    existing := err == nil
+    if err != nil && err != sql.ErrNoRows {
+        return err
+    }
+
+    var openAIID any
+    if entry.openAIResponseID != "" {
+        var ownerRequestID string
+        ownerErr := tx.QueryRowContext(ctx, `SELECT COALESCE(c.request_id,'')
+            FROM inference_requests r
+            LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
+            WHERE r.openai_response_id=? LIMIT 1`, entry.openAIResponseID).Scan(&ownerRequestID)
+        switch {
+        case ownerErr == sql.ErrNoRows:
+            openAIID = entry.openAIResponseID
+        case ownerErr != nil:
+            return ownerErr
+        case ownerRequestID == entry.requestID:
+            openAIID = entry.openAIResponseID
+        default:
+            slog.Warn("duplicate openai response id ignored during observability writeback", "request_id", entry.requestID, "openai_response_id", entry.openAIResponseID)
+        }
+    }
+
+    if !existing {
+        inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
+            started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
+            duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
+            trace_id,call_type,client_ip,user_agent,model_slug,openai_response_id,openai_response_deleted
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result,
+            record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
+            record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted))
+        if err != nil {
+            return err
+        }
+        rowID, err = inserted.LastInsertId()
+        if err != nil {
+            return err
+        }
+        if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_correlations(request_id,inference_request_id,prompt_tokens_per_second) VALUES(?,?,?)`, entry.requestID, rowID, promptTPS); err != nil {
+            return err
+        }
+    } else {
+        if _, err := tx.ExecContext(ctx, `UPDATE inference_requests SET
+            started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
+            prompt_tokens=?,generated_tokens=?,total_tokens=?,tokens_per_second=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,error=?,request_body=?,response_body=?,
+            trace_id=?,call_type=?,client_ip=?,user_agent=?,model_slug=?,openai_response_id=COALESCE(?,openai_response_id),
+            openai_response_deleted=CASE WHEN openai_response_deleted=1 OR ?=1 THEN 1 ELSE 0 END
+            WHERE id=?`,
+            record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
+            record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
+            record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted), rowID); err != nil {
+            return err
+        }
+        if _, err := tx.ExecContext(ctx, `UPDATE inference_request_correlations SET prompt_tokens_per_second=? WHERE request_id=?`, promptTPS, entry.requestID); err != nil {
+            return err
+        }
+    }
+
+    if entry.contextReady {
+        modelID, modelName, err := s.resolveWritebackModelIdentity(ctx, tx, record.InstanceID, entry.contextInstanceID)
+        if err != nil {
+            return err
+        }
+        if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_log_context(request_id,session_id,model_id,model_name) VALUES(?,?,?,?)
+            ON CONFLICT(request_id) DO UPDATE SET
+                session_id=CASE WHEN excluded.session_id<>'' THEN excluded.session_id ELSE inference_request_log_context.session_id END,
+                model_id=CASE WHEN excluded.model_id<>'' THEN excluded.model_id ELSE inference_request_log_context.model_id END,
+                model_name=CASE WHEN excluded.model_name<>'' THEN excluded.model_name ELSE inference_request_log_context.model_name END`,
+            entry.requestID, entry.sessionID, modelID, modelName); err != nil {
+            return err
+        }
+    }
+
+    if !existing || existingFinishedAt == 0 {
+        if err := addFinalCounters(ctx, tx, record); err != nil {
+            return err
+        }
+        if existing && record.Autoloaded {
+            if err := addCounter(ctx, tx, Counter{Metric: "autoload_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
+                return err
+            }
+            if record.LoadDurationMS > 0 {
+                if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: record.InstanceID, Value: record.LoadDurationMS}); err != nil {
+                    return err
+                }
+            }
+            if record.Result != "success" {
+                if err := addCounter(ctx, tx, Counter{Metric: "failed_start_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
+                    return err
+                }
+            }
+        }
+    }
+    return nil
+}
+
+'''
+          replace_regex(
+              "backend/internal/observability/writeback.go",
+              r"func \(s \*Service\) flushWriteback\(ctx context\.Context, onlyReady bool\) \(int, error\) \{.*?\n(?=func \(s \*Service\) resolveWritebackModelIdentity)",
+              writeback_block,
+          )
+
+          context_test = r'''func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
+    s := testService(t)
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    s.startWriteback(ctx, time.Hour)
+    if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-a','model-a','Model A','model.gguf',1)`); err != nil {
+        t.Fatal(err)
+    }
+    if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-a','public-model','model-a','Instance A')`); err != nil {
+        t.Fatal(err)
+    }
+
+    record := RequestRecord{StartedAt: 1000, InstanceID: "instance-a", Endpoint: "/v1/chat/completions", StatusCode: 200}
+    if err := s.BeginCorrelatedRequest(ctx, "req-a", record); err != nil {
+        t.Fatal(err)
+    }
+    record.APIKey = &APIKeyRef{ID: "key-a", Name: "Key A", Prefix: "sk-lr-a"}
+    if err := s.UpdateCorrelatedRequest(ctx, "req-a", record); err != nil {
+        t.Fatal(err)
+    }
+    if err := s.SetRequestModelSlug(ctx, "req-a", "public-model"); err != nil {
+        t.Fatal(err)
+    }
+    if err := s.FinalizeCorrelatedRequest(ctx, "req-a", nil, record); err != nil {
+        t.Fatal(err)
+    }
+
+    var count int
+    if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&count); err != nil {
+        t.Fatal(err)
+    }
+    if count != 0 {
+        t.Fatalf("writeback persisted before flush: %d", count)
+    }
+    if flushed, err := s.flushWriteback(ctx, true); err != nil || flushed != 0 {
+        t.Fatalf("ready flush before context=%d err=%v", flushed, err)
+    }
+    if err := s.AttachRequestLogContext(ctx, "req-a", "session-a", "instance-a"); err != nil {
+        t.Fatal(err)
+    }
+    if flushed, err := s.flushWriteback(ctx, true); err != nil || flushed != 1 {
+        t.Fatalf("ready flush=%d err=%v", flushed, err)
+    }
+
+    var requestID, instanceID, modelSlug, sessionID, modelID, modelName string
+    if err := s.db.QueryRowContext(ctx, `SELECT c.request_id,r.instance_id,r.model_slug,x.session_id,x.model_id,x.model_name
+        FROM inference_requests r
+        JOIN inference_request_correlations c ON c.inference_request_id=r.id
+        JOIN inference_request_log_context x ON x.request_id=c.request_id`).Scan(&requestID, &instanceID, &modelSlug, &sessionID, &modelID, &modelName); err != nil {
+        t.Fatal(err)
+    }
+    if requestID != "req-a" || instanceID != "instance-a" || modelSlug != "public-model" || sessionID != "session-a" || modelID != "model-a" || modelName != "Model A" {
+        t.Fatalf("persisted request=%q instance=%q slug=%q session=%q model=%q name=%q", requestID, instanceID, modelSlug, sessionID, modelID, modelName)
+    }
+}
+
+'''
+          replace_regex(
+              "backend/internal/observability/writeback_test.go",
+              r"func TestWritebackBuffersUntilContextReadyAndFlushes\(t \*testing\.T\) \{.*?\n\}\n\n(?=func TestWritebackExplicitFlushPersistsFinalizedWithoutContext)",
+              context_test,
+          )
+
+          wb_extra = r'''
+func TestWritebackPersistenceIsIdempotentByRequestID(t *testing.T) {
+    s := testService(t)
+    ctx := context.Background()
+    s.startWriteback(ctx, time.Hour)
+    record := RequestRecord{StartedAt: 1000, InstanceID: "instance-a", Endpoint: "/v1/test", StatusCode: 200}
+    if err := s.RecordCorrelatedRequest(ctx, "req-idempotent", nil, record); err != nil {
+        t.Fatal(err)
+    }
+    if _, err := s.flushWriteback(ctx, true); err != nil {
+        t.Fatal(err)
+    }
+    if handled, err := s.bufferFinalize("req-idempotent", nil, record); !handled || err != nil {
+        t.Fatalf("rebuffer handled=%v err=%v", handled, err)
+    }
+    if handled, err := s.bufferRequestLogContext("req-idempotent", "session", ""); !handled || err != nil {
+        t.Fatalf("context handled=%v err=%v", handled, err)
+    }
+    if _, err := s.flushWriteback(ctx, true); err != nil {
+        t.Fatal(err)
+    }
+    var requests, correlations int
+    if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&requests); err != nil {
+        t.Fatal(err)
+    }
+    if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_request_correlations WHERE request_id='req-idempotent'").Scan(&correlations); err != nil {
+        t.Fatal(err)
+    }
+    if requests != 1 || correlations != 1 {
+        t.Fatalf("requests=%d correlations=%d", requests, correlations)
+    }
+}
+
+func TestBufferedRecordRequiresStartedAt(t *testing.T) {
+    s := testService(t)
+    s.startWriteback(context.Background(), time.Hour)
+    err := s.RecordCorrelatedRequest(context.Background(), "req-no-start", nil, RequestRecord{InstanceID: "instance-a", Endpoint: "/v1/test"})
+    if err == nil || !strings.Contains(err.Error(), "started_at is required") {
+        t.Fatalf("err=%v", err)
+    }
+}
+'''
+          p = Path("backend/internal/observability/writeback_test.go")
+          text = p.read_text()
+          if "TestWritebackPersistenceIsIdempotentByRequestID" not in text:
+              p.write_text(text.rstrip() + "\n" + wb_extra)
+
+          replace_once(
+              "backend/internal/gateway/gateway.go",
+              "\toverhead := newOverheadTracker(started)\n\tw = &overheadResponseWriter{ResponseWriter: w, tracker: overhead}\n\tr = r.WithContext(context.WithValue(r.Context(), overheadContextKey{}, overhead))\n",
+              "",
+          )
+          replace_once(
+              "backend/internal/gateway/proxy.go",
+              "\tif tracker, ok := r.Context().Value(overheadContextKey{}).(*overheadTracker); ok {\n\t\tproxy.Transport = overheadTransport{tracker: tracker}\n\t}\n",
+              "",
+          )
+          replace_once(
+              "backend/internal/gateway/headers.go",
+              "\theaderOverheadMS      = \"X-LlamaRack-Overhead-Duration-MS\"\n",
+              "",
+          )
+          replace_once(
+              "backend/internal/gateway/headers.go",
+              "X-LlamaRack-Load-MS, X-LlamaRack-Overhead-Duration-MS, X-LlamaRack-TTFT-MS",
+              "X-LlamaRack-Load-MS, X-LlamaRack-TTFT-MS",
+          )
+          Path("backend/internal/gateway/overhead.go").unlink()
+          Path("backend/internal/gateway/overhead_test.go").unlink()
+
+          load_funcs = r'''func runGatewayLoad(t *testing.T, target, secret, payload string, users int, duration time.Duration, collect bool) gatewayLoadResult {
+    t.Helper()
+    transport := &http.Transport{
+        MaxIdleConns:        users * 2,
+        MaxIdleConnsPerHost: users,
+        IdleConnTimeout:     30 * time.Second,
+    }
+    client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+    defer transport.CloseIdleConnections()
+
+    var requests atomic.Int64
+    var failures atomic.Int64
+    var mu sync.Mutex
+    latencies := make([]time.Duration, 0, users*16)
+    queues := make([]time.Duration, 0, users*16)
+    start := time.Now()
+    deadline := start.Add(duration)
+    var wg sync.WaitGroup
+    wg.Add(users)
+    for worker := 0; worker < users; worker++ {
+        go func() {
+            defer wg.Done()
+            for time.Now().Before(deadline) {
+                began := time.Now()
+                req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(payload))
+                if err == nil {
+                    req.Header.Set("Content-Type", "application/json")
+                    if secret != "" {
+                        req.Header.Set("Authorization", "Bearer "+secret)
+                    }
+                    resp, doErr := client.Do(req)
+                    if doErr != nil {
+                        err = doErr
+                    } else {
+                        _, readErr := io.Copy(io.Discard, resp.Body)
+                        closeErr := resp.Body.Close()
+                        if readErr != nil {
+                            err = readErr
+                        } else if closeErr != nil {
+                            err = closeErr
+                        }
+                        if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+                            if err == nil {
+                                err = fmt.Errorf("status %d", resp.StatusCode)
+                            }
+                        }
+                        if collect {
+                            mu.Lock()
+                            if queueMS, parseErr := strconv.ParseFloat(resp.Header.Get(headerQueueMS), 64); parseErr == nil {
+                                queues = append(queues, time.Duration(queueMS*float64(time.Millisecond)))
+                            }
+                            mu.Unlock()
+                        }
+                    }
+                }
+                requests.Add(1)
+                if err != nil {
+                    failures.Add(1)
+                }
+                if collect {
+                    mu.Lock()
+                    latencies = append(latencies, time.Since(began))
+                    mu.Unlock()
+                }
+                if remaining := time.Until(deadline); remaining > 0 {
+                    think := 500*time.Millisecond + time.Duration(rand.Int64N(int64(500*time.Millisecond)))
+                    if think > remaining {
+                        think = remaining
+                    }
+                    time.Sleep(think)
+                }
+            }
+        }()
+    }
+    wg.Wait()
+    elapsed := time.Since(start)
+    return gatewayLoadResult{
+        Requests: requests.Load(),
+        Errors: failures.Load(),
+        Elapsed: elapsed,
+        P95: durationP95(latencies),
+        QueueP95: durationP95(queues),
+    }
+}
+
+func logGatewayLoadResult(t *testing.T, name string, result gatewayLoadResult) {
+    t.Helper()
+    rps := float64(result.Requests) / result.Elapsed.Seconds()
+    t.Logf("%s users load: requests=%d errors=%d elapsed=%s rps=%.1f p95=%s queue_p95=%s", name, result.Requests, result.Errors, result.Elapsed.Round(time.Millisecond), rps, result.P95, result.QueueP95)
+}
+
+'''
+          replace_regex(
+              "backend/internal/gateway/overhead_locust_test.go",
+              r"func runGatewayLoad\(t \*testing\.T, target, secret, payload string, users int, duration time\.Duration, collect bool\) gatewayLoadResult \{.*?\n(?=func durationP95)",
+              load_funcs,
+          )
+          replace_once(
+              "backend/internal/gateway/overhead_locust_test.go",
+              "\tOverheadP95 time.Duration\n",
+              "",
+          )
+
+          leftovers = []
+          for path in Path("backend").rglob("*.go"):
+              text = path.read_text()
+              for symbol in ("headerOverheadMS", "newOverheadTracker", "overheadTransport", "overheadResponseWriter"):
+                  if symbol in text:
+                      leftovers.append(f"{path}:{symbol}")
+          if leftovers:
+              raise SystemExit("overhead implementation leftovers: " + ", ".join(leftovers))
+
+          Path(".github/workflows/temp-175-review-fixes.yml").unlink()
+          PY
+
+          gofmt -w \
+            backend/internal/auth/api_keys.go \
+            backend/internal/auth/api_keys_cache.go \
+            backend/internal/auth/api_keys_cache_test.go \
+            backend/internal/auth/types.go \
+            backend/internal/instances/hot_cache.go \
+            backend/internal/instances/hot_cache_test.go \
+            backend/internal/instances/service.go \
+            backend/internal/observability/correlation.go \
+            backend/internal/observability/writeback.go \
+            backend/internal/observability/writeback_test.go \
+            backend/internal/gateway/gateway.go \
+            backend/internal/gateway/headers.go \
+            backend/internal/gateway/overhead_locust_test.go \
+            backend/internal/gateway/proxy.go
+      - name: Validate affected backend packages
+        working-directory: backend
+        run: |
+          go test ./internal/auth ./internal/instances ./internal/observability ./internal/gateway
+          go test -race ./internal/auth ./internal/instances ./internal/observability ./internal/gateway
+          go vet ./internal/auth ./internal/instances ./internal/observability ./internal/gateway
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: address #175 review findings"
+          git push origin HEAD:perf/175-sqlite-off-v1
