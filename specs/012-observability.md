@@ -51,7 +51,7 @@ This includes, at minimum:
 
 Request identity and durable request logging begin before authentication/body validation can return. The gateway centralizes finalization so every outcome is finalized once. Observability persistence is best-effort relative to inference: persistence failures are logged but do not turn an otherwise successful inference into an inference failure. If the early insert fails and persistence recovers before completion, finalization may create the completed row as a recovery path.
 
-Potentially large or chunked unauthenticated request bodies must not be buffered to the full normal request-size limit before API-key validation. The gateway may use a small bounded pre-authentication metadata budget while still finalizing failed-auth request records through the normal observability path.
+`/v1/*` API-key authentication occurs before any request-body read. Missing or invalid credentials return without consuming or waiting for the body. Failed-auth request records still use the normal observability path, but only with metadata available from headers and the connection: request ID, endpoint/path, method-derived call type, header-supplied trace/session identifiers, client IP, User-Agent, and HTTP status/result/error. Body-derived fields such as `instance_id`, `model_slug`, streaming mode, and LiteLLM metadata from the JSON body may be empty when authentication fails.
 
 A request record contains, where available:
 
@@ -118,10 +118,10 @@ Tracing is first-class flat grouping: related requests share one UUID `trace_id`
 Trace resolution precedence is:
 
 1. `X-LiteLLM-Trace-ID`;
-2. `litellm_metadata.trace_id` from the request JSON body;
+2. `litellm_metadata.trace_id` from the request JSON body, only after successful API-key authentication;
 3. a newly generated UUID.
 
-A LiteLLM session ID is **not** a trace ID and must never be used as a trace fallback. The trace header takes precedence over body trace metadata. A valid supplied trace ID is preserved on failures. If no valid trace ID is supplied, the manager generates a UUID.
+A LiteLLM session ID is **not** a trace ID and must never be used as a trace fallback. The trace header takes precedence over body trace metadata. Failed authentication must not read the body to obtain a trace ID; only a header-supplied trace ID is preserved on auth failure. After successful authentication, a valid supplied trace ID is preserved on later failures. If no valid trace ID is supplied, the manager generates a UUID.
 
 Issue #60 intentionally does **not** add W3C `traceparent`/`tracestate` support or parent-request headers.
 
@@ -136,9 +136,9 @@ Session resolution precedence is:
 1. `X-LiteLLM-Session-ID`;
 2. another bounded valid `X-*-Session-ID` header, excluding the LiteLLM trace header;
 3. supported Codex session/thread headers for Codex clients;
-4. `litellm_metadata.session_id` from the request JSON body;
-5. `metadata.session_id` from the request JSON body, including Home Assistant Local OpenAI LLM;
-6. top-level `session_id` from the request JSON body;
+4. `litellm_metadata.session_id` from the request JSON body, only after successful API-key authentication;
+5. `metadata.session_id` from the request JSON body, including Home Assistant Local OpenAI LLM, only after successful API-key authentication;
+6. top-level `session_id` from the request JSON body, only after successful API-key authentication;
 7. a newly generated UUID when none of the supported sources provides a valid session ID.
 
 Normal request-history queries return **every request as its own row** and paginate individual requests. Requests sharing one `session_id` are not collapsed or deduplicated in the main `/logs` table.
@@ -304,7 +304,7 @@ Pending-request admission must remain visible:
 ## Performance and privacy constraints
 
 - Streaming inference must remain streaming; do not buffer streaming responses before forwarding.
-- Potentially large unauthenticated request bodies are authenticated before full-size buffering; failed-auth observability remains bounded.
+- Unauthenticated `/v1/*` requests are authenticated before any request-body read; failed-auth observability uses header/connection metadata only.
 - Request identity/logging begins early, but persistence errors remain non-fatal to inference.
 - Finalization and cumulative counter updates are exactly-once/idempotent.
 - Short best-effort persistence after a client cancellation must not inherit the cancelled request context.
@@ -335,7 +335,7 @@ Session-only raw worker logs with source/search filtering and live tail.
 
 ### Slice 11.5 — Request-log explorer and flat tracing
 
-- request/trace identity before authentication/validation;
+- request/trace identity from headers before authentication; body-derived metadata only after successful authentication;
 - all gateway error attempts persisted;
 - distinct LiteLLM trace and session compatibility plus UUID generation for missing trace/session identity;
 - per-request history pagination plus session-aware sidepanel expansion;
@@ -352,12 +352,13 @@ Session-only raw worker logs with source/search filtering and live tail.
 - request/history data survives manager restarts and obeys configured retention;
 - every gateway `/v1/...` request attempt is represented, including early auth/validation/unsupported-endpoint errors;
 - every logged request has a stable manager request ID, UUID trace ID, and session ID;
-- LiteLLM trace header/body metadata is accepted with the specified precedence;
-- session identity follows the specified precedence and falls back to a generated UUID when absent;
+- LiteLLM trace header metadata is accepted before authentication; body `litellm_metadata.trace_id` is accepted only after successful authentication, with the specified precedence;
+- session identity follows the specified precedence, using header sources before authentication and body sources only after successful authentication, and falls back to a generated UUID when absent;
 - LiteLLM session identity remains separate from trace identity and never becomes a trace fallback;
 - W3C `traceparent` support is not added by issue #60;
 - request and trace IDs are returned on successful and failed gateway responses;
-- potentially large unauthenticated bodies cannot consume the full normal request-body buffer before API-key validation;
+- unauthenticated `/v1/*` requests do not read the request body before API-key validation;
+- failed-auth `instance_id`, body-derived model/streaming metadata, and body-only LiteLLM fields may be empty;
 - client IP precedence and IPv4/IPv6 normalization follow this specification;
 - call type is stored for the four supported inference endpoints;
 - unresolved Instance/API-key/model metadata can remain unavailable on early failures;
