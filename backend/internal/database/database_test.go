@@ -137,3 +137,77 @@ func TestOpenFailsWhenContextCanceledDuringPragma(t *testing.T) {
 		t.Fatal("expected canceled context error")
 	}
 }
+
+func TestOpenCreatesPrivateDatabasePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "manager.db")
+	db, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	assertMode(t, filepath.Dir(path), privateDirPerm)
+	assertSQLitePrivate(t, path)
+}
+
+func TestOpenRepairsPermissiveExistingDatabase(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	path := filepath.Join(dir, "manager.db")
+	db, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(name); err != nil {
+			t.Fatalf("expected %s before reopen: %v", name, err)
+		}
+		if err := os.Chmod(name, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	assertMode(t, dir, privateDirPerm)
+	assertSQLitePrivate(t, path)
+}
+
+func TestOpenDoesNotBroadenPrivateDatabasePermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	path := filepath.Join(dir, "manager.db")
+	db, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertMode(t, dir, privateDirPerm)
+	assertMode(t, path, privateFilePerm)
+	db, err = Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	assertMode(t, dir, privateDirPerm)
+	assertSQLitePrivate(t, path)
+}
+
+func assertSQLitePrivate(t *testing.T, path string) {
+	t.Helper()
+	assertMode(t, path, privateFilePerm)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		sidecar := path + suffix
+		if _, err := os.Stat(sidecar); err != nil {
+			t.Fatalf("expected %s: %v", sidecar, err)
+		}
+		assertMode(t, sidecar, privateFilePerm)
+	}
+}
