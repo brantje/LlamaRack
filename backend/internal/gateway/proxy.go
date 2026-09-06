@@ -57,6 +57,9 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 			proxyRequest.Out.Header.Del("Authorization")
 		},
 	}
+	if tracker, ok := r.Context().Value(overheadContextKey{}).(*overheadTracker); ok {
+		proxy.Transport = overheadTransport{tracker: tracker}
+	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
 		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)

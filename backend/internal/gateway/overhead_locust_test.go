@@ -18,11 +18,12 @@ import (
 )
 
 type gatewayLoadResult struct {
-	Requests int64
-	Errors   int64
-	Elapsed  time.Duration
-	P95      time.Duration
-	QueueP95 time.Duration
+	Requests    int64
+	Errors      int64
+	Elapsed     time.Duration
+	P95         time.Duration
+	QueueP95    time.Duration
+	OverheadP95 time.Duration
 }
 
 func TestGatewayOverheadLocust(t *testing.T) {
@@ -78,6 +79,7 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 	var mu sync.Mutex
 	latencies := make([]time.Duration, 0, users*16)
 	queues := make([]time.Duration, 0, users*16)
+	overheads := make([]time.Duration, 0, users*16)
 	start := time.Now()
 	deadline := start.Add(duration)
 	var wg sync.WaitGroup
@@ -103,11 +105,14 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 							err = fmt.Errorf("status %d", resp.StatusCode)
 						}
 						if collect {
+							mu.Lock()
 							if queueMS, parseErr := strconv.ParseFloat(resp.Header.Get(headerQueueMS), 64); parseErr == nil {
-								mu.Lock()
 								queues = append(queues, time.Duration(queueMS*float64(time.Millisecond)))
-								mu.Unlock()
 							}
+							if overheadMS, parseErr := strconv.ParseFloat(resp.Header.Get(headerOverheadMS), 64); parseErr == nil {
+								overheads = append(overheads, time.Duration(overheadMS*float64(time.Millisecond)))
+							}
+							mu.Unlock()
 						}
 					}
 				}
@@ -133,18 +138,19 @@ func runGatewayLoad(t *testing.T, target, secret, payload string, users int, dur
 	wg.Wait()
 	elapsed := time.Since(start)
 	return gatewayLoadResult{
-		Requests: requests.Load(),
-		Errors:   failures.Load(),
-		Elapsed:  elapsed,
-		P95:      durationP95(latencies),
-		QueueP95: durationP95(queues),
+		Requests:    requests.Load(),
+		Errors:      failures.Load(),
+		Elapsed:     elapsed,
+		P95:         durationP95(latencies),
+		QueueP95:    durationP95(queues),
+		OverheadP95: durationP95(overheads),
 	}
 }
 
 func logGatewayLoadResult(t *testing.T, name string, result gatewayLoadResult) {
 	t.Helper()
 	rps := float64(result.Requests) / result.Elapsed.Seconds()
-	t.Logf("%s users load: requests=%d errors=%d elapsed=%s rps=%.1f p95=%s queue_p95=%s", name, result.Requests, result.Errors, result.Elapsed.Round(time.Millisecond), rps, result.P95, result.QueueP95)
+	t.Logf("%s users load: requests=%d errors=%d elapsed=%s rps=%.1f p95=%s queue_p95=%s overhead_p95=%s", name, result.Requests, result.Errors, result.Elapsed.Round(time.Millisecond), rps, result.P95, result.QueueP95, result.OverheadP95)
 }
 
 func durationP95(values []time.Duration) time.Duration {

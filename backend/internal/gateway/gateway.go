@@ -62,6 +62,9 @@ func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
+	overhead := newOverheadTracker(started)
+	w = &overheadResponseWriter{ResponseWriter: w, tracker: overhead}
+	r = r.WithContext(context.WithValue(r.Context(), overheadContextKey{}, overhead))
 	requestID := newRequestID()
 	setProductHeader(w.Header(), headerRequestID, requestID)
 	spec, params, known := classify(r.Method, r.URL.Path)
