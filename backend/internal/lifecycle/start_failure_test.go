@@ -373,6 +373,36 @@ func TestResourcePressureBlockDoesNotCountAsStartFailure(t *testing.T) {
 	}
 }
 
+func TestInsufficientVRAMDoesNotEnterStartupBackoff(t *testing.T) {
+	ctx := context.Background()
+	s, _, m, _, exec := setupLifecycle(t, true, false)
+	items, err := s.instances.ListByModel(ctx, m.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("instances=%+v err=%v", items, err)
+	}
+	instance := items[0]
+	exec("UPDATE models SET total_bytes=? WHERE id=?", 8*testGiB, m.ID)
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 1 * testGiB}}}}}
+	_, err = s.startOneWithEviction(ctx, instance, true)
+	if !errors.Is(err, errResourcePressureBlocked) || !strings.Contains(err.Error(), "insufficient usable VRAM") {
+		t.Fatalf("err=%v", err)
+	}
+	if _, ok := s.startFailureState(instance.ID); ok {
+		t.Fatal("resource-pressure wait counted as crash-loop failure")
+	}
+
+	_, release, acquireErr := s.Acquire(ctx, instance.ID)
+	if release != nil {
+		release()
+	}
+	if errors.Is(acquireErr, errStartBackoff) || (acquireErr != nil && strings.Contains(acquireErr.Error(), "startup backoff")) {
+		t.Fatalf("later autoload hit crash-loop backoff after resource pressure: %v", acquireErr)
+	}
+	if !errors.Is(acquireErr, errResourcePressureBlocked) {
+		t.Fatalf("later autoload err=%v", acquireErr)
+	}
+}
+
 func TestReadinessTimeoutCountsAsStartFailure(t *testing.T) {
 	ctx := context.Background()
 	s, _, m, _, exec := setupLifecycle(t, true, false)
