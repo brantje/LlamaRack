@@ -302,7 +302,7 @@ func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *flo
 	}
 }
 
-func (g *Gateway) captureModelSlug(ctx context.Context, requestID string, slug string) {
+func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
 	slug = boundedMetadata(slug, modelSlugCaptureLimit)
 	if g.observability == nil || slug == "" {
 		return
