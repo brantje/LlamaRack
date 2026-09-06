@@ -105,6 +105,9 @@ func (s *Service) UpdateCorrelatedRequest(ctx context.Context, requestID string,
 	if handled, err := s.bufferUpdate(requestID, record); handled {
 		return err
 	}
+	if s.writebackEnabled() {
+		return nil
+	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
@@ -305,6 +308,9 @@ func (s *Service) SetOpenAIResponseID(ctx context.Context, requestID, openaiID s
 	}
 	if handled, err := s.bufferOpenAIResponseID(requestID, openaiID); handled {
 		return err
+	}
+	if s.writebackEnabled() {
+		return nil
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err

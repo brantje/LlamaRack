@@ -332,6 +332,9 @@ func (s *Service) AttachRequestLogContext(ctx context.Context, requestID, sessio
 	if handled, err := s.bufferRequestLogContext(requestID, sessionID, instanceID); handled {
 		return err
 	}
+	if s.writebackEnabled() {
+		return nil
+	}
 	return s.UpdateRequestLogContext(ctx, requestID, sessionID, instanceID)
 }
 

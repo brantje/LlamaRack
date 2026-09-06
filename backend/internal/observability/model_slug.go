@@ -18,6 +18,9 @@ func (s *Service) SetRequestModelSlug(ctx context.Context, requestID, modelSlug 
 	if handled, err := s.bufferModelSlug(requestID, modelSlug); handled {
 		return err
 	}
+	if s.writebackEnabled() {
+		return nil
+	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
