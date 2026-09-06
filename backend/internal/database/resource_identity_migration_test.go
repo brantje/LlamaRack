@@ -45,6 +45,9 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 		}
 		instances[slug] = id
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	rows.Close()
 	if len(instances) != 2 || instances["primary-coder"] == "" || instances["imported-coder"] == "" {
 		t.Fatalf("instances=%v", instances)
@@ -94,6 +97,9 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 		}
 		models[id] = slug
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	rows.Close()
 	if models["model-a"] != "qwen-coder" || models["model-b"] != "qwen-coder-2" {
 		t.Fatalf("model slugs=%v", models)
@@ -106,6 +112,9 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 	}
 	for rows.Next() {
 		violations++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	rows.Close()
 	if violations != 0 {
@@ -157,6 +166,9 @@ func TestResourceIdentityMigrationFailureRollsBackAtomically(t *testing.T) {
 		if name == "slug" {
 			t.Fatal("slug column survived rolled back migration")
 		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	assertSingleString(t, ctx, db, `SELECT id FROM instances WHERE name='Primary Coder'`, "primary-coder")
 	db.Close()
