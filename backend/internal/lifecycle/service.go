@@ -1255,7 +1255,7 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 			return ghost.Placement, nil
 		}
 	}
-	return scheduler.Placement{}, fmt.Errorf("%w: evict: %w", errResourcePressureBlocked, errEvictionIneligible)
+	return scheduler.Placement{}, fmt.Errorf("%w: eviction attempts exhausted", errResourcePressureBlocked)
 }
 
 func (s *Service) victimPlacementCurrent(candidate scheduler.Candidate, snapshot hardware.Snapshot) bool {

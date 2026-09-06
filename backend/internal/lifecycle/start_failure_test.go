@@ -373,7 +373,7 @@ func TestResourcePressureBlockDoesNotCountAsStartFailure(t *testing.T) {
 	}
 }
 
-func TestEvictionExhaustedDoesNotEnterStartupBackoff(t *testing.T) {
+func TestInsufficientVRAMDoesNotEnterStartupBackoff(t *testing.T) {
 	ctx := context.Background()
 	s, _, m, _, exec := setupLifecycle(t, true, false)
 	items, err := s.instances.ListByModel(ctx, m.ID)
