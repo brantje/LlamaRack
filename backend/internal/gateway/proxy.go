@@ -54,12 +54,11 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	r.ContentLength = int64(len(body))
 	r.Header.Del("Authorization")
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	original := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		original(req)
-		req.Host = target.Host
-		req.Header.Del("Authorization")
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(proxyRequest *httputil.ProxyRequest) {
+			proxyRequest.SetURL(target)
+			proxyRequest.Out.Header.Del("Authorization")
+		},
 	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
