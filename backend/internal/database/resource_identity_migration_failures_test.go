@@ -93,7 +93,7 @@ func TestResourceIdentityMigrationHelpersSurfaceSchemaAndScanFailures(t *testing
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		if err := backfillModelSlugs(ctx, tx); err == nil || !strings.Contains(strings.ToLower(err.Error()), "slug") {
+		if err := backfillModelSlugs(ctx, tx); err == nil || strings.ToLower(err.Error()) != "sql logic error: no such column: slug (1)" {
 			t.Fatalf("backfillModelSlugs write error=%v", err)
 		}
 	})
