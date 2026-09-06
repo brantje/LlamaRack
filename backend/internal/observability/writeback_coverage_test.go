@@ -168,6 +168,13 @@ func TestWritebackPersistsRichContextAndResponseState(t *testing.T) {
 	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_rich"); err != nil {
 		t.Fatal(err)
 	}
+	var persistedBeforeFlush int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests WHERE instance_id='instance-rich'").Scan(&persistedBeforeFlush); err != nil {
+		t.Fatal(err)
+	}
+	if persistedBeforeFlush != 0 {
+		t.Fatalf("rich writeback persisted before explicit Flush: %d", persistedBeforeFlush)
+	}
 	if err := s.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}

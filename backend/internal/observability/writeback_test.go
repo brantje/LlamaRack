@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -231,5 +232,39 @@ func TestBufferedRecordRequiresStartedAt(t *testing.T) {
 	err := s.RecordCorrelatedRequest(context.Background(), "req-no-start", nil, RequestRecord{InstanceID: "instance-a", Endpoint: "/v1/test"})
 	if err == nil || err.Error() != "started_at is required" {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	s.startWriteback(ctx, time.Hour)
+
+	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER reject_permanent_writeback
+BEFORE INSERT ON inference_requests
+WHEN NEW.endpoint='/v1/permanent'
+BEGIN
+	SELECT RAISE(ABORT, 'constraint failed: permanent writeback fixture');
+END`); err != nil {
+		t.Fatal(err)
+	}
+
+	record := RequestRecord{StartedAt: 1000, InstanceID: "instance-permanent", Endpoint: "/v1/permanent", StatusCode: 500}
+	for i := 0; i < writebackBatchSize+1; i++ {
+		requestID := fmt.Sprintf("req-permanent-%03d", i)
+		if err := s.RecordCorrelatedRequest(ctx, requestID, nil, record); err != nil {
+			t.Fatalf("buffer %s: %v", requestID, err)
+		}
+	}
+
+	if err := s.Flush(ctx); err != nil {
+		t.Fatalf("explicit Flush should drop permanent failures and continue draining: %v", err)
+	}
+	state := writebackStateFor(s)
+	state.mu.Lock()
+	pending := len(state.entries)
+	state.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("explicit Flush left %d buffered entries after permanent failures", pending)
 	}
 }

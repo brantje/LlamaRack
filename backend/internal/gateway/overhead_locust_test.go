@@ -55,7 +55,8 @@ func TestGatewayOverheadLocust(t *testing.T) {
 	t.Cleanup(full.Close)
 
 	if warmup > 0 {
-		_ = runGatewayLoad(t, full.URL+"/v1/chat/completions", fixture.secret, payload, users, warmup, false)
+		warmupResult := runGatewayLoad(t, full.URL+"/v1/chat/completions", fixture.secret, payload, users, warmup, false)
+		requireGatewayLoadSuccess(t, "warmup", warmupResult)
 	}
 
 	direct := runGatewayLoad(t, directURL, "", payload, users, duration, true)
@@ -65,6 +66,19 @@ func TestGatewayOverheadLocust(t *testing.T) {
 	logGatewayLoadResult(t, "direct", direct)
 	logGatewayLoadResult(t, "gateway-no-observability", withoutObservability)
 	logGatewayLoadResult(t, "gateway-observability", withObservability)
+	requireGatewayLoadSuccess(t, "direct", direct)
+	requireGatewayLoadSuccess(t, "gateway-no-observability", withoutObservability)
+	requireGatewayLoadSuccess(t, "gateway-observability", withObservability)
+}
+
+func requireGatewayLoadSuccess(t *testing.T, name string, result gatewayLoadResult) {
+	t.Helper()
+	if result.Requests == 0 {
+		t.Fatalf("%s load completed without requests", name)
+	}
+	if result.Errors != 0 {
+		t.Fatalf("%s load had %d errors across %d requests", name, result.Errors, result.Requests)
+	}
 }
 
 func runGatewayLoad(t *testing.T, target, secret, payload string, users int, duration time.Duration, collect bool) gatewayLoadResult {

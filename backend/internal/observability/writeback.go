@@ -407,17 +407,18 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 		return len(batch), nil
 	}
 
-	persisted := 0
+	processed := 0
 	var firstErr error
 	for i := range batch {
 		entry := batch[i]
 		if err := s.persistWritebackBatch(ctx, []writebackEntry{entry}); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
 			if isPermanentWritebackError(err) {
 				slog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)
+				processed++
 				continue
+			}
+			if firstErr == nil {
+				firstErr = err
 			}
 			state.mu.Lock()
 			if _, exists := state.entries[entry.requestID]; !exists {
@@ -430,9 +431,9 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 			state.mu.Unlock()
 			continue
 		}
-		persisted++
+		processed++
 	}
-	return persisted, firstErr
+	return processed, firstErr
 }
 
 func isPermanentWritebackError(err error) bool {
