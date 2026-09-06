@@ -14,10 +14,14 @@ func TestIdentityMutationsSurfaceStorageFailures(t *testing.T) {
 	}
 
 	changes := 0
-	service.SetOnChange(func() { changes++ })
-	service.NotifyChange()
-	if changes != 1 {
-		t.Fatalf("change notifications=%d want 1", changes)
+	changedID := ""
+	service.SetOnChange(func(_ context.Context, instanceID string) {
+		changes++
+		changedID = instanceID
+	})
+	service.NotifyChange(ctx, created.ID)
+	if changes != 1 || changedID != created.ID {
+		t.Fatalf("change notifications=%d id=%q want 1/%q", changes, changedID, created.ID)
 	}
 
 	if err := db.Close(); err != nil {
