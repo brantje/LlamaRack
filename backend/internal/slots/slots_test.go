@@ -10,11 +10,13 @@ import (
 )
 
 func TestUpstreamPath(t *testing.T) {
-	if got := UpstreamPath(http.MethodGet, ""); got != "/slots" {
-		t.Fatalf("GET path=%q", got)
+	got, err := UpstreamPath(http.MethodGet, "")
+	if err != nil || got != "/slots" {
+		t.Fatalf("GET path=%q err=%v", got, err)
 	}
-	if got := UpstreamPath(http.MethodPost, "3"); got != "/slots/3" {
-		t.Fatalf("POST path=%q", got)
+	got, err = UpstreamPath(http.MethodPost, "3")
+	if err != nil || got != "/slots/3" {
+		t.Fatalf("POST path=%q err=%v", got, err)
 	}
 }
 
@@ -83,7 +85,11 @@ func TestProxyRewritesPathQueryAndMapsNotImplemented(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/slots?model=gateway-model&action=save", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
-	if err := Proxy(rec, req, worker.URL, UpstreamPath(http.MethodGet, ""), nil, true); err != nil {
+	upstreamPath, err := UpstreamPath(http.MethodGet, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Proxy(rec, req, worker.URL, upstreamPath, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	if gotPath != "/slots" || strings.Contains(gotQuery, "model=") || !strings.Contains(gotQuery, "action=save") {

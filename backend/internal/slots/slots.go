@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -18,12 +19,31 @@ var allowedActions = map[string]bool{
 	"erase":   true,
 }
 
-// UpstreamPath maps a gateway slots route to the native llama.cpp worker path.
-func UpstreamPath(method, slotID string) string {
-	if strings.EqualFold(method, http.MethodPost) && strings.TrimSpace(slotID) != "" {
-		return "/slots/" + strings.TrimSpace(slotID)
+// ParseSlotID accepts a non-negative decimal slot identifier and rejects any
+// other path text so callers cannot inject separators or dot-segments.
+func ParseSlotID(slotID string) (uint64, error) {
+	if slotID == "" {
+		return 0, errors.New("slot_id must be a non-negative integer")
 	}
-	return "/slots"
+	id, err := strconv.ParseUint(slotID, 10, 64)
+	if err != nil {
+		return 0, errors.New("slot_id must be a non-negative integer")
+	}
+	return id, nil
+}
+
+// UpstreamPath maps a gateway slots route to the native llama.cpp worker path.
+// POST paths are reconstructed from the parsed integer rather than concatenated
+// caller-controlled text.
+func UpstreamPath(method, slotID string) (string, error) {
+	if strings.EqualFold(method, http.MethodPost) {
+		id, err := ParseSlotID(slotID)
+		if err != nil {
+			return "", err
+		}
+		return "/slots/" + strconv.FormatUint(id, 10), nil
+	}
+	return "/slots", nil
 }
 
 // SanitizeQuery drops manager-only query parameters before proxying.
