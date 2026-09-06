@@ -15,6 +15,17 @@ models_dir="$work_dir/models"
 artifact_dir="${QUALIFICATION_ARTIFACT_DIR:-$work_dir/artifacts}"
 mkdir -p "$config_dir" "$models_dir" "$artifact_dir"
 chmod 0777 "$config_dir" "$models_dir"
+# GitHub-hosted runners own these bind mounts as the runner user (typically
+# uid 1001), while the image runs as USER 1000:1000. Recreate that mismatch
+# so directory chmod EPERM is exercised locally and in CI.
+reown_bind_mount() {
+  docker run --rm --user 0:0 --entrypoint sh \
+    -v "$1:/mnt" \
+    "$image" \
+    -c 'chown 1001:1001 /mnt && chmod 0777 /mnt'
+}
+reown_bind_mount "$config_dir"
+reown_bind_mount "$models_dir"
 container_name="llamarack-qualification-${variant}-$$"
 base_url=""
 log_file="$artifact_dir/${variant}-manager.log"

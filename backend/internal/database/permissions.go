@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 const (
@@ -32,6 +33,10 @@ func EnsurePrivateDir(path string) error {
 func shouldRestrictDir(path string) bool {
 	cleaned := filepath.Clean(path)
 	return cleaned != "." && cleaned != string(os.PathSeparator)
+}
+
+func isPermissionDenied(err error) bool {
+	return errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)
 }
 
 func isSharedDir(path string, info os.FileInfo) bool {
@@ -84,6 +89,12 @@ func restrictModeWith(path string, perm os.FileMode, optional bool, stat fileSta
 		return nil
 	}
 	if err := chmod(path, perm); err != nil {
+		if info.IsDir() && isPermissionDenied(err) {
+			// Bind-mounted data dirs are often owned by the host user. The
+			// unprivileged container cannot chmod them; SQLite files created
+			// inside the mount are still restricted to 0600.
+			return nil
+		}
 		return fmt.Errorf("restrict permissions on %s: %w; %s", path, err, permissionRemediation)
 	}
 	info, err = stat(path)
