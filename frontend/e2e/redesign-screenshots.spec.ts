@@ -456,7 +456,7 @@ async function installApiFixture(page: Page) {
       await route.fulfill({ status: 200, headers: corsHeaders, body: JSON.stringify({ items: [{
         id: 599, request_id: 'req_dashboard_failure', trace_id: 'trace_dashboard_failure', session_id: 'session_dashboard_failure',
         accepted_at: now - 9_000, started_at: now - 8_900, finished_at: now - 8_100,
-        instance_id: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' },
+        instance_id: 'qwen3-primary', model_slug: 'qwen3-primary', endpoint: '/v1/chat/completions', api_key: { id: 'key-default', name: 'Open WebUI', prefix: 'lcm_sk_ab12' },
         streaming: true, status_code: 503, result: 'error', duration_ms: 800, ttft_ms: 0,
         prompt_tokens: 128, generated_tokens: 0, total_tokens: 128, tokens_per_second: 0,
         queue_duration_ms: 22, load_duration_ms: 0, autoloaded: false,
