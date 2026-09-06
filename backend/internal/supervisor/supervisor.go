@@ -47,16 +47,17 @@ type worker struct {
 }
 
 type Supervisor struct {
-	mu             sync.RWMutex
-	binary         string
-	host           string
-	portStart      int
-	startupTimeout time.Duration
-	workers        map[string]*worker
-	logs           map[string]*ring
-	installationID string
-	store          RuntimeStore
-	scanner        ProcScanner
+	mu              sync.RWMutex
+	binary          string
+	host            string
+	portStart       int
+	startupTimeout  time.Duration
+	workers         map[string]*worker
+	logs            map[string]*ring
+	installationID  string
+	store           RuntimeStore
+	scanner         ProcScanner
+	deviceValidator func([]string) error
 }
 
 func New(binary, host string, portStart int, startupTimeout time.Duration) *Supervisor {
@@ -74,4 +75,10 @@ func (s *Supervisor) SetProcScanner(scanner ProcScanner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scanner = scanner
+}
+
+func (s *Supervisor) SetDeviceValidator(validator func([]string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deviceValidator = validator
 }

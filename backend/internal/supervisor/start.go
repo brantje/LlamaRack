@@ -37,9 +37,12 @@ func (s *Supervisor) StartWithAliasEnv(ctx context.Context, instanceID, publicAl
 		slog.Info("llama-server worker already active", "instance_id", instanceID, "model_id", modelID, "state", rt.State, "pid", rt.PID)
 		return rt, nil
 	}
+	resolvedArgs := sanitizeWorkerOwnedArgs(args)
+	if s.deviceValidator != nil {
+		if err := s.deviceValidator(launchDeviceIDs(resolvedArgs, env)); err != nil { s.mu.Unlock(); return Runtime{}, err }
+	}
 	port, err := s.allocatePortLocked()
 	if err != nil { s.mu.Unlock(); slog.Error("unable to allocate llama-server port", "instance_id", instanceID, "model_id", modelID, "error", err); return Runtime{}, err }
-	resolvedArgs := sanitizeWorkerOwnedArgs(args)
 	workerArgs := []string{"--model", modelPath, "--alias", publicAlias, "--host", s.host, "--port", fmt.Sprint(port)}
 	workerArgs = append(workerArgs, resolvedArgs...)
 	workerArgs = append(workerArgs, "--cors-origins", "localhost")

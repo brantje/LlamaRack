@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -19,10 +21,13 @@ type Option struct {
 }
 
 type Profile struct {
-	Path        string   `json:"path"`
-	Version     string   `json:"version,omitempty"`
-	Fingerprint string   `json:"fingerprint"`
-	Options     []Option `json:"options"`
+	Path                     string   `json:"path"`
+	Version                  string   `json:"version,omitempty"`
+	Fingerprint              string   `json:"fingerprint"`
+	Options                  []Option `json:"options"`
+	Devices                  []string `json:"devices,omitempty"`
+	DeviceDiscoveryAvailable bool     `json:"device_discovery_available"`
+	DeviceDiscoveryError     string   `json:"-"`
 }
 
 func (p Profile) Has(key string) bool {
@@ -44,8 +49,60 @@ func Discover(ctx context.Context, path string) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
-	sum := sha256.Sum256(append([]byte(strings.TrimSpace(string(versionOut))+"\n"), help...))
-	return Profile{Path: path, Version: firstLine(string(versionOut)), Fingerprint: hex.EncodeToString(sum[:]), Options: parseHelp(string(help))}, nil
+	profile := Profile{Path: path, Version: firstLine(string(versionOut)), Options: parseHelp(string(help))}
+	deviceOut, deviceErr := exec.CommandContext(ctx, path, "--list-devices").CombinedOutput()
+	if deviceErr == nil {
+		profile.Devices, deviceErr = parseListDevices(string(deviceOut))
+	}
+	if deviceErr == nil {
+		profile.DeviceDiscoveryAvailable = true
+	} else {
+		profile.DeviceDiscoveryError = deviceErr.Error()
+	}
+
+	fingerprintInput := strings.TrimSpace(string(versionOut)) + "\n" + string(help) + "\n"
+	if profile.DeviceDiscoveryAvailable {
+		fingerprintInput += "devices:\n" + strings.Join(profile.Devices, "\n")
+	} else {
+		fingerprintInput += "devices:unavailable"
+	}
+	sum := sha256.Sum256([]byte(fingerprintInput))
+	profile.Fingerprint = hex.EncodeToString(sum[:])
+	return profile, nil
+}
+
+func parseListDevices(text string) ([]string, error) {
+	lines := strings.Split(text, "\n")
+	marker := -1
+	for index, raw := range lines {
+		if strings.TrimSpace(raw) == "Available devices:" {
+			marker = index
+			break
+		}
+	}
+	if marker < 0 {
+		return nil, errors.New("llama-server --list-devices output missing Available devices marker")
+	}
+	seen := map[string]bool{}
+	var devices []string
+	for _, raw := range lines[marker+1:] {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		colon := strings.IndexByte(line, ':')
+		if colon <= 0 {
+			continue
+		}
+		device := strings.TrimSpace(line[:colon])
+		if device == "" || strings.ContainsAny(device, " \t") || seen[device] {
+			continue
+		}
+		seen[device] = true
+		devices = append(devices, device)
+	}
+	sort.Strings(devices)
+	return devices, nil
 }
 
 func firstLine(s string) string {
