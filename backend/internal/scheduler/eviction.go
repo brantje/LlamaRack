@@ -302,24 +302,18 @@ func candidateGPUBytes(candidate Candidate) int64 {
 }
 
 // AttributeResources fills a per-device resource vector. Observed process VRAM
-// wins, then the instance lease, then configured devices plus the estimate.
+// wins per device, then missing lease/configured devices are filled from the
+// lease or a split of the estimate. Tensor-split workers often report nvidia-smi
+// used-memory on only one GPU; the lease still names every reserved device.
 // Unknown devices are not invented except when the snapshot contains exactly
 // one GPU, which is the only device the instance could be using.
 func AttributeResources(in ResourceAttribution) CandidateResources {
 	out := CandidateResources{HostRAMBytes: in.HostRAMBytes}
-	if gpus := observedProcessGPUs(in.PID, in.Processes); len(gpus) > 0 {
-		out.GPU = gpus
+	devices := reservedDeviceIDs(in.Devices, in.LeaseGPUs)
+	observed := observedProcessGPUs(in.PID, in.Processes)
+	if len(observed) > 0 {
+		out.GPU = unionObservedWithReserved(observed, devices, in.LeaseGPUs, in.EstimatedBytes, in.TensorSplit)
 		return out
-	}
-	devices := cleanDeviceIDs(in.Devices)
-	if len(devices) == 0 {
-		for _, gpu := range in.LeaseGPUs {
-			id := strings.TrimSpace(gpu.DeviceID)
-			if id != "" {
-				devices = append(devices, id)
-			}
-		}
-		devices = cleanDeviceIDs(devices)
 	}
 	if len(devices) > 0 {
 		if in.EstimatedBytes > 0 {
@@ -335,6 +329,67 @@ func AttributeResources(in ResourceAttribution) CandidateResources {
 			out.GPU = []GPUResource{{DeviceID: id, Bytes: in.EstimatedBytes}}
 		}
 	}
+	return out
+}
+
+func reservedDeviceIDs(configured []string, lease []GPUReservation) []string {
+	devices := cleanDeviceIDs(configured)
+	if len(devices) > 0 {
+		return devices
+	}
+	for _, gpu := range lease {
+		id := strings.TrimSpace(gpu.DeviceID)
+		if id != "" {
+			devices = append(devices, id)
+		}
+	}
+	return cleanDeviceIDs(devices)
+}
+
+func unionObservedWithReserved(observed []GPUResource, devices []string, lease []GPUReservation, estimated int64, tensorSplit string) []GPUResource {
+	out := append([]GPUResource(nil), observed...)
+	have := map[string]bool{}
+	for _, gpu := range out {
+		have[gpu.DeviceID] = true
+	}
+	leaseByID := map[string]int64{}
+	for _, gpu := range lease {
+		id := strings.TrimSpace(gpu.DeviceID)
+		if id == "" || gpu.Bytes <= 0 {
+			continue
+		}
+		leaseByID[id] = gpu.Bytes
+		if !have[id] {
+			devices = append(devices, id)
+		}
+	}
+	devices = cleanDeviceIDs(devices)
+	missing := make([]string, 0, len(devices))
+	for _, id := range devices {
+		if have[id] {
+			continue
+		}
+		if bytes := leaseByID[id]; bytes > 0 {
+			out = append(out, GPUResource{DeviceID: id, Bytes: bytes})
+			have[id] = true
+			continue
+		}
+		missing = append(missing, id)
+	}
+	if len(missing) == 0 || estimated <= 0 {
+		return out
+	}
+	observedTotal := int64(0)
+	for _, gpu := range observed {
+		if gpu.Bytes > 0 {
+			observedTotal += gpu.Bytes
+		}
+	}
+	remaining := estimated - observedTotal
+	if remaining < 1 {
+		return out
+	}
+	out = append(out, SplitEstimateAcrossDevices(remaining, missing, tensorSplit)...)
 	return out
 }
 
