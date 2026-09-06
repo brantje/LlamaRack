@@ -200,7 +200,7 @@ Requirements:
 - enforce scoped-key authorization against immutable Instance ID;
 - require the selected Instance to already be **READY**; do not autoload and do not consume pending-admission slots;
 - rewrite `/v1/slots` to worker `/slots` and `/v1/slots/{slot_id}` to worker `/slots/{slot_id}`;
-- treat `{slot_id}` as a non-negative decimal integer; reconstruct the worker path from the parsed integer rather than concatenating caller-controlled path text; reject empty, negative, non-numeric, encoded-separator, or otherwise malformed values with `400` and never proxy them;
+- treat `{slot_id}` as a non-negative decimal integer; reconstruct the worker path from the parsed integer rather than concatenating caller-controlled path text; reject empty, negative, non-numeric, or otherwise malformed values on a matched slot route with `400` and never proxy them; decoded path separators that prevent the route from matching return `404` before validation;
 - drop `model` from the forwarded query and forward remaining query parameters such as `action`;
 - allowlist `action` to `save`, `restore`, and `erase`; reject anything else with `400`;
 - for `save` and `restore`, reject empty or path-escaping `filename` values in the JSON body with `400`;
