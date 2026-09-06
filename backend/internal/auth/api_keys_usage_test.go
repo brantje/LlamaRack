@@ -41,6 +41,9 @@ func TestAPIKeyLastUsedWriteIsCoalescedAcrossRestart(t *testing.T) {
 		t.Fatalf("last_used_at changed inside coalescing window after restart: first=%d second=%d", first, second)
 	}
 
+	// The restart path intentionally seeds the in-memory gate from persisted
+	// last_used_at. Clear it before exercising the low-level reservation helper.
+	restarted.clearAPIUseWrite(key.ID)
 	now := time.Now()
 	if !restarted.reserveAPIUseWrite(key.ID, now) {
 		t.Fatal("expected first in-memory write reservation")
