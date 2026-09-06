@@ -1,0 +1,84 @@
+name: Apply PR183 CodeRabbit frontend fixes
+
+on:
+  push:
+    branches:
+      - fix/180-stable-resource-identities
+    paths:
+      - .github/workflows/apply-pr183-cr-frontend.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/180-stable-resource-identities
+          fetch-depth: 0
+      - name: Apply guarded replacements
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "frontend/app/pages/logs/index.vue",
+              "function requestModelSlug(item: RequestRecord) {\n  if (item.model_slug) return item.model_slug\n  return manager.instances.value.find(candidate => candidate.id === item.instance_id)?.slug || '—'\n}",
+              "function requestModelSlug(item: RequestRecord) { return item.model_slug || '—' }",
+          )
+          replace_once(
+              "frontend/app/pages/index.vue",
+              "function requestInstanceLabel(record: RequestRecord) {\n  return record.model_slug || instancePublicLabel(record.instance_id)\n}",
+              "function requestInstanceLabel(record: RequestRecord) { return record.model_slug || '—' }",
+          )
+
+          test_path = Path("frontend/test/instances-redesign.nuxt.test.ts")
+          text = test_path.read_text()
+          replacements = [
+              (
+                  "function instance(id: string, overrides: Partial<Instance> = {}): Instance {\n  return { id, slug: id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }\n}\n\nfunction telemetry(id: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {\n  return { instance_id: id, pid: 42, gpu_devices: ['CUDA0'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 8 * gib }], vram_used_bytes: 8 * gib, gpu_utilization_pct: 62, cpu_percent: 35, memory_used_bytes: 3 * gib, collected_at: '2026-08-29T20:00:00Z', ...overrides }\n}",
+                  "function durableID(slug: string) { return `uuid-${slug}` }\n\nfunction instance(slug: string, overrides: Partial<Instance> = {}): Instance {\n  return { id: durableID(slug), slug, model_id: 'm1', name: slug.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }\n}\n\nfunction telemetry(slug: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {\n  return { instance_id: durableID(slug), pid: 42, gpu_devices: ['CUDA0'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 8 * gib }], vram_used_bytes: 8 * gib, gpu_utilization_pct: 62, cpu_percent: 35, memory_used_bytes: 3 * gib, collected_at: '2026-08-29T20:00:00Z', ...overrides }\n}",
+              ),
+              ("{ id: 'm1', slug: 'm1', name: 'Coder Model'", "{ id: 'm1', slug: 'coder-model', name: 'Coder Model'"),
+              ("instance_id: 'ready'", "instance_id: durableID('ready')"),
+              ("instance_id: 'stopped'", "instance_id: durableID('stopped')"),
+              ("instance_id: 'failed'", "instance_id: durableID('failed')"),
+              ("instance_id: 'downloading'", "instance_id: durableID('downloading')"),
+              ("instance_id: 'runtime-failed'", "instance_id: durableID('runtime-failed')"),
+              ("instance_id: 'paused'", "instance_id: durableID('paused')"),
+              ("instance_id: 'cancelled'", "instance_id: durableID('cancelled')"),
+              ("manager.runtimeTelemetry.value = { ready: telemetry('ready') }", "manager.runtimeTelemetry.value = { [durableID('ready')]: telemetry('ready') }"),
+              ("manager.runtimeTelemetry.value = {\n      aggregate: telemetry('aggregate', {", "manager.runtimeTelemetry.value = {\n      [durableID('aggregate')]: telemetry('aggregate', {"),
+              ("instance_id: 'aggregate'", "instance_id: durableID('aggregate')"),
+              ("expect(readyCard.find('[data-testid=\"instance-id\"]').text()).toBe('ready')", "expect(readyCard.find('[data-testid=\"instance-id\"]').text()).toBe(durableID('ready'))"),
+              (
+                  "        const id = decodeURIComponent(runtimeMatch[1])\n        for (const group of Object.values(manager.runtimes.value)) {\n          const runtime = group.find(item => item.instance_id === id)\n          if (runtime) return runtime\n        }\n        return { instance_id: id, model_id: 'm1', state: 'UNLOADED' }",
+                  "        const slug = decodeURIComponent(runtimeMatch[1])\n        const id = manager.instances.value.find(item => item.slug === slug)?.id || ''\n        for (const group of Object.values(manager.runtimes.value)) {\n          const runtime = group.find(item => item.instance_id === id)\n          if (runtime) return runtime\n        }\n        return { instance_id: id, model_id: 'm1', state: 'UNLOADED' }",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"instances-redesign: missing expected pattern: {old!r}")
+              text = text.replace(old, new)
+          test_path.write_text(text)
+          PY
+      - name: Remove temporary workflow
+        run: rm .github/workflows/apply-pr183-cr-frontend.yml
+      - name: Commit fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/pages/logs/index.vue frontend/app/pages/index.vue frontend/test/instances-redesign.nuxt.test.ts .github/workflows/apply-pr183-cr-frontend.yml
+          git diff --cached --check
+          git commit -m "Fix CodeRabbit frontend identity feedback"
+          git push origin HEAD:fix/180-stable-resource-identities
