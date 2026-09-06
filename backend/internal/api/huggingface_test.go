@@ -183,13 +183,35 @@ func TestHuggingFaceTokenCRUDNeverReturnsPlaintext(t *testing.T) {
 }
 
 func TestDownloadJobStateIgnoresFileLevelCompleted(t *testing.T) {
-	body := []byte(`{"id":"j1","state":"DOWNLOADING","files":[{"path":"a.gguf","state":"COMPLETED"}]}`)
-	if !strings.Contains(string(body), downloads.StateCompleted) {
+	downloading := []byte(`{"id":"j1","state":"DOWNLOADING","files":[{"path":"a.gguf","state":"COMPLETED"}]}`)
+	completed := []byte(`{"id":"j1","state":"COMPLETED","files":[{"path":"a.gguf","state":"COMPLETED"}]}`)
+	if !strings.Contains(string(downloading), downloads.StateCompleted) {
 		t.Fatal("fixture must include COMPLETED so a substring wait would fire early")
 	}
-	job := decodeDownloadJob(t, body)
-	if job.State != downloads.StateDownloading {
-		t.Fatalf("job state = %q, want %q", job.State, downloads.StateDownloading)
+	decoded := decodeDownloadJob(t, downloading)
+	if decoded.State != downloads.StateDownloading {
+		t.Fatalf("job state = %q, want %q", decoded.State, downloads.StateDownloading)
+	}
+
+	var polls int
+	fixture := huggingFaceFixture{
+		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			polls++
+			w.Header().Set("Content-Type", "application/json")
+			body := downloading
+			if polls > 1 {
+				body = completed
+			}
+			_, _ = w.Write(body)
+		}),
+		cookie: &http.Cookie{Name: sessionCookie, Value: "unused"},
+	}
+	got := waitHuggingFaceDownloadState(t, fixture, "j1", downloads.StateCompleted)
+	if polls < 2 {
+		t.Fatalf("wait returned after %d poll(s); file-level COMPLETED must not complete the wait", polls)
+	}
+	if got.ID != "j1" || got.State != downloads.StateCompleted {
+		t.Fatalf("got %+v", got)
 	}
 }
 
