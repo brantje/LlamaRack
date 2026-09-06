@@ -162,7 +162,7 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 		instanceID := strings.TrimSpace(w.Header().Get(headerInstance))
 		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer cancel()
-		if err := service.UpdateRequestLogContext(persistCtx, requestID, sessionID, instanceID); err != nil {
+		if err := service.AttachRequestLogContext(persistCtx, requestID, sessionID, instanceID); err != nil {
 			slog.Warn("update inference request log context failed", "request_id", requestID, "session_id", sessionID, "instance_id", instanceID, "error", err)
 		}
 	})

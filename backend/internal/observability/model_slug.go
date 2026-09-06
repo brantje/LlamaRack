@@ -15,6 +15,9 @@ func (s *Service) SetRequestModelSlug(ctx context.Context, requestID, modelSlug 
 	if requestID == "" || modelSlug == "" {
 		return nil
 	}
+	if handled, err := s.bufferModelSlug(requestID, modelSlug); handled {
+		return err
+	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
@@ -40,6 +43,9 @@ func (s *Service) RequestModelIdentity(ctx context.Context, requestID string) (R
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return RequestModelIdentity{}, fmt.Errorf("request_id is required")
+	}
+	if identity, ok := s.bufferedRequestModelIdentity(requestID); ok {
+		return identity, nil
 	}
 	var identity RequestModelIdentity
 	err := s.db.QueryRowContext(ctx, `SELECT r.instance_id,r.model_slug
