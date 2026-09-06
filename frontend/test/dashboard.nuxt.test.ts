@@ -222,9 +222,9 @@ describe('Phase 11 Dashboard', () => {
       }
       if (path.startsWith('/api/v1/observability/requests')) {
         return { items: [
-          { id: 3, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', endpoint: '/v1/chat/completions', streaming: false, status_code: 500, result: 'error', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false, error: 'internal error' },
-          { id: 2, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', endpoint: '/v1/chat/completions', streaming: false, status_code: 503, result: 'error', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false, error: 'worker unavailable' },
-          { id: 1, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', endpoint: '/v1/chat/completions', streaming: true, status_code: 200, result: 'success', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false }
+          { id: 3, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', model_slug: 'coder', endpoint: '/v1/chat/completions', streaming: false, status_code: 500, result: 'error', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false, error: 'internal error' },
+          { id: 2, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', model_slug: 'coder', endpoint: '/v1/chat/completions', streaming: false, status_code: 503, result: 'error', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false, error: 'worker unavailable' },
+          { id: 1, started_at: Date.now(), finished_at: Date.now(), instance_id: 'coder', model_slug: 'coder', endpoint: '/v1/chat/completions', streaming: true, status_code: 200, result: 'success', duration_ms: 10, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false }
         ] }
       }
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 0, source: 'default', editable: true } }
