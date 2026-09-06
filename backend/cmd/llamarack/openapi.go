@@ -405,11 +405,11 @@ func registerInferenceOperations(doc *manageropenapi.Document) {
 	doc.MustRegister(http.MethodPost, "/v1/slots/{slot_id}", manageropenapi.Operation{
 		OperationID: "slotsAction",
 		Summary:     "Save, restore, or erase a llama.cpp slot",
-		Description: "llama.cpp extension. Proxied to POST /slots/{slot_id}?action=save|restore|erase on the selected READY Instance. slot_id is a non-negative decimal integer; the manager reconstructs the worker path from the parsed integer and rejects malformed values with 400. The model query parameter is the Instance ID. save and restore require a JSON filename; erase accepts an empty body. Manager rejects path-escaping filenames. Does not autoload stopped Instances.",
+		Description: "llama.cpp extension. Proxied to POST /slots/{slot_id}?action=save|restore|erase on the selected READY Instance. slot_id is a non-negative decimal integer; the manager reconstructs the worker path from the parsed integer and rejects invalid routed values with 400. A decoded path separator does not match this route and returns 404. The model query parameter is the Instance ID. save and restore require a JSON filename; erase accepts an empty body. Manager rejects path-escaping filenames. Does not autoload stopped Instances.",
 		Tags:        []string{"llama.cpp Extensions"},
 		Security:    bearer,
 		Parameters: []manageropenapi.Parameter{
-			{Name: "slot_id", In: "path", Description: "Non-negative decimal slot index. The manager parses the path segment as an integer and reconstructs the worker path; invalid values return 400.", Required: true, Schema: manageropenapi.Schema{Type: "integer", Minimum: new(float64)}},
+			{Name: "slot_id", In: "path", Description: "Non-negative decimal slot index. The manager parses a routed path segment as an integer and reconstructs the worker path; invalid routed values return 400.", Required: true, Schema: manageropenapi.Schema{Type: "integer", Minimum: new(float64)}},
 			{Name: "model", In: "query", Description: "Addressable Instance ID.", Required: true, Schema: manageropenapi.Schema{Type: "string"}},
 			{Name: "action", In: "query", Description: "Slot action.", Required: true, Schema: manageropenapi.Schema{Type: "string", Enum: []string{"save", "restore", "erase"}}},
 		},
