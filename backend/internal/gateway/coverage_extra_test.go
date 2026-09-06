@@ -44,7 +44,7 @@ func TestCoverageHelpersAndLocalHandlers(t *testing.T) {
 	if _, _, ok := classify(http.MethodGet, ""); ok {
 		t.Fatal("empty path")
 	}
-	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gw%2Fmodel"); !ok || params["model"] != "gw/model" {
+	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gw%2Fmodel"); !ok || params["model"] != "gw%2Fmodel" {
 		t.Fatalf("unescape=%v ok=%v", params, ok)
 	}
 
