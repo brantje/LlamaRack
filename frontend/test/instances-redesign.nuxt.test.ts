@@ -44,7 +44,7 @@ function seed() {
   manager.observabilityLive.value = {
     collected_at: '2026-08-29T20:00:00Z',
     hardware: { ram_total_bytes: 32 * gib, ram_available_bytes: 16 * gib, collected_at: '2026-08-29T20:00:00Z', processes: [], gpus: [{ id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU', total_bytes: 16 * gib, used_bytes: 9 * gib, free_bytes: 7 * gib, utilization_pct: 70 }] },
-    telemetry: [manager.runtimeTelemetry.value.ready!],
+    telemetry: [manager.runtimeTelemetry.value[durableID('ready')]!],
     gateway: { since: 0, requests: 0, successes: 0, errors: 0, active: 0, queued: 0, active_api_keys: 0, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, latency_ms: {}, ttft_ms: {} },
     requests: []
   }
@@ -218,7 +218,7 @@ describe('Instances redesign', () => {
       if (path === '/api/v1/instances/manual-launch/start' && options?.method === 'POST') return {}
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return manager.instances.value
-      if (path === '/api/v1/instances/manual-launch/runtime') return { instance_id: 'manual-launch', model_id: 'm1', state: 'UNLOADED' }
+      if (path === '/api/v1/instances/manual-launch/runtime') return { instance_id: durableID('manual-launch'), model_id: 'm1', state: 'UNLOADED' }
       if (path === '/api/v1/llamacpp/profile') throw new Error('profile unavailable')
       return []
     })
