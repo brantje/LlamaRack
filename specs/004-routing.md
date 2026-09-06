@@ -107,7 +107,7 @@ Current routes:
 - `GET /v1/slots?model=<instance.slug>`
 - `POST /v1/slots/{slot_id}?model=<instance.slug>&action=save|restore|erase`
 
-These routes require a **READY** worker, do not autoload, and do not reserve pending-admission capacity. Rewrite `/v1/slots` to worker `/slots` before proxying and drop `model` from the forwarded query.
+These routes require a **READY** worker, do not autoload, and do not reserve pending-admission capacity. Rewrite `/v1/slots` to worker `/slots` before proxying and drop `model` from the forwarded query. `{slot_id}` is a non-negative decimal integer; the manager reconstructs `/slots/{id}` from the parsed integer and rejects anything else with `400`.
 
 ## 7. Request pipeline
 
