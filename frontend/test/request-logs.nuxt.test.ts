@@ -16,11 +16,12 @@ const request = {
   request_id: 'lcm_abc123',
   trace_id: traceID,
   model_id: 'm1',
+  model_slug: 'coder',
   model_name: 'Qwen Coder 7B',
   call_type: 'chat_completion',
   started_at: Date.now() - 1000,
   finished_at: Date.now(),
-  instance_id: 'coder',
+  instance_id: 'instance-uuid',
   endpoint: '/v1/chat/completions',
   api_key: { id: 'key-1', name: 'Primary key', prefix: 'pk_live' },
   client_ip: '198.51.100.10',
@@ -47,8 +48,8 @@ function seedManager() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Qwen Coder 7B', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 4096 }]
-  manager.instances.value = [{ id: 'coder', model_id: 'm1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '', request_log_mode: 'metadata' }]
+  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Qwen Coder 7B', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 4096 }]
+  manager.instances.value = [{ id: 'instance-uuid', slug: 'coder', model_id: 'm1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '', request_log_mode: 'metadata' }]
   manager.runtimes.value = {}
   manager.runtimeTelemetry.value = {}
   manager.observabilityLive.value = null

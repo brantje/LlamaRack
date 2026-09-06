@@ -75,25 +75,33 @@ func (r *activeRegistry) getByUpstream(id string) *activeRequest {
 }
 
 func (r *activeRegistry) cancelByUpstream(id string) (*activeRequest, bool) {
+	entry, cancelled, _ := r.cancelByUpstreamAuthorized(id, nil)
+	return entry, cancelled
+}
+
+func (r *activeRegistry) cancelByUpstreamAuthorized(id string, allowed func(string) bool) (*activeRequest, bool, bool) {
 	if r == nil || id == "" {
-		return nil, false
+		return nil, false, true
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry := r.byUpstream[id]
 	if entry == nil {
-		return nil, false
+		return nil, false, true
+	}
+	copy := *entry
+	if allowed != nil && !allowed(entry.instanceID) {
+		return &copy, false, false
 	}
 	if entry.cancelled {
-		copy := *entry
-		return &copy, false
+		return &copy, false, true
 	}
 	entry.cancelled = true
 	if entry.cancel != nil {
 		entry.cancel()
 	}
-	copy := *entry
-	return &copy, true
+	copy = *entry
+	return &copy, true, true
 }
 
 func (r *activeRegistry) remove(managerID string) {

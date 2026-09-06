@@ -97,6 +97,17 @@ func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Se
 	if err != nil {
 		t.Fatal(err)
 	}
+	createdInstances, err := ms.Instances(ctx, m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(createdInstances) != 1 {
+		t.Fatalf("expected one compatibility Instance, got %d", len(createdInstances))
+	}
+	// Lifecycle APIs are internal and keyed by the immutable Instance UUID. The
+	// deprecated PublicID field is retained in these shared tests only as a
+	// convenient fixture handle.
+	m.PublicID = createdInstances[0].ID
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

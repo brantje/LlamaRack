@@ -23,9 +23,12 @@ describe('model edit redesign', () => {
     expect(formSource).not.toMatch(/(?:linear|radial|conic)-gradient|bg-gradient-|from-|via-|to-/)
   })
 
-  it('keeps model-only fields and the existing update payload', () => {
-    expect(editSource).toContain("reactive({ name: '', context_length: 0, options: {} as Record<string, string> })")
-    expect(editSource).toContain('body: { name: form.name, context_length: form.context_length, options: form.options }')
+  it('keeps model-only fields and exposes the management slug separately', () => {
+    expect(editSource).toContain("reactive({ name: '', slug: '', context_length: 0, options: {} as Record<string, string> })")
+    expect(editSource).toContain('body: { name: form.name, slug: form.slug, context_length: form.context_length, options: form.options }')
+    expect(editSource).toContain('data-testid="model-edit-slug"')
+    expect(editSource).toContain('data-testid="model-slug"')
+    expect(editSource).toContain('changes management URLs and bookmarks')
     expect(editSource).toContain('<ModelForm')
     expect(newSource).toContain('<ModelForm')
     expect(editSource).not.toContain('always_on')

@@ -25,6 +25,10 @@ func TestClassifySlotsRoutes(t *testing.T) {
 func TestSlotsGatewayValidationAndAuth(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	ctx := t.Context()
+	instance, err := f.lifecycle.Instances().GetBySlug(ctx, "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	w := gatewayRequest(t, f.gateway, http.MethodGet, "/v1/slots", f.secret, "")
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "model_required") {
@@ -35,7 +39,7 @@ func TestSlotsGatewayValidationAndAuth(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "model_unavailable") {
 		t.Fatalf("not ready=%d %s", w.Code, w.Body.String())
 	}
-	if _, ok := f.sup.Endpoint("gateway-model"); ok {
+	if _, ok := f.sup.Endpoint(instance.ID); ok {
 		t.Fatal("slots request started worker")
 	}
 
@@ -51,16 +55,13 @@ func TestSlotsGatewayValidationAndAuth(t *testing.T) {
 	}
 
 	_, allowedSecret, err := f.gateway.auth.CreateAPIKey(ctx, auth.CreateAPIKeyInput{
-		Name: "slots-allow", KeyType: auth.APIKeyTypeInference, OwnerUserID: &f.ownerID, InstanceIDs: []string{"gateway-model"},
+		Name: "slots-allow", KeyType: auth.APIKeyTypeInference, OwnerUserID: &f.ownerID, InstanceIDs: []string{instance.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var modelID string
-	if err := f.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, "gateway-model").Scan(&modelID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('other-instance',?,'Other')`, modelID); err != nil {
+	const otherID = "00000000-0000-4000-8000-000000000098"
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,'Other')`, otherID, "other-instance", instance.ModelID); err != nil {
 		t.Fatal(err)
 	}
 	w = gatewayRequest(t, f.gateway, http.MethodGet, "/v1/slots?model=other-instance", allowedSecret, "")
@@ -83,7 +84,11 @@ func TestSlotsGatewayProxyReadyInstance(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := f.lifecycle.StartInstance(ctx, "gateway-model"); err != nil {
+	instance, err := f.lifecycle.Instances().GetBySlug(ctx, "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lifecycle.StartInstance(ctx, instance.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +114,11 @@ func TestSlotsGatewayMapsWorkerNotImplemented(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := f.lifecycle.StartInstance(ctx, "gateway-model"); err != nil {
+	instance, err := f.lifecycle.Instances().GetBySlug(ctx, "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.lifecycle.StartInstance(ctx, instance.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -121,6 +130,10 @@ func TestSlotsGatewayMapsWorkerNotImplemented(t *testing.T) {
 
 func TestSlotsDoesNotConsumePendingAdmission(t *testing.T) {
 	f := newGatewayFixture(t, true)
+	instance, err := f.lifecycle.Instances().GetBySlug(context.Background(), "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.lifecycle.SetPendingLimits(func(context.Context) (int, int) { return 1, 10 })
 	hold := make(chan struct{})
 	f.lifecycle.SetLoadHold(func(string) { <-hold })
@@ -131,10 +144,10 @@ func TestSlotsDoesNotConsumePendingAdmission(t *testing.T) {
 		firstDone <- w.Code
 	}()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && f.lifecycle.Activity("gateway-model").PendingRequests != 1 {
+	for time.Now().Before(deadline) && f.lifecycle.Activity(instance.ID).PendingRequests != 1 {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if f.lifecycle.Activity("gateway-model").PendingRequests != 1 {
+	if f.lifecycle.Activity(instance.ID).PendingRequests != 1 {
 		t.Fatal("first request did not become pending")
 	}
 
@@ -142,8 +155,8 @@ func TestSlotsDoesNotConsumePendingAdmission(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("slots while unloaded=%d %s", w.Code, w.Body.String())
 	}
-	if f.lifecycle.Activity("gateway-model").PendingRequests != 1 {
-		t.Fatalf("slots poll changed pending count: %+v", f.lifecycle.Activity("gateway-model"))
+	if f.lifecycle.Activity(instance.ID).PendingRequests != 1 {
+		t.Fatalf("slots poll changed pending count: %+v", f.lifecycle.Activity(instance.ID))
 	}
 
 	close(hold)

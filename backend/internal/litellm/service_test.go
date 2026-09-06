@@ -52,16 +52,18 @@ func newLiteLLMTestEnv(t *testing.T) (*Service, *fakeLiteLLMServer, *auth.Servic
 	return service, fake, authService, db
 }
 
-func insertEnabledInstance(t *testing.T, db *sql.DB, id string) {
+func insertEnabledInstance(t *testing.T, db *sql.DB, id string) string {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO models(id,name,gguf_path,total_bytes) VALUES(?,?,?,?)`, "model-1", "Model", "/tmp/model.gguf", 1); err != nil {
 		t.Fatal(err)
 	}
 	store := instances.New(db)
 	enabled := true
-	if _, err := store.Create(context.Background(), instances.CreateInput{ModelID: "model-1", Name: id, Slug: id, Enabled: &enabled}); err != nil {
+	instance, err := store.Create(context.Background(), instances.CreateInput{ModelID: "model-1", Name: id, Slug: id, Enabled: &enabled})
+	if err != nil {
 		t.Fatal(err)
 	}
+	return instance.ID
 }
 
 func TestServiceSaveReconcileAndStatus(t *testing.T) {
@@ -147,11 +149,11 @@ func TestServiceBootReconcileWhenConfigured(t *testing.T) {
 
 func TestServiceReconcileUpdateDeleteAndStoreModelError(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{ProxyURL: serviceMustURL(t, service), APIBase: "http://llamarack.example/v1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(context.Background(), `UPDATE instances SET enabled=0 WHERE id=?`, "alpha"); err != nil {
+	if _, err := db.ExecContext(context.Background(), `UPDATE instances SET enabled=0 WHERE id=?`, instanceID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Reconcile(context.Background())
@@ -251,15 +253,15 @@ func TestServiceDisconnectWithoutUnpublish(t *testing.T) {
 	}
 }
 
-func TestServiceReconcileRenamesInstanceID(t *testing.T) {
+func TestServiceReconcileRenamesInstanceSlugInPlace(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{ProxyURL: serviceMustURL(t, service), APIBase: "http://llamarack.example/v1"}); err != nil {
 		t.Fatal(err)
 	}
 	store := instances.New(db)
 	enabled := true
-	if _, err := store.Update(context.Background(), "alpha", instances.UpdateInput{ModelID: "model-1", Name: "Beta", Slug: "beta", Enabled: &enabled}); err != nil {
+	if _, err := store.Update(context.Background(), instanceID, instances.UpdateInput{ModelID: "model-1", Name: "Beta", Slug: "beta", Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Reconcile(context.Background())
@@ -267,10 +269,10 @@ func TestServiceReconcileRenamesInstanceID(t *testing.T) {
 		t.Fatalf("reconcile=%+v err=%v", result, err)
 	}
 	fake.mu.Lock()
-	_, hasBeta := fake.models["litellm-beta"]
+	entry, ok := fake.models["litellm-alpha"]
 	fake.mu.Unlock()
-	if !hasBeta {
-		t.Fatalf("expected renamed model in fake catalog, got %#v", fake.snapshotModels())
+	if !ok || entry.ModelName != "beta" || entry.LiteLLMParams.Model != "openai/beta" || entry.ModelInfo.LlamaRackInstanceID != instanceID {
+		t.Fatalf("expected in-place slug rename, got %#v", fake.snapshotModels())
 	}
 }
 
@@ -318,11 +320,11 @@ func TestNotifyInstanceChangeDoesNotPanicWhenProxyDown(t *testing.T) {
 
 func TestServiceReconcileUnpublishesDisabledInstance(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{ProxyURL: serviceMustURL(t, service), APIBase: "http://llamarack.example/v1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", "alpha"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", instanceID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Reconcile(context.Background())

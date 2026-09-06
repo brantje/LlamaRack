@@ -88,7 +88,7 @@ func TestRuntimeWebSocketRequiresTicketAndStreamsSupervisorState(t *testing.T) {
 		t.Fatalf("snapshot=%+v", snapshot)
 	}
 
-	start := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instance.ID+"/start", nil, cookie)
+	start := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instance.Slug+"/start", nil, cookie)
 	if start.Code != http.StatusServiceUnavailable {
 		t.Fatalf("start status=%d body=%s", start.Code, start.Body.String())
 	}

@@ -10,6 +10,7 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 function model(overrides: Partial<Model> = {}): Model {
   return {
     id: 'm1',
+    slug: 'm1',
     name: 'Coder',
     gguf_path: 'models/coder.gguf',
     total_bytes: 4 * 1024 * 1024,

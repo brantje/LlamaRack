@@ -12,6 +12,7 @@ const gib = 1024 ** 3
 function instance(id: string, overrides: Partial<Instance> = {}): Instance {
   return {
     id,
+    slug: id,
     model_id: 'm1',
     name: id,
     enabled: true,
@@ -35,7 +36,7 @@ function resetManager() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', name: 'Model', gguf_path: 'model.gguf', total_bytes: 1, context_length: 8192 }]
+  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Model', gguf_path: 'model.gguf', total_bytes: 1, context_length: 8192 }]
   manager.instances.value = []
   manager.runtimes.value = { m1: [] }
   manager.runtimeTelemetry.value = {}
@@ -99,7 +100,7 @@ describe('Dashboard edge branches', () => {
       }
       if (path.startsWith('/api/v1/observability/requests')) {
         return { items: [
-          { id: 1, started_at: 0, finished_at: 0, instance_id: 'starting', endpoint: '/v1/chat/completions', streaming: false, status_code: 0, result: 'error', duration_ms: 500, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false },
+          { id: 1, started_at: 0, finished_at: 0, instance_id: 'starting', model_slug: 'starting', endpoint: '/v1/chat/completions', streaming: false, status_code: 0, result: 'error', duration_ms: 500, prompt_tokens: 0, generated_tokens: 0, total_tokens: 0, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false },
           { id: 2, started_at: Date.now(), finished_at: Date.now(), instance_id: 'loading', endpoint: '/v1/responses', api_key: { id: 'k2', name: '', prefix: '' }, streaming: true, status_code: 500, result: 'error', duration_ms: 10_000, prompt_tokens: 1, generated_tokens: 1, total_tokens: 2, queue_duration_ms: 0, load_duration_ms: 0, autoloaded: false }
         ] }
       }

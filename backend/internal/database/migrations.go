@@ -16,6 +16,7 @@ import (
 var embeddedMigrations embed.FS
 
 var migrationFS fs.FS = embeddedMigrations
+var goMigrations = []*goose.Migration{resourceIdentityMigration}
 
 // ErrUnsupportedDatabaseSchema is returned when SQLite contains application tables
 // that were not created through embedded Goose migrations.
@@ -78,7 +79,10 @@ func newMigrationProvider(db *sql.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open migrations: %w", err)
 	}
-	return goose.NewProvider(goose.DialectSQLite3, db, fsys)
+	return goose.NewProvider(goose.DialectSQLite3, db, fsys,
+		goose.WithGoMigrations(goMigrations...),
+		goose.WithDisableGlobalRegistry(true),
+	)
 }
 
 func classifyDatabase(ctx context.Context, db *sql.DB) (dbClass, error) {
@@ -189,6 +193,11 @@ func maxEmbeddedMigrationVersion() (int64, error) {
 			maxVersion = version
 		}
 	}
+	for _, migration := range goMigrations {
+		if migration != nil && migration.Version > maxVersion {
+			maxVersion = migration.Version
+		}
+	}
 	if maxVersion == 0 {
 		return 0, fmt.Errorf("no embedded migrations found")
 	}
@@ -199,4 +208,10 @@ func withMigrationFS(fsys fs.FS) func() {
 	prev := migrationFS
 	migrationFS = fsys
 	return func() { migrationFS = prev }
+}
+
+func withGoMigrations(migrations []*goose.Migration) func() {
+	prev := goMigrations
+	goMigrations = migrations
+	return func() { goMigrations = prev }
 }

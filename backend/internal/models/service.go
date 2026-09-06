@@ -11,10 +11,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/brantje/llamarack/backend/internal/resourceid"
 )
 
 type Model struct {
 	ID            string `json:"id"`
+	Slug          string `json:"slug"`
 	Name          string `json:"name"`
 	GGUFPath      string `json:"gguf_path"`
 	TotalBytes    int64  `json:"total_bytes"`
@@ -35,6 +38,7 @@ type Model struct {
 
 type Instance struct {
 	ID                string   `json:"id"`
+	Slug              string   `json:"slug"`
 	ModelID           string   `json:"model_id"`
 	Name              string   `json:"name"`
 	Enabled           bool     `json:"enabled"`
@@ -51,6 +55,7 @@ type Instance struct {
 
 type CreateModelInput struct {
 	Name          string            `json:"name"`
+	Slug          string            `json:"slug,omitempty"`
 	GGUFPath      string            `json:"gguf_path"`
 	ContextLength int               `json:"context_length,omitempty"`
 	Options       map[string]string `json:"options,omitempty"`
@@ -69,6 +74,7 @@ type CreateModelInput struct {
 
 type UpdateModelInput struct {
 	Name          string            `json:"name"`
+	Slug          string            `json:"slug,omitempty"`
 	ContextLength int               `json:"context_length,omitempty"`
 	Options       map[string]string `json:"options,omitempty"`
 }
@@ -85,6 +91,14 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
 		return Model{}, errors.New("name is required")
+	}
+	slugSource := strings.TrimSpace(in.Slug)
+	if slugSource == "" {
+		slugSource = in.Name
+	}
+	slug := resourceid.Slugify(slugSource)
+	if slug == "" {
+		return Model{}, errors.New("slug must contain at least one letter or number")
 	}
 	if in.ContextLength < 0 {
 		return Model{}, errors.New("context_length must be zero or greater")
@@ -103,6 +117,7 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	}
 	m := Model{
 		ID:            newID(),
+		Slug:          slug,
 		Name:          in.Name,
 		GGUFPath:      ggufPath,
 		TotalBytes:    info.Size(),
@@ -114,8 +129,8 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 		return Model{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`,
-		m.ID, m.Name, m.GGUFPath, m.TotalBytes, m.Quantization, m.ContextLength); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?,?)`,
+		m.ID, m.Slug, m.Name, m.GGUFPath, m.TotalBytes, m.Quantization, m.ContextLength); err != nil {
 		return Model{}, err
 	}
 	if err := replaceOptions(ctx, tx, "model_options", "model_id", m.ID, in.Options); err != nil {
@@ -123,10 +138,11 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 	}
 
 	// Compatibility only: pre-Phase-5.5 callers supplied model_id and expected a
-	// default worker. New management requests omit model_id, so Models can exist
-	// with zero Instances as required by Phase 5.5.
+	// default worker. Keep the public value as the Instance slug while assigning
+	// the compatibility Instance its own durable UUID.
 	if legacy := strings.TrimSpace(in.PublicID); legacy != "" {
-		if strings.ContainsAny(legacy, " /\\\t\r\n") {
+		legacySlug := resourceid.Slugify(legacy)
+		if legacySlug == "" || strings.ContainsAny(legacy, " /\\\t\r\n") {
 			return Model{}, errors.New("invalid model_id")
 		}
 		enabled := true
@@ -145,8 +161,12 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 		if in.IdleUnloadSeconds < 0 {
 			return Model{}, errors.New("idle_unload_seconds must be zero or greater")
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`,
-			strings.ToLower(legacy), m.ID, legacy, boolInt(enabled), boolInt(autoload), boolInt(in.AlwaysOn), priority, boolInt(eviction), in.IdleUnloadSeconds); err != nil {
+		instanceID, err := resourceid.NewUUID()
+		if err != nil {
+			return Model{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			instanceID, legacySlug, m.ID, legacy, boolInt(enabled), boolInt(autoload), boolInt(in.AlwaysOn), priority, boolInt(eviction), in.IdleUnloadSeconds); err != nil {
 			return Model{}, err
 		}
 	}
@@ -157,9 +177,20 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 }
 
 func (s *Service) Update(ctx context.Context, id string, in UpdateModelInput) (Model, error) {
+	current, err := s.GetByID(ctx, id)
+	if err != nil {
+		return Model{}, err
+	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return Model{}, errors.New("name is required")
+	}
+	slug := current.Slug
+	if strings.TrimSpace(in.Slug) != "" {
+		slug = resourceid.Slugify(in.Slug)
+		if slug == "" {
+			return Model{}, errors.New("slug must contain at least one letter or number")
+		}
 	}
 	if in.ContextLength < 0 {
 		return Model{}, errors.New("context_length must be zero or greater")
@@ -169,7 +200,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateModelInput) (M
 		return Model{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE models SET name=?, context_length=?, updated_at=unixepoch() WHERE id=?`, name, in.ContextLength, id)
+	result, err := tx.ExecContext(ctx, `UPDATE models SET slug=?,name=?,context_length=?,updated_at=unixepoch() WHERE id=?`, slug, name, in.ContextLength, id)
 	if err != nil {
 		return Model{}, err
 	}
@@ -187,7 +218,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateModelInput) (M
 	return s.GetByID(ctx, id)
 }
 
-const modelColumns = `id,name,gguf_path,total_bytes,quantization,context_length`
+const modelColumns = `id,slug,name,gguf_path,total_bytes,quantization,context_length`
 
 func (s *Service) List(ctx context.Context) ([]Model, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+modelColumns+` FROM models ORDER BY name`)
@@ -217,7 +248,7 @@ func (s *Service) applyLegacyPolicies(ctx context.Context, models []Model) {
 	if len(models) == 0 {
 		return
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT model_id,id,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances ORDER BY model_id,created_at,id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT model_id,slug,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances ORDER BY model_id,created_at,id`)
 	if err != nil {
 		return
 	}
@@ -262,16 +293,24 @@ func (s *Service) GetByID(ctx context.Context, id string) (Model, error) {
 	return s.withLegacyPolicy(ctx, m), nil
 }
 
+func (s *Service) GetBySlug(ctx context.Context, slug string) (Model, error) {
+	m, err := scanModel(s.db.QueryRowContext(ctx, `SELECT `+modelColumns+` FROM models WHERE slug=?`, resourceid.Slugify(slug)))
+	if err != nil {
+		return Model{}, err
+	}
+	return s.withLegacyPolicy(ctx, m), nil
+}
+
 // GetByPublicID is retained for source compatibility. Public inference identity
-// is now the exact Instance ID, so this resolves through instances.id.
+// is the Instance slug; durable Instance IDs never leak into this compatibility path.
 func (s *Service) GetByPublicID(ctx context.Context, id string) (Model, error) {
 	var modelID string
-	if err := s.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE id=?`, id).Scan(&modelID); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT model_id FROM instances WHERE slug=?`, resourceid.Slugify(id)).Scan(&modelID); err != nil {
 		return Model{}, err
 	}
 	m, err := s.GetByID(ctx, modelID)
 	if err == nil {
-		m.PublicID = id
+		m.PublicID = resourceid.Slugify(id)
 	}
 	return m, err
 }
@@ -288,7 +327,7 @@ func (s *Service) Options(ctx context.Context, modelID string) (map[string]strin
 // Instances is a compatibility read helper. Instance CRUD/policy ownership lives
 // in internal/instances; callers should prefer that service for new code.
 func (s *Service) Instances(ctx context.Context, modelID string) ([]Instance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split FROM instances WHERE model_id=? ORDER BY name`, modelID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,gpu_mode,gpu_devices,tensor_split FROM instances WHERE model_id=? ORDER BY name`, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +337,7 @@ func (s *Service) Instances(ctx context.Context, modelID string) ([]Instance, er
 		var i Instance
 		var enabled, autoload, alwaysOn, eviction int
 		var devices, tensorSplit sql.NullString
-		if err := rows.Scan(&i.ID, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.GPUMode, &devices, &tensorSplit); err != nil {
+		if err := rows.Scan(&i.ID, &i.Slug, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.GPUMode, &devices, &tensorSplit); err != nil {
 			return nil, err
 		}
 		i.Enabled, i.Autoload, i.AlwaysOn, i.EvictionEnabled = enabled != 0, autoload != 0, alwaysOn != 0, eviction != 0
@@ -378,7 +417,7 @@ type queryer interface {
 func scanModel(row scanner) (Model, error) {
 	var m Model
 	var quantization sql.NullString
-	if err := row.Scan(&m.ID, &m.Name, &m.GGUFPath, &m.TotalBytes, &quantization, &m.ContextLength); err != nil {
+	if err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.GGUFPath, &m.TotalBytes, &quantization, &m.ContextLength); err != nil {
 		return Model{}, err
 	}
 	if quantization.Valid {
@@ -427,7 +466,7 @@ func readOptions(ctx context.Context, q queryer, table, idColumn, id string) (ma
 
 func (s *Service) withLegacyPolicy(ctx context.Context, m Model) Model {
 	var enabled, autoload, alwaysOn, eviction int
-	err := s.db.QueryRowContext(ctx, `SELECT id,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances WHERE model_id=? ORDER BY created_at,id LIMIT 1`, m.ID).
+	err := s.db.QueryRowContext(ctx, `SELECT slug,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds FROM instances WHERE model_id=? ORDER BY created_at,id LIMIT 1`, m.ID).
 		Scan(&m.PublicID, &enabled, &autoload, &alwaysOn, &m.Priority, &eviction, &m.IdleUnloadSeconds)
 	if err == nil {
 		m.Enabled = enabled != 0

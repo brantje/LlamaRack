@@ -50,7 +50,7 @@ const ownerItems = computed(() => {
 })
 
 const instanceItems = computed(() => {
-  const live = props.instances.map(instance => ({ label: instance.name, value: instance.id }))
+  const live = props.instances.map(instance => ({ label: `${instance.name} (${instance.slug})`, value: instance.id }))
   const known = new Set(live.map(item => item.value))
   const extras = [...new Set([...(props.initialKey?.missing_instance_ids || []), ...instanceIds.value])]
     .filter(id => !known.has(id))

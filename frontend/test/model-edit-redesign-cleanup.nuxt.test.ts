@@ -19,14 +19,17 @@ describe('Edit model semantic cleanup', () => {
     expect(editSource).not.toContain('<UAlert')
   })
 
-  it('keeps the two Model-only peer surfaces and update contract', () => {
+  it('keeps the Model peer surfaces and slug-aware update contract', () => {
     expect(formSource).toContain("'model-edit-metadata'")
     expect(formSource).toContain("'model-edit-defaults'")
     expect(formSource).toContain('<LlamaCppOptionsEditor v-model="form.options" scope="model" :model-id="modelId" :exclude-keys="companionOptionKeys" />')
     expect(editSource).toContain("if (!model?.name) throw")
     expect(editSource).toContain('<ModelForm')
-    expect(editSource).toContain('body: { name: form.name, context_length: form.context_length, options: form.options }')
-    expect(editSource).toContain("await router.push('/models')")
+    expect(editSource).toContain("reactive({ name: '', slug: '', context_length: 0, options: {} as Record<string, string> })")
+    expect(editSource).toContain('body: { name: form.name, slug: form.slug, context_length: form.context_length, options: form.options }')
+    expect(editSource).toContain('Changing the Model slug')
+    expect(editSource).toContain('It does not change any Instance OpenAI model ID.')
+    expect(editSource).toContain("await router.push(slugChanged ? `/models/${encodeURIComponent(updated.slug)}/details` : '/models')")
     expect(editSource).not.toContain('always_on')
     expect(editSource).not.toContain('autoload')
     expect(editSource).not.toContain('eviction')

@@ -43,9 +43,9 @@ func TestCorePersistenceFailuresBecomeHTTPErrorResponses(t *testing.T) {
 		path   string
 		want   int
 	}{
-		{http.MethodGet, "/api/v1/models/id", 404},
+		{http.MethodGet, "/api/v1/models/id", 500},
 		{http.MethodDelete, "/api/v1/models/id", 500},
-		{http.MethodPost, "/api/v1/models/id/start", 503},
+		{http.MethodPost, "/api/v1/models/id/start", 500},
 		{http.MethodPost, "/api/v1/models/id/stop", 500},
 		{http.MethodGet, "/api/v1/models/id/runtime", 500},
 		{http.MethodGet, "/api/v1/models/id/options", 500},

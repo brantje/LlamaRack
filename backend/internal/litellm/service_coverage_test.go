@@ -13,6 +13,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
@@ -90,7 +91,7 @@ func TestServiceBootReconcileSkipsWhenUnconfigured(t *testing.T) {
 
 func TestServiceReconcileRenameInstanceInPlace(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{
 		ProxyURL: serviceMustURL(t, service),
 		APIBase:  "http://llamarack.example/v1",
@@ -98,16 +99,19 @@ func TestServiceReconcileRenameInstanceInPlace(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(context.Background(), `UPDATE instances SET id='beta', name='beta' WHERE id='alpha'`); err != nil {
+	store := instances.New(db)
+	enabled := true
+	if _, err := store.Update(context.Background(), instanceID, instances.UpdateInput{ModelID: "model-1", Name: "Beta", Slug: "beta", Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Reconcile(context.Background())
-	if err != nil || !result.OK {
+	if err != nil || !result.OK || result.Published != 1 {
 		t.Fatalf("reconcile=%+v err=%v", result, err)
 	}
 	models := fake.snapshotModels()
-	if _, ok := models["litellm-beta"]; !ok {
-		t.Fatalf("expected renamed model, got %#v", models)
+	entry, ok := models["litellm-alpha"]
+	if !ok || entry.ModelName != "beta" || entry.LiteLLMParams.Model != "openai/beta" || entry.ModelInfo.LlamaRackInstanceID != instanceID {
+		t.Fatalf("expected renamed model in place, got %#v", models)
 	}
 }
 
@@ -191,7 +195,7 @@ func TestServiceSavePropagatesConnectionFailure(t *testing.T) {
 
 func TestServiceReconcileUsesModelNameFallback(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{
 		ProxyURL: serviceMustURL(t, service),
 		APIBase:  "http://llamarack.example/v1",
@@ -205,7 +209,7 @@ func TestServiceReconcileUsesModelNameFallback(t *testing.T) {
 		fake.models[id] = entry
 	}
 	fake.mu.Unlock()
-	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", "alpha"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", instanceID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.Reconcile(context.Background())
@@ -342,7 +346,7 @@ func TestRotatePropagatesReconcileFailure(t *testing.T) {
 
 func TestReconcileCreateUpdateDeleteFailures(t *testing.T) {
 	service, fake, _, db := newLiteLLMTestEnv(t)
-	insertEnabledInstance(t, db, "alpha")
+	instanceID := insertEnabledInstance(t, db, "alpha")
 	if _, err := service.Save(context.Background(), SaveInput{
 		ProxyURL: serviceMustURL(t, service),
 		APIBase:  "http://llamarack.example/v1",
@@ -362,7 +366,7 @@ func TestReconcileCreateUpdateDeleteFailures(t *testing.T) {
 	fake.mu.Lock()
 	fake.failCreate = false
 	fake.failUpdate = true
-	fake.models["litellm-alpha"] = BuildModelEntry("alpha", "http://stale.example/v1", "old-key", "litellm-alpha")
+	fake.models["litellm-alpha"] = BuildInstanceModelEntry(instanceID, "alpha", "http://stale.example/v1", "old-key", "litellm-alpha")
 	fake.mu.Unlock()
 	if _, err := service.Reconcile(context.Background()); err == nil {
 		t.Fatal("expected update failure")
@@ -372,7 +376,7 @@ func TestReconcileCreateUpdateDeleteFailures(t *testing.T) {
 	fake.failUpdate = false
 	fake.failDelete = true
 	fake.mu.Unlock()
-	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", "alpha"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "UPDATE instances SET enabled=0 WHERE id=?", instanceID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Reconcile(context.Background()); err == nil {

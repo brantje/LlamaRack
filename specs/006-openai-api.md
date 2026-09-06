@@ -8,7 +8,7 @@ Related issue: #1
 
 This specification defines the public inference API under `/v1/*`.
 
-The manager exposes OpenAI-compatible endpoints while using llama.cpp workers privately. The public `model` identity is the configured **Instance ID**.
+The manager exposes OpenAI-compatible endpoints while using llama.cpp workers privately. The public `model` identity is the configured **Instance slug**. Immutable Instance IDs remain internal durable identities.
 
 ## 2. Compatibility scope
 
@@ -42,22 +42,27 @@ Supported fields ultimately depend on the active llama.cpp build and effective I
 
 ## 3. Instance identity contract
 
-Every Instance has a human-entered name and a slug-derived `id`.
+Every Instance has:
+
+- `id` — immutable UUID used for durable ownership, foreign keys, API-key scopes, runtime state and history correlation;
+- `slug` — unique mutable public identifier and exact OpenAI-compatible model ID;
+- `name` — mutable display label.
+
+Creation defaults `slug` from `name`, but later name edits do not implicitly change the slug.
 
 ```text
 Instance name: Qwen Coding 32B
-instance.id:   qwen-coding-32b
+instance.slug: qwen-coding-32b
+instance.id:   550e8400-e29b-41d4-a716-446655440000
 ```
 
-Clients use that exact ID:
+Clients use the slug:
 
 ```json
 {"model":"qwen-coding-32b"}
 ```
 
-There is no separate public inference ID/model alias field for Instances.
-
-A registered Model is a management-plane configuration resource and is not directly inferable unless an Instance exists for it.
+A registered Model is a management-plane configuration resource and is not directly inferable unless an Instance exists for it. Model slugs have no OpenAI inference meaning.
 
 ## 4. Authentication
 
@@ -67,9 +72,7 @@ All inference endpoints require a valid manager-generated bearer key unless a fu
 Authorization: Bearer <key>
 ```
 
-Authenticate before Instance resolution/autoload.
-
-Invalid/disabled/revoked keys must not trigger lifecycle work.
+Authenticate the key before lifecycle/autoload work. For Instance-scoped inference keys, resolve the supplied model slug to an Instance, then authorize against that Instance's immutable ID. Invalid/disabled keys must not trigger lifecycle work.
 
 ## 5. `GET /v1/models`
 
@@ -78,40 +81,43 @@ The manager generates this response from configured addressable Instances.
 Requirements:
 
 - include configured Instances even while stopped when they are valid/addressable;
-- use exact `instance.id` as the standard model object's `id`;
+- use exact `instance.slug` as the standard model object's `id`;
+- enforce scoped-key visibility with immutable Instance IDs;
 - do not expose registered Model database IDs;
+- do not expose Instance UUIDs as OpenAI model IDs;
 - do not expose GGUF filesystem paths;
 - do not expose PIDs/private worker ports;
-- do not expose a second public alias;
 - use a stable OpenAI-compatible object shape.
 
 Detailed runtime state belongs to `/api/v1/instances`.
 
 A registered Model with zero Instances is absent from `/v1/models`.
 
-`GET /v1/models/{model}` uses the same namespace: enabled Instance IDs. Absent or disabled IDs return an OpenAI-style `404`. Model retrieve must not start or acquire llama.cpp.
+`GET /v1/models/{model}` uses the same public namespace: enabled Instance slugs. Absent or disabled slugs return an OpenAI-style `404`. Model retrieve must not start or acquire llama.cpp.
 
 ## 6. Request model resolution
 
 For inference requests:
 
 1. authenticate;
-2. parse enough JSON to read `model`;
-3. resolve exact `instance.id`;
-4. validate endpoint capability where known;
-5. if READY, proxy to that exact Instance;
-6. if stopped/loading, apply that Instance's lifecycle/autoload policy;
-7. never silently substitute a sibling Instance.
+2. parse enough request data to read `model`;
+3. resolve exact `instance.slug` to one Instance;
+4. enforce an inference-key allowlist against immutable `instance.id`;
+5. capture the exact supplied slug as historical `model_slug`;
+6. validate endpoint capability where known;
+7. if READY, proxy to that exact Instance by immutable ID;
+8. if stopped/loading, apply that Instance's lifecycle/autoload policy;
+9. never silently substitute a sibling Instance.
 
-Unknown Instance ID returns model-not-found.
+Unknown Instance slug returns model-not-found.
 
-## 7. Model field rewriting upstream
+## 7. Worker-facing model identity
 
-`instance.id` is a manager concept and may not be the value llama.cpp expects internally.
+The manager owns the worker process. Runtime ownership, reservations, process identity environment and worker registry keys use immutable `instance.id`.
 
-The gateway may rewrite the worker-facing `model` field where necessary, but external responses should preserve/normalize back to the public `instance.id` when compatibility-safe.
+The current `instance.slug` is supplied as managed `llama-server --alias`, so worker-visible model identity matches the public OpenAI model value without making the slug a process-ownership key.
 
-Workers' file names/internal identifiers remain private.
+External responses should preserve the public Instance slug where a model ID is returned. Worker filenames, UUID ownership metadata and private addresses remain private unless explicitly exposed through management diagnostics.
 
 ## 8. Chat completions
 
@@ -144,11 +150,11 @@ Do not transform text completions into chat unless a future compatibility requir
 The manager should remain thin for generation:
 
 - authenticate;
-- resolve exact Instance ID;
+- resolve exact Instance slug to immutable Instance ID;
 - autoload when permitted;
 - stream/proxy;
 - capture the upstream `resp_*` ID even when request logging is metadata-only;
-- normalize external Instance identity;
+- persist both durable `instance_id` and exact historical `model_slug`;
 - map manager-level failures.
 
 Stored Responses reuse `inference_requests` rather than a second table.
@@ -162,37 +168,36 @@ Manager-side retrievability follows the Instance `request_log_mode` at request t
 
 `GET /v1/responses/{id}/input_items` reconstructs OpenAI input items from the retained original request body and honors `limit`/`after`.
 
-In-flight Responses may be retrieved as `status=in_progress` from the active-request registry and cancelled with `POST /v1/responses/{id}/cancel`. Completed Responses return `400` on cancel; unknown IDs return `404`.
+In-flight Responses may be retrieved as `status=in_progress` from the active-request registry and cancelled with `POST /v1/responses/{id}/cancel`. The registry stores immutable Instance ownership separately from the public model slug used in the OpenAI response. Completed Responses return `400` on cancel; unknown IDs return `404`.
 
 Normal observability retention is the maximum lifetime of a retrievable Response.
 
 ## 11. Embeddings
 
-`POST /v1/embeddings` resolves an exact Instance.
+`POST /v1/embeddings` resolves an exact Instance by slug.
 
-If that Instance's effective Model/configuration cannot serve embeddings and this is known before dispatch, fail clearly.
-
-Never silently route to a different embedding-capable Instance.
+If that Instance's effective Model/configuration cannot serve embeddings and this is known before dispatch, fail clearly. Never silently route to a different embedding-capable Instance.
 
 ## 11.1 Audio transcription
 
-`POST /v1/audio/transcriptions` is multipart form data. Authenticate before accepting a large body. The `model` form field is the addressable Instance ID. Proxy the original multipart bytes intact and never forward Manager `Authorization`. Full request logging stores filename, content type, and size — never raw audio as SQLite TEXT.
+`POST /v1/audio/transcriptions` is multipart form data. Authenticate before accepting a large body. The `model` form field is the addressable Instance slug. Proxy the original multipart bytes intact and never forward Manager `Authorization`. Full request logging stores filename, content type, and size — never raw audio as SQLite TEXT.
 
 ## 11.2 Token counting, rerank, and chat control
 
-`POST /v1/responses/input_tokens` and `POST /v1/chat/completions/input_tokens` use normal Instance resolution/autoload. Map returned input-token counts into observability `prompt_tokens`. Do not expose generation-token metrics. A worker `404` for these routes is rewritten to Manager `501`.
+`POST /v1/responses/input_tokens` and `POST /v1/chat/completions/input_tokens` use normal Instance slug resolution/autoload. Map returned input-token counts into observability `prompt_tokens`. Do not expose generation-token metrics. A worker `404` for these routes is rewritten to Manager `501`.
 
 `POST /v1/rerank` and `POST /v1/reranking` are equivalent llama.cpp extensions.
 
-`POST /v1/chat/completions/control` routes an in-flight completion ID through the shared active-request registry to the owning worker. It does not resolve a new Instance from a `model` field.
+`POST /v1/chat/completions/control` routes an in-flight completion ID through the shared active-request registry to the owning immutable Instance ID. It does not resolve a new Instance from a `model` field.
 
 ## 11.3 Slots
 
-`GET /v1/slots?model=<instance.id>` and `POST /v1/slots/{slot_id}?model=<instance.id>&action=save|restore|erase` are llama.cpp extensions proxied to the worker's native `/slots` API.
+`GET /v1/slots?model=<instance.slug>` and `POST /v1/slots/{slot_id}?model=<instance.slug>&action=save|restore|erase` are llama.cpp extensions proxied to the worker's native `/slots` API.
 
 Requirements:
 
-- resolve the Instance from the `model` query parameter because these routes have no OpenAI JSON `model` field;
+- resolve the Instance from the public `model` slug because these routes have no OpenAI JSON `model` field;
+- enforce scoped-key authorization against immutable Instance ID;
 - require the selected Instance to already be **READY**; do not autoload and do not consume pending-admission slots;
 - rewrite `/v1/slots` to worker `/slots` and `/v1/slots/{slot_id}` to worker `/slots/{slot_id}`;
 - drop `model` from the forwarded query and forward remaining query parameters such as `action`;
@@ -204,19 +209,19 @@ Security: `GET /slots` can include in-flight prompts and slot state from other c
 
 ## 12. Instance availability
 
-For a valid `instance.id`:
+For a valid current Instance slug:
 
 ### READY
 
-Proxy immediately.
+Proxy immediately to the resolved immutable Instance ID.
 
 ### Startup already in progress
 
-Join that Instance's shared startup wait.
+Join that Instance ID's shared startup wait.
 
 ### Stopped + Autoload enabled
 
-Request startup of that exact Instance and wait up to the effective deadline.
+Request startup of that exact Instance ID and wait up to the effective deadline.
 
 ### Stopped + Autoload disabled
 
@@ -243,7 +248,7 @@ Suggested mappings:
 | Condition | HTTP | Concept |
 |---|---:|---|
 | invalid API key | 401 | authentication error |
-| unknown Instance ID | 404 | model not found |
+| unknown Instance slug | 404 | model not found |
 | invalid request/config | 400 | invalid request |
 | unsupported capability | 400 | unsupported capability |
 | Autoload disabled while stopped | 503 | model unavailable |
@@ -273,7 +278,7 @@ Requirements:
 Preferred approach:
 
 - validate content type/body size;
-- parse enough JSON for manager policy and Instance resolution;
+- parse enough data for manager policy and Instance slug resolution;
 - preserve original/normalized payload for upstream forwarding;
 - rewrite only manager-mediated fields.
 
@@ -283,40 +288,34 @@ Do not tightly hard-code every evolving OpenAI field solely for proxying.
 
 V1 never retries by switching to a sibling Instance.
 
-Before output begins, a bounded safe retry against the **same** Instance may be allowed for transient connection setup failure.
-
-After output begins, never transparently retry.
+Before output begins, a bounded safe retry against the **same immutable Instance ID** may be allowed for transient connection setup failure. After output begins, never transparently retry.
 
 ## 17. Client cancellation
 
-Cancellation must:
+Cancellation must cancel the upstream request, release request accounting, remove that caller from startup waiters, and not stop the Instance merely because one client disconnects.
 
-- cancel upstream request;
-- release request accounting;
-- remove that caller from startup waiters;
-- not stop the Instance merely because one client disconnects.
+## 18. Instance name and slug changes
 
-## 18. Instance rename
+Changing Instance `name` alone preserves `id`, `slug`, OpenAI model identity, API-key scopes and runtime ownership.
 
-Instance name is slugified into `instance.id`.
+Changing Instance `slug` explicitly:
 
-Renaming therefore changes the public OpenAI model ID.
-
-Required behavior:
-
-- UI warns that existing clients using the old `model` value will break;
-- old ID stops resolving after successful rename;
-- `/v1/models` exposes the new ID;
-- no compatibility alias is retained in v1.
+- preserves immutable `instance.id` and all ID-based durable references;
+- changes the accepted public OpenAI `model` value;
+- requires an explicit UI warning because existing clients using the old slug will break;
+- causes the old slug to stop resolving after a successful update;
+- changes `/v1/models` to expose the new slug;
+- does not rewrite historical request `model_slug` values;
+- does not retain a compatibility alias in v1.
 
 ## 19. `/v1/models` and Model registry separation
 
 The terminology must remain clear:
 
-- **registered Model**: management-plane resource under `/api/v1/models`;
-- **OpenAI model ID**: `instance.id`, exposed under `/v1/models`.
+- **registered Model**: management-plane resource under `/api/v1/models`, addressed by Model slug in human-facing management routes;
+- **OpenAI model ID**: `instance.slug`, exposed under `/v1/models`.
 
-This is intentional even though OpenAI calls the field `model`.
+Registered Model IDs/slugs are not OpenAI model identifiers. This is intentional even though OpenAI calls the field `model`.
 
 ## 20. Worker authentication
 
@@ -329,7 +328,8 @@ If internal worker auth is used, it is manager-owned and hidden.
 Per-request metrics may record:
 
 - endpoint;
-- `instance.id`;
+- immutable `instance.id` for stable grouping;
+- historical `model_slug` where public request identity is useful;
 - status/error code;
 - latency;
 - load-wait latency;
@@ -345,7 +345,8 @@ Default access logs may include:
 
 - correlation ID;
 - endpoint;
-- `instance.id`;
+- immutable `instance.id` for durable correlation;
+- captured `model_slug` for the public identity used by that request;
 - HTTP status;
 - duration;
 - safe error classification.
@@ -354,15 +355,16 @@ Do not log full prompts/completions or credentials by default.
 
 ## 23. LiteLLM compatibility
 
-LiteLLM uses the Instance ID as the backend model identifier:
+LiteLLM uses the Instance slug as the public model identifier while LlamaRack ownership metadata uses the immutable Instance ID:
 
 ```text
-LiteLLM model = qwen-coding-32b
-OpenAI model  = qwen-coding-32b
-Instance ID   = qwen-coding-32b
+LiteLLM model_name            = qwen-coding-32b
+OpenAI model                  = qwen-coding-32b
+LlamaRack Instance slug       = qwen-coding-32b
+LlamaRack durable Instance ID = 550e8400-e29b-41d4-a716-446655440000
 ```
 
-No LiteLLM-specific transport is required.
+No LiteLLM-specific transport is required. Managed LiteLLM reconciliation updates public names when slugs change without changing durable ownership.
 
 ## 24. SDK compatibility
 
@@ -373,13 +375,14 @@ Before v1, automated integration tests should cover:
 - LiteLLM Python library;
 - LiteLLM Proxy.
 
-Test exact Instance-ID resolution, autoload and streaming.
+Test exact Instance-slug resolution, immutable scoped authorization, autoload and streaming.
 
 ## 25. Security
 
 - authenticate before autoload;
 - bound body sizes;
-- validate Instance IDs as identifiers, never paths;
+- validate Instance slugs as identifiers, never paths;
+- authorize Instance-scoped keys with immutable Instance IDs;
 - never expose worker URLs;
 - never return API-key hashes;
 - proxy targets come only from manager-owned runtime registry;
@@ -388,29 +391,33 @@ Test exact Instance-ID resolution, autoload and streaming.
 ## 26. Invariants
 
 1. All public inference traffic enters manager `/v1/*`.
-2. OpenAI `model` is exactly `instance.id`.
-3. `instance.id` is the slug derived from Instance name.
-4. `/v1/models` lists Instances, not registered Models.
+2. OpenAI `model` is exactly the current `instance.slug`.
+3. `instance.id` is immutable durable identity and is not the public model name.
+4. `/v1/models` lists Instance slugs, not registered Models or Instance UUIDs.
 5. A registered Model with no Instance is not inferable.
 6. Authentication failure never starts an Instance.
-7. A request never silently switches to a sibling Instance.
-8. Streaming is incremental.
-9. Worker ports/addresses remain private.
-10. Unsupported semantics are not silently claimed as supported.
+7. Instance-scoped API keys remain attached to the same Instance across slug changes because scopes store immutable IDs.
+8. A request never silently switches to a sibling Instance.
+9. Streaming is incremental.
+10. Worker ports/addresses remain private.
+11. Unsupported semantics are not silently claimed as supported.
+12. Historical `model_slug` is immutable request context.
 
 ## 27. Acceptance criteria
 
 Automated tests prove:
 
-- creating Instance name `Qwen Coding` yields ID `qwen-coding`;
+- creating Instance name `Qwen Coding` can yield slug `qwen-coding` plus an independent UUID;
 - `/v1/models` returns `qwen-coding`;
-- OpenAI SDK calls using `model="qwen-coding"` reach that exact Instance;
+- OpenAI SDK calls using `model="qwen-coding"` reach that exact UUID-owned Instance;
 - registered Models without Instances do not appear in `/v1/models`;
 - stopped configured Instances remain addressable/listed;
 - autoload-enabled inference starts the exact Instance;
 - autoload-disabled inference fails without process startup;
 - sibling Instances are never substituted;
-- public response model identity stays the Instance ID where applicable;
-- Instance rename changes the accepted OpenAI model ID only after explicit management update;
+- public response model identity stays the Instance slug where applicable;
+- name-only edits do not change accepted OpenAI model identity;
+- explicit Instance slug changes change the accepted OpenAI model while preserving UUID ownership and API-key scope;
+- historical request rows keep their original `model_slug` after a later rename;
 - streaming works through OpenAI SDK/LiteLLM;
 - private worker addresses never leak.

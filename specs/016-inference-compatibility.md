@@ -13,11 +13,12 @@ The contract is intentionally narrower than “everything OpenAI supports”. A 
 ## 2. Public identity and transport invariants
 
 - All inference traffic enters the manager under `/v1`.
-- The public OpenAI `model` value is the durable LlamaRack `instance.id`.
-- `/v1/models` lists enabled/addressable Instances, not registered management-plane Models.
-- Manager API keys use `Authorization: Bearer <key>` and are authenticated before lifecycle/autoload work.
+- The public OpenAI `model` value is the current LlamaRack `instance.slug`.
+- The durable LlamaRack `instance.id` is an immutable UUID used for ownership, authorization scopes, runtime state, scheduler state and durable correlation; it is not the public OpenAI model name.
+- `/v1/models` lists enabled/addressable Instance slugs, not registered management-plane Models or Instance UUIDs.
+- Manager API keys use `Authorization: Bearer <key>` and are authenticated before lifecycle/autoload work. Instance-scoped keys are authorized against immutable Instance IDs after slug resolution.
 - Manager-owned errors use an OpenAI-style `error` object with `message`, `type`, `param`, and `code` fields.
-- Private worker hostnames, ports, filesystem paths, PIDs, credentials, and internal model identifiers are never part of the public compatibility surface.
+- Private worker hostnames, ports, filesystem paths, PIDs, credentials, and internal durable identifiers are never part of the public compatibility surface unless explicitly exposed by a management diagnostics endpoint.
 - Streaming responses remain incremental; LlamaRack does not buffer a complete generation before forwarding it.
 - A client disconnect cancels that upstream request and releases manager accounting without stopping the Instance solely because the caller disconnected.
 
@@ -25,9 +26,9 @@ The contract is intentionally narrower than “everything OpenAI supports”. A 
 
 | Surface | 1.0 status | Contract |
 |---|---|---|
-| `GET /v1/models` | Supported | Manager-local OpenAI model-list shape using exact Instance IDs. |
-| `GET /v1/models/{model}` | Supported | Manager-local lookup by exact enabled Instance ID; does not start a worker. |
-| `POST /v1/chat/completions` | Supported | Thin llama.cpp-compatible pass-through with exact Instance resolution, lifecycle handling, identity normalization, streaming, and manager error mapping. |
+| `GET /v1/models` | Supported | Manager-local OpenAI model-list shape using exact current Instance slugs. |
+| `GET /v1/models/{model}` | Supported | Manager-local lookup by exact enabled Instance slug; does not start a worker. |
+| `POST /v1/chat/completions` | Supported | Thin llama.cpp-compatible pass-through with exact Instance-slug resolution, UUID-backed lifecycle/authorization, identity normalization, streaming, and manager error mapping. |
 | `POST /v1/completions` | Supported | Legacy text-completions pass-through with the same routing/lifecycle rules. |
 | `POST /v1/responses` | Supported | Thin llama.cpp Responses pass-through; response IDs may be retained by manager observability according to request-log policy. |
 | Responses retrieve/delete/input-items/cancel | Supported with documented LlamaRack storage semantics | Manager-local operations described in `006-openai-api.md`; not a claim of OpenAI server-side storage parity. |
@@ -38,7 +39,7 @@ The contract is intentionally narrower than “everything OpenAI supports”. A 
 | Structured output / JSON schema | Conditional | Compatible response-format/schema fields are passed through. Schema enforcement is the selected runtime's behavior unless LlamaRack explicitly validates a manager-owned field. |
 | Chat/Completions/Responses streaming | Supported | SDK iteration plus raw SSE/content-type/framing/termination are release-tested. |
 | Request cancellation/disconnect | Supported | Disconnect propagates upstream and a subsequent request must remain usable. |
-| Cold Instance autoload | Supported | READY routes immediately; autoload-enabled STOPPED starts once and waits; autoload-disabled STOPPED returns availability error. |
+| Cold Instance autoload | Supported | READY routes immediately; autoload-enabled STOPPED starts once by immutable Instance ID and waits; autoload-disabled STOPPED returns availability error. |
 | llama.cpp token-count/rerank/chat-control/slots extensions | Extension | Public LlamaRack extensions, not OpenAI compatibility claims. |
 
 ## 4. Explicit non-contract / partial areas
@@ -56,7 +57,7 @@ Common manager-originated failures are stable enough for clients to branch on st
 | Condition | HTTP |
 |---|---:|
 | missing/invalid/revoked inference key | 401 |
-| unknown or disabled Instance ID | 404 |
+| unknown or disabled Instance slug | 404 |
 | malformed/invalid manager-owned request | 400 |
 | stopped Instance with autoload disabled | 503 |
 | resource/admission/startup failure | 503 |
@@ -82,8 +83,8 @@ The conformance suite checks both real SDK iteration and the raw wire framing so
 
 Release qualification prepares fixture states through the management API, then exercises inference only through `/v1`:
 
-- READY: request routes immediately to that exact Instance.
-- STOPPED + autoload enabled: concurrent cold requests coordinate one startup and all admissible callers converge on it.
+- READY: public slug resolves to one immutable Instance ID and routes immediately to that exact Instance.
+- STOPPED + autoload enabled: concurrent cold requests for the same slug coordinate one startup keyed by immutable Instance ID and all admissible callers converge on it.
 - STOPPED + autoload disabled: request returns the documented availability error and no worker is started.
 - startup failure: request returns a useful client-visible error and the Instance remains recoverable/inspectable rather than entering corrupt manager state.
 
@@ -106,12 +107,21 @@ Capability-specific checks are enabled by fixture environment variables. A relea
 
 Two integrations are verified:
 
-1. LiteLLM SDK using LlamaRack's OpenAI-compatible base URL and exact Instance ID.
-2. LiteLLM Proxy using the managed OpenAI-provider shape from `013-litellm.md`, then accepting a client request and forwarding it to LlamaRack.
+1. LiteLLM SDK using LlamaRack's OpenAI-compatible base URL and exact Instance slug.
+2. LiteLLM Proxy using the managed OpenAI-provider shape from `013-litellm.md`, where public `model_name`/`openai/...` use `instance.slug` and `llamarack_instance_id` stores immutable Instance ownership, then accepting a client request and forwarding it to LlamaRack.
 
-The suite verifies model identity, bearer authentication, streaming, and caller tracing/request headers that LlamaRack is documented to retain/forward. LiteLLM catalog synchronization remains a management integration; it does not change the `/v1` inference identity.
+The suite verifies model identity, bearer authentication, streaming, and caller tracing/request headers that LlamaRack is documented to retain/forward. LiteLLM catalog synchronization remains a management integration; it does not introduce another `/v1` inference identity.
 
-## 10. Release evidence and version policy
+## 10. Rename/slug compatibility boundary
+
+- Changing Instance `name` alone is non-breaking for OpenAI clients because `instance.slug` is unchanged.
+- Explicitly changing `instance.slug` is a public API break for clients that still send the old slug; the management UI must warn before saving it.
+- An Instance slug change preserves immutable `instance.id`, API-key scopes, runtime ownership and durable references.
+- `/v1/models` exposes the new slug after the update and the old slug no longer resolves in v1.
+- Request history preserves the exact `model_slug` captured at request time; historical rows are never rewritten to the new slug.
+- Changing a registered Model slug is management-only and has no OpenAI inference meaning.
+
+## 11. Release evidence and version policy
 
 `1.0.0-rc.*` qualification must retain machine-readable evidence containing client/runtime versions, enabled fixtures, pass/fail/not-applicable results, and the candidate image digest or externally supplied target identifier.
 
@@ -121,6 +131,6 @@ Versioning policy:
 - additional compatible endpoints/features may be added in later `1.x` and must be documented before being advertised;
 - an intentional breaking change to a documented 1.x compatibility guarantee requires a major release unless that surface was explicitly experimental before 1.0.
 
-## 11. Acceptance gate
+## 12. Acceptance gate
 
-The 1.0 release gate is satisfied only when the repeatable live suite demonstrates the advertised contract against the release candidate and the evidence includes, at minimum: model listing/identity, Python and JS basic+streaming calls, Responses, authentication and invalid-model/request errors, raw streaming framing/termination, cold-autoload lifecycle behavior, direct LiteLLM client compatibility, LiteLLM Proxy forwarding, and every conditional capability declared required for that candidate fixture set.
+The 1.0 release gate is satisfied only when the repeatable live suite demonstrates the advertised contract against the release candidate and the evidence includes, at minimum: model listing/slug identity, Python and JS basic+streaming calls, Responses, authentication and invalid-model/request errors, raw streaming framing/termination, cold-autoload lifecycle behavior, direct LiteLLM client compatibility, LiteLLM Proxy forwarding, rename-safe durable ownership/scopes, and every conditional capability declared required for that candidate fixture set.

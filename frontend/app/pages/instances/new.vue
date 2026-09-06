@@ -16,7 +16,7 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    const instance = await manager.request<{ id: string }>('/api/v1/instances', {
+    const instance = await manager.request<{ id: string; slug: string }>('/api/v1/instances', {
       method: 'POST',
       body: {
         ...form,
@@ -38,10 +38,10 @@ async function submit() {
         await router.push('/instances')
         return
       }
-      await manager.request(`/api/v1/instances/${encodeURIComponent(instance.id)}/start`, { method: 'POST' })
+      await manager.request(`/api/v1/instances/${encodeURIComponent(instance.slug)}/start`, { method: 'POST' })
     }
     await manager.refresh()
-    await router.push('/instances')
+    await router.push(`/instances/${encodeURIComponent(instance.slug)}/detail`)
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to create Instance'
   } finally {

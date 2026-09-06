@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-const baselineVersion = 1
+const baselineVersion = resourceIdentityMigrationVersion
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()
@@ -144,7 +144,7 @@ func TestNewerSchemaVersionRefused(t *testing.T) {
 	}
 }
 
-func TestSecondMigrationUpgradesFromBaseline(t *testing.T) {
+func TestThirdMigrationUpgradesFromResourceIdentity(t *testing.T) {
 	ctx := context.Background()
 	baselineSQL, err := fs.ReadFile(embeddedMigrations, "migrations/00001_baseline.sql")
 	if err != nil {
@@ -152,9 +152,9 @@ func TestSecondMigrationUpgradesFromBaseline(t *testing.T) {
 	}
 	testFS := fstest.MapFS{
 		"migrations/00001_baseline.sql": {Data: baselineSQL},
-		"migrations/00002_test_marker.sql": {Data: []byte(`-- +goose Up
+		"migrations/00003_test_marker.sql": {Data: []byte(`-- +goose Up
 CREATE TABLE migration_marker (id INTEGER PRIMARY KEY);
-INSERT INTO migration_marker(id) VALUES (2);
+INSERT INTO migration_marker(id) VALUES (3);
 
 -- +goose Down
 `)},
@@ -173,11 +173,11 @@ INSERT INTO migration_marker(id) VALUES (2);
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
+	if version != 3 {
 		t.Fatalf("version=%d", version)
 	}
 	var marker int
-	if err := db.QueryRowContext(ctx, `SELECT id FROM migration_marker`).Scan(&marker); err != nil || marker != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT id FROM migration_marker`).Scan(&marker); err != nil || marker != 3 {
 		t.Fatalf("marker=%d err=%v", marker, err)
 	}
 }
@@ -197,7 +197,7 @@ SELECT invalid_function_that_does_not_exist();
 `)
 	testFS := fstest.MapFS{
 		"migrations/00001_baseline.sql": {Data: baselineSQL},
-		"migrations/00002_fail.sql":     {Data: failSQL},
+		"migrations/00003_fail.sql":     {Data: failSQL},
 	}
 	restore := withMigrationFS(testFS)
 	defer restore()
@@ -208,18 +208,22 @@ SELECT invalid_function_that_does_not_exist();
 		db.Close()
 		t.Fatal("expected failing migration error")
 	}
-	if !tableExistsQuick(ctx, mustOpenSQLite(path), "users") {
-		t.Fatal("baseline tables should exist after failed second migration")
+	probe := mustOpenSQLite(path)
+	if !tableExistsQuick(ctx, probe, "users") {
+		probe.Close()
+		t.Fatal("baseline tables should exist after failed third migration")
 	}
-	if tableExistsQuick(ctx, mustOpenSQLite(path), "migration_fail_probe") {
+	if tableExistsQuick(ctx, probe, "migration_fail_probe") {
+		probe.Close()
 		t.Fatal("failed migration table should not persist")
 	}
+	probe.Close()
 
 	successFS := fstest.MapFS{
 		"migrations/00001_baseline.sql": {Data: baselineSQL},
-		"migrations/00002_success.sql": {Data: []byte(`-- +goose Up
+		"migrations/00003_success.sql": {Data: []byte(`-- +goose Up
 CREATE TABLE migration_fail_probe (id INTEGER PRIMARY KEY);
-INSERT INTO migration_fail_probe(id) VALUES (2);
+INSERT INTO migration_fail_probe(id) VALUES (3);
 
 -- +goose Down
 `)},
@@ -234,7 +238,7 @@ INSERT INTO migration_fail_probe(id) VALUES (2);
 	}
 	defer db.Close()
 	var marker int
-	if err := db.QueryRowContext(ctx, `SELECT id FROM migration_fail_probe`).Scan(&marker); err != nil || marker != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT id FROM migration_fail_probe`).Scan(&marker); err != nil || marker != 3 {
 		t.Fatalf("marker=%d err=%v", marker, err)
 	}
 }
@@ -296,9 +300,11 @@ func TestAppliedGooseVersionWithoutTable(t *testing.T) {
 	}
 }
 
-func TestMaxEmbeddedMigrationVersionRequiresFiles(t *testing.T) {
-	restore := withMigrationFS(fstest.MapFS{})
-	defer restore()
+func TestMaxEmbeddedMigrationVersionRequiresSources(t *testing.T) {
+	restoreFS := withMigrationFS(fstest.MapFS{})
+	defer restoreFS()
+	restoreGo := withGoMigrations(nil)
+	defer restoreGo()
 	if _, err := maxEmbeddedMigrationVersion(); err == nil {
 		t.Fatal("expected missing migrations error")
 	}

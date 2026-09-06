@@ -23,10 +23,10 @@ type Client struct {
 }
 
 type ModelParams struct {
-	Model              string `json:"model"`
-	APIBase            string `json:"api_base"`
-	APIKey             string `json:"api_key"`
-	CustomLLMProvider  string `json:"custom_llm_provider"`
+	Model             string `json:"model"`
+	APIBase           string `json:"api_base"`
+	APIKey            string `json:"api_key"`
+	CustomLLMProvider string `json:"custom_llm_provider"`
 }
 
 type ModelInfo struct {
@@ -158,11 +158,19 @@ func IsManaged(entry ModelEntry) bool {
 	return entry.ModelInfo.LlamaRackManaged
 }
 
+// BuildModelEntry retains the pre-#180 helper contract for internal callers and
+// tests that still use one value for ownership and public model identity.
 func BuildModelEntry(instanceID, apiBase, inferenceKey, litellmModelID string) ModelEntry {
+	return BuildInstanceModelEntry(instanceID, instanceID, apiBase, inferenceKey, litellmModelID)
+}
+
+// BuildInstanceModelEntry separates LlamaRack's immutable Instance ownership ID
+// from the mutable OpenAI/LiteLLM model name.
+func BuildInstanceModelEntry(instanceID, instanceSlug, apiBase, inferenceKey, litellmModelID string) ModelEntry {
 	entry := ModelEntry{
-		ModelName: instanceID,
+		ModelName: instanceSlug,
 		LiteLLMParams: ModelParams{
-			Model:             "openai/" + instanceID,
+			Model:             "openai/" + instanceSlug,
 			APIBase:           apiBase,
 			APIKey:            inferenceKey,
 			CustomLLMProvider: "openai",
@@ -179,10 +187,14 @@ func BuildModelEntry(instanceID, apiBase, inferenceKey, litellmModelID string) M
 }
 
 func entryDrifted(entry ModelEntry, instanceID, apiBase, inferenceKey string) bool {
-	if entry.ModelName != instanceID {
+	return instanceEntryDrifted(entry, instanceID, instanceID, apiBase, inferenceKey)
+}
+
+func instanceEntryDrifted(entry ModelEntry, instanceID, instanceSlug, apiBase, inferenceKey string) bool {
+	if entry.ModelName != instanceSlug {
 		return true
 	}
-	if entry.LiteLLMParams.Model != "openai/"+instanceID {
+	if entry.LiteLLMParams.Model != "openai/"+instanceSlug {
 		return true
 	}
 	if entry.LiteLLMParams.APIBase != apiBase {

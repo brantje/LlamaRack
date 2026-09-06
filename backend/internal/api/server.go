@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,8 @@ func (s *Server) routes(w http.ResponseWriter, r *http.Request, path string) {
 			return
 		}
 		writeJSON(w, http.StatusOK, items)
+	case path == "/api/v1/models/available":
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	case path == "/api/v1/models" && r.Method == http.MethodPost:
 		s.createModel(w, r)
 	case path == "/api/v1/instances" && r.Method == http.MethodGet:
@@ -217,18 +220,24 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	id := parts[0]
+	if !validModelRouteMethod(w, r.Method, parts) {
+		return
+	}
+	model, err := s.resolveModelRoute(r, parts[0])
+	if err != nil {
+		writeResourceLookupError(w, "model", err)
+		return
+	}
+	id := model.ID
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
-			item, err := s.models.GetByID(r.Context(), id)
-			if err != nil {
-				writeErr(w, http.StatusNotFound, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, item)
+			writeJSON(w, http.StatusOK, model)
 		case http.MethodPut:
-			var in models.UpdateModelInput
+			var in struct {
+				models.UpdateModelInput
+				ConfirmSlugChange bool `json:"confirm_slug_change"`
+			}
 			if !decode(w, r, &in) {
 				return
 			}
@@ -238,7 +247,15 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 				return
 			}
 			in.Options = validated
-			item, err := s.models.Update(r.Context(), id, in)
+			nextSlug := model.Slug
+			if strings.TrimSpace(in.Slug) != "" {
+				nextSlug = modelsSlug(in.Slug)
+			}
+			if nextSlug != model.Slug && !in.ConfirmSlugChange {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "changing this Model slug changes management URLs; confirmation required"})
+				return
+			}
+			item, err := s.models.Update(r.Context(), id, in.UpdateModelInput)
 			if err != nil {
 				writeErr(w, http.StatusBadRequest, err)
 				return
@@ -246,21 +263,11 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 			writeJSON(w, http.StatusOK, item)
 		case http.MethodDelete:
 			s.deleteModel(w, r, id)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		return
-	}
-	if len(parts) != 2 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
 	switch parts[1] {
 	case "options":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		items, err := s.models.Options(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -268,10 +275,6 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 		}
 		writeJSON(w, http.StatusOK, items)
 	case "start":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		_, err := s.lifecycle.StartModel(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, err)
@@ -280,30 +283,64 @@ func (s *Server) modelRoute(w http.ResponseWriter, r *http.Request, path string)
 		items, _ := s.lifecycle.Runtime(r.Context(), id)
 		writeJSON(w, http.StatusAccepted, items)
 	case "stop":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		if err := s.lifecycle.StopModel(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case "runtime":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		items, err := s.lifecycle.Runtime(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, items)
-	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
+
+func validModelRouteMethod(w http.ResponseWriter, method string, parts []string) bool {
+	if len(parts) == 1 {
+		if method == http.MethodGet || method == http.MethodPut || method == http.MethodDelete {
+			return true
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return false
+	}
+	if len(parts) != 2 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return false
+	}
+	required := ""
+	switch parts[1] {
+	case "options", "runtime":
+		required = http.MethodGet
+	case "start", "stop":
+		required = http.MethodPost
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return false
+	}
+	if method != required {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
+func (s *Server) resolveModelRoute(r *http.Request, value string) (models.Model, error) {
+	item, err := s.models.GetBySlug(r.Context(), value)
+	if err == nil {
+		return item, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return models.Model{}, err
+	}
+	// Transitional compatibility for old opaque-ID management links. Frontend
+	// navigation always emits the canonical slug route.
+	return s.models.GetByID(r.Context(), value)
+}
+
+func modelsSlug(value string) string { return instances.Slugify(value) }
 
 func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path string) {
 	rest := strings.TrimPrefix(path, "/api/v1/instances/")
@@ -312,48 +349,37 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	id := parts[0]
+	if !validInstanceRouteMethod(w, r.Method, parts) {
+		return
+	}
+	instance, err := s.lifecycle.Instances().GetBySlug(r.Context(), parts[0])
+	if err != nil {
+		writeResourceLookupError(w, "instance", err)
+		return
+	}
+	id := instance.ID
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
-			item, err := s.lifecycle.Instances().Get(r.Context(), id)
-			if err != nil {
-				writeErr(w, http.StatusNotFound, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, item)
+			writeJSON(w, http.StatusOK, instance)
 		case http.MethodPut:
-			s.updateInstance(w, r, id)
+			s.updateInstance(w, r, instance)
 		case http.MethodDelete:
 			_ = s.lifecycle.StopInstance(r.Context(), id)
 			if err := s.lifecycle.Instances().Delete(r.Context(), id); err != nil {
-				writeErr(w, http.StatusNotFound, err)
+				writeResourceLookupError(w, "instance", err)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 		return
 	}
-	if len(parts) == 3 && parts[1] == "logs" && parts[2] == "stream" {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
+	if len(parts) == 3 {
 		s.streamLogs(w, r, id)
-		return
-	}
-	if len(parts) != 2 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
 	switch parts[1] {
 	case "start":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		if _, err := s.lifecycle.StartInstance(r.Context(), id); err != nil {
 			writeErr(w, http.StatusServiceUnavailable, err)
 			return
@@ -361,20 +387,12 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		runtime, _ := s.lifecycle.RuntimeInstance(r.Context(), id)
 		writeJSON(w, http.StatusAccepted, runtime)
 	case "stop":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		if err := s.lifecycle.StopInstance(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case "restart":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		if _, err := s.lifecycle.RestartInstance(r.Context(), id); err != nil {
 			writeErr(w, http.StatusServiceUnavailable, err)
 			return
@@ -382,20 +400,12 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		runtime, _ := s.lifecycle.RuntimeInstance(r.Context(), id)
 		writeJSON(w, http.StatusAccepted, runtime)
 	case "kill":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		if err := s.lifecycle.KillInstance(r.Context(), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case "duplicate":
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		item, err := s.lifecycle.Instances().Duplicate(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err)
@@ -403,10 +413,6 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, http.StatusCreated, item)
 	case "runtime":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		runtime, err := s.lifecycle.RuntimeInstance(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusNotFound, err)
@@ -414,10 +420,6 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, http.StatusOK, runtime)
 	case "options":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		items, err := s.lifecycle.Instances().Options(r.Context(), id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -425,21 +427,64 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 		}
 		writeJSON(w, http.StatusOK, items)
 	case "logs":
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{"lines": s.lifecycle.Logs(id)})
-	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
 
-func (s *Server) updateInstance(w http.ResponseWriter, r *http.Request, id string) {
+func validInstanceRouteMethod(w http.ResponseWriter, method string, parts []string) bool {
+	if len(parts) == 1 {
+		if method == http.MethodGet || method == http.MethodPut || method == http.MethodDelete {
+			return true
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return false
+	}
+	if len(parts) == 3 {
+		if parts[1] != "logs" || parts[2] != "stream" {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return false
+		}
+		if method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return false
+		}
+		return true
+	}
+	if len(parts) != 2 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return false
+	}
+	required := ""
+	switch parts[1] {
+	case "runtime", "options", "logs":
+		required = http.MethodGet
+	case "start", "stop", "restart", "kill", "duplicate":
+		required = http.MethodPost
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return false
+	}
+	if method != required {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return false
+	}
+	return true
+}
+
+func writeResourceLookupError(w http.ResponseWriter, resource string, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": resource + " not found"})
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err)
+}
+
+func (s *Server) updateInstance(w http.ResponseWriter, r *http.Request, current instances.Instance) {
 	var in struct {
 		instances.UpdateInput
 		RestartRunning       bool `json:"restart_running"`
 		ConfirmModelIDChange bool `json:"confirm_model_id_change"`
+		ConfirmSlugChange    bool `json:"confirm_slug_change"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -450,33 +495,27 @@ func (s *Server) updateInstance(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	in.Options = validated
-	current, err := s.lifecycle.Instances().Get(r.Context(), id)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
+	nextSlug := current.Slug
+	if strings.TrimSpace(in.Slug) != "" {
+		nextSlug = instances.Slugify(in.Slug)
+	}
+	if nextSlug != current.Slug && !in.ConfirmSlugChange && !in.ConfirmModelIDChange {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "changing this Instance slug changes the OpenAI model ID; confirmation required"})
 		return
 	}
-	newIDSource := in.Slug
-	if strings.TrimSpace(newIDSource) == "" {
-		newIDSource = in.Name
-	}
-	newID := instances.Slugify(newIDSource)
-	if newID != current.ID && !in.ConfirmModelIDChange {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "renaming this Instance changes the OpenAI model ID; confirmation required"})
-		return
-	}
-	runtime, _ := s.lifecycle.RuntimeInstance(r.Context(), id)
+	runtime, _ := s.lifecycle.RuntimeInstance(r.Context(), current.ID)
 	running := runtime.State != supervisor.Unloaded && runtime.State != supervisor.Failed
 	if running && !in.RestartRunning {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "running Instance must restart to apply configuration; confirmation required"})
 		return
 	}
 	if running {
-		if err := s.lifecycle.StopInstance(r.Context(), id); err != nil {
+		if err := s.lifecycle.StopInstance(r.Context(), current.ID); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
-	item, err := s.lifecycle.Instances().Update(r.Context(), id, in.UpdateInput)
+	item, err := s.lifecycle.Instances().Update(r.Context(), current.ID, in.UpdateInput)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return

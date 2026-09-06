@@ -12,6 +12,12 @@ import (
 // baseline database is migrated on reopen without losing release-critical state.
 func TestExistingBaselineDatabaseUpgradesDurableState(t *testing.T) {
 	ctx := context.Background()
+	// This qualification test injects its own synthetic v2 migration. Keep the
+	// repository's real Go migrations out of this isolated baseline/probe test;
+	// they are qualified separately by resource_identity_migration_test.go.
+	restoreGo := withGoMigrations(nil)
+	defer restoreGo()
+
 	baselineSQL, err := fs.ReadFile(embeddedMigrations, "migrations/00001_baseline.sql")
 	if err != nil {
 		t.Fatal(err)

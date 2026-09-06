@@ -13,6 +13,10 @@ import (
 
 func TestQueueLimitRejectionIsOverloadedAndDoesNotStartWorker(t *testing.T) {
 	f := newGatewayFixture(t, true)
+	instance, err := f.lifecycle.Instances().GetBySlug(context.Background(), "gateway-model")
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.lifecycle.SetPendingLimits(func(context.Context) (int, int) { return 1, 10 })
 	hold := make(chan struct{})
 	f.lifecycle.SetLoadHold(func(string) { <-hold })
@@ -23,10 +27,10 @@ func TestQueueLimitRejectionIsOverloadedAndDoesNotStartWorker(t *testing.T) {
 		firstDone <- w.Code
 	}()
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && f.lifecycle.Activity("gateway-model").PendingRequests != 1 {
+	for time.Now().Before(deadline) && f.lifecycle.Activity(instance.ID).PendingRequests != 1 {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if f.lifecycle.Activity("gateway-model").PendingRequests != 1 {
+	if f.lifecycle.Activity(instance.ID).PendingRequests != 1 {
 		t.Fatal("first request did not become pending")
 	}
 
@@ -43,7 +47,7 @@ func TestQueueLimitRejectionIsOverloadedAndDoesNotStartWorker(t *testing.T) {
 		t.Fatalf("error envelope=%v", payload)
 	}
 
-	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: "gateway-model"})
+	records, err := f.observability.ListRequests(context.Background(), observability.RequestFilters{InstanceID: instance.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

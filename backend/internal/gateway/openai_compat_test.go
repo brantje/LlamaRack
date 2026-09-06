@@ -72,7 +72,7 @@ func TestRetrieveKnownEnabledModelWithoutAcquire(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"gateway-model"`) || !strings.Contains(w.Body.String(), `"owned_by":"llamarack"`) {
 		t.Fatalf("retrieve=%d %s", w.Code, w.Body.String())
 	}
-	if _, ok := f.sup.Endpoint("gateway-model"); ok {
+	if _, ok := f.sup.Endpoint(f.instanceID); ok {
 		t.Fatal("model retrieve started a worker")
 	}
 	unknown := gatewayRequest(t, f.gateway, http.MethodGet, "/v1/models/missing", f.secret, "")
@@ -80,7 +80,7 @@ func TestRetrieveKnownEnabledModelWithoutAcquire(t *testing.T) {
 		t.Fatalf("unknown=%d %s", unknown.Code, unknown.Body.String())
 	}
 	enabled := false
-	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), "gateway-model", instances.UpdateInput{
+	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), f.instanceID, instances.UpdateInput{
 		Name: "Gateway model", Enabled: &enabled,
 	}); err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func TestTokenCountRerankAndNotImplemented(t *testing.T) {
 func TestStoredResponsesFullAndMetadata(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	full := "full"
-	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), "gateway-model", instances.UpdateInput{
+	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), f.instanceID, instances.UpdateInput{
 		Name: "Gateway model", RequestLogMode: full,
 	}); err != nil {
 		t.Fatal(err)
@@ -167,7 +167,7 @@ func TestStoredResponsesFullAndMetadata(t *testing.T) {
 	}
 
 	metadata := "metadata"
-	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), "gateway-model", instances.UpdateInput{
+	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), f.instanceID, instances.UpdateInput{
 		Name: "Gateway model", RequestLogMode: metadata,
 	}); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestStoredResponsesFullAndMetadata(t *testing.T) {
 
 func TestStreamingResponseRetrieveAsJSON(t *testing.T) {
 	f := newGatewayFixture(t, true)
-	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), "gateway-model", instances.UpdateInput{
+	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), f.instanceID, instances.UpdateInput{
 		Name: "Gateway model", RequestLogMode: "full",
 	}); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestDuplicateOpenAIResponseIDRejectedByIndex(t *testing.T) {
 	now := time.Now().UnixMilli()
 	body := `{"id":"resp_dup","object":"response"}`
 	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_1", nil, observability.RequestRecord{
-		StartedAt: now, FinishedAt: now, InstanceID: "gateway-model", Endpoint: "/v1/responses",
+		StartedAt: now, FinishedAt: now, InstanceID: f.instanceID, Endpoint: "/v1/responses",
 		StatusCode: 200, Result: "success", ResponseBody: &body,
 	}); err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestDuplicateOpenAIResponseIDRejectedByIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_2", nil, observability.RequestRecord{
-		StartedAt: now, FinishedAt: now, InstanceID: "gateway-model", Endpoint: "/v1/responses",
+		StartedAt: now, FinishedAt: now, InstanceID: f.instanceID, Endpoint: "/v1/responses",
 		StatusCode: 200, Result: "success", ResponseBody: &body,
 	}); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestRetentionRemovesRetrievableResponse(t *testing.T) {
 	ctx := context.Background()
 	body := `{"id":"resp_old","object":"response","status":"completed"}`
 	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_old", nil, observability.RequestRecord{
-		StartedAt: 1, FinishedAt: 2, InstanceID: "gateway-model", Endpoint: "/v1/responses",
+		StartedAt: 1, FinishedAt: 2, InstanceID: f.instanceID, Endpoint: "/v1/responses",
 		StatusCode: 200, Result: "success", ResponseBody: &body,
 	}); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestMalformedStoredResponseFailsSafe(t *testing.T) {
 	f := newGatewayFixture(t, false)
 	ctx := context.Background()
 	if err := f.observability.BeginCorrelatedRequest(ctx, "lr_malformed", observability.RequestRecord{
-		StartedAt: 1, InstanceID: "gateway-model", Endpoint: "/v1/responses", CallType: "response",
+		StartedAt: 1, InstanceID: f.instanceID, Endpoint: "/v1/responses", CallType: "response",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestMalformedStoredResponseFailsSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := f.observability.FinalizeCorrelatedRequest(ctx, "lr_malformed", nil, observability.RequestRecord{
-		StartedAt: 1, FinishedAt: 2, InstanceID: "gateway-model", Endpoint: "/v1/responses",
+		StartedAt: 1, FinishedAt: 2, InstanceID: f.instanceID, Endpoint: "/v1/responses",
 		StatusCode: 200, Result: "success", ResponseBody: strPtr("not-json"),
 	}); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestMalformedStoredResponseFailsSafe(t *testing.T) {
 
 func TestAudioTranscriptionMultipart(t *testing.T) {
 	f := newGatewayFixture(t, true)
-	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), "gateway-model", instances.UpdateInput{
+	if _, err := f.gateway.lifecycle.Instances().Update(context.Background(), f.instanceID, instances.UpdateInput{
 		Name: "Gateway model", RequestLogMode: "full",
 	}); err != nil {
 		t.Fatal(err)

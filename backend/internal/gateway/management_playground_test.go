@@ -28,7 +28,7 @@ func TestManagementPlaygroundProxyReentersGatewayAndKeepsLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Endpoint != "/v1/chat/completions" || record.InstanceID != "gateway-model" || record.Result != "success" {
+	if record.Endpoint != "/v1/chat/completions" || record.InstanceID != f.instanceID || record.Result != "success" {
 		t.Fatalf("management bridge observability=%+v", record)
 	}
 	if record.APIKey == nil || record.APIKey.Name != "Management Playground" || record.APIKey.ID != "" || record.APIKey.Prefix != "" {

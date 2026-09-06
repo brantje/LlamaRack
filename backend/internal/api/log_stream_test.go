@@ -74,6 +74,7 @@ func TestWorkerLogStreamStreamsLiveWorkerOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	instanceID := instance.ID
+	instanceSlug := instance.Slug
 
 	sup := supervisor.New(fakeAPILogServer(t), "127.0.0.1", 33500, 5*time.Second)
 	f.server.lifecycle = lifecycle.New(f.models, sup)
@@ -84,13 +85,13 @@ func TestWorkerLogStreamStreamsLiveWorkerOutput(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceID+"/logs/stream", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/instances/"+instanceSlug+"/logs/stream", nil).WithContext(ctx)
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { f.server.ServeHTTP(recorder, req); close(done) }()
 
 	time.Sleep(25 * time.Millisecond)
-	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instanceID+"/start", nil, nil)
+	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+instanceSlug+"/start", nil, nil)
 	if started.Code != http.StatusAccepted {
 		cancel()
 		t.Fatalf("start status=%d body=%s", started.Code, started.Body.String())

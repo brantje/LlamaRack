@@ -12,12 +12,12 @@ const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: { value: 'http://manager.test:8888' } }))
 
 function model(overrides: Partial<Model> = {}): Model {
-  return { id: 'm1', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 4, context_length: 8192, ...overrides }
+  return { id: 'm1', slug: 'm1', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 4, context_length: 8192, ...overrides }
 }
 
 function instance(overrides: Partial<Instance> = {}): Instance {
   return {
-    id: 'primary-coder', model_id: 'm1', name: 'Primary Coder', enabled: true,
+    id: 'instance-uuid', slug: 'primary-coder', model_id: 'm1', name: 'Primary Coder', enabled: true,
     autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true,
     idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '', ...overrides
   }
@@ -114,7 +114,7 @@ describe('Instance configuration pages', () => {
     mocks.request.mockImplementation(async (path: string, options?: any) => {
       const hardware = hardwareAndLlamaCppResponse(path)
       if (hardware !== undefined) return hardware
-      if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'custom-coder' }
+      if (path === '/api/v1/instances' && options?.method === 'POST') return { id: 'custom-uuid', slug: 'custom-coder' }
       if (path === '/api/v1/instances/custom-coder/start') return { state: 'READY' }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return []
@@ -169,7 +169,7 @@ describe('Instance configuration pages', () => {
       if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances' && options?.method === 'POST') {
         if (failCreate) throw { data: { error: 'create failed' } }
-        return { id: 'cancelled-launch' }
+        return { id: 'cancelled-uuid', slug: 'cancelled-launch' }
       }
       if (path === '/api/v1/models') return manager.models.value
       if (path === '/api/v1/instances') return []
@@ -203,12 +203,12 @@ describe('Instance configuration pages', () => {
       const hardware = hardwareAndLlamaCppResponse(path)
       if (hardware !== undefined) return hardware
       if (path === '/api/v1/instances/primary-coder') {
-        if (options?.method === 'PUT') return { id: 'renamed-coder' }
+        if (options?.method === 'PUT') return { id: current.id, slug: 'renamed-coder' }
         return current
       }
       if (path === '/api/v1/instances/primary-coder/options') return { 'ctx-size': '8192' }
       if (path === '/api/v1/models') return manager.models.value
-      if (path === '/api/v1/instances') return [instance({ id: 'renamed-coder', name: 'Renamed Coder' })]
+      if (path === '/api/v1/instances') return [instance({ slug: 'renamed-coder', name: 'Renamed Coder' })]
       return {}
     })
 
@@ -217,7 +217,7 @@ describe('Instance configuration pages', () => {
     await expandFrame(wrapper, 'instance-form-overrides')
     expect(wrapper.text()).toContain('Edit Instance')
     expect(wrapper.findComponent(LlamaCppOptionsEditor).props('modelValue')).toEqual({ 'ctx-size': '8192' })
-    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('instanceId')).toBe('primary-coder')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('instanceId')).toBe(current.id)
     expect(wrapper.text()).toContain('No changes to save.')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
@@ -231,7 +231,7 @@ describe('Instance configuration pages', () => {
 
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(document.body.textContent).toContain('Existing clients using the old model ID will break')
+    expect(document.body.textContent).toContain('Existing clients using the old model ID and old bookmarks will break')
     await clickConfirmation('confirm')
     expect(document.body.textContent).toContain('temporary unavailability')
     await clickConfirmation('confirm')
@@ -321,7 +321,7 @@ describe('Model edit page', () => {
     await flushPromises()
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/m1', {
       method: 'PUT',
-      body: { name: 'Updated Model', context_length: 32768, options: { 'ctx-size': '32768', threads: '8' } }
+      body: { name: 'Updated Model', slug: 'm1', context_length: 32768, options: { 'ctx-size': '32768', threads: '8' } }
     })
   })
 

@@ -159,7 +159,7 @@ func TestCoreHealthAndModelProfileRoutes(t *testing.T) {
 		{"/api/v1/models/" + m.ID + "/runtime", 200},
 		{"/api/v1/models/" + m.ID + "/options", 200},
 		{"/api/v1/llamacpp/profile", 200},
-		{"/api/v1/instances/missing/logs", 200},
+		{"/api/v1/instances/missing/logs", 404},
 		{"/api/v1/artifacts", 404},
 	} {
 		w := doRequest(t, f.server, http.MethodGet, tc.path, nil, nil)
@@ -204,14 +204,14 @@ func TestCoreMethodsNotFoundAndProfileUnavailable(t *testing.T) {
 		{http.MethodPost, "/api/v1/models/available", nil, 405},
 		{http.MethodPatch, "/api/v1/models/missing", map[string]any{}, 405},
 		{http.MethodGet, "/api/v1/models/missing", nil, 404},
-		{http.MethodPut, "/api/v1/models/missing", map[string]any{"name": "x"}, 400},
-		{http.MethodGet, "/api/v1/models/missing/options", nil, 200},
-		{http.MethodGet, "/api/v1/models/missing/runtime", nil, 200},
+		{http.MethodPut, "/api/v1/models/missing", map[string]any{"name": "x"}, 404},
+		{http.MethodGet, "/api/v1/models/missing/options", nil, 404},
+		{http.MethodGet, "/api/v1/models/missing/runtime", nil, 404},
 		{http.MethodGet, "/api/v1/models/missing/unknown", nil, 404},
 		{http.MethodGet, "/api/v1/instances/missing", nil, 404},
-		{http.MethodPost, "/api/v1/instances/missing/start", nil, 503},
+		{http.MethodPost, "/api/v1/instances/missing/start", nil, 404},
 		{http.MethodGet, "/api/v1/instances/missing/runtime", nil, 404},
-		{http.MethodGet, "/api/v1/instances/missing/options", nil, 200},
+		{http.MethodGet, "/api/v1/instances/missing/options", nil, 404},
 		{http.MethodPost, "/api/v1/instances", map[string]any{}, 400},
 		{http.MethodGet, "/api/v1/nope", nil, 404},
 	} {

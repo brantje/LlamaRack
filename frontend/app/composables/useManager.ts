@@ -4,6 +4,7 @@ export type LoginResult = { access_token: string; token_type: string; expires_at
 export type AuthProviderInfo = { local_login_enabled: boolean; providers: PublicOIDCProvider[] }
 export type Model = {
   id: string
+  slug: string
   name: string
   gguf_path: string
   total_bytes: number
@@ -20,6 +21,7 @@ export type Model = {
 }
 export type Instance = {
   id: string
+  slug: string
   model_id: string
   name: string
   enabled: boolean
@@ -80,6 +82,7 @@ export type ObservabilityRequest = {
   started_at: number
   finished_at: number
   instance_id: string
+  model_slug?: string
   endpoint: string
   api_key?: { id: string; name: string; prefix: string }
   streaming: boolean
@@ -366,13 +369,13 @@ export function useManager() {
   async function refresh() {
     if (!user.value) return
     const [modelItems, instanceItems] = await Promise.all([request<Model[]>('/api/v1/models'), request<Instance[]>('/api/v1/instances')])
-    models.value = modelItems || []
-    instances.value = instanceItems || []
+    models.value = (modelItems || []).map(model => ({ ...model, slug: model.slug || model.id }))
+    instances.value = (instanceItems || []).map(instance => ({ ...instance, slug: instance.slug || instance.id }))
     if (runtimeEventsConnected.value) {
       runtimes.value = Object.fromEntries(models.value.map(model => [model.id, runtimes.value[model.id] || []]))
     } else {
       const runtimeItems = await Promise.all(instances.value.map(async instance => {
-        try { return await request<Runtime>(`/api/v1/instances/${encodeURIComponent(instance.id)}/runtime`) }
+        try { return await request<Runtime>(`/api/v1/instances/${encodeURIComponent(instance.slug)}/runtime`) }
         catch { return { instance_id: instance.id, model_id: instance.model_id, state: 'UNLOADED' } satisfies Runtime }
       }))
       applyRuntimeSnapshot(runtimeItems)

@@ -36,13 +36,23 @@ Before `1.0.0`, incompatible databases must be recreated or restored from a Goos
 - Lifecycle/scheduler state belongs to Instances, not Models.
 - Desired Instance configuration is separate from observed runtime state.
 - llama.cpp configuration uses inheritance rather than duplicated full configs.
-- Instance identity is human-friendly and directly usable by OpenAI-compatible clients.
+- Durable resource identity is separate from mutable human/public identity.
 - High-frequency metrics are not permanently relational by default.
 - Secrets remain separate from normal settings.
 - Raw GGUF files remain the source of truth for embedded model metadata.
 - Arbitrary GGUF metadata must not require one relational column per metadata key.
 
-## 4. Core entities
+## 4. Resource identity convention
+
+Long-lived first-class resources use three distinct concepts when they need human-addressable routes:
+
+- `id` — immutable durable machine identity and foreign-key target;
+- `slug` — unique mutable human/public route identity;
+- `name` — mutable display label.
+
+This convention applies to Models and Instances. It should also be used by future first-class resources such as Nodes when they require mutable human-friendly routes. It is not a requirement to add slugs to event rows, metrics, request IDs, jobs, or other machine-only records.
+
+Names and slugs are independent after creation. A name change does not implicitly change a slug. A slug change is an explicit operation with collision validation and an impact warning appropriate to the resource.
 
 ### 4.1 User / Session / Service account / API Key / Secret
 
@@ -55,7 +65,7 @@ These retain the existing v1 security model with typed owner-bound keys:
   - `key_type` of `inference`, `management`, or `full`;
   - exactly one owner (`owner_user_id` or `owner_service_account_id`);
   - optional `expires_on` (`YYYY-MM-DD`, valid through end of that UTC day);
-  - optional inference `instance_ids` allowlist;
+  - optional inference `instance_ids` allowlist containing immutable Instance IDs;
   - `enabled`, `prefix`, `last_used_at`;
   - no `revoked_at`; rotate replaces `token_hash` and `prefix` in place;
 - deleting a user or service account cascades and deletes that owner's keys;
@@ -109,11 +119,14 @@ A Model is a registered/configured management-plane model.
 
 Conceptual fields:
 
-- `id` — internal stable Model identifier;
+- `id` — immutable stable Model identifier and foreign-key target;
+- `slug` — unique mutable management/UI route identifier;
 - `name` — user-facing Model name;
 - `artifact_id`;
 - `enabled` if needed for management availability;
 - timestamps.
+
+Model slugs have no OpenAI inference meaning. Changing a Model slug changes management URLs/bookmarks only; it does not change any Instance slug or OpenAI `model` value.
 
 Model-derived summary data may expose:
 
@@ -140,7 +153,7 @@ Stores reusable llama.cpp overrides for one Model.
 
 Fields:
 
-- Model FK;
+- immutable Model ID FK;
 - canonical option key;
 - normalized serialized value;
 - validation/source metadata where useful;
@@ -154,9 +167,10 @@ An Instance is one durable configured potential `llama-server` process.
 
 Conceptual fields:
 
-- `id` — unique slug derived from Instance name;
-- `name` — human-entered Instance name;
-- `model_id` — FK to registered Model;
+- `id` — immutable UUID and durable foreign-key target;
+- `slug` — unique mutable public identifier and exact OpenAI `model` value;
+- `name` — human-entered Instance display name;
+- `model_id` — immutable Model ID FK;
 - `enabled` where needed;
 - `always_on`;
 - `autoload_enabled`;
@@ -174,20 +188,25 @@ The Instance row is durable even while no process exists.
 
 ### 4.7 Instance identity rules
 
-Instance identity is intentionally derived from its name.
+Instance creation defaults the slug from the name, but durable and public identity are separate:
 
 ```text
 Instance name
-   -> slugify
-   -> instance.id
+   -> slugify on create
+   -> instance.slug
    -> OpenAI model identifier
+
+instance.id
+   -> immutable UUID
+   -> runtime ownership / foreign keys / allowlists / history correlation
 ```
 
 Example:
 
 ```text
 name = "Qwen Coding 32B"
-id   = "qwen-coding-32b"
+slug = "qwen-coding-32b"
+id   = "550e8400-e29b-41d4-a716-446655440000"
 ```
 
 Clients use:
@@ -198,13 +217,15 @@ Clients use:
 
 Rules:
 
-- `instance.id` is globally unique among addressable Instances;
-- slug generation is deterministic;
-- use a conservative URL/JSON-safe character set;
-- no separate `public_id`, `model_alias` or inference alias is required;
-- renaming an Instance changes its slug/ID;
-- rename is therefore API-breaking and requires explicit warning/confirmation in the UI;
-- duplicate/colliding slugs must fail validation rather than silently target the wrong Instance.
+- `instance.id` is immutable and never derived from later name/slug edits;
+- `instance.slug` is globally unique among addressable Instances;
+- default slug generation is deterministic and uses a conservative URL/JSON-safe character set;
+- `instance.slug` is the exact OpenAI-compatible model identifier;
+- renaming an Instance changes only `name` unless the user explicitly edits `slug`;
+- changing `slug` is API-breaking for clients using the old OpenAI `model` value and requires explicit warning/confirmation;
+- changing `slug` does not rewrite durable UUID references;
+- duplicate/colliding slugs fail validation rather than silently target the wrong Instance;
+- no hidden compatibility alias for an old slug is retained unless explicitly added as a future feature.
 
 ### 4.8 Instance llama.cpp override
 
@@ -232,7 +253,7 @@ Observed runtime state is separate from durable Instance configuration.
 
 It can expose:
 
-- `instance_id`;
+- `instance_id` — immutable Instance UUID;
 - lifecycle state;
 - PID;
 - private port;
@@ -248,7 +269,7 @@ PID, port and READY state are ephemeral and cannot be trusted after manager rest
 
 A separate `worker_runtime` table stores only enough identity to reconcile after an abnormal manager restart:
 
-- `instance_id` (plain text, no foreign key, so a deleted Instance can still be cleaned up);
+- `instance_id` (plain immutable Instance ID text, no foreign key, so a deleted Instance can still be cleaned up);
 - worker generation token;
 - PID;
 - process start identity (`start_ticks`);
@@ -256,18 +277,25 @@ A separate `worker_runtime` table stores only enough identity to reconcile after
 
 This table is not desired Instance configuration and must never override durable Instance rows. A durable `installation_id` in `manager_settings` (internal, not an admin General setting) labels workers belonging to this installation. Workers also receive `LLAMARACK_INSTALLATION_ID`, `LLAMARACK_INSTANCE_ID`, and `LLAMARACK_WORKER_GENERATION` in their environment so startup cleanup can prove ownership before terminating a process.
 
+The managed `llama-server --alias` value is the current Instance slug. Process ownership, runtime maps, reservations and cleanup remain keyed by immutable Instance ID.
+
 ### 4.10 Download job / provider cache
 
 Retain the existing durable download-job model and bounded provider cache behavior.
 
 ### 4.11 Inference request OpenAI Response state
 
-`inference_requests` remains the single persistence source for inference traffic. OpenAI stored-Response support adds:
+`inference_requests` remains the single persistence source for inference traffic. Request history stores both:
+
+- `instance_id` — durable Instance identity used for correlation/authorization/filtering;
+- `model_slug` — exact OpenAI model slug captured for that request and never rewritten after a later rename.
+
+OpenAI stored-Response support adds:
 
 - `openai_response_id` (nullable text)
 - `openai_response_deleted` (integer, default 0)
 
-A partial unique index on non-null `openai_response_id` values enforces one Manager row per upstream Response ID. OpenAI deletion only sets `openai_response_deleted`; it does not delete the row or clear debugging bodies. Development databases with an incompatible earlier schema are recreated; this work does not introduce a general migration framework.
+A partial unique index on non-null `openai_response_id` values enforces one Manager row per upstream Response ID. OpenAI deletion only sets `openai_response_deleted`; it does not delete the row or clear debugging bodies.
 
 ## 5. Configuration fingerprints
 
@@ -293,7 +321,7 @@ The GGUF metadata-cache fingerprint is separate from the Instance launch fingerp
 
 For `/models`:
 
-- Model ID/name;
+- Model name and slug;
 - path;
 - size;
 - quantization;
@@ -304,7 +332,7 @@ Do not mix Instance runtime state into the Models table.
 
 ### Model details
 
-For `/models/:id/details`:
+For `/models/:slug/details`:
 
 - a compact Model/GGUF summary;
 - GGUF version/count/status where available;
@@ -320,13 +348,15 @@ Instance lifecycle/runtime state does not move to Model details.
 
 For `/instances`:
 
-- Instance `id` and name;
+- Instance `slug` and name;
 - referenced Model;
 - configured lifecycle/resource policy;
 - observed runtime state;
 - placement summary;
 - health/failure information;
 - runtime metrics as observability adds them.
+
+The immutable UUID may be exposed in diagnostics/details where machine identity matters, but normal navigation uses the slug.
 
 ## 7. Model creation with optional first Instance
 
@@ -335,6 +365,7 @@ Creating a Model may optionally bootstrap one Instance.
 The Model creation UI may collect only these Instance-specific settings:
 
 - Instance name;
+- Instance slug (defaulted from name);
 - Always On;
 - Autoload on request;
 - Allow resource-pressure eviction;
@@ -345,12 +376,12 @@ Before Model save, GGUF inspection may inspect the selected local GGUF and pre-f
 The backend must:
 
 1. validate/inspect the selected logical GGUF artifact where possible;
-2. create the Model;
+2. create the Model with an immutable ID and unique slug;
 3. persist accepted Model metadata/cache information where configured;
-4. slugify Instance name to `instance.id` when first-Instance bootstrap was requested;
-5. validate uniqueness;
-6. create the Instance;
-7. apply the selected three policies;
+4. default the optional first Instance slug from its name when not explicitly provided;
+5. validate slug uniqueness;
+6. create the Instance with an immutable UUID;
+7. apply the selected policies;
 8. optionally request launch.
 
 If process startup fails, do not delete the successfully created Model or Instance.
@@ -374,24 +405,25 @@ Examples:
 - creating a Model plus its optional first Instance definition;
 - persisting Model metadata/cache information alongside successful Model registration;
 - duplicating an Instance and its override rows;
-- updating an Instance name/ID plus related foreign-key references if the schema requires it;
+- changing a slug while preserving all ID-based foreign-key references;
 - marking download completion and artifact files.
 
 Worker process startup cannot be inside a SQLite transaction. Persist desired state first, then execute lifecycle actions.
 
 GGUF inspection/file I/O should not hold a long SQLite write transaction. Inspect/validate first, then transactionally persist the accepted result.
 
-## 10. Rename semantics
+## 10. Rename and slug-change semantics
 
-Because `instance.id` is derived from Instance name, renaming changes inference identity.
+Names and slugs are independent after creation.
 
 Required behavior:
 
-- compute the new slug before save;
-- validate uniqueness;
-- warn that clients using the old OpenAI `model` value will break;
-- apply rename atomically to durable references where possible;
-- do not retain a hidden compatibility alias in v1 unless explicitly added as a future feature.
+- changing `name` alone preserves `id` and `slug`;
+- changing `slug` preserves immutable `id` and every durable ID reference;
+- validate slug uniqueness before save;
+- Instance slug changes warn that clients using the old OpenAI `model` value will break;
+- Model slug changes warn that management URLs/bookmarks change, but do not imply an inference/API break;
+- do not retain hidden old-slug compatibility aliases unless explicitly added as a future feature.
 
 ## 11. Hardware identity
 
@@ -415,19 +447,22 @@ GGUF metadata cache, when used, contains artifact metadata only and must never c
 
 1. A Model references a usable completed artifact.
 2. A Model may have zero or many Instances.
-3. An Instance references exactly one Model.
+3. An Instance references exactly one Model by immutable Model ID.
 4. Lifecycle/scheduler policy belongs to the Instance.
-5. `instance.id` is the slug derived from Instance name.
-6. `instance.id` is the exact OpenAI `model` identifier.
-7. There is no second public Instance alias in v1.
-8. Runtime PID/port do not prove liveness after restart; stale owned workers are identified from installation/generation metadata plus start identity, then terminated before replacements launch.
-9. Model and Instance llama.cpp overrides retain inheritance semantics.
-10. Instance GPU assignments cannot silently retarget another device.
-11. Model deletion and artifact deletion are separate.
-12. Schema changes after the 1.0 baseline require a new immutable Goose migration in the same change, with fixtures/seeds/tests updated together; runtime schema compatibility helpers are prohibited.
-13. The GGUF file/shard set is the source of truth; cached inspection must be invalidated/refreshed when its artifact fingerprint changes.
-14. Arbitrary GGUF metadata keys are not modeled as one schema column each.
-15. Model metadata/details never acquire Instance runtime lifecycle ownership.
+5. Model and Instance `id` values are immutable durable identities.
+6. Model and Instance `slug` values are unique mutable human/public route identities.
+7. `instance.slug` is the exact OpenAI `model` identifier; `model.slug` has no OpenAI meaning.
+8. Name changes do not implicitly change slugs after creation.
+9. Durable references, runtime ownership and API-key Instance scopes use immutable IDs, not slugs.
+10. Request history preserves both durable Instance ID and the exact model slug captured for the request.
+11. Runtime PID/port do not prove liveness after restart; stale owned workers are identified from installation/generation metadata plus start identity, then terminated before replacements launch.
+12. Model and Instance llama.cpp overrides retain inheritance semantics.
+13. Instance GPU assignments cannot silently retarget another device.
+14. Model deletion and artifact deletion are separate.
+15. Schema changes after the 1.0 baseline require a new immutable Goose migration in the same change, with fixtures/seeds/tests updated together; runtime schema compatibility helpers are prohibited.
+16. The GGUF file/shard set is the source of truth; cached inspection must be invalidated/refreshed when its artifact fingerprint changes.
+17. Arbitrary GGUF metadata keys are not modeled as one schema column each.
+18. Model metadata/details never acquire Instance runtime lifecycle ownership.
 
 ## 14. Acceptance criteria
 
@@ -435,17 +470,20 @@ The data model is adequate when it can represent:
 
 - a registered Model with no Instance;
 - one Model with two independently configured Instances;
-- Instance names `Coding` and `Coding Large` with IDs `coding` and `coding-large`;
-- `/v1/models` entries whose IDs are those Instance IDs;
+- Instance names `Coding` and `Coding Large` with slugs `coding` and `coding-large` plus independent UUID IDs;
+- `/v1/models` entries whose IDs are those Instance slugs;
 - a stopped Instance whose durable policy survives restart;
 - two sibling Instances with different context/GPU/llama.cpp overrides;
 - Instance-specific Always On, Autoload and eviction policy;
-- a rename that changes `instance.id` only after explicit API-breaking warning;
+- a name-only rename that preserves both UUID and slug;
+- an explicit Instance slug change that preserves UUID/references and only occurs after an API-breaking warning;
+- an explicit Model slug change that preserves Model ID and Instance inference identity;
+- API-key Instance scopes that remain valid after Instance slug changes;
+- request history that keeps the original model slug after a later Instance rename;
 - a failed first-Instance launch without deleting its Model;
 - stale PID/port state discarded after manager restart;
 - split GGUF artifacts and resumable downloads;
 - a versioned GGUF metadata inspection/cache preserving generic key/type/value data;
 - manager-derived values such as Context capability without requiring a schema field for every GGUF metadata key;
 - cache invalidation when the local artifact/shard fingerprint changes;
-- `/models/:id/details` generic metadata data without adding Instance runtime state to the Model;
-- no development migration file for the active-development schema rewrite.
+- `/models/:slug/details` generic metadata data without adding Instance runtime state to the Model.
