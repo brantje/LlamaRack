@@ -28,9 +28,12 @@ jobs:
             backend/internal/observability/writeback_test.go \
             backend/internal/observability/writeback_coverage_test.go \
             backend/internal/gateway/overhead_locust_test.go
-      - name: Test final writeback regressions
+      - name: Test permanent writeback drain regression
         working-directory: backend
-        run: go test -v ./internal/observability -run 'TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches|TestWritebackPersistsRichContextAndResponseState'
+        run: go test -v ./internal/observability -run '^TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches$'
+      - name: Test rich writeback pre-flush regression
+        working-directory: backend
+        run: go test -v ./internal/observability -run '^TestWritebackPersistsRichContextAndResponseState$'
       - name: Test observability package
         working-directory: backend
         run: go test ./internal/observability
