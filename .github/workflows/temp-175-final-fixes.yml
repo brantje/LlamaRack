@@ -29,8 +29,22 @@ jobs:
             backend/internal/observability/writeback_coverage_test.go \
             backend/internal/gateway/overhead_locust_test.go
       - name: Test permanent writeback drain regression
+        id: permanent
+        continue-on-error: true
         working-directory: backend
-        run: go test -v ./internal/observability -run '^TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches$'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -v ./internal/observability -run '^TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches$' 2>&1 | tee ../permanent-writeback.log
+      - name: Upload regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permanent-writeback-log
+          path: permanent-writeback.log
+      - name: Stop on permanent regression failure
+        if: steps.permanent.outcome == 'failure'
+        run: exit 1
       - name: Test rich writeback pre-flush regression
         working-directory: backend
         run: go test -v ./internal/observability -run '^TestWritebackPersistsRichContextAndResponseState$'
