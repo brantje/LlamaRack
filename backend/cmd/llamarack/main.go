@@ -137,7 +137,10 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			slog.Warn("llama-server discovery unavailable", "error", err)
 		} else {
-			slog.Info("llama-server discovered", "version", p.Version, "options", len(p.Options))
+			slog.Info("llama-server discovered", "version", p.Version, "options", len(p.Options), "devices", p.Devices)
+			if !p.DeviceDiscoveryAvailable {
+				slog.Warn("llama-server device discovery unavailable", "error", p.DeviceDiscoveryError)
+			}
 		}
 	}
 	refreshProfile()
@@ -146,7 +149,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		defer profileMu.RUnlock()
 		return profile, profileErr
 	}
-	lifecycleService.SetProfileGetter(profileGetter)
+	lifecycleService.SetRuntimeDeviceProfile(profileGetter)
 
 	providerSecrets, err := huggingface.NewSecretStore(db, cfg.DataDir)
 	if err != nil {
