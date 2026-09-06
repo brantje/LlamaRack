@@ -44,7 +44,7 @@ func TestCoverageHelpersAndLocalHandlers(t *testing.T) {
 	if _, _, ok := classify(http.MethodGet, ""); ok {
 		t.Fatal("empty path")
 	}
-	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gw%2Fmodel"); !ok || params["model"] != "gw/model" {
+	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gw%2Fmodel"); !ok || params["model"] != "gw%2Fmodel" {
 		t.Fatalf("unescape=%v ok=%v", params, ok)
 	}
 
@@ -100,5 +100,29 @@ func TestCoverageHelpersAndLocalHandlers(t *testing.T) {
 	g.proxyChatControl(newResponseObserver(w, false), httptest.NewRequest(http.MethodPost, "/v1/chat/completions/control", nil), routeSpec{Kind: routeChatControl}, "lr_ctl", &record, []byte(`{"id":"missing"}`), time.Now(), &tps, &panicVal)
 	if w.Code != 404 {
 		t.Fatalf("control missing=%d", w.Code)
+	}
+}
+
+func TestMatchPathDoesNotRecursivelyDecode(t *testing.T) {
+	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gateway-model"); !ok || params["model"] != "gateway-model" {
+		t.Fatalf("plain model=%v ok=%v", params, ok)
+	}
+	if params, ok := matchPath("/v1/responses/{response_id}", "/v1/responses/resp_1"); !ok || params["response_id"] != "resp_1" {
+		t.Fatalf("plain response=%v ok=%v", params, ok)
+	}
+	if params, ok := matchPath("/v1/slots/{slot_id}", "/v1/slots/7"); !ok || params["slot_id"] != "7" {
+		t.Fatalf("plain slot=%v ok=%v", params, ok)
+	}
+	if params, ok := matchPath("/v1/models/{model}", "/v1/models/gw%2Fmodel"); !ok || params["model"] != "gw%2Fmodel" {
+		t.Fatalf("encoded slash became %v ok=%v", params, ok)
+	}
+	if params, ok := matchPath("/v1/slots/{slot_id}", "/v1/slots/%2e%2e%2fprobe"); !ok || params["slot_id"] != "%2e%2e%2fprobe" {
+		t.Fatalf("encoded traversal became %v ok=%v", params, ok)
+	}
+	if params, ok := matchPath("/v1/slots/{slot_id}", "/v1/slots/%252e%252e%252fprobe"); !ok || params["slot_id"] != "%252e%252e%252fprobe" {
+		t.Fatalf("double-encoded traversal became %v ok=%v", params, ok)
+	}
+	if _, ok := matchPath("/v1/slots/{slot_id}", "/v1/slots/../1"); ok {
+		t.Fatal("dot-dot extra segments should not match a single slot_id")
 	}
 }

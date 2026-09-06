@@ -142,6 +142,13 @@ func TestInferenceOpenAPIDocumentsNewSurface(t *testing.T) {
 	if _, ok := doc.Paths["/v1/responses/input_tokens"]["post"].Responses["501"]; !ok {
 		t.Fatal("token count missing 501")
 	}
+	slotAction := doc.Paths["/v1/slots/{slot_id}"]["post"]
+	if len(slotAction.Parameters) == 0 || slotAction.Parameters[0].Name != "slot_id" || slotAction.Parameters[0].Schema.Type != "integer" {
+		t.Fatalf("slot_id schema=%+v", slotAction.Parameters)
+	}
+	if slotAction.Parameters[0].Schema.Minimum == nil || *slotAction.Parameters[0].Schema.Minimum != 0 {
+		t.Fatalf("slot_id minimum=%v", slotAction.Parameters[0].Schema.Minimum)
+	}
 	create := doc.Paths["/v1/responses"]["post"]
 	if !strings.Contains(create.Description, "previous_response_id") {
 		t.Fatalf("missing previous_response_id note: %s", create.Description)

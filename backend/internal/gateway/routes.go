@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -159,11 +158,7 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 			if pathParts[i] == "" || name == "" {
 				return nil, false
 			}
-			decoded, err := url.PathUnescape(pathParts[i])
-			if err != nil {
-				decoded = pathParts[i]
-			}
-			params[name] = decoded
+			params[name] = pathParts[i]
 			continue
 		}
 		if part != pathParts[i] {

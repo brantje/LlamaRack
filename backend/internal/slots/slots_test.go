@@ -9,12 +9,58 @@ import (
 	"testing"
 )
 
-func TestUpstreamPath(t *testing.T) {
-	if got := UpstreamPath(http.MethodGet, ""); got != "/slots" {
-		t.Fatalf("GET path=%q", got)
+func TestParseSlotID(t *testing.T) {
+	valid := []struct {
+		in   string
+		want uint64
+	}{
+		{in: "0", want: 0},
+		{in: "7", want: 7},
+		{in: "001", want: 1},
 	}
-	if got := UpstreamPath(http.MethodPost, "3"); got != "/slots/3" {
-		t.Fatalf("POST path=%q", got)
+	for _, tc := range valid {
+		got, err := ParseSlotID(tc.in)
+		if err != nil || got != tc.want {
+			t.Fatalf("ParseSlotID(%q)=%d err=%v want=%d", tc.in, got, err, tc.want)
+		}
+	}
+	for _, in := range []string{"", "-1", "+7", "1e2", "1.0", "../1", "1/2", "%2e%2e%2fprobe", "1%2F2", " 7", "7 ", "abc"} {
+		if _, err := ParseSlotID(in); err == nil {
+			t.Fatalf("ParseSlotID(%q) accepted", in)
+		}
+	}
+}
+
+func TestUpstreamPath(t *testing.T) {
+	got, err := UpstreamPath(http.MethodGet, "")
+	if err != nil || got != "/slots" {
+		t.Fatalf("GET path=%q err=%v", got, err)
+	}
+	for _, tc := range []struct {
+		id   string
+		want string
+	}{
+		{id: "0", want: "/slots/0"},
+		{id: "3", want: "/slots/3"},
+		{id: "7", want: "/slots/7"},
+		{id: "001", want: "/slots/1"},
+	} {
+		got, err = UpstreamPath(http.MethodPost, tc.id)
+		if err != nil || got != tc.want {
+			t.Fatalf("POST id=%q path=%q err=%v want=%q", tc.id, got, err, tc.want)
+		}
+	}
+}
+
+func TestUpstreamPathRejectsMalformedIDs(t *testing.T) {
+	for _, id := range []string{"", "-1", "abc", "../1", "1/2", "%2e%2e%2fprobe", "1%2F2", ".."} {
+		got, err := UpstreamPath(http.MethodPost, id)
+		if err == nil {
+			t.Fatalf("POST id=%q path=%q", id, got)
+		}
+		if got != "" {
+			t.Fatalf("POST id=%q leaked path=%q", id, got)
+		}
 	}
 }
 
@@ -83,7 +129,11 @@ func TestProxyRewritesPathQueryAndMapsNotImplemented(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/slots?model=gateway-model&action=save", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
-	if err := Proxy(rec, req, worker.URL, UpstreamPath(http.MethodGet, ""), nil, true); err != nil {
+	upstreamPath, err := UpstreamPath(http.MethodGet, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Proxy(rec, req, worker.URL, upstreamPath, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	if gotPath != "/slots" || strings.Contains(gotQuery, "model=") || !strings.Contains(gotQuery, "action=save") {

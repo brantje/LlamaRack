@@ -114,7 +114,11 @@ func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec r
 	if !ok { return }
 	setProductHeader(wHeader(observed), headerInstance, instance.Slug)
 
-	upstreamPath := slots.UpstreamPath(r.Method, params["slot_id"])
+	upstreamPath, err := slots.UpstreamPath(r.Method, params["slot_id"])
+	if err != nil {
+		writeError(observed, http.StatusBadRequest, "invalid_request_error", "invalid_request", err.Error())
+		return
+	}
 	if r.Method == http.MethodPost {
 		action := strings.TrimSpace(r.URL.Query().Get("action"))
 		if err := slots.ValidateAction(action); err != nil {
