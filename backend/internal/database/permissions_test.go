@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -93,6 +94,36 @@ func TestRestrictModeFailsWhenChmodRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "honors chmod") {
 		t.Fatalf("expected actionable chmod error, got %v", err)
+	}
+}
+
+func TestRestrictModeSkipsDirectoryWhenChmodPermissionDenied(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o0777); err != nil {
+		t.Fatal(err)
+	}
+	err := restrictModeWith(dir, privateDirPerm, false, os.Stat, func(name string, mode os.FileMode) error {
+		return &os.PathError{Op: "chmod", Path: name, Err: syscall.EPERM}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMode(t, dir, 0o777)
+}
+
+func TestRestrictModeFailsWhenFileChmodPermissionDenied(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manager.db")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := restrictModeWith(path, privateFilePerm, false, os.Stat, func(name string, mode os.FileMode) error {
+		return &os.PathError{Op: "chmod", Path: name, Err: syscall.EPERM}
+	})
+	if err == nil || !strings.Contains(err.Error(), "honors chmod") {
+		t.Fatalf("expected file chmod permission error, got %v", err)
 	}
 }
 
