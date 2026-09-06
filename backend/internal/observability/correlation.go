@@ -62,6 +62,9 @@ func (s *Service) BeginCorrelatedRequest(ctx context.Context, requestID string, 
 	if record.StartedAt <= 0 {
 		return fmt.Errorf("started_at is required")
 	}
+	if handled, err := s.bufferBegin(requestID, record); handled {
+		return err
+	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
@@ -98,6 +101,12 @@ func (s *Service) UpdateCorrelatedRequest(ctx context.Context, requestID string,
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return fmt.Errorf("request_id is required")
+	}
+	if handled, err := s.bufferUpdate(requestID, record); handled {
+		return err
+	}
+	if s.writebackEnabled() {
+		return nil
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
@@ -144,6 +153,9 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 	}
 	if strings.TrimSpace(record.Endpoint) == "" {
 		return fmt.Errorf("endpoint is required")
+	}
+	if handled, err := s.bufferFinalize(requestID, promptTokensPerSecond, record); handled {
+		return err
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
@@ -240,6 +252,16 @@ func (s *Service) RecordCorrelatedRequest(ctx context.Context, requestID string,
 	if strings.TrimSpace(record.InstanceID) == "" || strings.TrimSpace(record.Endpoint) == "" {
 		return fmt.Errorf("instance_id and endpoint are required")
 	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if record.StartedAt <= 0 {
+		return fmt.Errorf("started_at is required")
+	}
+	if handled, err := s.bufferRecordCorrelated(requestID, promptTokensPerSecond, record); handled {
+		return err
+	}
 	if err := s.BeginCorrelatedRequest(ctx, requestID, record); err != nil {
 		return err
 	}
@@ -284,6 +306,12 @@ func (s *Service) SetOpenAIResponseID(ctx context.Context, requestID, openaiID s
 	if requestID == "" || openaiID == "" {
 		return nil
 	}
+	if handled, err := s.bufferOpenAIResponseID(requestID, openaiID); handled {
+		return err
+	}
+	if s.writebackEnabled() {
+		return nil
+	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
@@ -300,6 +328,9 @@ func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) 
 	openaiID = strings.TrimSpace(openaiID)
 	if openaiID == "" {
 		return StoredOpenAIResponse{}, sql.ErrNoRows
+	}
+	if item, ok := s.bufferedStoredOpenAIResponse(openaiID); ok {
+		return item, nil
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return StoredOpenAIResponse{}, err
@@ -326,16 +357,19 @@ func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) 
 	return item, nil
 }
 
-func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openaiID string) error {
-	openaiID = strings.TrimSpace(openaiID)
-	if openaiID == "" {
+func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openAIID string) error {
+	openAIID = strings.TrimSpace(openAIID)
+	if openAIID == "" {
 		return sql.ErrNoRows
+	}
+	if handled, err := s.bufferMarkOpenAIResponseDeleted(openAIID); handled {
+		return err
 	}
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET openai_response_deleted=1
-		WHERE openai_response_id=? AND endpoint='/v1/responses' AND openai_response_deleted=0`, openaiID)
+		WHERE openai_response_id=? AND endpoint='/v1/responses' AND openai_response_deleted=0`, openAIID)
 	if err != nil {
 		return err
 	}

@@ -134,7 +134,11 @@ func (s *Service) SetUserEnabled(ctx context.Context, id int64, enabled bool) er
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.clearAPIKeyCache()
+	return nil
 }
 
 func (s *Service) DeleteUser(ctx context.Context, actorID, id int64) error {
@@ -162,7 +166,11 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, id int64) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id=?", id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.clearAPIKeyCache()
+	return nil
 }
 
 func (s *Service) ResetPassword(ctx context.Context, userID int64, newPassword string) error {

@@ -42,14 +42,22 @@ type Gateway struct {
 }
 
 type requestEnvelope struct {
-	Model           string `json:"model"`
-	Stream          bool   `json:"stream"`
+	Model     string `json:"model"`
+	Stream    bool   `json:"stream"`
+	SessionID string `json:"session_id"`
+	Metadata  struct {
+		SessionID string `json:"session_id"`
+	} `json:"metadata"`
 	LiteLLMMetadata struct {
-		TraceID string `json:"trace_id"`
+		TraceID   string `json:"trace_id"`
+		SessionID string `json:"session_id"`
 	} `json:"litellm_metadata"`
 }
 
 func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*observability.Service) *Gateway {
+	if l != nil {
+		l.Instances().EnableHotCache()
+	}
 	g := &Gateway{auth: a, lifecycle: l, active: newActiveRegistry()}
 	if len(services) > 0 {
 		g.observability = services[0]
@@ -76,6 +84,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if spec.Body != bodyMultipart && looksLikeJSON(prefix) {
 		parseErr = json.Unmarshal(prefix, &envelope)
 	}
+	recordSessionCapture(r, envelope)
 	traceID := resolveTraceID(r, envelope.LiteLLMMetadata.TraceID)
 	w.Header().Set(headerTraceID, traceID)
 
@@ -176,7 +185,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyTooLarge = true
 		body = nil
 	}
-	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge {
+	if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge && len(body) > len(prefix) {
 		var fullEnvelope requestEnvelope
 		parseErr = nil
 		if looksLikeJSON(body) {
@@ -186,6 +195,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		envelope = fullEnvelope
 		record.Streaming = envelope.Stream
+		recordSessionCapture(r, envelope)
 		g.captureModelSlug(r.Context(), requestID, strings.TrimSpace(envelope.Model))
 		if suppliedTraceID, ok := suppliedTraceID(r, envelope.LiteLLMMetadata.TraceID); ok && suppliedTraceID != traceID {
 			traceID = suppliedTraceID
@@ -250,28 +260,41 @@ func looksLikeJSON(body []byte) bool {
 }
 
 func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	detached := context.WithoutCancel(ctx)
+	if g.observability != nil && g.observability.WritebackEnabled() {
+		return detached, func() {}
+	}
+	return context.WithTimeout(detached, 5*time.Second)
 }
 
 func (g *Gateway) begin(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.BeginCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("begin inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) update(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.UpdateCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("update inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.FinalizeCorrelatedRequest(persistCtx, requestID, promptTPS, record); err != nil {
 		slog.Warn("finalize inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
@@ -279,8 +302,11 @@ func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *flo
 
 func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
 	slug = boundedMetadata(slug, modelSlugCaptureLimit)
-	if g.observability == nil || slug == "" { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil || slug == "" {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.SetRequestModelSlug(persistCtx, requestID, slug); err != nil {
 		slog.Warn("capture inference model slug failed", "request_id", requestID, "model_slug", slug, "error", err)
 	}

@@ -71,7 +71,10 @@ func TestResolveInstanceByIDUsesDurableIdentityAndHandlesFailures(t *testing.T) 
 		}
 		record := observability.RequestRecord{}
 		observed, w := newObserved()
-		if _, ok := f.gateway.resolveInstanceByID(observed, newRequest(), &record, f.instanceID); ok {
+		// Use an uncached durable ID: a warmed cache entry must remain usable even
+		// after storage becomes unavailable, while a true cache miss must surface
+		// the underlying storage failure.
+		if _, ok := f.gateway.resolveInstanceByID(observed, newRequest(), &record, "00000000-0000-4000-8000-fffffffffff0"); ok {
 			t.Fatal("expected closed database lookup to fail")
 		}
 		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "model_unavailable") {

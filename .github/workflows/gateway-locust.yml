@@ -1,0 +1,80 @@
+name: Gateway Locust
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/gateway/**'
+      - 'backend/internal/auth/**'
+      - 'backend/internal/instances/**'
+      - 'backend/internal/lifecycle/**'
+      - 'backend/internal/models/**'
+      - 'backend/internal/observability/**'
+      - 'backend/internal/storage/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/gateway-locust.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/internal/gateway/**'
+      - 'backend/internal/auth/**'
+      - 'backend/internal/instances/**'
+      - 'backend/internal/lifecycle/**'
+      - 'backend/internal/models/**'
+      - 'backend/internal/observability/**'
+      - 'backend/internal/storage/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/gateway-locust.yml'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Load profile
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - qualification
+
+permissions:
+  contents: read
+
+jobs:
+  gateway-locust:
+    name: Gateway Locust
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+
+      - name: Select load profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.profile }}" == "qualification" ]]; then
+            echo "LLAMARACK_BENCH_USERS=1000" >> "$GITHUB_ENV"
+            echo "LLAMARACK_BENCH_WARMUP=15s" >> "$GITHUB_ENV"
+            echo "LLAMARACK_BENCH_DURATION=60s" >> "$GITHUB_ENV"
+          else
+            echo "LLAMARACK_BENCH_USERS=40" >> "$GITHUB_ENV"
+            echo "LLAMARACK_BENCH_WARMUP=2s" >> "$GITHUB_ENV"
+            echo "LLAMARACK_BENCH_DURATION=5s" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run gateway load qualification
+        env:
+          GOMAXPROCS: '4'
+          LLAMARACK_GATEWAY_BENCH: '1'
+        run: go test ./internal/gateway -run '^TestGatewayOverheadLocust$' -timeout 20m -count=1 -v

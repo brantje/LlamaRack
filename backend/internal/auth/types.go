@@ -156,6 +156,7 @@ type Service struct {
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
 	lastAPIKeyWrite map[string]time.Time
+	apiKeyCache     apiKeyCacheState
 	jwtPrivate      ed25519.PrivateKey
 	jwtPublic       ed25519.PublicKey
 	schemaErr       error
@@ -171,7 +172,8 @@ func New(db *sql.DB, sessionLifetime time.Duration) *Service {
 	}
 	return &Service{
 		db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
-		jwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
+		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
+		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}
 }
 

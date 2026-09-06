@@ -79,7 +79,13 @@ func TestWithRequestLogContextPersistsBodyAndHeaderSessions(t *testing.T) {
 	seed("lcm_header_session")
 
 	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("downstream body read: %v", err)
+		}
+		if !strings.Contains(string(body), `"model":"coder"`) {
+			t.Errorf("downstream missing original body: %q", body)
+		}
 		if strings.Contains(r.Header.Get("X-Test-Request"), "header") {
 			w.Header().Set(headerRequestID, "lcm_header_session")
 		} else {
@@ -195,5 +201,14 @@ func TestWithRequestLogContextNilService(t *testing.T) {
 	WithRequestLogContext(next, nil).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
 	if !called || w.Code != http.StatusNoContent {
 		t.Fatalf("called=%v status=%d", called, w.Code)
+	}
+}
+
+func TestNeedsSessionBodyPeekSkipsGateway(t *testing.T) {
+	if needsSessionBodyPeek(&Gateway{}) {
+		t.Fatal("Gateway already fills sessionCapture from the parsed envelope")
+	}
+	if !needsSessionBodyPeek(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})) {
+		t.Fatal("non-Gateway handlers still need a body peek")
 	}
 }

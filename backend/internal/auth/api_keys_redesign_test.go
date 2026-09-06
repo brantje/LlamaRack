@@ -56,6 +56,9 @@ func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET expires_on=? WHERE id=?", yesterday, key.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Raw SQL bypasses the service mutation hooks that normally invalidate the
+	// token-hash cache, so this storage-level fixture must reset it explicitly.
+	s.clearAPIKeyCache()
 	if err := s.AuthenticateAPIKey(ctx, secret); !errors.Is(err, ErrAPIKeyInvalid) {
 		t.Fatalf("expired key=%v", err)
 	}

@@ -102,6 +102,16 @@ func run(ctx context.Context, cfg config.Config) error {
 	lifecycleService := lifecycle.New(modelService, sup)
 	lifecycleService.SetDataDir(cfg.DataDir)
 	observabilityService := observability.New(db)
+	writebackCtx, stopWriteback := context.WithCancel(ctx)
+	observabilityService.StartWriteback(writebackCtx)
+	defer func() {
+		stopWriteback()
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := observabilityService.Flush(flushCtx); err != nil {
+			slog.Error("flush inference observability on shutdown failed", "error", err)
+		}
+	}()
 	pendingLimits := func(requestCtx context.Context) (int, int) {
 		perInstance, global := 32, 128
 		if value, resolveErr := managerSettings.Int(requestCtx, settings.MaxPendingRequestsPerInstance); resolveErr == nil {
@@ -151,7 +161,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
-	importService.SetInstanceOnChange(liteLLMService.NotifyInstanceChange)
+	importService.SetInstanceOnChange(lifecycleService.Instances().NotifyChange)
 	if err := downloadManager.ResumePending(ctx); err != nil {
 		return fmt.Errorf("resume downloads: %w", err)
 	}

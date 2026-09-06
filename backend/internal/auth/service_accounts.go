@@ -158,6 +158,7 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	s.clearAPIKeyCache()
 	return nil
 }
 
@@ -188,6 +189,7 @@ func (s *Service) deleteServiceAccount(ctx context.Context, id string) error {
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	s.clearAPIKeyCache()
 	return nil
 }
 
