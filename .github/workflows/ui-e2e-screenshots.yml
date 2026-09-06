@@ -3,51 +3,60 @@ name: UI E2E screenshots
 on:
   pull_request:
     paths:
-      - '.github/workflows/ui-e2e-screenshots.yml'
+      - 'frontend/**'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
-  actions: read
-  contents: write
+  contents: read
 
 jobs:
   screenshots:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
-      - name: Check out branch head
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Download generated desktop screenshots
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture UI pages
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/llamarack-screenshots
-          gh run download 34028748514 \
-            --name ui-e2e-screenshots-34028748514 \
-            --dir /tmp/llamarack-screenshots
+          NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
+        run: npm run test:e2e:screenshots
 
-      - name: Normalize to exact 1920x1080
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-          rm -rf screenshots
-          mkdir -p screenshots
-          for image in /tmp/llamarack-screenshots/desktop-wide-1920x1080/*.png; do
-            convert "$image" -crop 1920x1080+0+0 +repage "screenshots/$(basename "$image")"
-          done
-          test "$(find screenshots -maxdepth 1 -name '*.png' | wc -l)" -eq 59
-          identify -format '%wx%h\n' screenshots/*.png | sort -u | grep -qx '1920x1080'
+      - name: Upload E2E screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-screenshots-${{ github.run_id }}
+          path: frontend/artifacts/ux-screenshots/**/*.png
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Commit screenshots
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -f screenshots
-          git commit -m 'docs: add 1920x1080 screenshots'
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-playwright-${{ github.run_id }}
+          path: |
+            frontend/artifacts/playwright-report
+            frontend/artifacts/test-results
+          if-no-files-found: warn
+          retention-days: 14
