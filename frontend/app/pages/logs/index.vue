@@ -147,10 +147,7 @@ function requestModelName(item: RequestRecord) {
   if (!instance) return '—'
   return manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id || '—'
 }
-function requestModelSlug(item: RequestRecord) {
-  if (item.model_slug) return item.model_slug
-  return manager.instances.value.find(candidate => candidate.id === item.instance_id)?.slug || '—'
-}
+function requestModelSlug(item: RequestRecord) { return item.model_slug || '—' }
 function currentInstanceTarget(item: RequestRecord) {
   const instance = manager.instances.value.find(candidate => candidate.id === item.instance_id)
   return instance ? `/instances/${encodeURIComponent(instance.slug)}/detail` : ''

@@ -173,9 +173,7 @@ function instanceDetailTarget(id?: string) {
   const instance = instanceByID(id)
   return instance ? `/instances/${encodeURIComponent(instance.slug)}/detail` : '/instances'
 }
-function requestInstanceLabel(record: RequestRecord) {
-  return record.model_slug || instancePublicLabel(record.instance_id)
-}
+function requestInstanceLabel(record: RequestRecord) { return record.model_slug || '—' }
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return '—'

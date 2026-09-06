@@ -10,12 +10,14 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 const gib = 1024 ** 3
 const now = Date.parse('2026-09-01T12:00:00.000Z')
 
-function instance(id: string, overrides: Partial<Instance> = {}): Instance {
-  return { id, slug: id, model_id: 'm1', name: id.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
+function durableID(slug: string) { return `uuid-${slug}` }
+
+function instance(slug: string, overrides: Partial<Instance> = {}): Instance {
+  return { id: durableID(slug), slug, model_id: 'm1', name: slug.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
 }
 
-function telemetry(id: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {
-  return { instance_id: id, pid: 42, gpu_devices: ['CUDA0'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 8 * gib }], vram_used_bytes: 8 * gib, gpu_utilization_pct: 62, cpu_percent: 35, memory_used_bytes: 3 * gib, collected_at: '2026-08-29T20:00:00Z', ...overrides }
+function telemetry(slug: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {
+  return { instance_id: durableID(slug), pid: 42, gpu_devices: ['CUDA0'], gpus: [{ device_id: 'CUDA0', vram_used_bytes: 8 * gib }], vram_used_bytes: 8 * gib, gpu_utilization_pct: 62, cpu_percent: 35, memory_used_bytes: 3 * gib, collected_at: '2026-08-29T20:00:00Z', ...overrides }
 }
 
 function seed() {
@@ -25,7 +27,7 @@ function seed() {
   manager.bootstrapRequired.value = false
   manager.backendError.value = ''
   manager.user.value = { id: 1, username: 'admin', enabled: true }
-  manager.models.value = [{ id: 'm1', slug: 'm1', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 8192 }]
+  manager.models.value = [{ id: 'm1', slug: 'coder-model', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 8192 }]
   manager.instances.value = [
     instance('ready', { always_on: true, idle_unload_seconds: 600, gpu_devices: ['CUDA0'] }),
     instance('stopped'),
@@ -33,12 +35,12 @@ function seed() {
     instance('downloading')
   ]
   manager.runtimes.value = { m1: [
-    { instance_id: 'ready', model_id: 'm1', state: 'READY', pid: 42, port: 9010 },
-    { instance_id: 'stopped', model_id: 'm1', state: 'UNLOADED' },
-    { instance_id: 'failed', model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(now + 45_000).toISOString() },
-    { instance_id: 'downloading', model_id: 'm1', state: 'UNLOADED' }
+    { instance_id: durableID('ready'), model_id: 'm1', state: 'READY', pid: 42, port: 9010 },
+    { instance_id: durableID('stopped'), model_id: 'm1', state: 'UNLOADED' },
+    { instance_id: durableID('failed'), model_id: 'm1', state: 'FAILED', last_error: 'CUDA allocation failed', consecutive_start_failures: 2, retry_after: new Date(now + 45_000).toISOString() },
+    { instance_id: durableID('downloading'), model_id: 'm1', state: 'UNLOADED' }
   ] }
-  manager.runtimeTelemetry.value = { ready: telemetry('ready') }
+  manager.runtimeTelemetry.value = { [durableID('ready')]: telemetry('ready') }
   manager.observabilityLive.value = {
     collected_at: '2026-08-29T20:00:00Z',
     hardware: { ram_total_bytes: 32 * gib, ram_available_bytes: 16 * gib, collected_at: '2026-08-29T20:00:00Z', processes: [], gpus: [{ id: 'CUDA0', backend: 'cuda', index: 0, name: 'GPU', total_bytes: 16 * gib, used_bytes: 9 * gib, free_bytes: 7 * gib, utilization_pct: 70 }] },
@@ -55,7 +57,7 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(now)
   seed()
   mocks.request.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/imports') return [{ id: 'imp-1', job_id: 'job-1', model_id: 'm1', instance_id: 'downloading', state: 'DOWNLOADING', start_when_ready: true }]
+    if (path === '/api/v1/imports') return [{ id: 'imp-1', job_id: 'job-1', model_id: 'm1', instance_id: durableID('downloading'), state: 'DOWNLOADING', start_when_ready: true }]
     if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
     return []
   })
@@ -116,7 +118,7 @@ describe('Instances redesign', () => {
     expect(readyCard.text()).toContain('Resource-pressure eviction allowed')
     expect(readyCard.text()).toContain('Global GPU usage')
     expect(readyCard.text()).toContain('8.0 GiB')
-    expect(readyCard.find('[data-testid="instance-id"]').text()).toBe('ready')
+    expect(readyCard.find('[data-testid="instance-id"]').text()).toBe(durableID('ready'))
     expect(readyCard.find('[data-testid="instance-card-more"]').exists()).toBe(true)
     expect(readyCard.text()).not.toContain('Kill')
     expect(readyCard.text()).not.toContain('Duplicate')
@@ -156,14 +158,14 @@ describe('Instances redesign', () => {
       instance('downloading', { autoload_enabled: false })
     ]
     manager.runtimes.value = {
-      missing: [{ instance_id: 'aggregate', model_id: 'missing', state: 'READY', pid: 42 }],
+      missing: [{ instance_id: durableID('aggregate'), model_id: 'missing', state: 'READY', pid: 42 }],
       m1: [
-        { instance_id: 'runtime-failed', model_id: 'm1', state: 'FAILED' },
-        { instance_id: 'paused', model_id: 'm1', state: 'PAUSED' }
+        { instance_id: durableID('runtime-failed'), model_id: 'm1', state: 'FAILED' },
+        { instance_id: durableID('paused'), model_id: 'm1', state: 'PAUSED' }
       ]
     }
     manager.runtimeTelemetry.value = {
-      aggregate: telemetry('aggregate', {
+      [durableID('aggregate')]: telemetry('aggregate', {
         gpu_devices: [],
         gpus: [{ device_id: 'CUDA9', vram_used_bytes: 512 * 1024 ** 2, utilization_pct: 5.5 }],
         vram_used_bytes: undefined,
@@ -175,8 +177,8 @@ describe('Instances redesign', () => {
     }
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/imports') return [
-        { id: 'imp-c', job_id: 'job-c', model_id: 'm1', instance_id: 'cancelled', state: 'CANCELLED', start_when_ready: false },
-        { id: 'imp-d', job_id: 'job-d', model_id: 'm1', instance_id: 'downloading', state: 'DOWNLOADING', start_when_ready: false }
+        { id: 'imp-c', job_id: 'job-c', model_id: 'm1', instance_id: durableID('cancelled'), state: 'CANCELLED', start_when_ready: false },
+        { id: 'imp-d', job_id: 'job-d', model_id: 'm1', instance_id: durableID('downloading'), state: 'DOWNLOADING', start_when_ready: false }
       ]
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: -5 } }
       return []
@@ -239,7 +241,7 @@ describe('Instances redesign', () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/imports') {
         return [{
-          id: 'imp-warn', job_id: 'job-warn', model_id: 'm1', instance_id: 'failed', state: 'COMPLETED', start_when_ready: false,
+          id: 'imp-warn', job_id: 'job-warn', model_id: 'm1', instance_id: durableID('failed'), state: 'COMPLETED', start_when_ready: false,
           error: 'Context capability could not be detected automatically from GGUF metadata.'
         }]
       }
@@ -248,7 +250,8 @@ describe('Instances redesign', () => {
       if (path === '/api/v1/instances') return manager.instances.value
       const runtimeMatch = path.match(/^\/api\/v1\/instances\/([^/]+)\/runtime$/)
       if (runtimeMatch) {
-        const id = decodeURIComponent(runtimeMatch[1])
+        const slug = decodeURIComponent(runtimeMatch[1])
+        const id = manager.instances.value.find(item => item.slug === slug)?.id || ''
         for (const group of Object.values(manager.runtimes.value)) {
           const runtime = group.find(item => item.instance_id === id)
           if (runtime) return runtime
