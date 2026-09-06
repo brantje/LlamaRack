@@ -25,6 +25,7 @@ The format is based on Keep a Changelog and releases follow Semantic Versioning.
 
 ### Fixed
 
+- Startup no longer treats a world-writable Docker bind-mounted config directory (`0777`, no sticky bit) as a shared path like `/tmp`; those dedicated volumes are tightened to `0700` as intended ([#135](https://github.com/brantje/LlamaRack/issues/135)).
 - Release-container runtime resolution no longer spends a 10-minute retry budget on llama.cpp GitHub stable tags that GHCR has not published.
 
 ## Release-entry convention

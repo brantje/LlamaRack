@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnsurePrivateDirCreatesAndRestricts(t *testing.T) {
@@ -156,22 +157,47 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
-func TestRestrictModeRejectsWorldWritableDirectory(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "shared")
+func TestRestrictModeRejectsStickyDirectory(t *testing.T) {
+	info := fakeDirInfo(os.ModeDir | os.ModeSticky | 0o777)
+	err := restrictModeWith("/var/data", privateDirPerm, false, func(string) (os.FileInfo, error) {
+		return info, nil
+	}, func(string, os.FileMode) error {
+		t.Fatal("must not chmod a sticky directory")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected sticky shared directory error, got %v", err)
+	}
+}
+
+func TestRestrictModeRejectsSystemTempDirectory(t *testing.T) {
+	info := fakeDirInfo(os.ModeDir | 0o777)
+	err := restrictModeWith("/tmp", privateDirPerm, false, func(string) (os.FileInfo, error) {
+		return info, nil
+	}, func(string, os.FileMode) error {
+		t.Fatal("must not chmod /tmp")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected system temp directory error, got %v", err)
+	}
+}
+
+func TestEnsurePrivateDirRepairsWorldWritableDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0o1777); err != nil {
+	if err := os.Chmod(dir, 0o0777); err != nil {
 		t.Fatal(err)
 	}
-	err := restrictMode(dir, privateDirPerm, false)
-	if err == nil || !strings.Contains(err.Error(), "shared directory") {
-		t.Fatalf("expected shared directory error, got %v", err)
+	if err := EnsurePrivateDir(dir); err != nil {
+		t.Fatal(err)
 	}
-	assertMode(t, dir, 0o777)
+	assertMode(t, dir, 0o700)
 }
 
-func TestEnsurePrivateDirRejectsWorldWritableDirectory(t *testing.T) {
+func TestEnsurePrivateDirRejectsStickyDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tmp")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -179,11 +205,27 @@ func TestEnsurePrivateDirRejectsWorldWritableDirectory(t *testing.T) {
 	if err := os.Chmod(dir, 0o1777); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsurePrivateDir(dir); err == nil || !strings.Contains(err.Error(), "shared directory") {
-		t.Fatalf("expected shared directory error, got %v", err)
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSticky == 0 {
+		t.Skip("filesystem does not preserve sticky bit")
+	}
+	if err := EnsurePrivateDir(dir); err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected sticky shared directory error, got %v", err)
 	}
 	assertMode(t, dir, 0o777)
 }
+
+type fakeDirInfo os.FileMode
+
+func (f fakeDirInfo) Name() string       { return "dir" }
+func (f fakeDirInfo) Size() int64        { return 0 }
+func (f fakeDirInfo) Mode() os.FileMode  { return os.FileMode(f) }
+func (f fakeDirInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeDirInfo) IsDir() bool        { return true }
+func (f fakeDirInfo) Sys() any           { return nil }
 
 func TestEnsurePrivateDirMkdirFailure(t *testing.T) {
 	root := t.TempDir()

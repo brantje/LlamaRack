@@ -213,7 +213,24 @@ func assertSQLitePrivate(t *testing.T, path string) {
 	}
 }
 
-func TestOpenRejectsSharedParentDirectory(t *testing.T) {
+func TestOpenRepairsWorldWritableParentDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "config")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o0777); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(context.Background(), filepath.Join(dir, "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	assertMode(t, dir, privateDirPerm)
+	assertSQLitePrivate(t, filepath.Join(dir, "manager.db"))
+}
+
+func TestOpenRejectsStickyParentDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "tmp")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -221,8 +238,15 @@ func TestOpenRejectsSharedParentDirectory(t *testing.T) {
 	if err := os.Chmod(dir, 0o1777); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Open(context.Background(), filepath.Join(dir, "manager.db"))
-	if err == nil || !strings.Contains(err.Error(), "shared directory") {
-		t.Fatalf("expected shared parent error, got %v", err)
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSticky == 0 {
+		t.Skip("filesystem does not preserve sticky bit")
+	}
+	_, err = Open(context.Background(), filepath.Join(dir, "manager.db"))
+	if err == nil || !strings.Contains(err.Error(), "sticky shared directory") {
+		t.Fatalf("expected sticky shared parent error, got %v", err)
 	}
 }
