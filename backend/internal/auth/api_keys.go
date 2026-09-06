@@ -180,6 +180,7 @@ func (s *Service) SetAPIKeyEnabled(ctx context.Context, id string, enabled bool)
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	s.clearAPIKeyCache()
 	return nil
 }
 
@@ -269,6 +270,7 @@ func (s *Service) UpdateAPIKey(ctx context.Context, id string, in UpdateAPIKeyIn
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	s.clearAPIKeyCache()
 	return nil
 }
 
@@ -315,6 +317,7 @@ func (s *Service) rotateAPIKeySecret(ctx context.Context, id string) (APIKey, st
 		return APIKey{}, "", sql.ErrNoRows
 	}
 	s.clearAPIUseWrite(id)
+	s.clearAPIKeyCache()
 	item, err := s.getAPIKeyIncludingHidden(ctx, id)
 	if err != nil {
 		return APIKey{}, "", err
@@ -339,21 +342,26 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 	if !strings.HasPrefix(token, apiKeySecretPrefix) {
 		return APIKey{}, ErrAPIKeyInvalid
 	}
-	item, err := s.lookupAPIKeyByHash(ctx, tokenHash(token))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return APIKey{}, ErrAPIKeyInvalid
+	hash := tokenHash(token)
+	item, cached := s.cachedAPIKey(hash)
+	if !cached {
+		var err error
+		item, err = s.lookupAPIKeyByHash(ctx, hash)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return APIKey{}, ErrAPIKeyInvalid
+			}
+			return APIKey{}, err
 		}
-		return APIKey{}, err
+		s.rememberAPIKey(hash, item)
+		s.seedAPIUseWrite(item.ID, item.LastUsedAt)
 	}
 	if !item.Enabled || !item.OwnerEnabled || apiKeyExpired(item.ExpiresOn, time.Now().UTC()) {
 		return APIKey{}, ErrAPIKeyInvalid
 	}
 
 	now := time.Now()
-	if item.LastUsedAt != nil && now.Unix()-*item.LastUsedAt < int64(apiUseWriteEvery/time.Second) {
-		return item, nil
-	}
+	item = s.stampCachedAPIKey(hash, now.Unix())
 	if !s.reserveAPIUseWrite(item.ID, now) {
 		return item, nil
 	}
@@ -361,8 +369,6 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 		s.releaseAPIUseWrite(item.ID, now)
 		return APIKey{}, err
 	}
-	value := now.Unix()
-	item.LastUsedAt = &value
 	return item, nil
 }
 
