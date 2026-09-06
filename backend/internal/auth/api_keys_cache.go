@@ -8,16 +8,18 @@ import (
 var apiKeyCaches sync.Map
 
 type apiKeyCacheState struct {
-	mu     sync.RWMutex
-	byHash map[string]APIKey
+	mu         sync.RWMutex
+	generation uint64
+	byHash     map[string]APIKey
 }
 
 func apiKeyCacheFor(s *Service) *apiKeyCacheState {
-	if value, ok := apiKeyCaches.Load(s); ok {
+	key := s.db
+	if value, ok := apiKeyCaches.Load(key); ok {
 		return value.(*apiKeyCacheState)
 	}
 	state := &apiKeyCacheState{byHash: map[string]APIKey{}}
-	actual, _ := apiKeyCaches.LoadOrStore(s, state)
+	actual, _ := apiKeyCaches.LoadOrStore(key, state)
 	return actual.(*apiKeyCacheState)
 }
 
@@ -39,38 +41,50 @@ func cloneAPIKey(item APIKey) APIKey {
 	return item
 }
 
-func (s *Service) cachedAPIKey(hash string) (APIKey, bool) {
+func (s *Service) cachedAPIKey(hash string) (APIKey, uint64, bool) {
 	state := apiKeyCacheFor(s)
 	state.mu.RLock()
 	item, ok := state.byHash[hash]
+	generation := state.generation
 	state.mu.RUnlock()
+	if !ok {
+		return APIKey{}, generation, false
+	}
+	return cloneAPIKey(item), generation, true
+}
+
+func (s *Service) rememberAPIKey(hash string, item APIKey, generation uint64) bool {
+	state := apiKeyCacheFor(s)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.generation != generation {
+		return false
+	}
+	state.byHash[hash] = cloneAPIKey(item)
+	return true
+}
+
+func (s *Service) stampCachedAPIKey(hash string, at int64, generation uint64) (APIKey, bool) {
+	state := apiKeyCacheFor(s)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.generation != generation {
+		return APIKey{}, false
+	}
+	item, ok := state.byHash[hash]
 	if !ok {
 		return APIKey{}, false
 	}
-	return cloneAPIKey(item), true
-}
-
-func (s *Service) rememberAPIKey(hash string, item APIKey) {
-	state := apiKeyCacheFor(s)
-	state.mu.Lock()
-	state.byHash[hash] = cloneAPIKey(item)
-	state.mu.Unlock()
-}
-
-func (s *Service) stampCachedAPIKey(hash string, at int64) APIKey {
-	state := apiKeyCacheFor(s)
-	state.mu.Lock()
-	item := state.byHash[hash]
 	value := at
 	item.LastUsedAt = &value
 	state.byHash[hash] = item
-	state.mu.Unlock()
-	return cloneAPIKey(item)
+	return cloneAPIKey(item), true
 }
 
 func (s *Service) clearAPIKeyCache() {
 	state := apiKeyCacheFor(s)
 	state.mu.Lock()
+	state.generation++
 	state.byHash = map[string]APIKey{}
 	state.mu.Unlock()
 }
