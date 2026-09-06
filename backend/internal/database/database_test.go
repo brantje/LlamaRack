@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -209,5 +210,19 @@ func assertSQLitePrivate(t *testing.T, path string) {
 			t.Fatalf("expected %s: %v", sidecar, err)
 		}
 		assertMode(t, sidecar, privateFilePerm)
+	}
+}
+
+func TestOpenRejectsSharedParentDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o1777); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Open(context.Background(), filepath.Join(dir, "manager.db"))
+	if err == nil || !strings.Contains(err.Error(), "shared directory") {
+		t.Fatalf("expected shared parent error, got %v", err)
 	}
 }

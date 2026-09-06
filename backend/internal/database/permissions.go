@@ -32,6 +32,14 @@ func shouldRestrictDir(path string) bool {
 	return cleaned != "." && cleaned != string(os.PathSeparator)
 }
 
+func isSharedDir(info os.FileInfo) bool {
+	if !info.IsDir() {
+		return false
+	}
+	mode := info.Mode()
+	return mode&os.ModeSticky != 0 || mode.Perm()&0o002 != 0
+}
+
 func restrictSQLiteFiles(path string) error {
 	if err := restrictMode(path, privateFilePerm, false); err != nil {
 		return err
@@ -62,6 +70,9 @@ func restrictModeWith(path string, perm os.FileMode, optional bool, stat fileSta
 	current := info.Mode().Perm()
 	if current == perm {
 		return nil
+	}
+	if isSharedDir(info) {
+		return fmt.Errorf("%s is a shared directory (mode %04o); put LLAMARACK_DATA_DIR and LLAMARACK_DATABASE_PATH in a dedicated LlamaRack data directory instead of a world-writable path such as /tmp", path, current)
 	}
 	if err := chmod(path, perm); err != nil {
 		return fmt.Errorf("restrict permissions on %s: %w; place LLAMARACK_DATABASE_PATH on a Unix filesystem that honors chmod, or fix the volume mount", path, err)

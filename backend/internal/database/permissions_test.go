@@ -156,6 +156,35 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
+func TestRestrictModeRejectsWorldWritableDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o1777); err != nil {
+		t.Fatal(err)
+	}
+	err := restrictMode(dir, privateDirPerm, false)
+	if err == nil || !strings.Contains(err.Error(), "shared directory") {
+		t.Fatalf("expected shared directory error, got %v", err)
+	}
+	assertMode(t, dir, 0o777)
+}
+
+func TestEnsurePrivateDirRejectsWorldWritableDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o1777); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsurePrivateDir(dir); err == nil || !strings.Contains(err.Error(), "shared directory") {
+		t.Fatalf("expected shared directory error, got %v", err)
+	}
+	assertMode(t, dir, 0o777)
+}
+
 func TestEnsurePrivateDirMkdirFailure(t *testing.T) {
 	root := t.TempDir()
 	blocker := filepath.Join(root, "file")
