@@ -128,7 +128,7 @@ END`); err != nil {
 \t\tt.Fatal(err)
 \t}
 
-\trecord := RequestRecord{StartedAt: 1000, Endpoint: "/v1/permanent", StatusCode: 500}
+\trecord := RequestRecord{StartedAt: 1000, InstanceID: "instance-permanent", Endpoint: "/v1/permanent", StatusCode: 500}
 \tfor i := 0; i < writebackBatchSize+1; i++ {
 \t\trequestID := fmt.Sprintf("req-permanent-%03d", i)
 \t\tif err := s.RecordCorrelatedRequest(ctx, requestID, nil, record); err != nil {
