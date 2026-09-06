@@ -26,6 +26,7 @@ type writebackState struct {
 	started         bool
 	limit           int
 	entries         map[string]*writebackEntry
+	activeEntries   map[string]*writebackEntry
 	openAIToRequest map[string]string
 	modelIdentities map[string]writebackModelIdentity
 }
@@ -55,6 +56,7 @@ func writebackStateFor(s *Service) *writebackState {
 	state := &writebackState{
 		limit:           writebackMaxEntries,
 		entries:         map[string]*writebackEntry{},
+		activeEntries:   map[string]*writebackEntry{},
 		openAIToRequest: map[string]string{},
 		modelIdentities: map[string]writebackModelIdentity{},
 	}
@@ -173,14 +175,34 @@ func (s *Service) bufferBegin(requestID string, record RequestRecord) (bool, err
 	if !state.enabled {
 		return false, nil
 	}
-	if _, exists := state.entries[requestID]; exists {
+	if _, exists := state.activeEntries[requestID]; exists {
 		return true, errors.New("duplicate request_id")
 	}
 	if len(state.entries) >= state.limit {
 		return true, ErrWritebackOverflow
 	}
-	state.entries[requestID] = &writebackEntry{requestID: requestID, record: cloneRequestRecord(record)}
+	entry := &writebackEntry{requestID: requestID, record: cloneRequestRecord(record)}
+	state.entries[requestID] = entry
+	state.activeEntries[requestID] = entry
 	return true, nil
+}
+
+func recoverActiveWritebackEntryLocked(state *writebackState, requestID string) (*writebackEntry, bool, error) {
+	if entry, exists := state.entries[requestID]; exists {
+		return entry, true, nil
+	}
+	entry, active := state.activeEntries[requestID]
+	if !active {
+		return nil, false, nil
+	}
+	if len(state.entries) >= state.limit {
+		return nil, true, ErrWritebackOverflow
+	}
+	state.entries[requestID] = entry
+	if entry.openAIResponseID != "" {
+		state.openAIToRequest[entry.openAIResponseID] = requestID
+	}
+	return entry, true, nil
 }
 
 func (s *Service) bufferUpdate(requestID string, record RequestRecord) (bool, error) {
@@ -190,9 +212,9 @@ func (s *Service) bufferUpdate(requestID string, record RequestRecord) (bool, er
 	if !state.enabled {
 		return false, nil
 	}
-	entry, exists := state.entries[requestID]
-	if !exists {
-		return false, nil
+	entry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)
+	if err != nil || !handled {
+		return handled, err
 	}
 	entry.record = cloneRequestRecord(record)
 	return true, nil
@@ -205,13 +227,17 @@ func (s *Service) bufferFinalize(requestID string, promptTPS *float64, record Re
 	if !state.enabled {
 		return false, nil
 	}
-	entry, exists := state.entries[requestID]
-	if !exists {
+	entry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)
+	if err != nil {
+		return true, err
+	}
+	if !handled {
 		if len(state.entries) >= state.limit {
 			return true, ErrWritebackOverflow
 		}
 		entry = &writebackEntry{requestID: requestID}
 		state.entries[requestID] = entry
+		state.activeEntries[requestID] = entry
 	}
 	entry.record = cloneRequestRecord(record)
 	entry.promptTPS = cloneFloat64(promptTPS)
@@ -226,19 +252,21 @@ func (s *Service) bufferRecordCorrelated(requestID string, promptTPS *float64, r
 	if !state.enabled {
 		return false, nil
 	}
-	if _, exists := state.entries[requestID]; exists {
+	if _, exists := state.activeEntries[requestID]; exists {
 		return true, errors.New("duplicate request_id")
 	}
 	if len(state.entries) >= state.limit {
 		return true, ErrWritebackOverflow
 	}
-	state.entries[requestID] = &writebackEntry{
+	entry := &writebackEntry{
 		requestID:    requestID,
 		record:       cloneRequestRecord(record),
 		promptTPS:    cloneFloat64(promptTPS),
 		finalized:    true,
 		contextReady: true,
 	}
+	state.entries[requestID] = entry
+	state.activeEntries[requestID] = entry
 	return true, nil
 }
 
@@ -249,9 +277,9 @@ func (s *Service) bufferModelSlug(requestID, modelSlug string) (bool, error) {
 	if !state.enabled {
 		return false, nil
 	}
-	entry, exists := state.entries[requestID]
-	if !exists {
-		return false, nil
+	entry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)
+	if err != nil || !handled {
+		return handled, err
 	}
 	entry.modelSlug = modelSlug
 	return true, nil
@@ -264,9 +292,9 @@ func (s *Service) bufferOpenAIResponseID(requestID, openAIID string) (bool, erro
 	if !state.enabled {
 		return false, nil
 	}
-	entry, exists := state.entries[requestID]
-	if !exists {
-		return false, nil
+	entry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)
+	if err != nil || !handled {
+		return handled, err
 	}
 	if owner, exists := state.openAIToRequest[openAIID]; exists && owner != requestID {
 		return true, ErrDuplicateOpenAIResponseID
@@ -286,9 +314,9 @@ func (s *Service) bufferRequestLogContext(requestID, sessionID, instanceID strin
 	if !state.enabled {
 		return false, nil
 	}
-	entry, exists := state.entries[requestID]
-	if !exists {
-		return false, nil
+	entry, handled, err := recoverActiveWritebackEntryLocked(state, requestID)
+	if err != nil || !handled {
+		return handled, err
 	}
 	entry.sessionID = strings.TrimSpace(sessionID)
 	entry.contextInstanceID = strings.TrimSpace(instanceID)
@@ -404,6 +432,7 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 	}
 
 	if err := s.persistWritebackBatch(ctx, batch); err == nil {
+		s.finishWritebackEntries(batch)
 		return len(batch), nil
 	}
 
@@ -414,6 +443,7 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 		if err := s.persistWritebackBatch(ctx, []writebackEntry{entry}); err != nil {
 			if isPermanentWritebackError(err) {
 				slog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)
+				s.finishWritebackEntries([]writebackEntry{entry})
 				processed++
 				continue
 			}
@@ -424,6 +454,7 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 			if _, exists := state.entries[entry.requestID]; !exists {
 				copyEntry := entry
 				state.entries[entry.requestID] = &copyEntry
+				state.activeEntries[entry.requestID] = &copyEntry
 				if entry.openAIResponseID != "" {
 					state.openAIToRequest[entry.openAIResponseID] = entry.requestID
 				}
@@ -431,9 +462,22 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 			state.mu.Unlock()
 			continue
 		}
+		s.finishWritebackEntries([]writebackEntry{entry})
 		processed++
 	}
 	return processed, firstErr
+}
+
+func (s *Service) finishWritebackEntries(batch []writebackEntry) {
+	state := writebackStateFor(s)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for i := range batch {
+		requestID := batch[i].requestID
+		if _, exists := state.entries[requestID]; !exists {
+			delete(state.activeEntries, requestID)
+		}
+	}
 }
 
 func isPermanentWritebackError(err error) bool {
