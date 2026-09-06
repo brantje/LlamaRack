@@ -81,11 +81,14 @@ func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, 
 
 func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	responseID = strings.TrimSpace(responseID)
-	if preview := g.active.getByUpstream(responseID); preview != nil && !requestInstanceAllowed(r, preview.instanceID) {
+	entry, cancelled, authorized := g.active.cancelByUpstreamAuthorized(responseID, func(instanceID string) bool {
+		return requestInstanceAllowed(r, instanceID)
+	})
+	if !authorized {
 		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
 		return
 	}
-	if entry, ok := g.active.cancelByUpstream(responseID); ok {
+	if cancelled {
 		_ = g.active.waitRemoved(entry.managerRequestID, 2*time.Second)
 		if stored, err := g.lookupStoredResponse(r.Context(), responseID); err == nil && stored.ResponseBody != nil {
 			if payload, parsed := parseFinalResponseJSON([]byte(*stored.ResponseBody)); parsed {
@@ -98,11 +101,7 @@ func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, r
 		writeJSON(w, http.StatusOK, map[string]any{"id": responseID, "object": "response", "status": "cancelled", "model": entry.model})
 		return
 	}
-	if entry := g.active.getByUpstream(responseID); entry != nil && entry.cancelled {
-		if !requestInstanceAllowed(r, entry.instanceID) {
-			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
-			return
-		}
+	if entry != nil && entry.cancelled {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is already cancelled")
 		return
 	}
