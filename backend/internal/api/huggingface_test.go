@@ -103,6 +103,36 @@ func huggingFaceRequest(t *testing.T, fixture huggingFaceFixture, method, path s
 	return w
 }
 
+func decodeDownloadJob(t *testing.T, body []byte) downloads.Job {
+	t.Helper()
+	var job downloads.Job
+	if err := json.Unmarshal(body, &job); err != nil {
+		t.Fatalf("download job decode: %v body=%s", err, body)
+	}
+	return job
+}
+
+func waitHuggingFaceDownloadState(t *testing.T, fixture huggingFaceFixture, id, want string) downloads.Job {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last downloads.Job
+	var lastCode int
+	var lastBody string
+	for time.Now().Before(deadline) {
+		w := huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/downloads/"+id, nil, true)
+		lastCode, lastBody = w.Code, w.Body.String()
+		if w.Code == http.StatusOK {
+			last = decodeDownloadJob(t, w.Body.Bytes())
+			if last.State == want {
+				return last
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("download %s did not reach %s: status=%d state=%s body=%s", id, want, lastCode, last.State, lastBody)
+	return last
+}
+
 func TestHuggingFaceRequiresAuthenticationAndRoutesProvider(t *testing.T) {
 	fixture := newHuggingFaceFixture(t)
 	if got := huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/huggingface/search", nil, false).Code; got != http.StatusUnauthorized {
@@ -152,6 +182,17 @@ func TestHuggingFaceTokenCRUDNeverReturnsPlaintext(t *testing.T) {
 	}
 }
 
+func TestDownloadJobStateIgnoresFileLevelCompleted(t *testing.T) {
+	body := []byte(`{"id":"j1","state":"DOWNLOADING","files":[{"path":"a.gguf","state":"COMPLETED"}]}`)
+	if !strings.Contains(string(body), downloads.StateCompleted) {
+		t.Fatal("fixture must include COMPLETED so a substring wait would fire early")
+	}
+	job := decodeDownloadJob(t, body)
+	if job.State != downloads.StateDownloading {
+		t.Fatalf("job state = %q, want %q", job.State, downloads.StateDownloading)
+	}
+}
+
 func TestHuggingFaceDownloadLifecycleRoutes(t *testing.T) {
 	fixture := newHuggingFaceFixture(t)
 	w := huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/huggingface/model?repo=acme%2Fdemo", nil, true)
@@ -171,17 +212,7 @@ func TestHuggingFaceDownloadLifecycleRoutes(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &job); err != nil || job.ID == "" {
 		t.Fatalf("job decode: %+v %v", job, err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		w = huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/downloads/"+job.ID, nil, true)
-		if w.Code == http.StatusOK && strings.Contains(w.Body.String(), downloads.StateCompleted) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), downloads.StateCompleted) {
-		t.Fatalf("get job status=%d body=%s", w.Code, w.Body.String())
-	}
+	job = waitHuggingFaceDownloadState(t, fixture, job.ID, downloads.StateCompleted)
 	w = huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/downloads", nil, true)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), job.ID) {
 		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
