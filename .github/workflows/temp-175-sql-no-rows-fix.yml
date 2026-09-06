@@ -1,0 +1,142 @@
+name: Temporary #175 SQL no-rows fix
+
+on:
+  push:
+    branches:
+      - perf/175-sqlite-off-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'brantje'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Apply buffered in-flight recovery fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/internal/observability/writeback.go')
+          text = path.read_text()
+
+          old_update = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize'''
+          new_update = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t}\n\tentry.record = cloneRequestRecord(record)\n\treturn true, nil\n}\n\nfunc (s *Service) bufferFinalize'''
+          if old_update not in text:
+              raise SystemExit('bufferUpdate target not found exactly once')
+          text = text.replace(old_update, new_update, 1)
+
+          old_slug = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\treturn false, nil\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID'''
+          new_slug = '''\tentry, exists := state.entries[requestID]\n\tif !exists {\n\t\tif len(state.entries) >= state.limit {\n\t\t\treturn true, ErrWritebackOverflow\n\t\t}\n\t\tentry = &writebackEntry{requestID: requestID}\n\t\tstate.entries[requestID] = entry\n\t}\n\tentry.modelSlug = modelSlug\n\treturn true, nil\n}\n\nfunc (s *Service) bufferOpenAIResponseID'''
+          if old_slug not in text:
+              raise SystemExit('bufferModelSlug target not found exactly once')
+          text = text.replace(old_slug, new_slug, 1)
+          path.write_text(text)
+          PY
+
+          cat > backend/internal/observability/writeback_missing_entry_test.go <<'EOF'
+          package observability
+
+          import (
+          	"context"
+          	"testing"
+          	"time"
+          )
+
+          func TestWritebackMissingInFlightEntryDoesNotFallBackToSQLite(t *testing.T) {
+          	s := testService(t)
+          	ctx, cancel := context.WithCancel(context.Background())
+          	defer cancel()
+          	s.startWriteback(ctx, time.Hour)
+          	s.db.SetMaxOpenConns(1)
+
+          	record := RequestRecord{StartedAt: 1000, Endpoint: "/v1/chat/completions"}
+          	if err := s.BeginCorrelatedRequest(ctx, "req-missing-active", record); err != nil {
+          		t.Fatal(err)
+          	}
+
+          	state := writebackStateFor(s)
+          	state.mu.Lock()
+          	delete(state.entries, "req-missing-active")
+          	state.mu.Unlock()
+
+          	conn, err := s.db.Conn(ctx)
+          	if err != nil {
+          		t.Fatal(err)
+          	}
+
+          	hotCtx, hotCancel := context.WithTimeout(ctx, 200*time.Millisecond)
+          	defer hotCancel()
+          	if err := s.SetRequestModelSlug(hotCtx, "req-missing-active", "public-model"); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("model slug unexpectedly touched SQLite: %v", err)
+          	}
+          	record.InstanceID = "instance-a"
+          	if err := s.UpdateCorrelatedRequest(hotCtx, "req-missing-active", record); err != nil {
+          		_ = conn.Close()
+          		t.Fatalf("update unexpectedly touched SQLite: %v", err)
+          	}
+          	if err := conn.Close(); err != nil {
+          		t.Fatal(err)
+          	}
+
+          	state.mu.Lock()
+          	entry, exists := state.entries["req-missing-active"]
+          	if !exists {
+          		state.mu.Unlock()
+          		t.Fatal("missing in-flight entry was not recreated")
+          	}
+          	gotInstance := entry.record.InstanceID
+          	gotSlug := entry.modelSlug
+          	state.mu.Unlock()
+          	if gotInstance != "instance-a" || gotSlug != "public-model" {
+          		t.Fatalf("recovered entry instance=%q slug=%q", gotInstance, gotSlug)
+          	}
+
+          	record.StatusCode = 200
+          	if err := s.FinalizeCorrelatedRequest(ctx, "req-missing-active", nil, record); err != nil {
+          		t.Fatal(err)
+          	}
+          	if err := s.AttachRequestLogContext(ctx, "req-missing-active", "session-a", "public-model"); err != nil {
+          		t.Fatal(err)
+          	}
+          	if err := s.Flush(ctx); err != nil {
+          		t.Fatal(err)
+          	}
+
+          	var instanceID, modelSlug string
+          	if err := s.db.QueryRowContext(ctx, `SELECT r.instance_id,r.model_slug
+          		FROM inference_requests r
+          		JOIN inference_request_correlations c ON c.inference_request_id=r.id
+          		WHERE c.request_id=?`, "req-missing-active").Scan(&instanceID, &modelSlug); err != nil {
+          		t.Fatal(err)
+          	}
+          	if instanceID != "instance-a" || modelSlug != "public-model" {
+          		t.Fatalf("persisted instance=%q slug=%q", instanceID, modelSlug)
+          	}
+          }
+          EOF
+
+          gofmt -w backend/internal/observability/writeback.go backend/internal/observability/writeback_missing_entry_test.go
+      - name: Validate targeted packages
+        working-directory: backend
+        run: |
+          go test ./internal/observability ./internal/gateway
+          go test -race ./internal/observability ./internal/gateway
+          go vet ./internal/observability ./internal/gateway
+      - name: Commit validated fix
+        run: |
+          git config user.name "Sander"
+          git config user.email "brantje@gmail.com"
+          git rm .github/workflows/temp-175-sql-no-rows-fix.yml
+          git add backend/internal/observability/writeback.go backend/internal/observability/writeback_missing_entry_test.go
+          git commit -m "fix: keep active observability updates buffered"
+          git push origin HEAD:perf/175-sqlite-off-v1
