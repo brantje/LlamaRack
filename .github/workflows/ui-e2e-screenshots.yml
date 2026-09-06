@@ -1,62 +1,46 @@
-name: UI E2E screenshots
+name: README screenshot update
 
 on:
   pull_request:
     paths:
-      - 'frontend/**'
-  release:
-    types: [published]
-  workflow_dispatch:
+      - '.github/workflows/ui-e2e-screenshots.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  screenshots:
+  update-readme:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: frontend
+    timeout-minutes: 5
 
     steps:
-      - name: Check out repository
+      - name: Check out branch head
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
+      - name: Add dashboard screenshot to README
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Install frontend dependencies
-        run: npm ci --legacy-peer-deps
+          path = Path('README.md')
+          text = path.read_text()
+          anchor = "[![Nuxt](https://img.shields.io/badge/frontend-Nuxt-00DC82?logo=nuxtdotjs&logoColor=white)](./frontend)\n\n"
+          addition = "[![LlamaRack dashboard](./screenshots/05-dashboard.png)](./screenshots.md)\n\n[View all screenshots →](./screenshots.md)\n\n"
+          if addition not in text:
+              if anchor not in text:
+                  raise SystemExit('README badge anchor not found')
+              text = text.replace(anchor, anchor + addition, 1)
+              path.write_text(text)
+          PY
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
-      - name: Capture UI pages
-        env:
-          NUXT_PUBLIC_API_BASE: http://127.0.0.1:8888
-        run: npm run test:e2e:screenshots
-
-      - name: Upload E2E screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-e2e-screenshots-${{ github.run_id }}
-          path: frontend/artifacts/ux-screenshots/**/*.png
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Playwright diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-e2e-playwright-${{ github.run_id }}
-          path: |
-            frontend/artifacts/playwright-report
-            frontend/artifacts/test-results
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Commit README
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'docs: feature dashboard screenshot in README'
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
