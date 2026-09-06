@@ -9,6 +9,10 @@ LlamaRack manages GGUF models, durable `llama-server` Instances, GPU placement, 
 [![Go](https://img.shields.io/badge/backend-Go-00ADD8?logo=go&logoColor=white)](./backend)
 [![Nuxt](https://img.shields.io/badge/frontend-Nuxt-00DC82?logo=nuxtdotjs&logoColor=white)](./frontend)
 
+[![LlamaRack dashboard](./screenshots/05-dashboard.png)](./screenshots.md)
+
+[View all screenshots →](./screenshots.md)
+
 > [!NOTE]
 > LlamaRack `1.x` follows a documented Semantic Versioning compatibility contract. See [`RELEASE.md`](./RELEASE.md) for the stable API, configuration, persistence, deployment, image-tag, and release guarantees.
 
