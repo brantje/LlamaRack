@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -49,25 +51,40 @@ func recordSessionCapture(r *http.Request, envelope requestEnvelope) {
 	capture.sessionID = sessionIDFromValues(envelope.LiteLLMMetadata.SessionID, envelope.Metadata.SessionID, envelope.SessionID)
 }
 
-type sessionCaptureBody struct {
-	source io.ReadCloser
-	pipe   *io.PipeWriter
+func needsSessionBodyPeek(next http.Handler) bool {
+	_, isGateway := next.(*Gateway)
+	return !isGateway
 }
 
-func (b *sessionCaptureBody) Read(p []byte) (int, error) {
-	n, err := b.source.Read(p)
-	if n > 0 {
-		_, _ = b.pipe.Write(p[:n])
-	}
-	if err != nil {
-		_ = b.pipe.CloseWithError(nil)
-	}
-	return n, err
+type prefixRestoreBody struct {
+	io.Reader
+	source io.Closer
 }
 
-func (b *sessionCaptureBody) Close() error {
-	_ = b.pipe.Close()
+func (b prefixRestoreBody) Close() error {
+	if b.source == nil {
+		return nil
+	}
 	return b.source.Close()
+}
+
+func peekSessionCapture(r *http.Request, capture *sessionCapture) *http.Request {
+	if r.Body == nil || capture == nil {
+		return r
+	}
+	prefix, _ := io.ReadAll(io.LimitReader(r.Body, preAuthRequestBodyBytes))
+	r.Body = prefixRestoreBody{Reader: io.MultiReader(bytes.NewReader(prefix), r.Body), source: r.Body}
+	if !looksLikeJSON(prefix) {
+		return r
+	}
+	var envelope sessionEnvelope
+	if json.Unmarshal(prefix, &envelope) != nil {
+		return r
+	}
+	capture.model = strings.TrimSpace(envelope.Model)
+	capture.stream = envelope.Stream
+	capture.sessionID = sessionIDFromEnvelope(envelope)
+	return r
 }
 
 type diagnosticResponseWriter struct {
@@ -107,10 +124,15 @@ func (w *diagnosticResponseWriter) StatusCode() int {
 // changing the OpenAI-compatible payload. Session identity is consumed here so
 // the gateway's trace resolver cannot accidentally treat X-LiteLLM-Session-ID
 // as a trace ID; LiteLLM keeps those identities distinct.
+//
+// Gateway.ServeHTTP fills sessionCapture from the already-parsed request
+// envelope. Other handlers get a bounded JSON peek so body session_id, model,
+// and stream fields are still recorded without teeing the body through a pipe.
 func WithRequestLogContext(next http.Handler, service *observability.Service) http.Handler {
 	if service == nil {
 		return next
 	}
+	peekBody := needsSessionBodyPeek(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		traceID, ok := suppliedTraceID(r, "")
@@ -120,6 +142,9 @@ func WithRequestLogContext(next http.Handler, service *observability.Service) ht
 		}
 		capture := &sessionCapture{}
 		r = r.WithContext(context.WithValue(lifecycle.WithRequestCorrelation(r.Context(), traceID), sessionCaptureKey{}, capture))
+		if peekBody {
+			r = peekSessionCapture(r, capture)
+		}
 		sessionFromHeader := sessionIDFromHeaders(r)
 
 		if sessionFromHeader != "" {

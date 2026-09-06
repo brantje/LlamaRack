@@ -161,7 +161,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
-	importService.SetInstanceOnChange(liteLLMService.NotifyInstanceChange)
+	importService.SetInstanceOnChange(lifecycleService.Instances().NotifyChange)
 	if err := downloadManager.ResumePending(ctx); err != nil {
 		return fmt.Errorf("resume downloads: %w", err)
 	}

@@ -81,6 +81,7 @@ func (s *Service) notifyChange(ctx context.Context, instanceID string) {
 	}
 }
 func (s *Service) NotifyChange(ctx context.Context, instanceID string) {
+	s.forgetHot(instanceID)
 	s.notifyChange(ctx, instanceID)
 }
 func Slugify(name string) string { return resourceid.Slugify(name) }

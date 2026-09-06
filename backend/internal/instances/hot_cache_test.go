@@ -107,6 +107,31 @@ func TestHotCacheInvalidatesCreateUpdateDeleteAndOldSlug(t *testing.T) {
 	}
 }
 
+func TestHotCacheNotifyChangeInvalidatesExternalSQLUpdates(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	item, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Pending", Slug: "pending-import", Enabled: boolp(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.EnableHotCache()
+	if _, err := s.GetByID(ctx, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE instances SET enabled=1, name='Imported' WHERE id=?", item.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := s.GetByID(ctx, item.ID)
+	if err != nil || stale.Name != "Pending" {
+		t.Fatalf("cache should still hold the pre-SQL snapshot: %+v err=%v", stale, err)
+	}
+	s.NotifyChange(ctx, item.ID)
+	fresh, err := s.GetByID(ctx, item.ID)
+	if err != nil || fresh.Name != "Imported" || !fresh.Enabled {
+		t.Fatalf("NotifyChange should drop the stale cache entry: %+v err=%v", fresh, err)
+	}
+}
+
 func TestHotCacheGenerationRejectsReadAfterUpdateAndDelete(t *testing.T) {
 	s, _ := testService(t)
 	s.EnableHotCache()

@@ -2,7 +2,7 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -79,7 +79,13 @@ func TestWithRequestLogContextPersistsBodyAndHeaderSessions(t *testing.T) {
 	seed("lcm_header_session")
 
 	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fillSessionCaptureFromBody(r)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("downstream body read: %v", err)
+		}
+		if !strings.Contains(string(body), `"model":"coder"`) {
+			t.Errorf("downstream missing original body: %q", body)
+		}
 		if strings.Contains(r.Header.Get("X-Test-Request"), "header") {
 			w.Header().Set(headerRequestID, "lcm_header_session")
 		} else {
@@ -146,7 +152,7 @@ func TestHomeAssistantMetadataSessionGroupsRequests(t *testing.T) {
 	}
 
 	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fillSessionCaptureFromBody(r)
+		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set(headerRequestID, r.Header.Get("X-Test-Request-ID"))
 		w.WriteHeader(http.StatusOK)
 	})
@@ -198,14 +204,11 @@ func TestWithRequestLogContextNilService(t *testing.T) {
 	}
 }
 
-func fillSessionCaptureFromBody(r *http.Request) {
-	var envelope sessionEnvelope
-	_ = json.NewDecoder(r.Body).Decode(&envelope)
-	capture, _ := r.Context().Value(sessionCaptureKey{}).(*sessionCapture)
-	if capture == nil {
-		return
+func TestNeedsSessionBodyPeekSkipsGateway(t *testing.T) {
+	if needsSessionBodyPeek(&Gateway{}) {
+		t.Fatal("Gateway already fills sessionCapture from the parsed envelope")
 	}
-	capture.model = strings.TrimSpace(envelope.Model)
-	capture.stream = envelope.Stream
-	capture.sessionID = sessionIDFromEnvelope(envelope)
+	if !needsSessionBodyPeek(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})) {
+		t.Fatal("non-Gateway handlers still need a body peek")
+	}
 }
