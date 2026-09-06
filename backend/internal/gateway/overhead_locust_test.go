@@ -25,6 +25,10 @@ type gatewayLoadResult struct {
 	QueueP95 time.Duration
 }
 
+// TestGatewayOverheadLocust is an opt-in qualification harness, not a
+// machine-independent performance assertion. Compare direct, gateway-only, and
+// full-observability runs on the same machine/runtime settings. Defaults mirror
+// issue #175: 1000 users, 15s warmup, 60s measurement, and a ~16 KiB request.
 func TestGatewayOverheadLocust(t *testing.T) {
 	if os.Getenv("LLAMARACK_GATEWAY_BENCH") != "1" {
 		t.Skip("set LLAMARACK_GATEWAY_BENCH=1 to run the gateway load harness")
