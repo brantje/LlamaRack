@@ -28,12 +28,15 @@ jobs:
             backend/internal/observability/writeback_test.go \
             backend/internal/observability/writeback_coverage_test.go \
             backend/internal/gateway/overhead_locust_test.go
-      - name: Validate affected packages
+      - name: Test affected packages
         working-directory: backend
-        run: |
-          go test ./internal/observability ./internal/gateway
-          go test -race ./internal/observability ./internal/gateway
-          go vet ./internal/observability ./internal/gateway
+        run: go test -v ./internal/observability ./internal/gateway
+      - name: Race affected packages
+        working-directory: backend
+        run: go test -race ./internal/observability ./internal/gateway
+      - name: Vet affected packages
+        working-directory: backend
+        run: go vet ./internal/observability ./internal/gateway
       - name: Commit fixes and remove temporary tooling
         run: |
           set -euo pipefail
