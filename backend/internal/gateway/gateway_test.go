@@ -190,6 +190,7 @@ type gatewayFixture struct {
 	gateway       *Gateway
 	lifecycle     *lifecycle.Service
 	secret        string
+	keyID         string
 	ownerID       int64
 	db            *sql.DB
 	sup           *supervisor.Supervisor
@@ -215,7 +216,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", user.ID)
+	key, secret, err := a.CreateAPIKeyForUser(ctx, "gateway", user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 		t.Fatal(err)
 	}
 	obs := observability.New(db)
-	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, ownerID: user.ID, db: db, sup: sup, observability: obs, instanceID: instance.ID}
+	return &gatewayFixture{gateway: New(a, m, l, obs), lifecycle: l, secret: secret, keyID: key.ID, ownerID: user.ID, db: db, sup: sup, observability: obs, instanceID: instance.ID}
 }
 
 func gatewayRequest(t *testing.T, g http.Handler, method, path, secret, body string) *httptest.ResponseRecorder {

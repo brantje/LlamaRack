@@ -149,6 +149,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record.APIKey = &observability.APIKeyRef{ID: key.ID, Name: key.Name, Prefix: key.Prefix}
+	r = stampResponseOwner(r, &record, key)
 
 	allowAll, allowedIDs, allStale, allowErr := g.inferenceAllowlist(r.Context(), key)
 	if allowErr != nil {

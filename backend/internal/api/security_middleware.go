@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
+	"github.com/brantje/llamarack/backend/internal/observability"
 	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
@@ -82,6 +84,12 @@ func ManagementSecurity(a *auth.Service, network *managersecurity.Network, next 
 			return
 		}
 		ctx := context.WithValue(r.Context(), managementAuthContextKey{}, principal)
+		if playgroundPath(path) && principal.User != nil {
+			ctx = auth.WithTrustedInferenceContext(ctx, auth.TrustedInferencePrincipal{
+				Kind: observability.OwnerKindManagementUser,
+				ID:   strconv.FormatInt(principal.User.ID, 10),
+			})
+		}
 		request := r.WithContext(ctx)
 		if instanceID, action, ok := lifecycleAction(path, r.Method); ok {
 			recorder := &managementStatusRecorder{ResponseWriter: w}
@@ -187,6 +195,10 @@ func apiKeySessionDenied(path string) bool {
 	if path == "/api/v1/logs/stream" || path == "/api/v1/downloads/ws" {
 		return true
 	}
+	return playgroundPath(path)
+}
+
+func playgroundPath(path string) bool {
 	return path == "/api/v1/playground" || strings.HasPrefix(path, "/api/v1/playground/")
 }
 

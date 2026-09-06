@@ -14,8 +14,7 @@ import (
 func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	responseID = strings.TrimSpace(responseID)
 	if inFlight := g.active.getByUpstream(responseID); inFlight != nil && strings.HasPrefix(inFlight.endpoint, "/v1/responses") {
-		if !requestInstanceAllowed(r, inFlight.instanceID) {
-			writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+		if !authorizeInFlightResponseAccess(w, r, inFlight) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -26,40 +25,40 @@ func (g *Gateway) getStoredResponse(w http.ResponseWriter, r *http.Request, resp
 	}
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted || stored.ResponseBody == nil || strings.TrimSpace(*stored.ResponseBody) == "" {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+	if !authorizeStoredResponseAccess(w, r, stored) {
 		return
 	}
 	payload, ok := parseFinalResponseJSON([]byte(*stored.ResponseBody))
 	if !ok {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
-	if !bytes.HasSuffix(payload, []byte("\n")) { _, _ = w.Write([]byte("\n")) }
+	if !bytes.HasSuffix(payload, []byte("\n")) {
+		_, _ = w.Write([]byte("\n"))
+	}
 }
 
 func (g *Gateway) deleteStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	if g.observability == nil {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+	if !authorizeStoredResponseAccess(w, r, stored) {
 		return
 	}
 	if err := g.observability.MarkOpenAIResponseDeleted(r.Context(), responseID); err != nil {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": responseID, "object": "response", "deleted": true})
@@ -68,11 +67,10 @@ func (g *Gateway) deleteStoredResponse(w http.ResponseWriter, r *http.Request, r
 func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, responseID string) {
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted || stored.RequestBody == nil || strings.TrimSpace(*stored.RequestBody) == "" {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+	if !authorizeStoredResponseAccess(w, r, stored) {
 		return
 	}
 	items := normalizeInputItems([]byte(*stored.RequestBody))
@@ -81,10 +79,18 @@ func (g *Gateway) getResponseInputItems(w http.ResponseWriter, r *http.Request, 
 
 func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, responseID string) {
 	responseID = strings.TrimSpace(responseID)
-	entry, cancelled, authorized := g.active.cancelByUpstreamAuthorized(responseID, func(instanceID string) bool {
-		return requestInstanceAllowed(r, instanceID)
-	})
-	if !authorized {
+	entry, cancelled, authResult := g.active.cancelByUpstreamAuthorized(responseID,
+		func(ownerKind, ownerID string) bool { return responseOwnerMatches(r, ownerKind, ownerID) },
+		func(instanceID string) bool { return requestInstanceAllowed(r, instanceID) },
+	)
+	switch authResult {
+	case cancelAuthNotFound:
+		if entry == nil {
+			break
+		}
+		writeResponseNotFound(w)
+		return
+	case cancelAuthForbidden:
 		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
 		return
 	}
@@ -107,17 +113,18 @@ func (g *Gateway) cancelStoredResponse(w http.ResponseWriter, r *http.Request, r
 	}
 	stored, err := g.lookupStoredResponse(r.Context(), responseID)
 	if err != nil || stored.Deleted {
-		writeError(w, http.StatusNotFound, "invalid_request_error", "not_found", "Response not found")
+		writeResponseNotFound(w)
 		return
 	}
-	if !requestInstanceAllowed(r, stored.InstanceID) {
-		writeError(w, http.StatusForbidden, "permission_error", "instance_not_allowed", "This API key cannot access that instance")
+	if !authorizeStoredResponseAccess(w, r, stored) {
 		return
 	}
 	writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_request", "Response is not cancellable")
 }
 
 func (g *Gateway) lookupStoredResponse(ctx context.Context, responseID string) (observability.StoredOpenAIResponse, error) {
-	if g.observability == nil { return observability.StoredOpenAIResponse{}, errors.New("observability unavailable") }
+	if g.observability == nil {
+		return observability.StoredOpenAIResponse{}, errors.New("observability unavailable")
+	}
 	return g.observability.GetStoredOpenAIResponse(ctx, responseID)
 }

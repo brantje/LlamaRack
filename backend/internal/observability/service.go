@@ -46,6 +46,8 @@ type RequestRecord struct {
 	LoadDurationMS            float64    `json:"load_duration_ms"`
 	Autoloaded                bool       `json:"autoloaded"`
 	Error                     string     `json:"error,omitempty"`
+	OwnerKind                 string     `json:"-"`
+	OwnerID                   string     `json:"-"`
 	// Request/response bodies intentionally never serialize through the shared
 	// request record. The correlated detail DTO exposes them explicitly so list
 	// APIs and WebSocket snapshots cannot leak full-mode content.

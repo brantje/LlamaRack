@@ -23,6 +23,7 @@ The format is based on Keep a Changelog and releases follow Semantic Versioning.
 
 - Startup now enforces private Unix modes on the configuration directory (`0700`) and SQLite database plus WAL/SHM sidecars (`0600`), including repair of existing overly permissive files, and fails clearly when the filesystem cannot honor `chmod` ([#135](https://github.com/brantje/LlamaRack/issues/135)).
 - Authenticated inference keys can no longer coerce `/v1/slots/{slot_id}` into private llama.cpp paths outside `/slots/{id}` ([#139](https://github.com/brantje/LlamaRack/issues/139)).
+- Stored and in-flight OpenAI Responses are now principal-owned: only the creating API key or management Playground user can retrieve, delete, read input items from, or cancel a `resp_*` object; cross-owner access returns `404` ([#140](https://github.com/brantje/LlamaRack/issues/140)).
 
 ### Fixed
 

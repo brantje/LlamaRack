@@ -9,6 +9,8 @@ import (
 type activeRequest struct {
 	managerRequestID string
 	instanceID       string
+	ownerKind        string
+	ownerID          string
 	target           *url.URL
 	cancel           func()
 	upstreamID       string
@@ -74,34 +76,45 @@ func (r *activeRegistry) getByUpstream(id string) *activeRequest {
 	return &copy
 }
 
+type cancelAuthResult int
+
+const (
+	cancelAuthOK        cancelAuthResult = 0
+	cancelAuthNotFound  cancelAuthResult = 1
+	cancelAuthForbidden cancelAuthResult = 2
+)
+
 func (r *activeRegistry) cancelByUpstream(id string) (*activeRequest, bool) {
-	entry, cancelled, _ := r.cancelByUpstreamAuthorized(id, nil)
+	entry, cancelled, _ := r.cancelByUpstreamAuthorized(id, nil, nil)
 	return entry, cancelled
 }
 
-func (r *activeRegistry) cancelByUpstreamAuthorized(id string, allowed func(string) bool) (*activeRequest, bool, bool) {
+func (r *activeRegistry) cancelByUpstreamAuthorized(id string, ownerAllowed func(ownerKind, ownerID string) bool, instanceAllowed func(instanceID string) bool) (*activeRequest, bool, cancelAuthResult) {
 	if r == nil || id == "" {
-		return nil, false, true
+		return nil, false, cancelAuthNotFound
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry := r.byUpstream[id]
 	if entry == nil {
-		return nil, false, true
+		return nil, false, cancelAuthNotFound
 	}
 	copy := *entry
-	if allowed != nil && !allowed(entry.instanceID) {
-		return &copy, false, false
+	if ownerAllowed != nil && !ownerAllowed(entry.ownerKind, entry.ownerID) {
+		return &copy, false, cancelAuthNotFound
+	}
+	if instanceAllowed != nil && !instanceAllowed(entry.instanceID) {
+		return &copy, false, cancelAuthForbidden
 	}
 	if entry.cancelled {
-		return &copy, false, true
+		return &copy, false, cancelAuthOK
 	}
 	entry.cancelled = true
 	if entry.cancel != nil {
 		entry.cancel()
 	}
 	copy = *entry
-	return &copy, true, true
+	return &copy, true, cancelAuthOK
 }
 
 func (r *activeRegistry) remove(managerID string) {
