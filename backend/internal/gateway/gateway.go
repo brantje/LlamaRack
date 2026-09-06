@@ -62,9 +62,6 @@ func New(a *auth.Service, _ *models.Service, l *lifecycle.Service, services ...*
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
-	overhead := newOverheadTracker(started)
-	w = &overheadResponseWriter{ResponseWriter: w, tracker: overhead}
-	r = r.WithContext(context.WithValue(r.Context(), overheadContextKey{}, overhead))
 	requestID := newRequestID()
 	setProductHeader(w.Header(), headerRequestID, requestID)
 	spec, params, known := classify(r.Method, r.URL.Path)
@@ -260,24 +257,33 @@ func (g *Gateway) persistenceContext(ctx context.Context) (context.Context, cont
 }
 
 func (g *Gateway) begin(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.BeginCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("begin inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) update(ctx context.Context, requestID string, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.UpdateCorrelatedRequest(persistCtx, requestID, record); err != nil {
 		slog.Warn("update inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
 }
 
 func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *float64, record observability.RequestRecord) {
-	if g.observability == nil { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.FinalizeCorrelatedRequest(persistCtx, requestID, promptTPS, record); err != nil {
 		slog.Warn("finalize inference observability failed", "request_id", requestID, "instance_id", record.InstanceID, "endpoint", record.Endpoint, "error", err)
 	}
@@ -285,8 +291,11 @@ func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *flo
 
 func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
 	slug = boundedMetadata(slug, modelSlugCaptureLimit)
-	if g.observability == nil || slug == "" { return }
-	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
+	if g.observability == nil || slug == "" {
+		return
+	}
+	persistCtx, cancel := g.persistenceContext(ctx)
+	defer cancel()
 	if err := g.observability.SetRequestModelSlug(persistCtx, requestID, slug); err != nil {
 		slog.Warn("capture inference model slug failed", "request_id", requestID, "model_slug", slug, "error", err)
 	}

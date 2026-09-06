@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-var apiKeyCaches sync.Map
-
 type apiKeyCacheState struct {
 	mu         sync.RWMutex
 	generation uint64
@@ -14,13 +12,7 @@ type apiKeyCacheState struct {
 }
 
 func apiKeyCacheFor(s *Service) *apiKeyCacheState {
-	key := s.db
-	if value, ok := apiKeyCaches.Load(key); ok {
-		return value.(*apiKeyCacheState)
-	}
-	state := &apiKeyCacheState{byHash: map[string]APIKey{}}
-	actual, _ := apiKeyCaches.LoadOrStore(key, state)
-	return actual.(*apiKeyCacheState)
+	return &s.apiKeyCache
 }
 
 func cloneAPIKey(item APIKey) APIKey {

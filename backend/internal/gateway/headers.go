@@ -9,7 +9,6 @@ const (
 	headerAutoloaded      = "X-LlamaRack-Autoloaded"
 	headerQueueMS         = "X-LlamaRack-Queue-MS"
 	headerLoadMS          = "X-LlamaRack-Load-MS"
-	headerOverheadMS      = "X-LlamaRack-Overhead-Duration-MS"
 	headerTTFTMS          = "X-LlamaRack-TTFT-MS"
 	headerPromptTPS       = "X-LlamaRack-Prompt-Tokens-Per-Second"
 	headerGenerationTPS   = "X-LlamaRack-Generation-Tokens-Per-Second"
@@ -23,5 +22,5 @@ func setProductHeader(header http.Header, name, value string) {
 }
 
 func CORSExposeHeaders() string {
-	return "X-LlamaRack-Request-ID, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID, X-LlamaRack-Instance, X-LlamaRack-Autoloaded, X-LlamaRack-Queue-MS, X-LlamaRack-Load-MS, X-LlamaRack-Overhead-Duration-MS, X-LlamaRack-TTFT-MS, X-LlamaRack-Prompt-Tokens-Per-Second, X-LlamaRack-Generation-Tokens-Per-Second, X-LlamaRack-Prompt-Tokens, X-LlamaRack-Generated-Tokens, X-LlamaRack-Total-Tokens"
+	return "X-LlamaRack-Request-ID, X-LiteLLM-Trace-ID, X-LiteLLM-Session-ID, X-LlamaRack-Instance, X-LlamaRack-Autoloaded, X-LlamaRack-Queue-MS, X-LlamaRack-Load-MS, X-LlamaRack-TTFT-MS, X-LlamaRack-Prompt-Tokens-Per-Second, X-LlamaRack-Generation-Tokens-Per-Second, X-LlamaRack-Prompt-Tokens, X-LlamaRack-Generated-Tokens, X-LlamaRack-Total-Tokens"
 }

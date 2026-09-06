@@ -253,6 +253,9 @@ func (s *Service) RecordCorrelatedRequest(ctx context.Context, requestID string,
 	if requestID == "" {
 		return fmt.Errorf("request_id is required")
 	}
+	if record.StartedAt <= 0 {
+		return fmt.Errorf("started_at is required")
+	}
 	if handled, err := s.bufferRecordCorrelated(requestID, promptTokensPerSecond, record); handled {
 		return err
 	}

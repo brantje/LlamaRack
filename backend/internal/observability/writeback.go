@@ -21,13 +21,13 @@ var ErrWritebackOverflow = errors.New("observability writeback buffer full")
 var writebackStates sync.Map
 
 type writebackState struct {
-	mu                sync.Mutex
-	enabled           bool
-	started           bool
-	limit             int
-	entries           map[string]*writebackEntry
-	openAIToRequest   map[string]string
-	modelIdentities   map[string]writebackModelIdentity
+	mu              sync.Mutex
+	enabled         bool
+	started         bool
+	limit           int
+	entries         map[string]*writebackEntry
+	openAIToRequest map[string]string
+	modelIdentities map[string]writebackModelIdentity
 }
 
 type writebackModelIdentity struct {
@@ -403,10 +403,23 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 		return 0, nil
 	}
 
-	if err := s.persistWritebackBatch(ctx, batch); err != nil {
-		state.mu.Lock()
-		for i := range batch {
-			entry := batch[i]
+	if err := s.persistWritebackBatch(ctx, batch); err == nil {
+		return len(batch), nil
+	}
+
+	persisted := 0
+	var firstErr error
+	for i := range batch {
+		entry := batch[i]
+		if err := s.persistWritebackBatch(ctx, []writebackEntry{entry}); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if isPermanentWritebackError(err) {
+				slog.Error("dropping permanently invalid inference observability writeback entry", "request_id", entry.requestID, "error", err)
+				continue
+			}
+			state.mu.Lock()
 			if _, exists := state.entries[entry.requestID]; !exists {
 				copyEntry := entry
 				state.entries[entry.requestID] = &copyEntry
@@ -414,11 +427,20 @@ func (s *Service) flushWriteback(ctx context.Context, onlyReady bool) (int, erro
 					state.openAIToRequest[entry.openAIResponseID] = entry.requestID
 				}
 			}
+			state.mu.Unlock()
+			continue
 		}
-		state.mu.Unlock()
-		return 0, err
+		persisted++
 	}
-	return len(batch), nil
+	return persisted, firstErr
+}
+
+func isPermanentWritebackError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "constraint failed") || strings.Contains(message, "constraint violation")
 }
 
 func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEntry) error {
@@ -430,70 +452,124 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 		return err
 	}
 	defer tx.Rollback()
-
-	seenOpenAI := map[string]struct{}{}
 	for i := range batch {
-		entry := batch[i]
-		record := normalizeFinalRecord(entry.record)
-		keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody := requestValues(record)
-		var promptTPS any
-		if entry.promptTPS != nil {
-			promptTPS = *entry.promptTPS
+		if err := s.persistWritebackEntry(ctx, tx, batch[i]); err != nil {
+			return err
 		}
-		var openAIID any
-		if entry.openAIResponseID != "" {
-			duplicate := false
-			if _, exists := seenOpenAI[entry.openAIResponseID]; exists {
-				duplicate = true
-			} else {
-				var existing int
-				err := tx.QueryRowContext(ctx, `SELECT 1 FROM inference_requests WHERE openai_response_id=?`, entry.openAIResponseID).Scan(&existing)
-				if err == nil {
-					duplicate = true
-				} else if err != sql.ErrNoRows {
-					return err
-				}
-			}
-			if duplicate {
-				slog.Warn("duplicate openai response id ignored during observability writeback", "request_id", entry.requestID, "openai_response_id", entry.openAIResponseID)
-			} else {
-				seenOpenAI[entry.openAIResponseID] = struct{}{}
-				openAIID = entry.openAIResponseID
-			}
-		}
+	}
+	return tx.Commit()
+}
 
+func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry writebackEntry) error {
+	record := normalizeFinalRecord(entry.record)
+	keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody := requestValues(record)
+	var promptTPS any
+	if entry.promptTPS != nil {
+		promptTPS = *entry.promptTPS
+	}
+
+	var rowID int64
+	var existingFinishedAt int64
+	err := tx.QueryRowContext(ctx, `SELECT r.id,r.finished_at
+        FROM inference_request_correlations c
+        JOIN inference_requests r ON r.id=c.inference_request_id
+        WHERE c.request_id=?`, entry.requestID).Scan(&rowID, &existingFinishedAt)
+	existing := err == nil
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+
+	var openAIID any
+	if entry.openAIResponseID != "" {
+		var ownerRequestID string
+		ownerErr := tx.QueryRowContext(ctx, `SELECT COALESCE(c.request_id,'')
+            FROM inference_requests r
+            LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
+            WHERE r.openai_response_id=? LIMIT 1`, entry.openAIResponseID).Scan(&ownerRequestID)
+		switch {
+		case ownerErr == sql.ErrNoRows:
+			openAIID = entry.openAIResponseID
+		case ownerErr != nil:
+			return ownerErr
+		case ownerRequestID == entry.requestID:
+			openAIID = entry.openAIResponseID
+		default:
+			slog.Warn("duplicate openai response id ignored during observability writeback", "request_id", entry.requestID, "openai_response_id", entry.openAIResponseID)
+		}
+	}
+
+	if !existing {
 		inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-			started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
-			duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
-			trace_id,call_type,client_ip,user_agent,model_slug,openai_response_id,openai_response_deleted
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
+            duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
+            trace_id,call_type,client_ip,user_agent,model_slug,openai_response_id,openai_response_deleted
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result,
 			record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
 			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted))
 		if err != nil {
 			return err
 		}
-		rowID, err := inserted.LastInsertId()
+		rowID, err = inserted.LastInsertId()
 		if err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_correlations(request_id,inference_request_id,prompt_tokens_per_second) VALUES(?,?,?)`, entry.requestID, rowID, promptTPS); err != nil {
 			return err
 		}
-		if entry.contextReady {
-			modelID, modelName, err := s.resolveWritebackModelIdentity(ctx, tx, record.InstanceID, entry.contextInstanceID)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_log_context(request_id,session_id,model_id,model_name) VALUES(?,?,?,?)`, entry.requestID, entry.sessionID, modelID, modelName); err != nil {
-				return err
-			}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE inference_requests SET
+            started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
+            prompt_tokens=?,generated_tokens=?,total_tokens=?,tokens_per_second=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,error=?,request_body=?,response_body=?,
+            trace_id=?,call_type=?,client_ip=?,user_agent=?,model_slug=?,openai_response_id=COALESCE(?,openai_response_id),
+            openai_response_deleted=CASE WHEN openai_response_deleted=1 OR ?=1 THEN 1 ELSE 0 END
+            WHERE id=?`,
+			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
+			record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
+			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted), rowID); err != nil {
+			return err
 		}
-		if err := addFinalCounters(ctx, tx, record); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE inference_request_correlations SET prompt_tokens_per_second=? WHERE request_id=?`, promptTPS, entry.requestID); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+
+	if entry.contextReady {
+		modelID, modelName, err := s.resolveWritebackModelIdentity(ctx, tx, record.InstanceID, entry.contextInstanceID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_log_context(request_id,session_id,model_id,model_name) VALUES(?,?,?,?)
+            ON CONFLICT(request_id) DO UPDATE SET
+                session_id=CASE WHEN excluded.session_id<>'' THEN excluded.session_id ELSE inference_request_log_context.session_id END,
+                model_id=CASE WHEN excluded.model_id<>'' THEN excluded.model_id ELSE inference_request_log_context.model_id END,
+                model_name=CASE WHEN excluded.model_name<>'' THEN excluded.model_name ELSE inference_request_log_context.model_name END`,
+			entry.requestID, entry.sessionID, modelID, modelName); err != nil {
+			return err
+		}
+	}
+
+	if !existing || existingFinishedAt == 0 {
+		if err := addFinalCounters(ctx, tx, record); err != nil {
+			return err
+		}
+		if existing && record.Autoloaded {
+			if err := addCounter(ctx, tx, Counter{Metric: "autoload_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
+				return err
+			}
+			if record.LoadDurationMS > 0 {
+				if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: record.InstanceID, Value: record.LoadDurationMS}); err != nil {
+					return err
+				}
+			}
+			if record.Result != "success" {
+				if err := addCounter(ctx, tx, Counter{Metric: "failed_start_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) resolveWritebackModelIdentity(ctx context.Context, tx *sql.Tx, durableID, publicID string) (string, string, error) {

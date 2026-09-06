@@ -57,9 +57,6 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 			proxyRequest.Out.Header.Del("Authorization")
 		},
 	}
-	if tracker, ok := r.Context().Value(overheadContextKey{}).(*overheadTracker); ok {
-		proxy.Transport = overheadTransport{tracker: tracker}
-	}
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(writer http.ResponseWriter, _ *http.Request, proxyErr error) {
 		slog.Warn("gateway worker proxy failed", "instance_id", instance.ID, "request_id", requestID, "error", proxyErr)
@@ -69,9 +66,13 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 
 	var completed *responseMetrics
 	onUpstreamID := func(id string) {
-		if id == "" { return }
+		if id == "" {
+			return
+		}
 		g.active.setUpstreamID(requestID, id)
-		if spec.CaptureResponseID { g.persistOpenAIResponseID(r.Context(), requestID, id) }
+		if spec.CaptureResponseID {
+			g.persistOpenAIResponseID(r.Context(), requestID, id)
+		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if spec.MapNotImplemented && resp.StatusCode == http.StatusNotFound {
@@ -92,13 +93,21 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 		tracked := &firstReadCloser{ReadCloser: resp.Body}
 		payload, readErr := io.ReadAll(tracked)
 		closeErr := resp.Body.Close()
-		if readErr != nil { return readErr }
-		if closeErr != nil { return closeErr }
+		if readErr != nil {
+			return readErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 		resp.Body = io.NopCloser(bytes.NewReader(payload))
 		resp.ContentLength = int64(len(payload))
 		resp.Header.Set("Content-Length", strconv.Itoa(len(payload)))
-		if spec.CaptureResponseID { onUpstreamID(firstNonEmpty(extractJSONID(payload), parseResponseIDFromSSE(payload))) }
-		if spec.CaptureCompletionID { onUpstreamID(extractJSONID(payload)) }
+		if spec.CaptureResponseID {
+			onUpstreamID(firstNonEmpty(extractJSONID(payload), parseResponseIDFromSSE(payload)))
+		}
+		if spec.CaptureCompletionID {
+			onUpstreamID(extractJSONID(payload))
+		}
 		metrics := calculateResponseMetrics(workerStarted, tracked.firstRead, time.Now(), parseUsage(payload))
 		completed = &metrics
 		addFinalMetricHeaders(resp.Header, spec.Metrics, metrics)
@@ -111,31 +120,47 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	}()
 	finished := time.Now()
 	active = false
-	if g.observability != nil { g.observability.EndActive(instance.ID) }
+	if g.observability != nil {
+		g.observability.EndActive(instance.ID)
+	}
 
 	record.StatusCode = observed.StatusCode()
-	if record.StatusCode >= 200 && record.StatusCode < 400 { record.Result = "success" } else { record.Result = "error" }
+	if record.StatusCode >= 200 && record.StatusCode < 400 {
+		record.Result = "success"
+	} else {
+		record.Result = "error"
+	}
 	record.FinishedAt = finished.UnixMilli()
 	record.DurationMS = milliseconds(finished.Sub(started))
 	responseSample := observed.Bytes()
 	metrics := responseMetrics{}
-	if completed != nil { metrics = *completed } else { metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample)) }
+	if completed != nil {
+		metrics = *completed
+	} else {
+		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
+	}
 	record.TTFTMS = metrics.ttftMS
 	record.PromptTokens = metrics.promptTokens
 	record.GeneratedTokens = metrics.generatedTokens
 	record.TotalTokens = metrics.totalTokens
 	record.TokensPerSecond = metrics.generationTPS
 	*promptTPS = metrics.promptTPS
-	if record.Result == "error" && record.Error == "" { record.Error = responseError(record.StatusCode, responseSample) }
+	if record.Result == "error" && record.Error == "" {
+		record.Error = responseError(record.StatusCode, responseSample)
+	}
 	if observed.captureAll {
 		value := string(responseSample)
 		record.ResponseBody = &value
 	}
-	if *proxyPanic != nil { panic(*proxyPanic) }
+	if *proxyPanic != nil {
+		panic(*proxyPanic)
+	}
 }
 
 func (g *Gateway) persistOpenAIResponseID(ctx context.Context, requestID, openaiID string) {
-	if g.observability == nil || strings.TrimSpace(openaiID) == "" { return }
+	if g.observability == nil || strings.TrimSpace(openaiID) == "" {
+		return
+	}
 	persistCtx, cancel := g.persistenceContext(ctx)
 	defer cancel()
 	if err := g.observability.SetOpenAIResponseID(persistCtx, requestID, openaiID); err != nil && !errors.Is(err, observability.ErrDuplicateOpenAIResponseID) {
@@ -159,20 +184,28 @@ func (s *idCaptureStream) Read(p []byte) (int, error) {
 	if n > 0 && !s.seen {
 		s.buf = append(s.buf, p[:n]...)
 		id := ""
-		if s.captureResponse { id = parseResponseIDFromSSE(s.buf) }
+		if s.captureResponse {
+			id = parseResponseIDFromSSE(s.buf)
+		}
 		if id == "" && s.captureCompletion {
 			id = extractJSONID(s.buf)
-			if id == "" { id = parseResponseIDFromSSE(s.buf) }
+			if id == "" {
+				id = parseResponseIDFromSSE(s.buf)
+			}
 		}
 		if id == "" {
 			id = extractQuotedID(s.buf)
-			if s.captureResponse && id != "" && !strings.HasPrefix(id, "resp_") { id = "" }
+			if s.captureResponse && id != "" && !strings.HasPrefix(id, "resp_") {
+				id = ""
+			}
 		}
 		if id != "" {
 			s.seen = true
 			s.onID(id)
 		}
-		if len(s.buf) > 1<<20 { s.buf = s.buf[len(s.buf)/2:] }
+		if len(s.buf) > 1<<20 {
+			s.buf = s.buf[len(s.buf)/2:]
+		}
 	}
 	return n, err
 }

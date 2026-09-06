@@ -167,3 +167,22 @@ func TestAPIKeyUseWriteSeedsFromPersistedTimestamp(t *testing.T) {
 		t.Fatalf("restart rewrote recent usage: got=%d want=%d", stored, persisted)
 	}
 }
+
+func TestAPIKeyCacheGenerationRejectsStalePopulationAndStamp(t *testing.T) {
+	s := testService(t)
+	state := apiKeyCacheFor(s)
+	state.mu.RLock()
+	generation := state.generation
+	state.mu.RUnlock()
+	item := APIKey{ID: "key-a", Enabled: true, OwnerEnabled: true}
+	if !s.rememberAPIKey("hash-a", item, generation) {
+		t.Fatal("initial cache population failed")
+	}
+	s.clearAPIKeyCache()
+	if s.rememberAPIKey("hash-a", item, generation) {
+		t.Fatal("stale generation repopulated invalidated cache")
+	}
+	if _, ok := s.stampCachedAPIKey("hash-a", time.Now().Unix(), generation); ok {
+		t.Fatal("stale generation stamped invalidated cache")
+	}
+}

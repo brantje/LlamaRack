@@ -13,6 +13,12 @@ func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.startWriteback(ctx, time.Hour)
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-a','model-a','Model A','model.gguf',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-a','public-model','model-a','Instance A')`); err != nil {
+		t.Fatal(err)
+	}
 
 	record := RequestRecord{StartedAt: 1000, InstanceID: "instance-a", Endpoint: "/v1/chat/completions", StatusCode: 200}
 	if err := s.BeginCorrelatedRequest(ctx, "req-a", record); err != nil {
@@ -39,22 +45,22 @@ func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	if flushed, err := s.flushWriteback(ctx, true); err != nil || flushed != 0 {
 		t.Fatalf("ready flush before context=%d err=%v", flushed, err)
 	}
-	if err := s.AttachRequestLogContext(ctx, "req-a", "session-a", "public-model"); err != nil {
+	if err := s.AttachRequestLogContext(ctx, "req-a", "session-a", "instance-a"); err != nil {
 		t.Fatal(err)
 	}
 	if flushed, err := s.flushWriteback(ctx, true); err != nil || flushed != 1 {
 		t.Fatalf("ready flush=%d err=%v", flushed, err)
 	}
 
-	var requestID, modelSlug, sessionID string
-	if err := s.db.QueryRowContext(ctx, `SELECT c.request_id,r.model_slug,x.session_id
-		FROM inference_requests r
-		JOIN inference_request_correlations c ON c.inference_request_id=r.id
-		JOIN inference_request_log_context x ON x.request_id=c.request_id`).Scan(&requestID, &modelSlug, &sessionID); err != nil {
+	var requestID, instanceID, modelSlug, sessionID, modelID, modelName string
+	if err := s.db.QueryRowContext(ctx, `SELECT c.request_id,r.instance_id,r.model_slug,x.session_id,x.model_id,x.model_name
+        FROM inference_requests r
+        JOIN inference_request_correlations c ON c.inference_request_id=r.id
+        JOIN inference_request_log_context x ON x.request_id=c.request_id`).Scan(&requestID, &instanceID, &modelSlug, &sessionID, &modelID, &modelName); err != nil {
 		t.Fatal(err)
 	}
-	if requestID != "req-a" || modelSlug != "public-model" || sessionID != "session-a" {
-		t.Fatalf("persisted request=%q slug=%q session=%q", requestID, modelSlug, sessionID)
+	if requestID != "req-a" || instanceID != "instance-a" || modelSlug != "public-model" || sessionID != "session-a" || modelID != "model-a" || modelName != "Model A" {
+		t.Fatalf("persisted request=%q instance=%q slug=%q session=%q model=%q name=%q", requestID, instanceID, modelSlug, sessionID, modelID, modelName)
 	}
 }
 
@@ -184,5 +190,46 @@ func TestWritebackBuffersStoredResponseState(t *testing.T) {
 	}
 	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_buffered"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("second delete err=%v", err)
+	}
+}
+
+func TestWritebackPersistenceIsIdempotentByRequestID(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	s.startWriteback(ctx, time.Hour)
+	record := RequestRecord{StartedAt: 1000, InstanceID: "instance-a", Endpoint: "/v1/test", StatusCode: 200}
+	if err := s.RecordCorrelatedRequest(ctx, "req-idempotent", nil, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.flushWriteback(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if handled, err := s.bufferFinalize("req-idempotent", nil, record); !handled || err != nil {
+		t.Fatalf("rebuffer handled=%v err=%v", handled, err)
+	}
+	if handled, err := s.bufferRequestLogContext("req-idempotent", "session", ""); !handled || err != nil {
+		t.Fatalf("context handled=%v err=%v", handled, err)
+	}
+	if _, err := s.flushWriteback(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	var requests, correlations int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&requests); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_request_correlations WHERE request_id='req-idempotent'").Scan(&correlations); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || correlations != 1 {
+		t.Fatalf("requests=%d correlations=%d", requests, correlations)
+	}
+}
+
+func TestBufferedRecordRequiresStartedAt(t *testing.T) {
+	s := testService(t)
+	s.startWriteback(context.Background(), time.Hour)
+	err := s.RecordCorrelatedRequest(context.Background(), "req-no-start", nil, RequestRecord{InstanceID: "instance-a", Endpoint: "/v1/test"})
+	if err == nil || err.Error() != "started_at is required" {
+		t.Fatalf("err=%v", err)
 	}
 }

@@ -343,33 +343,41 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 		return APIKey{}, ErrAPIKeyInvalid
 	}
 	hash := tokenHash(token)
-	item, cached := s.cachedAPIKey(hash)
-	if !cached {
-		var err error
-		item, err = s.lookupAPIKeyByHash(ctx, hash)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return APIKey{}, ErrAPIKeyInvalid
+	for {
+		item, generation, cached := s.cachedAPIKey(hash)
+		if !cached {
+			var err error
+			item, err = s.lookupAPIKeyByHash(ctx, hash)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return APIKey{}, ErrAPIKeyInvalid
+				}
+				return APIKey{}, err
 			}
+			if !s.rememberAPIKey(hash, item, generation) {
+				continue
+			}
+			s.seedAPIUseWrite(item.ID, item.LastUsedAt)
+		}
+		if !item.Enabled || !item.OwnerEnabled || apiKeyExpired(item.ExpiresOn, time.Now().UTC()) {
+			return APIKey{}, ErrAPIKeyInvalid
+		}
+
+		now := time.Now()
+		stamped, ok := s.stampCachedAPIKey(hash, now.Unix(), generation)
+		if !ok {
+			continue
+		}
+		item = stamped
+		if !s.reserveAPIUseWrite(item.ID, now) {
+			return item, nil
+		}
+		if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=? AND enabled=1", now.Unix(), item.ID); err != nil {
+			s.releaseAPIUseWrite(item.ID, now)
 			return APIKey{}, err
 		}
-		s.rememberAPIKey(hash, item)
-		s.seedAPIUseWrite(item.ID, item.LastUsedAt)
-	}
-	if !item.Enabled || !item.OwnerEnabled || apiKeyExpired(item.ExpiresOn, time.Now().UTC()) {
-		return APIKey{}, ErrAPIKeyInvalid
-	}
-
-	now := time.Now()
-	item = s.stampCachedAPIKey(hash, now.Unix())
-	if !s.reserveAPIUseWrite(item.ID, now) {
 		return item, nil
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=? AND enabled=1", now.Unix(), item.ID); err != nil {
-		s.releaseAPIUseWrite(item.ID, now)
-		return APIKey{}, err
-	}
-	return item, nil
 }
 
 func (s *Service) reserveAPIUseWrite(id string, now time.Time) bool {

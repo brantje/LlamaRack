@@ -106,3 +106,30 @@ func TestHotCacheInvalidatesCreateUpdateDeleteAndOldSlug(t *testing.T) {
 		t.Fatal("deleted instance remained cached")
 	}
 }
+
+func TestHotCacheGenerationRejectsReadAfterUpdateAndDelete(t *testing.T) {
+	s, _ := testService(t)
+	s.EnableHotCache()
+	stale := Instance{ID: "instance-a", Slug: "old", Name: "Old"}
+
+	_, updateGeneration, _ := s.cachedByIDAtGeneration(stale.ID)
+	updated := stale
+	updated.Slug = "new"
+	updated.Name = "New"
+	s.rememberHot(updated)
+	if s.rememberHotIfGeneration(stale, updateGeneration) {
+		t.Fatal("stale read repopulated cache after update")
+	}
+	if got, ok := s.cachedByID(stale.ID); !ok || got.Name != "New" || got.Slug != "new" {
+		t.Fatalf("updated cache=%+v ok=%v", got, ok)
+	}
+
+	_, deleteGeneration, _ := s.cachedByIDAtGeneration(stale.ID)
+	s.forgetHot(stale.ID)
+	if s.rememberHotIfGeneration(stale, deleteGeneration) {
+		t.Fatal("stale read repopulated cache after delete")
+	}
+	if _, ok := s.cachedByID(stale.ID); ok {
+		t.Fatal("deleted instance returned to cache")
+	}
+}
