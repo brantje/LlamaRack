@@ -364,6 +364,7 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		}
 	}
 	devices = cleanDeviceIDs(devices)
+	leaseAllocated := int64(0)
 	missing := make([]string, 0, len(devices))
 	for _, id := range devices {
 		if have[id] {
@@ -371,6 +372,7 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		}
 		if bytes := leaseByID[id]; bytes > 0 {
 			out = append(out, GPUResource{DeviceID: id, Bytes: bytes})
+			leaseAllocated += bytes
 			have[id] = true
 			continue
 		}
@@ -385,7 +387,7 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 			observedTotal += gpu.Bytes
 		}
 	}
-	remaining := estimated - observedTotal
+	remaining := estimated - observedTotal - leaseAllocated
 	if remaining < 1 {
 		return out
 	}

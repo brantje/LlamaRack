@@ -314,6 +314,24 @@ func TestAttributeResourcesUnionsObservedWithLeaseDevices(t *testing.T) {
 	if byID["CUDA0"] != 14*gib || byID["CUDA1"] != 6*gib {
 		t.Fatalf("missing lease device should take leftover estimate, got %+v", remainder)
 	}
+
+	mixed := AttributeResources(ResourceAttribution{
+		EstimatedBytes: 20 * gib,
+		PID:            9,
+		Processes:      []hardware.GPUProcess{{PID: 9, DeviceID: "CUDA0", UsedBytes: 10 * gib}},
+		Devices:        []string{"CUDA0", "CUDA1", "CUDA2"},
+		LeaseGPUs: []GPUReservation{
+			{DeviceID: "CUDA0", Bytes: 10 * gib},
+			{DeviceID: "CUDA1", Bytes: 6 * gib},
+		},
+	})
+	byID = map[string]int64{}
+	for _, gpu := range mixed.GPU {
+		byID[gpu.DeviceID] = gpu.Bytes
+	}
+	if byID["CUDA0"] != 10*gib || byID["CUDA1"] != 6*gib || byID["CUDA2"] != 4*gib {
+		t.Fatalf("lease bytes must be subtracted from leftover estimate, got %+v", mixed)
+	}
 }
 
 func TestCreditsFromCandidatesOmitsUnassignedBytes(t *testing.T) {
