@@ -70,6 +70,11 @@ func (n *Network) EffectiveRemoteAddress(r *http.Request) string {
 	if len(chain) == 0 {
 		chain = xForwardedFor(r.Header.Get("X-Forwarded-For"))
 	}
+	if len(chain) == 0 {
+		if address := forwardedAddress(r.Header.Get("X-Real-IP")); address.IsValid() {
+			return address.String()
+		}
+	}
 	chain = append(chain, peer)
 	for index := len(chain) - 1; index >= 0; index-- {
 		if !n.isTrustedPeer(r.Context(), chain[index]) {
@@ -178,11 +183,26 @@ func forwardedProto(header string) string {
 func xForwardedFor(header string) []netip.Addr {
 	var result []netip.Addr
 	for _, raw := range strings.Split(header, ",") {
-		if ip, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(raw), "[]")); err == nil {
-			result = append(result, ip.Unmap())
+		if ip := forwardedAddress(raw); ip.IsValid() {
+			result = append(result, ip)
 		}
 	}
 	return result
+}
+
+func forwardedAddress(value string) netip.Addr {
+	value = strings.Trim(strings.TrimSpace(value), `"`)
+	if value == "" || strings.EqualFold(value, "unknown") || strings.HasPrefix(value, "_") {
+		return netip.Addr{}
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	ip, err := netip.ParseAddr(strings.Trim(value, "[]"))
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ip.Unmap()
 }
 
 func addrsToStrings(addrs []netip.Addr) []string {
@@ -204,12 +224,8 @@ func forwardedFor(header string) []netip.Addr {
 			if !ok || !strings.EqualFold(key, "for") {
 				continue
 			}
-			value = strings.Trim(strings.TrimSpace(value), `"`)
-			if host, _, err := net.SplitHostPort(value); err == nil {
-				value = host
-			}
-			if ip, err := netip.ParseAddr(strings.Trim(value, "[]")); err == nil {
-				result = append(result, ip.Unmap())
+			if ip := forwardedAddress(value); ip.IsValid() {
+				result = append(result, ip)
 			}
 		}
 	}
