@@ -22,6 +22,7 @@ const (
 	metadataResponseCaptureLimit = 8 << 20
 	preAuthRequestBodyBytes      = 64 << 10
 	maxRequestBodyBytes          = 32 << 20
+	modelSlugCaptureLimit        = 512
 )
 
 var requestIDFallback atomic.Uint64
@@ -213,7 +214,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case routeListModels:
 		g.listModels(observed, r, allowAll, allowedIDs)
 	case routeGetModel:
-		g.getModel(observed, r, params["model"])
+		g.getModel(observed, r, requestID, &record, params["model"])
 	case routeGetResponse:
 		g.getStoredResponse(observed, r, params["response_id"])
 	case routeDeleteResponse:
@@ -277,7 +278,8 @@ func (g *Gateway) finalize(ctx context.Context, requestID string, promptTPS *flo
 }
 
 func (g *Gateway) captureModelSlug(ctx context.Context, requestID, slug string) {
-	if g.observability == nil || strings.TrimSpace(slug) == "" { return }
+	slug = boundedMetadata(slug, modelSlugCaptureLimit)
+	if g.observability == nil || slug == "" { return }
 	persistCtx, cancel := g.persistenceContext(ctx); defer cancel()
 	if err := g.observability.SetRequestModelSlug(persistCtx, requestID, slug); err != nil {
 		slog.Warn("capture inference model slug failed", "request_id", requestID, "model_slug", slug, "error", err)
