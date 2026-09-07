@@ -201,7 +201,6 @@ async function saveDownloadLimit() {
 
         <div v-if="settings" class="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">
           <AppButton intent="primary" :loading="settingsBusy" :disabled="!canSaveLimit" data-testid="hf-max-download-save" @click="saveDownloadLimit">Save download limit</AppButton>
-          <code class="font-mono text-xs text-[var(--neutral-700)]" data-testid="hf-max-download-bytes">{{ formatExactBytes(limitBytes) }}</code>
         </div>
       </Frame>
     </div>
