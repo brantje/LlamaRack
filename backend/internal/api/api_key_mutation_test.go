@@ -220,3 +220,54 @@ func TestManagedLiteLLMKeyIsListedAndNameIsImmutable(t *testing.T) {
 		t.Fatalf("public rotate managed key status=%d body=%s", rotated.Code, rotated.Body.String())
 	}
 }
+
+func TestAPIKeyMutationRejectsHiddenServiceAccountOwner(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	handler := apiKeyHandler(t, f)
+	user, err := f.auth.UserByID(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := f.auth.EnsureHiddenServiceAccount(t.Context(), auth.ManagedPrincipalName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible, err := f.auth.CreateServiceAccount(t.Context(), "docs", user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	createdHidden := doRequest(t, handler, http.MethodPost, "/api/v1/api-keys", map[string]any{
+		"name": "hidden-owned", "owner_service_account_id": hidden.ID,
+	}, nil)
+	if createdHidden.Code != http.StatusNotFound || !strings.Contains(createdHidden.Body.String(), "api key not found") {
+		t.Fatalf("create hidden owner status=%d body=%s", createdHidden.Code, createdHidden.Body.String())
+	}
+
+	created := doRequest(t, handler, http.MethodPost, "/api/v1/api-keys", map[string]any{
+		"name": "user-key", "owner_user_id": user.ID,
+	}, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create user-owned status=%d body=%s", created.Code, created.Body.String())
+	}
+	var result struct {
+		Key auth.APIKey `json:"key"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	hiddenOwner := doRequest(t, handler, http.MethodPatch, "/api/v1/api-keys/"+result.Key.ID, map[string]any{
+		"owner_service_account_id": hidden.ID,
+	}, nil)
+	if hiddenOwner.Code != http.StatusNotFound || !strings.Contains(hiddenOwner.Body.String(), "api key not found") {
+		t.Fatalf("patch hidden owner status=%d body=%s", hiddenOwner.Code, hiddenOwner.Body.String())
+	}
+
+	visibleOwner := doRequest(t, handler, http.MethodPatch, "/api/v1/api-keys/"+result.Key.ID, map[string]any{
+		"owner_service_account_id": visible.ID,
+	}, nil)
+	if visibleOwner.Code != http.StatusNoContent {
+		t.Fatalf("patch visible owner status=%d body=%s", visibleOwner.Code, visibleOwner.Body.String())
+	}
+}

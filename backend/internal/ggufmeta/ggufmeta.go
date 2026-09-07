@@ -14,13 +14,30 @@ import (
 )
 
 const (
-	maxMetadataCount       = uint64(1_000_000)
-	maxArrayCount          = uint64(10_000_000)
-	maxStringBytes         = uint64(16 * 1024 * 1024)
-	maxDisplayBytes        = uint64(4096)
-	maxKeyBytes            = uint64(64 * 1024)
-	maxArrayPreview        = uint64(16)
-	metadataReadBufferSize = 8 * 1024
+	// maxMetadataCount is a hard parser safety bound. Real GGUF files store
+	// architecture/tokenizer/config as tens to low hundreds of KV entries
+	// (tokenizer vocabularies are array values, not extra keys). In-repo
+	// fixtures top out at 205 keys; 4096 leaves substantial headroom while
+	// rejecting million-entry allocation attacks.
+	maxMetadataCount = uint64(4096)
+	maxArrayCount    = uint64(10_000_000)
+	maxStringBytes   = uint64(16 * 1024 * 1024)
+	maxDisplayBytes  = uint64(4096)
+	maxKeyBytes      = uint64(64 * 1024)
+	maxArrayPreview  = uint64(16)
+	// maxRetainedMetadataBytes bounds attacker-controlled retained parser
+	// state: keys plus display/preview strings across the metadata section.
+	maxRetainedMetadataBytes = uint64(2 * 1024 * 1024)
+	// maxMetadataSectionBytes bounds bytes read or skipped while walking the
+	// metadata section. It covers large real tokenizer arrays while blocking
+	// many max-sized string skips.
+	maxMetadataSectionBytes = uint64(64 * 1024 * 1024)
+	metadataReadBufferSize  = 8 * 1024
+)
+
+var (
+	errMetadataBudgetExceeded    = errors.New("GGUF metadata unavailable: metadata budget exceeded")
+	errUnreasonableMetadataCount = errors.New("GGUF metadata unavailable: unreasonable metadata count")
 )
 
 type Entry struct {
@@ -93,24 +110,28 @@ func inspect(r io.Reader) (Inspection, error) {
 	if err != nil {
 		return Inspection{}, err
 	}
-	if metadataCount > maxMetadataCount {
-		return Inspection{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
+	if err := checkMetadataCount(metadataCount); err != nil {
+		return Inspection{}, err
 	}
 
-	result := Inspection{Version: version, TensorCount: tensorCount, MetadataCount: metadataCount, Metadata: make([]Entry, 0, metadataCount)}
+	result := Inspection{Version: version, TensorCount: tensorCount, MetadataCount: metadataCount, Metadata: make([]Entry, 0)}
 	scalars := make(map[string]string)
+	meta, budget := boundMetadataReader(r)
 	for i := uint64(0); i < metadataCount; i++ {
-		key, err := readKey(r)
+		key, err := readKey(meta)
 		if err != nil {
 			return Inspection{}, err
 		}
-		typeID, err := readU32(r)
+		typeID, err := readU32(meta)
 		if err != nil {
 			return Inspection{}, err
 		}
-		value, err := readValue(r, typeID)
+		value, err := readValue(meta, typeID)
 		if err != nil {
 			return Inspection{}, fmt.Errorf("GGUF metadata %q: %w", key, err)
+		}
+		if err := budget.retain(key, value.display); err != nil {
+			return Inspection{}, err
 		}
 		entry := Entry{Key: key, Type: value.typeName, Value: value.display, Truncated: value.truncated, ArrayLength: value.arrayLength}
 		result.Metadata = append(result.Metadata, entry)

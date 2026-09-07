@@ -56,31 +56,38 @@ func readSummary(r io.Reader) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	if metadataCount > maxMetadataCount {
-		return Summary{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
+	if err := checkMetadataCount(metadataCount); err != nil {
+		return Summary{}, err
 	}
 
 	values := make(map[string]string, 14)
+	meta, budget := boundMetadataReader(r)
 	for i := uint64(0); i < metadataCount; i++ {
-		key, err := readKey(r)
+		key, err := readKey(meta)
 		if err != nil {
 			return Summary{}, err
 		}
-		typeID, err := readU32(r)
+		if err := budget.retain(key); err != nil {
+			return Summary{}, err
+		}
+		typeID, err := readU32(meta)
 		if err != nil {
 			return Summary{}, err
 		}
 		if summaryMetadataKey(key) {
-			value, err := readValue(r, typeID)
+			value, err := readValue(meta, typeID)
 			if err != nil {
 				return Summary{}, fmt.Errorf("GGUF metadata %q: %w", key, err)
+			}
+			if err := budget.retain(value.display); err != nil {
+				return Summary{}, err
 			}
 			if value.scalar {
 				values[key] = value.display
 			}
 			continue
 		}
-		if err := skipSummaryValue(r, typeID); err != nil {
+		if err := skipSummaryValue(meta, typeID); err != nil {
 			return Summary{}, fmt.Errorf("GGUF metadata %q: %w", key, err)
 		}
 	}

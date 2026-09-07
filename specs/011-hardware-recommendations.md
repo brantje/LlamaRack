@@ -244,7 +244,8 @@ Recommendations remain estimates and must degrade gracefully when metadata is ab
 - move binary parsing out of recommendations;
 - expose all key/type/value metadata;
 - add defensive limits and malformed-file tests;
-- support bounded handling of large values.
+- support bounded handling of large values;
+- enforce a hard metadata-count ceiling (4096 entries) and an aggregate parse/retention budget so untrusted GGUF headers cannot drive large allocations.
 
 ### Slice 9B — Context capability integration
 
