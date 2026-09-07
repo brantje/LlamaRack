@@ -129,9 +129,9 @@ Filename parsing is heuristic. Do not treat an unrecognized filename as invalid 
 Some llama.cpp model repositories contain GGUF files that support a primary model but are not themselves selectable main models. Provider import recognizes separate companion files for:
 
 - multimodal projectors whose repository path/name contains the established `mmproj`, `mmoproj` or `projector` marker;
-- separate MTP draft models whose basename starts with `mtp`.
+- separate MTP draft models whose basename starts with `mtp`, or whose path contains an `mtp` directory component.
 
-Projector detection intentionally preserves the existing broad project rule: names such as `model-mmproj-*.gguf`, `asda-projector.gguf` and files stored below a projector/mmproj directory are helper artifacts and must not appear as selectable main models. MTP detection is deliberately more conservative: `mtp` must be the basename prefix (followed by a conventional separator such as `-`, `_`, `.`, or be the complete basename). A normal main model containing `MTP` later in its filename may describe embedded MTP capability and must not be hidden as a separate draft sidecar solely from that substring.
+Projector detection intentionally preserves the existing broad project rule: names such as `model-mmproj-*.gguf`, `asda-projector.gguf` and files stored below a projector/mmproj directory are helper artifacts and must not appear as selectable main models. MTP detection is deliberately more conservative than projector matching: `mtp` must be the basename prefix (followed by a conventional separator such as `-`, `_`, `.`, or be the complete basename) or an exact `mtp` path component. Files under `MTP/` are draft helpers even when the filename itself is `*-MTP-*.gguf`. A normal main model containing `MTP` later in its filename may describe embedded MTP capability and must not be hidden as a separate draft sidecar solely from that substring.
 
 For each complete selectable main artifact:
 
@@ -484,7 +484,7 @@ Downloads must support:
 9. Download cancellation is idempotent.
 10. Model definition deletion does not silently delete multi-gigabyte artifacts.
 11. Recognized projector and separate MTP sidecars remain dependencies of a main artifact rather than standalone Model choices.
-12. Existing broad projector-marker filtering is preserved, while MTP sidecar detection stays prefix-based so embedded-MTP main filenames are not hidden accidentally.
+12. Existing broad projector-marker filtering is preserved, while MTP sidecar detection stays prefix- or `mtp/`-directory-based so embedded-MTP main filenames are not hidden accidentally.
 
 ## 31. Acceptance criteria
 
@@ -498,6 +498,7 @@ Before v1, tests must demonstrate:
 - registering a downloaded main GGUF preconfigures `mmproj` and separate-MTP llama.cpp model defaults from that exact completed download job;
 - existing projector marker forms such as `model-mmproj-*`, `asda-projector.gguf` and projector directories remain filtered as helpers;
 - a normal main filename that contains `MTP` away from the basename prefix is not misclassified as a separate MTP helper;
+- GGUF files stored under an `mtp/` directory are classified as MTP helpers rather than selectable main artifacts;
 - hardware fit/recommendation can rank candidate quantizations without hiding alternatives;
 - global Hugging Face token enables authorized private/gated metadata/download access and is never returned through the API;
 - Hugging Face downloads honor a configurable `max_download_bytes` ceiling (default 1 TiB) for known-size, unknown-size, resumed, and split artifacts;

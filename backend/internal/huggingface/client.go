@@ -390,15 +390,26 @@ func GroupArtifacts(repoID, revision string, files []File, parameterCounts ...in
 }
 
 func sidecarKind(name string) string {
-	normalized := strings.ToLower(name)
+	normalized := strings.ToLower(strings.ReplaceAll(name, "\\", "/"))
 	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
 		return "mmproj"
 	}
-	base := strings.ToLower(strings.TrimSuffix(path.Base(name), path.Ext(name)))
-	if base == "mtp" || strings.HasPrefix(base, "mtp-") || strings.HasPrefix(base, "mtp_") || strings.HasPrefix(base, "mtp.") {
+	if mtpSidecarPath(normalized) {
 		return "mtp"
 	}
 	return ""
+}
+
+func mtpSidecarPath(normalized string) bool {
+	if dir := path.Dir(normalized); dir != "." {
+		for _, part := range strings.Split(dir, "/") {
+			if part == "mtp" {
+				return true
+			}
+		}
+	}
+	base := strings.TrimSuffix(path.Base(normalized), path.Ext(normalized))
+	return base == "mtp" || strings.HasPrefix(base, "mtp-") || strings.HasPrefix(base, "mtp_") || strings.HasPrefix(base, "mtp.")
 }
 
 func selectDependency(kind, targetQuant string, candidates []ArtifactDependency) (ArtifactDependency, bool) {
