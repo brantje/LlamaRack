@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"time"
 )
 
@@ -84,11 +83,7 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 	}
 
 	for _, file := range job.Files {
-		finalPath, err := m.localPath(job, file.Path)
-		if err != nil {
-			continue
-		}
-		if err := os.Remove(finalPath + ".lcm-" + job.ID + ".part"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := m.removePartial(job, file); err != nil {
 			return err
 		}
 	}

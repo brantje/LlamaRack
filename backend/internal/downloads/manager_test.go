@@ -17,6 +17,10 @@ import (
 )
 
 func newTestManager(t *testing.T, handler http.Handler) (*Manager, *httptest.Server, context.CancelFunc) {
+	return newTestManagerLimit(t, handler, 0)
+}
+
+func newTestManagerLimit(t *testing.T, handler http.Handler, maxBytes int64) (*Manager, *httptest.Server, context.CancelFunc) {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	root := t.TempDir()
@@ -32,7 +36,12 @@ func newTestManager(t *testing.T, handler http.Handler) (*Manager, *httptest.Ser
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	manager := New(ctx, db, filepath.Join(root, "models"), hf)
+	var limit SizeLimitFunc
+	if maxBytes > 0 {
+		n := maxBytes
+		limit = func(context.Context) (int64, error) { return n, nil }
+	}
+	manager := New(ctx, db, filepath.Join(root, "models"), hf, limit)
 	t.Cleanup(func() {
 		cancel()
 		server.Close()
@@ -106,8 +115,8 @@ func TestDownloadCompletesSplitArtifactAtomically(t *testing.T) {
 			t.Fatalf("file = %+v", file)
 		}
 		full := filepath.Join(manager.modelsDir, filepath.FromSlash(file.LocalPath))
-		if _, err := os.Stat(full + ".lcm-" + job.ID + ".part"); !os.IsNotExist(err) {
-			t.Fatalf("partial file still exists: %v", err)
+		if matches, err := filepath.Glob(filepath.Join(filepath.Dir(full), "*.part")); err != nil || len(matches) > 0 {
+			t.Fatalf("partial file still exists: %v %v", matches, err)
 		}
 		if data, err := os.ReadFile(full); err != nil || string(data) != contents["/acme/demo/resolve/rev/"+file.Path] {
 			t.Fatalf("final file %s = %q err=%v", full, data, err)

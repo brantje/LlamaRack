@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-const baselineVersion = 3
+const baselineVersion = 4
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()
@@ -33,6 +33,10 @@ func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 		if !tableExistsQuick(ctx, db, table) {
 			t.Fatalf("missing table %s", table)
 		}
+	}
+	var tempPathColumn string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('download_files') WHERE name='temp_path'`).Scan(&tempPathColumn); err != nil || tempPathColumn != "temp_path" {
+		t.Fatalf("download_files.temp_path missing: %q err=%v", tempPathColumn, err)
 	}
 }
 

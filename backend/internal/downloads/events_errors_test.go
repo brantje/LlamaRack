@@ -82,13 +82,18 @@ VALUES('cleanup-error','huggingface','acme/demo','rev','artifact','demo.gguf',''
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialDir := finalPath + ".lcm-cleanup-error.part"
-	if err := os.MkdirAll(partialDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "keep"), []byte("x"), 0o644); err != nil {
+	partialPath := legacyPartPath(finalPath, "cleanup-error")
+	if err := os.WriteFile(partialPath, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	dir := filepath.Dir(partialPath)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 	if err := manager.Remove(ctx, "cleanup-error"); err == nil {
 		t.Fatal("expected partial cleanup error")
 	}

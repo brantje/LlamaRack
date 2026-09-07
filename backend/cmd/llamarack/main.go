@@ -163,7 +163,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
 	}
-	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient)
+	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
+		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)
+	})
 	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
