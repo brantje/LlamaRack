@@ -63,7 +63,7 @@ const limitBytes = computed(() => {
   if (!Number.isFinite(magnitude) || magnitude <= 0) return 0
   return Math.round(magnitude * UNIT_BYTES[limitUnit.value])
 })
-const settingsEditable = computed(() => settings.value?.max_download_bytes.editable !== false)
+const settingsEditable = computed(() => settings.value?.max_download_bytes.editable === true)
 const settingsChanged = computed(() => Boolean(settings.value && limitBytes.value !== settings.value.max_download_bytes.value))
 const canSaveLimit = computed(() => settingsEditable.value && settingsChanged.value && limitBytes.value >= 1)
 
@@ -85,7 +85,7 @@ async function load() {
   try {
     applySettings(normalizeSettings(await manager.request('/api/v1/huggingface/settings')))
   } catch (value: any) {
-    applySettings(normalizeSettings(null))
+    settings.value = null
     settingsError.value = value?.data?.error || value?.message || 'Unable to load Hugging Face settings'
   }
 }

@@ -191,6 +191,17 @@ func TestTempPathHelpersRejectEscapesAndInvalidLimits(t *testing.T) {
 	if err := manager.unlinkRegularTemp(symlink); err != nil {
 		t.Fatalf("symlink cleanup = %v", err)
 	}
+	info, err := os.Lstat(symlink)
+	if err != nil {
+		t.Fatalf("symlink missing after cleanup: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("cleanup removed or replaced the symlink")
+	}
+	target, err := os.Readlink(symlink)
+	if err != nil || target != "/tmp" {
+		t.Fatalf("symlink target=%q err=%v", target, err)
+	}
 	manager.limit = func(context.Context) (int64, error) { return 0, nil }
 	if _, err := manager.maxDownloadBytes(context.Background()); err == nil {
 		t.Fatal("expected invalid limit")
