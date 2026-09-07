@@ -11,6 +11,8 @@ const authSettings = {
   local_login_enabled: { value: true, source: 'default', editable: true },
   oidc_jit_provisioning_enabled: { value: true, source: 'default', editable: true },
   oidc_auto_link_enabled: { value: false, source: 'default', editable: true },
+  oidc_allow_http: { value: false, source: 'default', editable: true },
+  oidc_allowed_hosts: { value: '', source: 'default', editable: true },
   external_url: { value: 'https://manager.example.test/', source: 'database', editable: true },
   frontend_url: { value: 'http://192.168.60.5:3000', source: 'database', editable: true }
 }
@@ -93,6 +95,8 @@ describe('Admin authentication page', () => {
     expect(wrapper.text()).toContain('Tested')
     expect(wrapper.text()).toContain('https://manager.example.test/api/v1/auth/oidc/primary%2Fprovider/callback')
     expect(wrapper.get('[data-testid="authentication-sign-in-policy"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="authentication-oidc-outbound-trust"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Allow plain HTTP OIDC')
     expect(wrapper.get('[data-testid="authentication-providers"]').exists()).toBe(true)
 
     await wrapperButton(wrapper, 'Save settings').trigger('click')
@@ -103,6 +107,8 @@ describe('Admin authentication page', () => {
         local_login_enabled: true,
         oidc_jit_provisioning_enabled: true,
         oidc_auto_link_enabled: false,
+        oidc_allow_http: false,
+        oidc_allowed_hosts: '',
         external_url: 'https://manager.example.test/',
         frontend_url: 'http://192.168.60.5:3000'
       }

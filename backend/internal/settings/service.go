@@ -19,6 +19,8 @@ const (
 	LocalLoginEnabled             = "local_login_enabled"
 	OIDCJITProvisioningEnabled    = "oidc_jit_provisioning_enabled"
 	OIDCAutoLinkEnabled           = "oidc_auto_link_enabled"
+	OIDCAllowHTTP                 = "oidc_allow_http"
+	OIDCAllowedHosts              = "oidc_allowed_hosts"
 	TrustedProxies                = "trusted_proxies"
 	AllowedOrigins                = "allowed_origins"
 	ExternalURL                   = "external_url"
@@ -113,6 +115,8 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			LocalLoginEnabled:             {defaultValue: "true", kind: "bool"},
 			OIDCJITProvisioningEnabled:    {defaultValue: "true", kind: "bool"},
 			OIDCAutoLinkEnabled:           {defaultValue: "false", kind: "bool"},
+			OIDCAllowHTTP:                 {env: "LLAMARACK_OIDC_ALLOW_HTTP", defaultValue: "false", kind: "bool"},
+			OIDCAllowedHosts:              {env: "LLAMARACK_OIDC_ALLOWED_HOSTS", defaultValue: "", kind: "string"},
 			TrustedProxies:                {env: "LLAMARACK_TRUSTED_PROXIES", defaultValue: "", kind: "string"},
 			AllowedOrigins:                {env: "LLAMARACK_ALLOWED_ORIGIN", defaultValue: defaults.AllowedOrigins, kind: "string", databaseOverridesEnv: true},
 			ExternalURL:                   {env: "LLAMARACK_EXTERNAL_URL", defaultValue: "", kind: "string"},

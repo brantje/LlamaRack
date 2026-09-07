@@ -10,7 +10,7 @@ import (
 // persisting it. It intentionally mirrors TestProvider's discovery/JWKS checks
 // so administrators can verify a new provider before saving it.
 func (m *OIDCManager) TestProviderInput(ctx context.Context, in OIDCProviderInput) error {
-	in, err := validateProviderInput(in)
+	in, err := m.validateProviderInput(ctx, in)
 	if err != nil {
 		return err
 	}

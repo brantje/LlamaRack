@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -128,7 +129,7 @@ type OIDCManager struct {
 func NewOIDCManager(a *Service, managerSettings *settings.Service, secrets ProviderSecretStore) *OIDCManager {
 	return &OIDCManager{
 		auth: a, settings: managerSettings, secrets: secrets,
-		client:       &http.Client{Timeout: 10 * time.Second},
+		client:       managersecurity.NewOIDCClient(managerSettings),
 		transactions: map[string]oidcTransaction{}, exchanges: map[string]oidcExchange{},
 	}
 }
@@ -152,7 +153,7 @@ func normalizeScopes(scopes []string) []string {
 	return out
 }
 
-func validateProviderInput(in OIDCProviderInput) (OIDCProviderInput, error) {
+func (m *OIDCManager) validateProviderInput(ctx context.Context, in OIDCProviderInput) (OIDCProviderInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Issuer = strings.TrimRight(strings.TrimSpace(in.Issuer), "/")
 	in.DiscoveryURL = strings.TrimSpace(in.DiscoveryURL)
@@ -164,9 +165,45 @@ func validateProviderInput(in OIDCProviderInput) (OIDCProviderInput, error) {
 	if in.Name == "" || in.Issuer == "" || in.ClientID == "" {
 		return OIDCProviderInput{}, errors.New("name, issuer and client_id are required")
 	}
-	parsed, err := url.Parse(in.Issuer)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-		return OIDCProviderInput{}, errors.New("issuer must be an absolute HTTP(S) URL")
+	allowHTTP, allowed, err := m.oidcTrust(ctx)
+	if err != nil {
+		return OIDCProviderInput{}, err
+	}
+	issuer, err := parseOIDCProviderURL("issuer", in.Issuer, allowHTTP)
+	if err != nil {
+		return OIDCProviderInput{}, err
+	}
+	if in.DiscoveryURL != "" {
+		discovery, err := parseOIDCProviderURL("discovery URL", in.DiscoveryURL, allowHTTP)
+		if err != nil {
+			return OIDCProviderInput{}, err
+		}
+		if !managersecurity.SameOrigin(discovery, issuer) {
+			return OIDCProviderInput{}, errors.New("discovery URL must be on the issuer origin")
+		}
+	}
+	if in.AuthorizationEndpoint != "" {
+		if _, err := parseOIDCProviderURL("authorization endpoint", in.AuthorizationEndpoint, allowHTTP); err != nil {
+			return OIDCProviderInput{}, err
+		}
+	}
+	if in.TokenEndpoint != "" {
+		token, err := parseOIDCProviderURL("token endpoint", in.TokenEndpoint, allowHTTP)
+		if err != nil {
+			return OIDCProviderInput{}, err
+		}
+		if !managersecurity.OIDCEndpointHostTrusted(token, issuer, allowed, false) {
+			return OIDCProviderInput{}, errors.New("token endpoint host is not trusted")
+		}
+	}
+	if in.JWKSURL != "" {
+		jwks, err := parseOIDCProviderURL("JWKS URL", in.JWKSURL, allowHTTP)
+		if err != nil {
+			return OIDCProviderInput{}, err
+		}
+		if !managersecurity.OIDCEndpointHostTrusted(jwks, issuer, allowed, false) {
+			return OIDCProviderInput{}, errors.New("JWKS URL host is not trusted")
+		}
 	}
 	if in.UsernameClaim == "" {
 		in.UsernameClaim = "preferred_username"
@@ -176,7 +213,7 @@ func validateProviderInput(in OIDCProviderInput) (OIDCProviderInput, error) {
 }
 
 func (m *OIDCManager) CreateProvider(ctx context.Context, in OIDCProviderInput) (OIDCProvider, error) {
-	in, err := validateProviderInput(in)
+	in, err := m.validateProviderInput(ctx, in)
 	if err != nil {
 		return OIDCProvider{}, err
 	}
@@ -205,7 +242,7 @@ func (m *OIDCManager) UpdateProvider(ctx context.Context, id string, in OIDCProv
 	if err != nil {
 		return OIDCProvider{}, err
 	}
-	in, err = validateProviderInput(in)
+	in, err = m.validateProviderInput(ctx, in)
 	if err != nil {
 		return OIDCProvider{}, err
 	}
@@ -419,11 +456,27 @@ func (m *OIDCManager) ensureProviderMayBeDisabled(ctx context.Context, id string
 }
 
 func (m *OIDCManager) resolveProvider(ctx context.Context, provider OIDCProvider) (resolvedOIDCProvider, error) {
+	allowHTTP, allowed, err := m.oidcTrust(ctx)
+	if err != nil {
+		return resolvedOIDCProvider{}, err
+	}
+	issuer, err := parseOIDCProviderURL("issuer", provider.Issuer, allowHTTP)
+	if err != nil {
+		return resolvedOIDCProvider{}, err
+	}
 	resolved := resolvedOIDCProvider{Issuer: provider.Issuer, AuthorizationEndpoint: provider.AuthorizationEndpoint, TokenEndpoint: provider.TokenEndpoint, JWKSURL: provider.JWKSURL}
+	discoveredToken, discoveredJWKS := false, false
 	if resolved.AuthorizationEndpoint == "" || resolved.TokenEndpoint == "" || resolved.JWKSURL == "" {
 		discoveryURL := provider.DiscoveryURL
 		if discoveryURL == "" {
 			discoveryURL = strings.TrimRight(provider.Issuer, "/") + "/.well-known/openid-configuration"
+		}
+		discovery, err := parseOIDCProviderURL("discovery URL", discoveryURL, allowHTTP)
+		if err != nil {
+			return resolvedOIDCProvider{}, err
+		}
+		if !managersecurity.SameOrigin(discovery, issuer) {
+			return resolvedOIDCProvider{}, errors.New("discovery URL must be on the issuer origin")
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
 		if err != nil {
@@ -453,16 +506,29 @@ func (m *OIDCManager) resolveProvider(ctx context.Context, provider OIDCProvider
 		}
 		if resolved.TokenEndpoint == "" {
 			resolved.TokenEndpoint = document.TokenEndpoint
+			discoveredToken = true
 		}
 		if resolved.JWKSURL == "" {
 			resolved.JWKSURL = document.JWKSURL
+			discoveredJWKS = true
 		}
 	}
-	for name, value := range map[string]string{"authorization endpoint": resolved.AuthorizationEndpoint, "token endpoint": resolved.TokenEndpoint, "JWKS URL": resolved.JWKSURL} {
-		parsed, err := url.Parse(value)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-			return resolvedOIDCProvider{}, fmt.Errorf("%s is invalid", name)
-		}
+	if _, err := parseOIDCProviderURL("authorization endpoint", resolved.AuthorizationEndpoint, allowHTTP); err != nil {
+		return resolvedOIDCProvider{}, err
+	}
+	token, err := parseOIDCProviderURL("token endpoint", resolved.TokenEndpoint, allowHTTP)
+	if err != nil {
+		return resolvedOIDCProvider{}, err
+	}
+	if !managersecurity.OIDCEndpointHostTrusted(token, issuer, allowed, discoveredToken) {
+		return resolvedOIDCProvider{}, errors.New("token endpoint host is not trusted")
+	}
+	jwks, err := parseOIDCProviderURL("JWKS URL", resolved.JWKSURL, allowHTTP)
+	if err != nil {
+		return resolvedOIDCProvider{}, err
+	}
+	if !managersecurity.OIDCEndpointHostTrusted(jwks, issuer, allowed, discoveredJWKS) {
+		return resolvedOIDCProvider{}, errors.New("JWKS URL host is not trusted")
 	}
 	return resolved, nil
 }
@@ -818,6 +884,32 @@ func (m *OIDCManager) UnlinkOwnIdentity(ctx context.Context, userID int64, id st
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (m *OIDCManager) oidcTrust(ctx context.Context) (bool, []string, error) {
+	allowHTTP, err := m.settings.Bool(ctx, settings.OIDCAllowHTTP)
+	if err != nil {
+		return false, nil, err
+	}
+	raw, err := m.settings.String(ctx, settings.OIDCAllowedHosts)
+	if err != nil {
+		return false, nil, err
+	}
+	return allowHTTP, managersecurity.ParseOIDCAllowedHosts(raw), nil
+}
+
+func parseOIDCProviderURL(name, raw string, allowHTTP bool) (*url.URL, error) {
+	parsed, err := managersecurity.ValidateOIDCURL(raw, allowHTTP)
+	if err == nil {
+		return parsed, nil
+	}
+	if errors.Is(err, managersecurity.ErrOIDCHTTPS) {
+		return nil, fmt.Errorf("%s must use HTTPS", name)
+	}
+	if errors.Is(err, managersecurity.ErrOIDCCredentials) {
+		return nil, fmt.Errorf("%s must not include credentials", name)
+	}
+	return nil, fmt.Errorf("%s is invalid", name)
 }
 
 func boolInt(value bool) int {

@@ -135,6 +135,21 @@ Client secrets use the manager's existing encrypted provider-secret store. Plain
 
 The Admin UI exposes **Test configuration**. Testing resolves discovery/manual endpoints, validates issuer consistency, checks the configured secret exists and verifies that the JWKS endpoint is reachable and contains keys. Testing does not provision a user or create a management session. A successful result is persisted and is used by the local-login lockout safeguard.
 
+### Outbound trust
+
+OIDC discovery, JWKS fetches, and authorization-code token exchange are server-side HTTP requests. They MUST use a dedicated outbound client that:
+
+- requires `https://` unless `oidc_allow_http` / `LLAMARACK_OIDC_ALLOW_HTTP` is enabled;
+- resolves the target host before dialing and rejects loopback, link-local, multicast, unspecified, private, CGNAT, IPv6 6to4 (`2002::/16`), and Teredo (`2001::/32`) destinations unless the request hostname is listed in `oidc_allowed_hosts` / `LLAMARACK_OIDC_ALLOWED_HOSTS`;
+- revalidates every redirect against the same scheme and destination policy and refuses cross-origin hops;
+- dials only an address that passed validation so DNS rebinding cannot retarget the connection.
+
+These two settings are independent. Enabling HTTP does not allow private destinations. Allowlisting a LAN hostname does not allow plain HTTP.
+
+Discovery URLs MUST be on the configured issuer origin. Token and JWKS URLs obtained from that same-origin discovery document MAY use a different public host (so providers such as Google remain usable). Manual token and JWKS endpoints MUST be on the issuer origin or on an allowlisted host. Authorization endpoints are browser-visited and are not fetched by the manager; they still require a valid HTTP(S) URL under the HTTPS default.
+
+Existing `http://` issuers fail until HTTP is explicitly enabled. That break is intentional. Self-hosted Authentik-style deployments on a LAN should set both knobs as needed rather than relying on implicit private-network trust.
+
 ## OIDC browser flow
 
 OIDC uses Authorization Code with state, nonce and PKCE S256.

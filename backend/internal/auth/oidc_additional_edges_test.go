@@ -30,8 +30,6 @@ func TestOIDCProviderNetworkAndStartErrorBranches(t *testing.T) {
 		}
 	}))
 	defer badDiscovery.Close()
-	f.manager.client = badDiscovery.Client()
-
 	if _, err := f.manager.resolveProvider(ctx, OIDCProvider{Issuer: badDiscovery.URL, DiscoveryURL: badDiscovery.URL + "/status"}); err == nil || !strings.Contains(err.Error(), "HTTP 502") {
 		t.Fatalf("discovery status err=%v", err)
 	}

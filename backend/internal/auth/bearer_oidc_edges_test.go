@@ -110,7 +110,6 @@ func TestOIDCSecretProviderAndIdentityErrorPaths(t *testing.T) {
 	f := newOIDCFixture(t)
 	ctx := t.Context()
 	idp := newTestOIDCProvider(t)
-	f.manager.client = idp.server.Client()
 	secret := "client-secret"
 
 	provider, err := f.manager.CreateProvider(ctx, idp.input(&secret))

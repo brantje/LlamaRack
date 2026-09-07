@@ -189,6 +189,8 @@ const authSettings = {
   local_login_enabled: setting(true),
   oidc_jit_provisioning_enabled: setting(true),
   oidc_auto_link_enabled: setting(false),
+  oidc_allow_http: setting(false),
+  oidc_allowed_hosts: setting(''),
   external_url: setting('http://127.0.0.1:8888'),
   frontend_url: setting('http://127.0.0.1:3000')
 }

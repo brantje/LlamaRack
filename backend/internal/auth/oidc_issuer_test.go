@@ -25,8 +25,6 @@ func TestOIDCResolveProviderAcceptsCanonicalTrailingSlash(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	f.manager.client = server.Client()
-
 	discoveryIssuer = server.URL + "/"
 	resolved, err := f.manager.resolveProvider(t.Context(), OIDCProvider{Issuer: server.URL})
 	if err != nil {

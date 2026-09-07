@@ -88,38 +88,25 @@ func (h *oidcHandler) publicProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *oidcHandler) writeAuthSettings(w http.ResponseWriter, r *http.Request) {
-	local, err := h.settings.Resolve(r.Context(), settings.LocalLoginEnabled)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+	keys := []string{
+		settings.LocalLoginEnabled,
+		settings.OIDCJITProvisioningEnabled,
+		settings.OIDCAutoLinkEnabled,
+		settings.ExternalURL,
+		settings.FrontendURL,
+		settings.OIDCAllowHTTP,
+		settings.OIDCAllowedHosts,
 	}
-	jit, err := h.settings.Resolve(r.Context(), settings.OIDCJITProvisioningEnabled)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
+	out := make(map[string]settings.Value, len(keys))
+	for _, key := range keys {
+		value, err := h.settings.Resolve(r.Context(), key)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		out[key] = value
 	}
-	autoLink, err := h.settings.Resolve(r.Context(), settings.OIDCAutoLinkEnabled)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	externalURL, err := h.settings.Resolve(r.Context(), settings.ExternalURL)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	frontendURL, err := h.settings.Resolve(r.Context(), settings.FrontendURL)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]settings.Value{
-		"local_login_enabled":           local,
-		"oidc_jit_provisioning_enabled": jit,
-		"oidc_auto_link_enabled":        autoLink,
-		"external_url":                  externalURL,
-		"frontend_url":                  frontendURL,
-	})
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *oidcHandler) authSettings(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +124,8 @@ func (h *oidcHandler) authSettings(w http.ResponseWriter, r *http.Request) {
 		OIDCAutoLinkEnabled        *bool   `json:"oidc_auto_link_enabled"`
 		ExternalURL                *string `json:"external_url"`
 		FrontendURL                *string `json:"frontend_url"`
+		OIDCAllowHTTP              *bool   `json:"oidc_allow_http"`
+		OIDCAllowedHosts           *string `json:"oidc_allowed_hosts"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -179,6 +168,12 @@ func (h *oidcHandler) authSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.FrontendURL != nil {
 		updates[settings.FrontendURL] = *in.FrontendURL
+	}
+	if in.OIDCAllowHTTP != nil {
+		updates[settings.OIDCAllowHTTP] = *in.OIDCAllowHTTP
+	}
+	if in.OIDCAllowedHosts != nil {
+		updates[settings.OIDCAllowedHosts] = *in.OIDCAllowedHosts
 	}
 	for key, value := range updates {
 		if _, err := h.settings.Set(r.Context(), key, value); err != nil {

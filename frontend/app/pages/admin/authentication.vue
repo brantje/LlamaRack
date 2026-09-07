@@ -6,6 +6,8 @@ type AuthSettings = {
   local_login_enabled: SettingValue<boolean>
   oidc_jit_provisioning_enabled: SettingValue<boolean>
   oidc_auto_link_enabled: SettingValue<boolean>
+  oidc_allow_http?: SettingValue<boolean>
+  oidc_allowed_hosts?: SettingValue<string>
   external_url: SettingValue<string>
   frontend_url?: SettingValue<string>
 }
@@ -49,7 +51,7 @@ const providerTestError = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
 const settings = ref<AuthSettings | null>(null)
-const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, external_url: '', frontend_url: '' })
+const settingsForm = reactive({ local_login_enabled: true, oidc_jit_provisioning_enabled: true, oidc_auto_link_enabled: false, oidc_allow_http: false, oidc_allowed_hosts: '', external_url: '', frontend_url: '' })
 const providers = ref<Provider[]>([])
 const providerModalOpen = ref(false)
 const editingProvider = ref<Provider | null>(null)
@@ -96,6 +98,8 @@ async function load() {
     settingsForm.local_login_enabled = authSettings.local_login_enabled.value
     settingsForm.oidc_jit_provisioning_enabled = authSettings.oidc_jit_provisioning_enabled.value
     settingsForm.oidc_auto_link_enabled = authSettings.oidc_auto_link_enabled.value
+    settingsForm.oidc_allow_http = authSettings.oidc_allow_http?.value || false
+    settingsForm.oidc_allowed_hosts = authSettings.oidc_allowed_hosts?.value || ''
     settingsForm.external_url = authSettings.external_url.value
     settingsForm.frontend_url = authSettings.frontend_url?.value || ''
     providers.value = providerItems || []
@@ -278,6 +282,23 @@ watch(() => manager.user.value, (value) => { if (value) void load() }, { immedia
           <div class="mt-5 flex flex-col items-start gap-2 border border-[var(--color-divider)] px-4 py-3 sm:flex-row" data-testid="authentication-auto-link-note">
             <StatusTag variant="pending">Explicit linking required</StatusTag>
             <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">Automatic linking is disabled by default. With it disabled, username collisions require explicit identity linking.</p>
+          </div>
+        </Frame>
+
+        <Frame class="p-5" data-testid="authentication-oidc-outbound-trust">
+          <div class="mb-5">
+            <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.1em] text-[var(--neutral-700)]">OIDC OUTBOUND TRUST</p>
+            <h2 class="mt-1 text-xl font-semibold">Provider connection policy</h2>
+            <p class="mt-1 text-sm text-[var(--neutral-800)]">Homelab and development only. Production providers should use HTTPS. Allowing HTTP does not permit private-network destinations.</p>
+          </div>
+          <div class="space-y-4">
+            <div class="grid gap-1 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-5"><USwitch v-model="settingsForm.oidc_allow_http" :disabled="settings?.oidc_allow_http?.editable === false" label="Allow plain HTTP OIDC" /><span :class="sourceClass(settings?.oidc_allow_http?.source)" class="pl-9 text-[length:var(--font-size-kicker)] font-mono uppercase sm:pl-0">source: {{ settings?.oidc_allow_http?.source || 'default' }}</span></div>
+            <UFormField description="Comma-separated hostnames or IPs that may resolve to private, loopback, or link-local addresses. Required for LAN IdPs such as Authentik.">
+              <template #label>
+                <div class="flex w-full items-center justify-between gap-3"><span>Allowed private hosts</span><span :class="sourceClass(settings?.oidc_allowed_hosts?.source)" class="text-[length:var(--font-size-kicker)] font-mono uppercase">{{ settings?.oidc_allowed_hosts?.source || 'default' }}</span></div>
+              </template>
+              <UInput v-model="settingsForm.oidc_allowed_hosts" class="w-full font-mono" :disabled="settings?.oidc_allowed_hosts?.editable === false" placeholder="authentik.lan, 192.168.1.10" />
+            </UFormField>
           </div>
         </Frame>
 
