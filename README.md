@@ -605,6 +605,8 @@ Schema upgrades run automatically during startup through embedded Goose migratio
 | `LLAMARACK_LOGIN_LOCKOUT_SECONDS` | `900` | Login lockout duration |
 | `LLAMARACK_TRUSTED_PROXIES` | empty | Trusted reverse-proxy CIDRs |
 | `LLAMARACK_EXTERNAL_URL` | empty | Public URL used for OIDC redirects |
+| `LLAMARACK_OIDC_ALLOW_HTTP` | `false` | Allow `http://` OIDC issuer and endpoint URLs. Does not permit private-network destinations |
+| `LLAMARACK_OIDC_ALLOWED_HOSTS` | empty | Comma-separated hostnames or IPs that may resolve to private/loopback/link-local addresses for OIDC |
 | `LLAMARACK_PROMETHEUS_AUTH_TOKEN` | empty | Optional `/metrics` Bearer token fallback when no encrypted secret is configured |
 | `LLAMARACK_IMAGE_TAG` | `latest` | CPU container image tag |
 | `LLAMARACK_NVIDIA_IMAGE_TAG` | `latest-cuda` | NVIDIA container image tag |
@@ -613,6 +615,8 @@ Schema upgrades run automatically during startup through embedded Goose migratio
 | `PGID` | `1000` | Container group ID |
 
 The normal Compose service is exposed on host port `8888`.
+
+OIDC providers use HTTPS by default. A trusted homelab IdP such as Authentik on a LAN needs an explicit allowlist (`LLAMARACK_OIDC_ALLOWED_HOSTS` or **Administration → Authentication**) for that hostname or IP. Plain HTTP additionally requires `LLAMARACK_OIDC_ALLOW_HTTP=true`. The HTTP flag never implies private-network trust.
 
 ### Docker GPU telemetry
 
