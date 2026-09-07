@@ -537,7 +537,7 @@ defineExpose({ setSelectedWindow })
         </Frame>
       </template>
 
-      <section id="logs" class="space-y-3"><div><h2 class="text-base font-semibold">Instance logs</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Current-session llama-server output.</p></div><InstanceLogViewer :instance-id="instance.id" /></section>
+      <section id="logs" class="space-y-3"><div><h2 class="text-base font-semibold">Instance logs</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Current-session llama-server output.</p></div><InstanceLogViewer :instance-id="instance.id" :instance-slug="instance.slug" /></section>
     </template>
     <AppConfirmationModal ref="confirmation" />
   </div>

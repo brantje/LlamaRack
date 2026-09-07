@@ -235,4 +235,23 @@ describe('InstanceLogViewer', () => {
     expect(FakeEventSource.instances[0]!.url).not.toContain('stale-ticket')
     wrapper.unmount()
   })
+
+  it('opens diagnostics with the Instance slug instead of the durable ID', async () => {
+    vi.stubGlobal('EventSource', undefined)
+    const instanceID = '8c821aec-1f0d-4b8d-a332-41c582dd2c58'
+    mocks.request.mockResolvedValue({ instance_id: instanceID, entries: [] })
+
+    const wrapper = await mountSuspended(InstanceLogViewer, {
+      props: { instanceId: instanceID, instanceSlug: 'qwen-coder-32b' },
+      route: false
+    })
+    await flushPromises()
+
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/logs?instance_id=${encodeURIComponent(instanceID)}&limit=2000`)
+    const href = wrapper.get('[data-testid="open-aggregate-logs"]').attributes('href') || ''
+    expect(href).toContain('/admin/system-logs')
+    expect(href).toContain('source=qwen-coder-32b')
+    expect(href).not.toContain(instanceID)
+    wrapper.unmount()
+  })
 })

@@ -249,7 +249,7 @@ func TestRingCopyLogsPortAllocationAndShutdown(t *testing.T) {
 	if got := r.lines(); len(got) != 2 || got[0] != "two" || got[1] != "three" {
 		t.Fatalf("ring=%v", got)
 	}
-	copyLogs(r, "instance", "model", "stderr", strings.NewReader("a\nb\n"))
+	copyLogs(r, "instance", "model", "stderr", "instance", strings.NewReader("a\nb\n"))
 	got := r.lines()
 	if len(got) != 2 {
 		t.Fatalf("copied logs=%v", got)

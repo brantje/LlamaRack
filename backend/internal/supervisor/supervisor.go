@@ -44,6 +44,7 @@ type worker struct {
 	startCancel context.CancelFunc
 	generation  string
 	startTicks  uint64
+	publicAlias string
 }
 
 type Supervisor struct {

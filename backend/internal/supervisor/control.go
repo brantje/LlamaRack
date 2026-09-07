@@ -135,6 +135,7 @@ func (s *Supervisor) wait(w *worker) {
 	instanceID := w.runtime.InstanceID
 	modelID := w.runtime.ModelID
 	generation := w.generation
+	logSource := w.publicAlias; if logSource == "" { logSource = instanceID }
 	w.runtime.PID = 0
 	if wasStopping {
 		w.runtime.State = Unloaded; w.runtime.LastError = ""
@@ -154,7 +155,7 @@ func (s *Supervisor) wait(w *worker) {
 	} else {
 		message := lastError
 		if stderrTail != "" { message += ": " + stderrTail }
-		systemlog.Log(systemlog.Error, instanceID, message)
+		systemlog.Log(systemlog.Error, logSource, message)
 		slog.Error("llama-server process exited unexpectedly", "instance_id", instanceID, "model_id", modelID, "state", state, "error", lastError)
 	}
 }
@@ -290,12 +291,13 @@ func lastStoredLogText(lines []string, source string) string {
 	return ""
 }
 
-func copyLogs(dst *ring, instanceID, modelID, source string, reader io.Reader) {
+func copyLogs(dst *ring, instanceID, modelID, source, logSource string, reader io.Reader) {
+	if strings.TrimSpace(logSource) == "" { logSource = instanceID }
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
 		dst.add(formatStoredLogLine(source, line))
-		systemlog.Log(systemlog.Info, instanceID, line)
+		systemlog.Log(systemlog.Info, logSource, line)
 		slog.Info("llama-server output", "instance_id", instanceID, "model_id", modelID, "stream", source, "line", line)
 	}
 }
