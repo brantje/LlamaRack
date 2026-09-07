@@ -8,7 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/brantje/llamarack/backend/internal/resourceid"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
 	"github.com/brantje/llamarack/backend/internal/systemlog"
 )
 
@@ -124,5 +127,57 @@ func TestSystemLogFiltersApplyBeforePerSourceLimit(t *testing.T) {
 	NewSystemLogHandler(store).ServeHTTP(w, r)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "old failure") {
 		t.Fatalf("stream snapshot=%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSystemLogAPIExposesInstanceSlugFromWorker(t *testing.T) {
+	const instanceID = "8c821aec-1f0d-4b8d-a332-41c582dd2c58"
+	const instanceSlug = "qwen-coder-32b"
+
+	systemlog.Default.Reset()
+	defer systemlog.Default.Reset()
+	resourceid.RememberInstanceSlug(instanceID, instanceSlug)
+	defer resourceid.ForgetInstanceSlug(instanceID)
+
+	s := supervisor.New(fakeAPILogServer(t), "127.0.0.1", 33710, 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	rt, err := s.StartWithEnv(ctx, instanceID, "model-1", "/tmp/model.gguf", nil, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Stop(context.Background(), instanceID) }()
+	if rt.InstanceID != instanceID {
+		t.Fatalf("runtime instance id=%q want durable id %q", rt.InstanceID, instanceID)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		found := false
+		for _, entry := range systemlog.Default.Snapshot(50) {
+			if entry.Source == instanceSlug && strings.Contains(entry.Message, "fake api worker online") {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	w := httptest.NewRecorder()
+	NewSystemLogHandler(nil).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/logs?scope=system&source="+instanceSlug+"&limit=100", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"source":"`+instanceSlug+`"`) || !strings.Contains(w.Body.String(), "fake api worker online") || strings.Contains(w.Body.String(), `"source":"`+instanceID+`"`) {
+		t.Fatalf("snapshot=%d %s", w.Code, w.Body.String())
+	}
+
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	streamCancel()
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/logs/stream?scope=system&source="+instanceSlug+"&limit=100", nil).WithContext(streamCtx)
+	NewSystemLogHandler(nil).ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "event: snapshot") || !strings.Contains(w.Body.String(), `"source":"`+instanceSlug+`"`) || !strings.Contains(w.Body.String(), "fake api worker online") || strings.Contains(w.Body.String(), `"source":"`+instanceID+`"`) {
+		t.Fatalf("stream=%d %s", w.Code, w.Body.String())
 	}
 }
