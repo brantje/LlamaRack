@@ -32,10 +32,14 @@ func (s *Service) prepareAutoMoELaunch(ctx context.Context, i instances.Instance
 		return plan
 	}
 	contextLength := optionInt64(effectiveOptions, "ctx-size")
+	// Plan expert spill against installed (idle) capacity so leftover VRAM on
+	// one occupied card cannot pin placement and skip eviction of an idle
+	// multi-GPU victim. If the empty machine already fits full/multi-GPU
+	// offload, leave gpu_mode=auto and let resource-pressure eviction run.
 	recommendation := recommendations.AnalyzeWithCapabilities(
 		m,
 		path,
-		snapshot,
+		recommendations.AssumeIdleSnapshot(snapshot),
 		contextLength,
 		hardwareErr,
 		recommendations.Capabilities{NCPUMoe: true},

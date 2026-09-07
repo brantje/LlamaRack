@@ -111,9 +111,13 @@ func AnalyzeWithCapabilities(model models.Model, path string, snapshot hardware.
 	return result
 }
 
-// assumeIdleSnapshot returns a copy of snapshot with free VRAM/RAM treated as
+// AssumeIdleSnapshot returns a copy of snapshot with free VRAM/RAM treated as
 // installed capacity. Only overwrites free/available when totals are known so
 // test fixtures that set FreeBytes alone keep working.
+func AssumeIdleSnapshot(snapshot hardware.Snapshot) hardware.Snapshot {
+	return assumeIdleSnapshot(snapshot)
+}
+
 func assumeIdleSnapshot(snapshot hardware.Snapshot) hardware.Snapshot {
 	idle := snapshot
 	if idle.RAMTotalBytes > 0 {
