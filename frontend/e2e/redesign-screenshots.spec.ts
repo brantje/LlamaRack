@@ -176,7 +176,7 @@ const generalSettings = {
   max_pending_requests_per_instance: setting(32),
   max_pending_requests_global: setting(128),
   observability_retention_days: setting(30),
-  prometheus_auth_token: setting(''),
+  prometheus_auth_token: { configured: false, source: 'default', editable: true },
   runtime: {
     data_dir: '/config',
     models_dir: '/models',

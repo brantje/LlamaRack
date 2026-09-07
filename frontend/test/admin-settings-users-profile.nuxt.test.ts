@@ -149,6 +149,7 @@ describe('General settings', () => {
       if (path === '/api/v1/settings/general' && options?.method === 'PUT') {
         expect(options.body.allowed_origins).toBeUndefined()
         expect(options.body.idle_unload_seconds).toBe(600)
+        expect(options.body.prometheus_auth_token).toBeUndefined()
         stored = generalSettings({ idle_unload_seconds: { value: 600, source: 'database', editable: true } })
         return stored
       }

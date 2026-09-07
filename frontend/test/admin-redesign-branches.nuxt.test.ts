@@ -73,7 +73,7 @@ describe('Administration redesign branches', () => {
   it('covers optional General settings, a locked Discover policy and post-save network fallback', async () => {
     let general = generalSettings({
       observability_retention_days: setting(14, 'environment', false),
-      prometheus_auth_token: setting('metrics-secret', 'database', true)
+      prometheus_auth_token: { configured: true, prefix: 'metrics-', source: 'database', editable: true }
     })
     let discover: any = { hybrid_recommendations_enabled: setting(false, 'environment', false) }
     let system: any = { network: { effective_scheme: 'https', secure_cookie: true } }
@@ -99,7 +99,9 @@ describe('Administration redesign branches', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="observability-settings"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('History retention (days)')
-    expect(wrapper.text()).toContain('Prometheus Bearer token')
+    expect(wrapper.text()).toContain('Replace Prometheus Bearer token (metrics-…)')
+    expect(wrapper.text()).toContain('Configured')
+    expect(wrapper.text()).not.toContain('metrics-secret')
     expect(wrapper.text()).toContain('environment')
     expect(wrapper.text()).toContain('database')
     expect(wrapper.text()).toContain('https')
@@ -113,6 +115,55 @@ describe('Administration redesign branches', () => {
     expect(wrapper.text()).toContain('Manager settings saved')
     expect(wrapper.text()).toContain('unknown')
     expect(wrapper.text()).toContain('Disabled')
+    wrapper.unmount()
+  })
+
+  it('omits the Prometheus token on unrelated saves and clears it through the confirmation modal', async () => {
+    let general = generalSettings({
+      prometheus_auth_token: { configured: true, prefix: 'metrics-', source: 'database', editable: true }
+    })
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/settings/general' && options?.method === 'PUT') {
+        if (Object.prototype.hasOwnProperty.call(options.body, 'prometheus_auth_token')) {
+          expect(options.body).toEqual({ prometheus_auth_token: '' })
+          general = generalSettings({
+            prometheus_auth_token: { configured: false, source: 'default', editable: true }
+          })
+          return general
+        }
+        expect(options.body.prometheus_auth_token).toBeUndefined()
+        expect(options.body.idle_unload_seconds).toBe(301)
+        return general
+      }
+      if (path === '/api/v1/settings/discover' && options?.method === 'PUT') return { hybrid_recommendations_enabled: setting(true) }
+      if (path === '/api/v1/settings/general') return general
+      if (path === '/api/v1/settings/discover') return { hybrid_recommendations_enabled: setting(true) }
+      if (path === '/api/v1/system') return { network: { effective_scheme: 'http', secure_cookie: false } }
+      return []
+    })
+
+    const wrapper = await mountSuspended(AdminGeneralPage, { route: false })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="prometheus-token-remove"]').exists()).toBe(true)
+
+    const idle = wrapper.findAllComponents({ name: 'UInputNumber' }).find((component: any) => component.props('modelValue') === 300)
+      || wrapper.findAllComponents({ name: 'InputNumber' }).find((component: any) => component.props('modelValue') === 300)
+    expect(idle).toBeTruthy()
+    idle!.vm.$emit('update:modelValue', 301)
+    await flushPromises()
+    await button(wrapper, 'Save changes').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Manager settings saved')
+    expect(wrapper.find('[data-testid="prometheus-token-remove"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="prometheus-token-remove"]').trigger('click')
+    await flushPromises()
+    const confirm = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="confirmation-confirm"]')].at(-1)
+    if (!confirm) throw new Error('Missing confirmation button')
+    confirm.click()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Not configured')
+    expect(wrapper.find('[data-testid="prometheus-token-remove"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
