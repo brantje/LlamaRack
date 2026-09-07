@@ -12,8 +12,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/buildinfo"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
-	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/litellm"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
@@ -378,7 +378,6 @@ func generalSettingsUpdates(in generalSettingsInput) []generalSettingUpdate {
 		{key: settings.MaxPendingRequestsPerInstance, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingPerInstance)},
 		{key: settings.MaxPendingRequestsGlobal, class: generalSettingOperational, read: generalSettingValue(in.MaxPendingGlobal)},
 		{key: settings.ObservabilityRetentionDays, class: generalSettingOperational, read: generalSettingValue(in.ObservabilityRetentionDays)},
-		{key: settings.PrometheusAuthToken, class: generalSettingSensitive, read: generalSettingValue(in.PrometheusAuthToken)},
 	}
 
 	updates := make([]generalSettingUpdate, 0, len(definitions))
@@ -402,14 +401,24 @@ func generalSettingsRequireUserPrincipal(updates []generalSettingUpdate) bool {
 	return false
 }
 
+func (h *adminHandler) writeGeneralSettings(w http.ResponseWriter, r *http.Request) {
+	general, err := h.settings.General(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	token, err := settings.PrometheusTokenStatus(r.Context(), h.secrets)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	general.PrometheusToken = token
+	writeJSON(w, http.StatusOK, general)
+}
+
 func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, principal managementAuthContext) {
 	if r.Method == http.MethodGet {
-		general, err := h.settings.General(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, general)
+		h.writeGeneralSettings(w, r)
 		return
 	}
 	if r.Method != http.MethodPut {
@@ -421,8 +430,15 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	updates := generalSettingsUpdates(in)
-	if generalSettingsRequireUserPrincipal(updates) && !requireManagementUserPrincipal(w, principal) {
+	if (generalSettingsRequireUserPrincipal(updates) || in.PrometheusAuthToken != nil) && !requireManagementUserPrincipal(w, principal) {
 		return
+	}
+	if in.PrometheusAuthToken != nil {
+		if err := settings.SetPrometheusToken(r.Context(), h.secrets, *in.PrometheusAuthToken); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", settings.PrometheusAuthToken)...)
 	}
 	for _, update := range updates {
 		if _, err := h.settings.Set(r.Context(), update.key, update.value); err != nil {
@@ -436,12 +452,7 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 		}
 		slog.Info("security event", append(actorLogAttrs(principal), "event", "settings.changed", "setting", update.key)...)
 	}
-	general, err := h.settings.General(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, general)
+	h.writeGeneralSettings(w, r)
 }
 
 func (h *adminHandler) summary(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +513,7 @@ func (h *adminHandler) system(w http.ResponseWriter, r *http.Request) {
 	forwarding := h.network.RequestForwardingDiagnostics(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"identity": buildinfo.Current(),
-		"manager": map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
+		"manager":  map[string]any{"uptime_seconds": int64(time.Since(h.started).Seconds()), "runtime": general.Runtime},
 		"network": map[string]any{
 			"effective_scheme": h.network.EffectiveScheme(r), "secure_cookie": h.network.IsSecure(r),
 			"allowed_origins": general.AllowedOrigins, "trusted_proxies": general.TrustedProxies, "external_url": general.ExternalURL,

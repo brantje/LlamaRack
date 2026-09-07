@@ -87,3 +87,36 @@ func (s *SecretStore) SecretConfigured(ctx context.Context, name string) (bool, 
 	}
 	return count == 1, nil
 }
+
+// MigrateManagerSettingSecret moves a leftover plaintext manager_settings row into
+// encrypted provider_secrets, then deletes the plaintext setting. Existing encrypted
+// secrets are preserved; empty plaintext rows are dropped without creating a secret.
+func (s *SecretStore) MigrateManagerSettingSecret(ctx context.Context, settingKey, secretName string) error {
+	settingKey = strings.TrimSpace(settingKey)
+	secretName = strings.TrimSpace(secretName)
+	if settingKey == "" || secretName == "" {
+		return errors.New("setting key and secret name are required")
+	}
+	var stored string
+	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", settingKey).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	stored = strings.TrimSpace(stored)
+	if stored != "" {
+		configured, err := s.SecretConfigured(ctx, secretName)
+		if err != nil {
+			return err
+		}
+		if !configured {
+			if err := s.SetSecretWithPrefix(ctx, secretName, stored); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = s.db.ExecContext(ctx, "DELETE FROM manager_settings WHERE setting_key=?", settingKey)
+	return err
+}

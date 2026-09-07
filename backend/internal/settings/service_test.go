@@ -45,7 +45,7 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	if general.ObservabilityRetention.Value != 30 || general.ObservabilityRetention.Source != "default" || !general.ObservabilityRetention.Editable {
 		t.Fatalf("observability retention default=%+v", general.ObservabilityRetention)
 	}
-	if general.PrometheusToken.Value != "" || general.PrometheusToken.Source != "default" || !general.PrometheusToken.Editable {
+	if general.PrometheusToken.Configured || general.PrometheusToken.Source != "default" || !general.PrometheusToken.Editable || general.PrometheusToken.Prefix != "" {
 		t.Fatalf("prometheus token default=%+v", general.PrometheusToken)
 	}
 	if general.Runtime.ModelsDir != "/models" || general.AllowedOrigins.Value != "http://localhost:3000" {
@@ -94,11 +94,8 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	if got, err := s.Int(ctx, ObservabilityRetentionDays); err != nil || got != 45 {
 		t.Fatalf("retention=%d err=%v", got, err)
 	}
-	if _, err := s.Set(ctx, PrometheusAuthToken, "dashboard-token"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.String(ctx, PrometheusAuthToken); err != nil || got != "dashboard-token" {
-		t.Fatalf("prometheus token=%q err=%v", got, err)
+	if _, err := s.Set(ctx, PrometheusAuthToken, "dashboard-token"); err == nil {
+		t.Fatal("prometheus token must not persist as a manager setting")
 	}
 }
 
@@ -153,16 +150,16 @@ func TestPrometheusTokenDatabaseCanOverrideEnvironment(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LLAMARACK_PROMETHEUS_AUTH_TOKEN", "environment-token")
 	s := testSettings(t)
-	value, err := s.Resolve(ctx, PrometheusAuthToken)
-	if err != nil || value.Value != "environment-token" || value.Source != "environment" || !value.Editable {
+	value, err := PrometheusTokenStatus(ctx, nil)
+	if err != nil || !value.Configured || value.Source != "environment" || !value.Editable || value.Prefix != "environm" {
 		t.Fatalf("environment token=%+v err=%v", value, err)
 	}
-	if _, err := s.Set(ctx, PrometheusAuthToken, "database-token"); err != nil {
-		t.Fatal(err)
+	got, err := ResolvePrometheusToken(ctx, nil)
+	if err != nil || got != "environment-token" {
+		t.Fatalf("environment resolve=%q err=%v", got, err)
 	}
-	value, err = s.Resolve(ctx, PrometheusAuthToken)
-	if err != nil || value.Value != "database-token" || value.Source != "database" || !value.Editable {
-		t.Fatalf("database token=%+v err=%v", value, err)
+	if _, err := s.Set(ctx, PrometheusAuthToken, "database-token"); err == nil {
+		t.Fatal("prometheus token must not persist as a manager setting")
 	}
 }
 

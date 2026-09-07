@@ -83,7 +83,7 @@ type General struct {
 	MaxPendingPerInstance  Value       `json:"max_pending_requests_per_instance"`
 	MaxPendingGlobal       Value       `json:"max_pending_requests_global"`
 	ObservabilityRetention Value       `json:"observability_retention_days"`
-	PrometheusToken        Value       `json:"prometheus_auth_token"`
+	PrometheusToken        SecretValue `json:"prometheus_auth_token"`
 	Runtime                RuntimeInfo `json:"runtime"`
 }
 
@@ -123,7 +123,6 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			MaxPendingRequestsPerInstance: {env: "LLAMARACK_MAX_PENDING_REQUESTS_PER_INSTANCE", defaultValue: "32", kind: "int", min: 0, max: 10000},
 			MaxPendingRequestsGlobal:      {env: "LLAMARACK_MAX_PENDING_REQUESTS_GLOBAL", defaultValue: "128", kind: "int", min: 0, max: 10000},
 			ObservabilityRetentionDays:    {defaultValue: "30", kind: "int", min: 1, max: 3650},
-			PrometheusAuthToken:           {env: "LLAMARACK_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
 			MaxDownloadBytes:              {env: "LLAMARACK_MAX_DOWNLOAD_BYTES", defaultValue: strconv.FormatInt(DefaultMaxDownloadBytes, 10), kind: "int64", min: MinMaxDownloadBytes, max: MaxMaxDownloadBytes},
 		},
 		runtime: RuntimeInfo{DataDir: defaults.DataDir, ModelsDir: defaults.ModelsDir, DatabasePath: defaults.DatabasePath, ListenAddr: defaults.ListenAddr, LlamaServerPath: defaults.LlamaServerPath},
@@ -216,7 +215,7 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 }
 
 func (s *Service) General(ctx context.Context) (General, error) {
-	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, LocalLoginEnabled, OIDCJITProvisioningEnabled, OIDCAutoLinkEnabled, TrustedProxies, AllowedOrigins, ExternalURL, FrontendURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, MaxPendingRequestsPerInstance, MaxPendingRequestsGlobal, ObservabilityRetentionDays, PrometheusAuthToken}
+	keys := []string{SessionLifetimeSeconds, LoginProtectionEnabled, LoginFailureThreshold, LoginLockoutSeconds, LocalLoginEnabled, OIDCJITProvisioningEnabled, OIDCAutoLinkEnabled, TrustedProxies, AllowedOrigins, ExternalURL, FrontendURL, StartupTimeoutSeconds, IdleUnloadSeconds, AlwaysOnReconcileSeconds, MaxPendingRequestsPerInstance, MaxPendingRequestsGlobal, ObservabilityRetentionDays}
 	values := make(map[string]Value, len(keys))
 	for _, key := range keys {
 		value, err := s.Resolve(ctx, key)
@@ -225,12 +224,16 @@ func (s *Service) General(ctx context.Context) (General, error) {
 		}
 		values[key] = value
 	}
+	token, err := PrometheusTokenStatus(ctx, nil)
+	if err != nil {
+		return General{}, err
+	}
 	return General{
 		SessionLifetime: values[SessionLifetimeSeconds], LoginProtection: values[LoginProtectionEnabled], LoginFailureThreshold: values[LoginFailureThreshold], LoginLockout: values[LoginLockoutSeconds],
 		LocalLogin: values[LocalLoginEnabled], OIDCJITProvisioning: values[OIDCJITProvisioningEnabled], OIDCAutoLink: values[OIDCAutoLinkEnabled],
 		TrustedProxies: values[TrustedProxies], AllowedOrigins: values[AllowedOrigins], ExternalURL: values[ExternalURL], FrontendURL: values[FrontendURL], StartupTimeout: values[StartupTimeoutSeconds], IdleUnloadTimeout: values[IdleUnloadSeconds], AlwaysOnReconcile: values[AlwaysOnReconcileSeconds],
 		MaxPendingPerInstance: values[MaxPendingRequestsPerInstance], MaxPendingGlobal: values[MaxPendingRequestsGlobal],
-		ObservabilityRetention: values[ObservabilityRetentionDays], PrometheusToken: values[PrometheusAuthToken], Runtime: s.runtime,
+		ObservabilityRetention: values[ObservabilityRetentionDays], PrometheusToken: token, Runtime: s.runtime,
 	}, nil
 }
 
