@@ -91,6 +91,8 @@ func TestEnsureNoSymlinkComponentsBranches(t *testing.T) {
 	}
 	if err := ensureNoSymlinkComponents(root, filepath.Join(link, "nested")); err == nil {
 		t.Fatal("expected symlink component rejection")
+	} else if !errors.Is(err, errPathSymlink) {
+		t.Fatalf("expected errPathSymlink, got %v", err)
 	}
 }
 

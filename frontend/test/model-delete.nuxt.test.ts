@@ -88,7 +88,7 @@ describe('model file deletion', () => {
     await flushPromises()
 
     expect(checkboxChecked()).toBe(true)
-    expect(document.body.textContent).toContain('Manually placed companion files that are only referenced by path are left on disk')
+    expect(document.body.textContent).toContain('The primary GGUF file of this Model will be permanently removed')
     expect(document.body.textContent).toContain('models/coder.gguf')
     expect(document.body.textContent).toContain('4.0 MiB')
 

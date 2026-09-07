@@ -114,7 +114,7 @@ func TestDeleteFilesAndModelAllowsSiblingModelInSameFolder(t *testing.T) {
 	}
 }
 
-func TestEmptyDirectoryPruneFailureKeepsRegistration(t *testing.T) {
+func TestEmptyDirectoryPruneFailureStillDeletesModel(t *testing.T) {
 	ctx := context.Background()
 	s, root := testModelService(t)
 	modelDir := filepath.Join(root, "io-failure")
@@ -134,11 +134,14 @@ func TestEmptyDirectoryPruneFailureKeepsRegistration(t *testing.T) {
 	originalRemoveDirectory := removeEmptyDirectory
 	removeEmptyDirectory = func(string) error { return errors.New("permission denied") }
 	t.Cleanup(func() { removeEmptyDirectory = originalRemoveDirectory })
-	if err := s.DeleteFilesAndModel(ctx, model.ID, plan); err == nil {
-		t.Fatal("expected empty directory prune failure")
+	if err := s.DeleteFilesAndModel(ctx, model.ID, plan); err != nil {
+		t.Fatalf("prune failure after unlinking owned files should not block Model deletion: %v", err)
 	}
-	if _, err := s.GetByID(ctx, model.ID); err != nil {
-		t.Fatalf("directory failure removed Model registration: %v", err)
+	if _, err := s.GetByID(ctx, model.ID); err == nil {
+		t.Fatal("model registration still exists after prune failure")
+	}
+	if _, err := os.Stat(modelDir); err != nil {
+		t.Fatalf("unpruned directory should remain: %v", err)
 	}
 }
 

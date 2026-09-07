@@ -14,6 +14,7 @@ import (
 var (
 	ErrArtifactShared     = errors.New("model artifact is still referenced by another registered Model")
 	ErrUnsafeArtifactPath = errors.New("unsafe model artifact path")
+	errPathSymlink        = errors.New("path contains a symbolic link")
 	removeArtifactFile    = os.Remove
 	removeEmptyDirectory  = os.Remove
 )
@@ -97,9 +98,7 @@ func (s *Service) DeleteFilesAndModel(ctx context.Context, id string, plan FileD
 		}
 		parents[filepath.Dir(file.absolutePath)] = struct{}{}
 	}
-	if err := s.pruneEmptyAncestorDirs(parents); err != nil {
-		return err
-	}
+	_ = s.pruneEmptyAncestorDirs(parents)
 	return s.Delete(ctx, id)
 }
 
@@ -295,7 +294,10 @@ func (s *Service) pruneEmptyAncestors(start string) error {
 			return nil
 		}
 		if err := ensureNoSymlinkComponents(root, current); err != nil {
-			return nil
+			if errors.Is(err, errPathSymlink) {
+				return nil
+			}
+			return fmt.Errorf("inspect model directory %q: %w", current, err)
 		}
 		info, err := os.Lstat(current)
 		switch {
@@ -428,7 +430,7 @@ func ensureNoSymlinkComponents(root, candidate string) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%q is a symbolic link", current)
+			return fmt.Errorf("%w: %q", errPathSymlink, current)
 		}
 	}
 	return nil
