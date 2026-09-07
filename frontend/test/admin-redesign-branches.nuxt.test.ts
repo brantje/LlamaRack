@@ -151,10 +151,11 @@ describe('Administration redesign branches', () => {
     expect(idle).toBeTruthy()
     idle!.vm.$emit('update:modelValue', 301)
     await flushPromises()
+    expect(wrapper.get('[data-testid="prometheus-token-remove"]').attributes('disabled')).toBeDefined()
     await button(wrapper, 'Save changes').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Manager settings saved')
-    expect(wrapper.find('[data-testid="prometheus-token-remove"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="prometheus-token-remove"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-testid="prometheus-token-remove"]').trigger('click')
     await flushPromises()

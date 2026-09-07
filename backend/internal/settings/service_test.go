@@ -250,6 +250,12 @@ func TestSettingValidationAndTypeErrors(t *testing.T) {
 	if _, err := s.Set(ctx, "missing", "x"); err == nil {
 		t.Fatal("expected unknown setting error")
 	}
+	if err := s.Validate(SessionLifetimeSeconds, 1); err == nil {
+		t.Fatal("expected validation error without write")
+	}
+	if got, err := s.Int(ctx, SessionLifetimeSeconds); err != nil || got != 86400 {
+		t.Fatalf("validate must not persist invalid value: got=%d err=%v", got, err)
+	}
 	if _, err := s.Resolve(ctx, "missing"); err == nil {
 		t.Fatal("expected unknown resolve error")
 	}

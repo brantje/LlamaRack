@@ -433,6 +433,12 @@ func (h *adminHandler) generalSettings(w http.ResponseWriter, r *http.Request, p
 	if (generalSettingsRequireUserPrincipal(updates) || in.PrometheusAuthToken != nil) && !requireManagementUserPrincipal(w, principal) {
 		return
 	}
+	for _, update := range updates {
+		if err := h.settings.Validate(update.key, update.value); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	if in.PrometheusAuthToken != nil {
 		if err := settings.SetPrometheusToken(r.Context(), h.secrets, *in.PrometheusAuthToken); err != nil {
 			writeErr(w, http.StatusBadRequest, err)

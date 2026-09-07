@@ -190,22 +190,33 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 	return Value{Value: parsed, Source: "default", Editable: true}, nil
 }
 
-func (s *Service) Set(ctx context.Context, key string, value any) (Value, error) {
+func (s *Service) validateWrite(key string, value any) (any, string, error) {
 	def, ok := s.defs[key]
 	if !ok {
-		return Value{}, fmt.Errorf("unknown manager setting %q", key)
+		return nil, "", fmt.Errorf("unknown manager setting %q", key)
 	}
 	if def.env != "" && !def.databaseOverridesEnv {
 		if envValue, ok := os.LookupEnv(def.env); ok && strings.TrimSpace(envValue) != "" {
-			return Value{}, fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
+			return nil, "", fmt.Errorf("%s is controlled by environment variable %s", key, def.env)
 		}
 	}
-	serialized := fmt.Sprint(value)
-	parsed, err := parse(def, serialized)
+	parsed, err := parse(def, fmt.Sprint(value))
+	if err != nil {
+		return nil, "", err
+	}
+	return parsed, serialize(parsed), nil
+}
+
+func (s *Service) Validate(key string, value any) error {
+	_, _, err := s.validateWrite(key, value)
+	return err
+}
+
+func (s *Service) Set(ctx context.Context, key string, value any) (Value, error) {
+	parsed, serialized, err := s.validateWrite(key, value)
 	if err != nil {
 		return Value{}, err
 	}
-	serialized = serialize(parsed)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)
 		ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=excluded.updated_at`, key, serialized, time.Now().Unix())
 	if err != nil {

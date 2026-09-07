@@ -64,6 +64,23 @@ func TestAdminPrometheusAuthTokenMaskedReplaceClearAndOmit(t *testing.T) {
 	}
 }
 
+func TestAdminPrometheusAuthTokenRejectsInvalidCompanionSettingWithoutMutatingSecret(t *testing.T) {
+	f := newAdminFixture(t)
+	const token = "dashboard-metrics-secret"
+	w := doRequest(t, f.handler, http.MethodPut, "/api/v1/settings/general", map[string]any{
+		"prometheus_auth_token":    token,
+		"session_lifetime_seconds": 1,
+	}, f.cookie)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("mixed invalid put=%d body=%s", w.Code, w.Body.String())
+	}
+	got, err := f.secrets.GetSecret(t.Context(), huggingface.SecretPrometheusAuthToken)
+	if err != nil || got != "" {
+		t.Fatalf("token mutated after rejected companion setting: secret=%q err=%v", got, err)
+	}
+	assertManagerSettingsHasNoPrometheusToken(t, f.db, token)
+}
+
 func TestAdminPrometheusAuthTokenEnvFallbackMasked(t *testing.T) {
 	t.Setenv("LLAMARACK_PROMETHEUS_AUTH_TOKEN", "environment-metrics-token")
 	f := newAdminFixture(t)

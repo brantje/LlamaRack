@@ -163,7 +163,7 @@ async function save() {
 }
 
 async function removePrometheusToken() {
-  if (!canRemovePrometheusToken.value || busy.value) return
+  if (!canRemovePrometheusToken.value || busy.value || hasChanges.value) return
   const confirmed = await confirmation.value?.request({
     title: 'Remove Prometheus token',
     description: 'Removing the stored Prometheus Bearer token leaves GET /metrics unauthenticated unless LLAMARACK_PROMETHEUS_AUTH_TOKEN is set.',
@@ -274,7 +274,7 @@ function editable(key: keyof typeof form) {
                 <span class="text-xs text-[var(--neutral-700)]">{{ settings.prometheus_auth_token.configured ? 'GET /metrics requires this Bearer token.' : '/metrics is unauthenticated.' }}</span>
               </div>
               <UInput v-model="form.prometheus_auth_token" type="password" autocomplete="off" class="w-full" :disabled="!editable('prometheus_auth_token')" :placeholder="settings.prometheus_auth_token.configured ? 'Leave blank to keep the current token' : 'Optional Bearer token for /metrics'" />
-              <AppButton v-if="canRemovePrometheusToken" intent="ghost" tone="destructive" :disabled="busy" data-testid="prometheus-token-remove" @click="removePrometheusToken">Remove token</AppButton>
+              <AppButton v-if="canRemovePrometheusToken" intent="ghost" tone="destructive" :disabled="busy || hasChanges" data-testid="prometheus-token-remove" @click="removePrometheusToken">Remove token</AppButton>
             </div>
             <template #help>The token is encrypted at rest and is never returned by the API.</template>
           </AdminSettingField>
