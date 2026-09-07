@@ -217,9 +217,9 @@ describe('Hugging Face administration', () => {
     const loader = await mountSuspended(AdminHuggingFacePage, { route: false })
     await flushPromises()
     expect(loader.text()).toContain('limit load denied')
-    expect(inputNumber(loader).props('disabled')).toBe(true)
-    expect(unitSelect(loader).props('disabled')).toBe(true)
-    expect(loader.get('[data-testid="hf-max-download-save"]').attributes('disabled')).toBeDefined()
+    expect(loader.find('[data-testid="hf-max-download-unavailable"]').exists()).toBe(true)
+    expect(loader.find('[data-testid="hf-max-download-bytes"]').exists()).toBe(false)
+    expect(loader.text()).not.toContain('Persisted as')
     loader.unmount()
 
     mode = 'save'

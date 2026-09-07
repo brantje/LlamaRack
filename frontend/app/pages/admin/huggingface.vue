@@ -184,8 +184,8 @@ async function saveDownloadLimit() {
           <StatusTag variant="ready">Saved</StatusTag><p class="text-xs leading-5 text-[var(--neutral-800)]">Download limit saved.</p>
         </div>
 
-        <div class="mt-5">
-          <AdminSettingField label="Max download size" :source="settings?.max_download_bytes.source || 'default'">
+        <div v-if="settings" class="mt-5">
+          <AdminSettingField label="Max download size" :source="settings.max_download_bytes.source">
             <UFieldGroup class="w-full">
               <UInputNumber v-model="limitMagnitude" class="w-full" :min="1" :disabled="!settingsEditable" data-testid="hf-max-download-magnitude" />
               <USelect v-model="limitUnit" class="w-28" :items="UNIT_ITEMS" value-key="value" label-key="label" :disabled="!settingsEditable" aria-label="Download size unit" data-testid="hf-max-download-unit" />
@@ -195,8 +195,11 @@ async function saveDownloadLimit() {
             </template>
           </AdminSettingField>
         </div>
+        <p v-else class="mt-5 text-xs text-[var(--neutral-700)]" data-testid="hf-max-download-unavailable">
+          Download limit is unavailable until settings load successfully.
+        </p>
 
-        <div class="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">
+        <div v-if="settings" class="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--color-divider)] pt-4">
           <AppButton intent="primary" :loading="settingsBusy" :disabled="!canSaveLimit" data-testid="hf-max-download-save" @click="saveDownloadLimit">Save download limit</AppButton>
           <code class="font-mono text-xs text-[var(--neutral-700)]" data-testid="hf-max-download-bytes">{{ formatExactBytes(limitBytes) }}</code>
         </div>
