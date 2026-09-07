@@ -391,11 +391,11 @@ func GroupArtifacts(repoID, revision string, files []File, parameterCounts ...in
 
 func sidecarKind(name string) string {
 	normalized := strings.ToLower(strings.ReplaceAll(name, "\\", "/"))
-	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
-		return "mmproj"
-	}
 	if mtpSidecarPath(normalized) {
 		return "mtp"
+	}
+	if strings.Contains(normalized, "mmproj") || strings.Contains(normalized, "mmoproj") || strings.Contains(normalized, "projector") {
+		return "mmproj"
 	}
 	return ""
 }

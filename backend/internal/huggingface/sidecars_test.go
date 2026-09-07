@@ -63,6 +63,7 @@ func TestSidecarClassificationPreservesProjectorRulesAndConservativeMTP(t *testi
 	for _, name := range []string{
 		"mtp-model-Q4_0.gguf", "MTP_Q8_0.GGUF",
 		"MTP/gemma-4-12B-it-MTP-BF16.gguf", "helpers/mtp/draft.gguf",
+		"MTP/projector-draft.gguf", "MTP/mmproj-F16.gguf",
 	} {
 		if got := sidecarKind(name); got != "mtp" {
 			t.Fatalf("sidecarKind(%q) = %q", name, got)
