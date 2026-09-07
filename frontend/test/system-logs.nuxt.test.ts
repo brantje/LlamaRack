@@ -218,4 +218,29 @@ describe('System diagnostics logs', () => {
     expect(rows.filter((text: string) => text.includes('manager line'))).toHaveLength(100)
     wrapper.unmount()
   })
+
+  it('displays and filters Instance sources by slug rather than durable ID', async () => {
+    vi.stubGlobal('EventSource', undefined)
+    const instanceID = '8c821aec-1f0d-4b8d-a332-41c582dd2c58'
+    mocks.request.mockResolvedValue({ entries: [
+      log('INFO', 'manager', 'reconcile: 1 Always On Instance satisfied'),
+      log('INFO', 'qwen-coder-32b', 'fake worker online'),
+      log('ERROR', 'qwen-coder-32b', 'worker exited status 2')
+    ] })
+
+    const wrapper = await mountSuspended(SystemLogsPage, { route: '/admin/system-logs?source=qwen-coder-32b' })
+    await flushPromises()
+
+    expect(button(wrapper, 'qwen-coder-32b').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).toContain('qwen-coder-32b')
+    expect(wrapper.text()).toContain('fake worker online')
+    expect(wrapper.text()).not.toContain(instanceID)
+    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(2)
+
+    await button(wrapper, 'All sources').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="system-log-row"]')).toHaveLength(3)
+    expect(wrapper.text()).not.toContain(instanceID)
+    wrapper.unmount()
+  })
 })
