@@ -3,7 +3,7 @@ type LogSource = 'stdout' | 'stderr' | 'manager'
 type LogEntry = { source: LogSource; timestamp: string; text: string }
 type LogResponse = { instance_id: string; entries: LogEntry[] }
 
-const props = defineProps<{ instanceId: string; embedded?: boolean }>()
+const props = defineProps<{ instanceId: string; instanceSlug?: string; embedded?: boolean }>()
 const manager = useManager()
 const entries = ref<LogEntry[]>([])
 const source = ref<'all' | LogSource>('all')
@@ -24,7 +24,7 @@ const sourceItems = [
 
 const aggregateLogsTo = computed(() => ({
   path: '/admin/system-logs',
-  query: { source: props.instanceId }
+  query: { source: props.instanceSlug || props.instanceId }
 }))
 
 const visibleEntries = computed(() => {

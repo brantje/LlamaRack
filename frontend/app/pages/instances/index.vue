@@ -23,6 +23,7 @@ const error = ref('')
 const refreshing = ref(false)
 const logsOpen = ref(false)
 const logInstanceId = ref('')
+const logInstanceSlug = ref('')
 const logTitle = ref('')
 const importStates = ref<Record<string, ImportStatus>>({})
 const defaultIdleSeconds = ref(300)
@@ -324,6 +325,7 @@ async function remove(instance: Instance) {
 function showLogs(instance: Instance) {
   error.value = ''
   logInstanceId.value = instance.id
+  logInstanceSlug.value = instance.slug
   logTitle.value = `${instance.name} logs`
   logsOpen.value = true
 }
@@ -522,7 +524,7 @@ onBeforeUnmount(() => {
 
     <p v-if="instances.length" class="border-t border-[var(--color-divider)] pt-4 text-[length:var(--font-size-table-header)] leading-relaxed text-[var(--neutral-700)]">GPU telemetry degrades per metric: when process-level utilization cannot be attributed, the assigned device's utilization is shown and labelled Global GPU usage. CPU and RAM stay process-scoped.</p>
 
-    <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }"><template #body><InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" embedded /></template></UModal>
+    <UModal v-model:open="logsOpen" :title="logTitle" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl' }"><template #body><InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" :instance-slug="logInstanceSlug" embedded /></template></UModal>
     <AppConfirmationModal ref="confirmation" />
   </div>
 </template>

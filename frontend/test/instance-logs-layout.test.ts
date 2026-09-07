@@ -8,13 +8,14 @@ const viewerSource = readFileSync(fileURLToPath(new URL('../app/components/Insta
 describe('Instance logs layout', () => {
   it('keeps the logs dialog console-sized and mounts the shared live viewer in flat embedded mode', () => {
     expect(pageSource).toContain("content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-6xl'")
-    expect(pageSource).toContain('<InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" embedded />')
+    expect(pageSource).toContain('<InstanceLogViewer v-if="logsOpen && logInstanceId" :instance-id="logInstanceId" :instance-slug="logInstanceSlug" embedded />')
     expect(pageSource).not.toContain('/logs`)')
     expect(pageSource).not.toContain('instance-logs-output')
   })
 
   it('uses shared flat primitives and the Administration diagnostics route', () => {
     expect(viewerSource).toContain('embedded?: boolean')
+    expect(viewerSource).toContain('instanceSlug?: string')
     expect(viewerSource).toContain("path: '/admin/system-logs'")
     expect(viewerSource).toContain('<Frame')
     expect(viewerSource).toContain('<StatusTag')
