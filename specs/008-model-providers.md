@@ -149,6 +149,8 @@ After that Hugging Face download completes, registering its main GGUF should aut
 
 These are normal model-level defaults: the user may review or override them, and the launcher still filters persisted options against the currently detected llama-server option schema before starting a process.
 
+A companion path stored as a model or instance option is a reference, not a transfer of filesystem ownership. Destructive model deletion may unlink a companion GGUF only when completed `download_files` provenance shows LlamaRack wrote that file for the Model's import job and no remaining registered Model or Instance still depends on it. Manually placed or otherwise unregistered companions stay on disk.
+
 Embedded MTP inside a primary GGUF is distinct from a separate `mtp-*` sidecar. Provider import must not invent a separate file relationship from a non-prefix MTP filename; richer embedded-MTP detection may use GGUF metadata when that metadata is available.
 
 ## 9. Split GGUF grouping
@@ -409,7 +411,10 @@ Provider/download state follows the data-model separation:
 
 - deleting a Model does not necessarily remove the downloaded artifact;
 - deleting an artifact requires no live model reference or an explicit workflow that resolves dependents;
-- deleting artifact files stops any running model first through lifecycle if a destructive dependent workflow is selected.
+- deleting artifact files stops any running model first through lifecycle if a destructive dependent workflow is selected;
+- `delete_files=true` unlinks the primary GGUF and LlamaRack-owned download artifacts (including companions recorded in that import job) and may prune resulting empty directories inside the models root;
+- companion files that are only referenced by path, and any other unregistered files in a nested folder, are not cascade-deleted;
+- directory cleanup never follows symlinks, never removes a non-empty directory, and never removes the configured models root.
 
 ## 26. Provider caching
 
@@ -485,6 +490,7 @@ Downloads must support:
 10. Model definition deletion does not silently delete multi-gigabyte artifacts.
 11. Recognized projector and separate MTP sidecars remain dependencies of a main artifact rather than standalone Model choices.
 12. Existing broad projector-marker filtering is preserved, while MTP sidecar detection stays prefix- or `mtp/`-directory-based so embedded-MTP main filenames are not hidden accidentally.
+13. Cascade deletion of companion GGUFs requires LlamaRack download provenance; a mere in-root path reference is not ownership.
 
 ## 31. Acceptance criteria
 

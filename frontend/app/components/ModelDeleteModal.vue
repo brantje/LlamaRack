@@ -51,14 +51,14 @@ defineExpose({ request })
         <div data-testid="model-delete-files">
           <UCheckbox
             v-model="deleteFiles"
-            label="Also delete model files and folder from disk"
+            label="Also delete LlamaRack-owned model files from disk"
           />
         </div>
 
         <Frame v-if="deleteFiles" data-testid="model-delete-warning" class="p-3">
           <div class="flex items-start gap-2">
             <StatusTag variant="failed">Permanent file deletion</StatusTag>
-            <p class="text-xs leading-5 text-[var(--neutral-800)]">The registered Model and its Instance definitions will be deleted. Associated model files will be permanently removed. If the primary GGUF is stored in a nested model folder, that entire folder and all of its contents will also be removed. This cannot be undone.</p>
+            <p class="text-xs leading-5 text-[var(--neutral-800)]">The registered Model and its Instance definitions will be deleted. LlamaRack-downloaded or imported GGUF files for this Model, including owned companion files such as mmproj or draft models, will be permanently removed. Manually placed companion files that are only referenced by path are left on disk. Empty directories that remain after those owned files are removed may be pruned. This cannot be undone.</p>
           </div>
         </Frame>
 
