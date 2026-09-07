@@ -198,6 +198,39 @@ func TestPreviousEnvPrefixDoesNotControlSettings(t *testing.T) {
 	}
 }
 
+func TestOIDCOutboundSettingsDefaultAndEnvironment(t *testing.T) {
+	ctx := context.Background()
+	s := testSettings(t)
+	value, err := s.Resolve(ctx, OIDCAllowHTTP)
+	if err != nil || value.Value != false || value.Source != "default" || !value.Editable {
+		t.Fatalf("allow http default=%+v err=%v", value, err)
+	}
+	value, err = s.Resolve(ctx, OIDCAllowedHosts)
+	if err != nil || value.Value != "" || value.Source != "default" || !value.Editable {
+		t.Fatalf("allowed hosts default=%+v err=%v", value, err)
+	}
+	if _, err := s.Set(ctx, OIDCAllowHTTP, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(ctx, OIDCAllowedHosts, "authentik.lan,192.168.1.10"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LLAMARACK_OIDC_ALLOW_HTTP", "false")
+	t.Setenv("LLAMARACK_OIDC_ALLOWED_HOSTS", "idp.home.arpa")
+	s = testSettings(t)
+	value, err = s.Resolve(ctx, OIDCAllowHTTP)
+	if err != nil || value.Value != false || value.Source != "environment" || value.Editable {
+		t.Fatalf("allow http env=%+v err=%v", value, err)
+	}
+	value, err = s.Resolve(ctx, OIDCAllowedHosts)
+	if err != nil || value.Value != "idp.home.arpa" || value.Source != "environment" || value.Editable {
+		t.Fatalf("allowed hosts env=%+v err=%v", value, err)
+	}
+	if _, err := s.Set(ctx, OIDCAllowHTTP, true); err == nil {
+		t.Fatal("environment-controlled OIDC HTTP setting should reject writes")
+	}
+}
+
 func TestPendingRequestLimitsHonorEnvironment(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LLAMARACK_MAX_PENDING_REQUESTS_PER_INSTANCE", "4")
