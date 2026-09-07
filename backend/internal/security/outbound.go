@@ -23,10 +23,14 @@ const (
 )
 
 var (
-	errOIDCDestination = errors.New("OIDC destination is not allowed")
-	errOIDCRedirect    = errors.New("OIDC redirect is not allowed")
-	errOIDCHTTPS       = errors.New("OIDC URL must use HTTPS")
-	errOIDCCredentials = errors.New("OIDC URL must not include credentials")
+	ErrOIDCDestination = errors.New("OIDC destination is not allowed")
+	ErrOIDCRedirect    = errors.New("OIDC redirect is not allowed")
+	ErrOIDCHTTPS       = errors.New("OIDC URL must use HTTPS")
+	ErrOIDCCredentials = errors.New("OIDC URL must not include credentials")
+	errOIDCDestination = ErrOIDCDestination
+	errOIDCRedirect    = ErrOIDCRedirect
+	errOIDCHTTPS       = ErrOIDCHTTPS
+	errOIDCCredentials = ErrOIDCCredentials
 	cgnatRange         = netip.MustParsePrefix("100.64.0.0/10")
 )
 

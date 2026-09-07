@@ -67,9 +67,20 @@ func newOIDCFixture(t *testing.T) *oidcFixture {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	managerSettings := settings.New(db, settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	enableOIDCTestLoopback(t, managerSettings)
 	authService := New(db, time.Hour)
 	secrets := newMemoryOIDCSecrets()
 	return &oidcFixture{auth: authService, settings: managerSettings, secrets: secrets, manager: NewOIDCManager(authService, managerSettings, secrets)}
+}
+
+func enableOIDCTestLoopback(t *testing.T, s *settings.Service) {
+	t.Helper()
+	if _, err := s.Set(t.Context(), settings.OIDCAllowHTTP, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(t.Context(), settings.OIDCAllowedHosts, "127.0.0.1,::1,localhost"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type testOIDCProvider struct {
@@ -139,7 +150,6 @@ func TestOIDCProviderLifecycleTestingAndLockoutPolicy(t *testing.T) {
 	f := newOIDCFixture(t)
 	ctx := t.Context()
 	idp := newTestOIDCProvider(t)
-	f.manager.client = idp.server.Client()
 
 	if _, err := f.manager.CreateProvider(ctx, OIDCProviderInput{}); err == nil {
 		t.Fatal("missing provider fields should fail")
@@ -244,7 +254,6 @@ func TestOIDCStartCallbackAndOneTimeExchange(t *testing.T) {
 	f := newOIDCFixture(t)
 	ctx := t.Context()
 	idp := newTestOIDCProvider(t)
-	f.manager.client = idp.server.Client()
 	secret := "client-secret"
 	provider, err := f.manager.CreateProvider(ctx, idp.input(&secret))
 	if err != nil {
@@ -440,7 +449,6 @@ func TestOIDCDiscoveryAndProviderErrorPaths(t *testing.T) {
 		}
 	}))
 	defer badDiscovery.Close()
-	f.manager.client = badDiscovery.Client()
 	secret := "secret"
 	provider, err := f.manager.CreateProvider(ctx, OIDCProviderInput{Name: "Bad discovery", Enabled: true, Issuer: badDiscovery.URL, ClientID: "client", ClientSecret: &secret})
 	if err != nil {

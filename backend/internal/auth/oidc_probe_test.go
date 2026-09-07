@@ -8,8 +8,6 @@ import (
 func TestOIDCTestProviderInput(t *testing.T) {
 	f := newOIDCFixture(t)
 	idp := newTestOIDCProvider(t)
-	f.manager.client = idp.server.Client()
-
 	secret := "client-secret"
 	if err := f.manager.TestProviderInput(t.Context(), idp.input(&secret)); err != nil {
 		t.Fatalf("valid provider draft: %v", err)

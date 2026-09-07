@@ -66,6 +66,12 @@ func newAPIOIDCFixture(t *testing.T) *apiOIDCFixture {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	managerSettings := settings.New(db, settings.Defaults{SessionLifetime: time.Hour, AllowedOrigins: "https://manager.example.test", StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	if _, err := managerSettings.Set(t.Context(), settings.OIDCAllowHTTP, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managerSettings.Set(t.Context(), settings.OIDCAllowedHosts, "127.0.0.1,::1,localhost"); err != nil {
+		t.Fatal(err)
+	}
 	authService := auth.New(db, time.Hour)
 	secrets := &apiOIDCSecrets{data: map[string]string{}}
 	oidcManager := auth.NewOIDCManager(authService, managerSettings, secrets)
