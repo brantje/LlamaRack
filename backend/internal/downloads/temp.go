@@ -20,6 +20,7 @@ var (
 )
 
 var openPartial = openPartialFile
+var removeFile = os.Remove
 
 func openPartialFile(path string, offset int64) (*os.File, error) {
 	var (
@@ -148,7 +149,7 @@ func (m *Manager) unlinkRegularTemp(path string) error {
 	if !info.Mode().IsRegular() {
 		return nil
 	}
-	return os.Remove(path)
+	return removeFile(path)
 }
 
 func (m *Manager) createExclusiveTemp(finalPath string) (string, error) {

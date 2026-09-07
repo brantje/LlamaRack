@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -89,11 +90,9 @@ VALUES('cleanup-error','huggingface','acme/demo','rev','artifact','demo.gguf',''
 	if err := os.WriteFile(partialPath, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Dir(partialPath)
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	original := removeFile
+	t.Cleanup(func() { removeFile = original })
+	removeFile = func(string) error { return errors.New("forced cleanup error") }
 	if err := manager.Remove(ctx, "cleanup-error"); err == nil {
 		t.Fatal("expected partial cleanup error")
 	}

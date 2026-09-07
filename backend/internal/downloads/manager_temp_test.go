@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -163,6 +164,44 @@ func TestLegacyRegularPartRemainsResumable(t *testing.T) {
 	}
 	if data, err := os.ReadFile(finalPath); err != nil || string(data) != "abcdef" {
 		t.Fatalf("resumed file = %q err=%v", data, err)
+	}
+}
+
+func TestTempPathHelpersRejectEscapesAndInvalidLimits(t *testing.T) {
+	manager, _, _ := newTestManager(t, http.NotFoundHandler())
+	if _, err := manager.containedPath(filepath.Join(t.TempDir(), "outside")); err == nil {
+		t.Fatal("expected escaped path error")
+	}
+	if _, err := manager.absTempPath(""); err == nil {
+		t.Fatal("expected empty temp path error")
+	}
+	if _, err := manager.absTempPath("../escape.part"); err == nil {
+		t.Fatal("expected relative escape error")
+	}
+	if err := manager.persistTempPath(context.Background(), "missing", "demo.gguf", filepath.Join(t.TempDir(), "x.part")); err == nil {
+		t.Fatal("expected persist escape error")
+	}
+	if err := os.MkdirAll(manager.modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(manager.modelsDir, "link.part")
+	if err := os.Symlink("/tmp", symlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.unlinkRegularTemp(symlink); err != nil {
+		t.Fatalf("symlink cleanup = %v", err)
+	}
+	manager.limit = func(context.Context) (int64, error) { return 0, nil }
+	if _, err := manager.maxDownloadBytes(context.Background()); err == nil {
+		t.Fatal("expected invalid limit")
+	}
+	manager.limit = func(context.Context) (int64, error) { return 0, errors.New("settings unavailable") }
+	if _, err := manager.maxDownloadBytes(context.Background()); err == nil {
+		t.Fatal("expected settings error")
+	}
+	artifact := huggingface.Artifact{TotalBytes: 10, Files: []huggingface.File{{Size: 3}, {Size: 4}}}
+	if knownDownloadBytes(artifact) != 10 {
+		t.Fatalf("known bytes=%d", knownDownloadBytes(artifact))
 	}
 }
 
