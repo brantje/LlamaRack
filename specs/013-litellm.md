@@ -38,6 +38,8 @@ LlamaRack remains the inference gateway. LiteLLM is a catalog/discovery front do
 - `litellm_proxy_api_key` — encrypted operator key; status APIs return `configured` + prefix only.
 - `litellm_inference_api_key` — encrypted copy of the generated LlamaRack `sk-` secret used in published `litellm_params.api_key`.
 
+The Prometheus `/metrics` bearer token uses the same `provider_secrets` store (`prometheus_auth_token`) and is managed from General settings rather than the LiteLLM admin API.
+
 ### Hidden principal
 
 - Hidden service account `LiteLLM` (`service_accounts.hidden = 1`).

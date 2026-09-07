@@ -30,13 +30,15 @@ JWT-only identity/security administration includes at minimum:
 - service-account listing and CRUD;
 - OIDC provider, identity and authentication/JIT/linking administration;
 - security/trust-boundary manager settings such as session lifetime, login protection, trusted proxies, allowed origins and external URL;
-- secret-bearing security settings such as the Prometheus authentication token;
+- secret-bearing security settings such as the Prometheus authentication token (`PUT /api/v1/settings/general` is write-only for the secret; `GET` returns only `configured`, optional `prefix`, `source`, and `editable`);
 - LiteLLM operations that create, rotate, publish or remove managed credentials (`PUT`/`DELETE`, sync and rotate);
 - future endpoints capable of creating, acquiring, delegating or materially changing a LlamaRack authentication credential or human identity.
 
 Operational API-key access remains intentional. For example, Management/Full keys may continue to use models, Instances, downloads/imports, lifecycle controls, logs/observability, hardware, llama.cpp configuration and non-security resource/lifecycle settings. `GET /api/v1/api-keys` remains available for credential inventory/observability, but API-key mutation is JWT-only. `GET /api/v1/litellm` and the non-mutating connection test may remain operational; credential-bearing LiteLLM mutations are JWT-only.
 
 `PUT /api/v1/settings/general` is authorized by the fields being changed. If an API-key request contains any security/trust-boundary field, the entire update returns **403 before any setting is written**. Pure operational updates may proceed. A mixed operational+security request must never partially apply the operational subset.
+
+The Prometheus authentication token is a JWT-only secret-bearing field on that same endpoint. It is stored in encrypted `provider_secrets`, never as plaintext in `manager_settings`. `GET /api/v1/settings/general` must not return the token value. A non-empty PUT replaces the secret; an explicit empty string clears it; omitting the field leaves the existing secret unchanged. `LLAMARACK_PROMETHEUS_AUTH_TOKEN` remains an environment fallback when no encrypted secret is configured.
 
 Session-bound denylist for any API key (403): `/api/v1/me`, `/api/v1/me/*`, `POST /api/v1/auth/logout`, `POST /api/v1/auth/ws-ticket`, ticket streams, `/api/v1/playground/*`. Playground trusted-inference bypass stays JWT-only.
 

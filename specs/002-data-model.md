@@ -69,7 +69,7 @@ These retain the existing v1 security model with typed owner-bound keys:
   - `enabled`, `prefix`, `last_used_at`;
   - no `revoked_at`; rotate replaces `token_hash` and `prefix` in place;
 - deleting a user or service account cascades and deletes that owner's keys;
-- encrypted provider secrets;
+- encrypted provider secrets (`provider_secrets`), including Hugging Face tokens, OIDC client secrets, LiteLLM keys, and the Prometheus `/metrics` bearer token;
 - no management RBAC in v1.
 
 ### 4.2 llama.cpp binary profile and option definitions
