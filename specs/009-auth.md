@@ -140,7 +140,7 @@ The Admin UI exposes **Test configuration**. Testing resolves discovery/manual e
 OIDC discovery, JWKS fetches, and authorization-code token exchange are server-side HTTP requests. They MUST use a dedicated outbound client that:
 
 - requires `https://` unless `oidc_allow_http` / `LLAMARACK_OIDC_ALLOW_HTTP` is enabled;
-- resolves the target host before dialing and rejects loopback, link-local, multicast, unspecified, private, and CGNAT destinations unless the request hostname is listed in `oidc_allowed_hosts` / `LLAMARACK_OIDC_ALLOWED_HOSTS`;
+- resolves the target host before dialing and rejects loopback, link-local, multicast, unspecified, private, CGNAT, IPv6 6to4 (`2002::/16`), and Teredo (`2001::/32`) destinations unless the request hostname is listed in `oidc_allowed_hosts` / `LLAMARACK_OIDC_ALLOWED_HOSTS`;
 - revalidates every redirect against the same scheme and destination policy and refuses cross-origin hops;
 - dials only an address that passed validation so DNS rebinding cannot retarget the connection.
 

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,9 +83,9 @@ func TestOIDCRejectsOffOriginDiscoveryAndManualToken(t *testing.T) {
 
 func TestOIDCDiscoveredOffOriginPublicTokenIsTrusted(t *testing.T) {
 	f := newOIDCFixture(t)
-	tokenHits := 0
+	var tokenHits atomic.Int64
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokenHits++
+		tokenHits.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{{"kty": "RSA"}}})
 	}))
 	defer tokenServer.Close()
@@ -113,7 +114,7 @@ func TestOIDCDiscoveredOffOriginPublicTokenIsTrusted(t *testing.T) {
 	if _, err := f.manager.TestProvider(t.Context(), provider.ID); err != nil {
 		t.Fatalf("discovered off-origin endpoints should be trusted: %v", err)
 	}
-	if tokenHits == 0 {
+	if tokenHits.Load() == 0 {
 		t.Fatal("expected JWKS fetch against discovered off-origin host")
 	}
 }

@@ -74,7 +74,7 @@ func TestParseAndMatchOIDCAllowedHosts(t *testing.T) {
 }
 
 func TestBlockedOIDCAddrClasses(t *testing.T) {
-	for _, value := range []string{"127.0.0.1", "::1", "10.0.0.8", "192.168.1.20", "172.16.5.1", "169.254.169.254", "224.0.0.1", "0.0.0.0", "100.64.1.2", "fc00::1", "fe80::1", "::ffff:10.1.2.3"} {
+	for _, value := range []string{"127.0.0.1", "::1", "10.0.0.8", "192.168.1.20", "172.16.5.1", "169.254.169.254", "224.0.0.1", "0.0.0.0", "100.64.1.2", "fc00::1", "fe80::1", "::ffff:10.1.2.3", "2002:c0a8:101::1", "2001:0:53aa:64c::1"} {
 		ip := netip.MustParseAddr(value)
 		if !BlockedOIDCAddr(ip) {
 			t.Fatalf("%s should be blocked", value)

@@ -32,6 +32,8 @@ var (
 	errOIDCHTTPS       = ErrOIDCHTTPS
 	errOIDCCredentials = ErrOIDCCredentials
 	cgnatRange         = netip.MustParsePrefix("100.64.0.0/10")
+	sixToFourRange     = netip.MustParsePrefix("2002::/16")
+	teredoRange        = netip.MustParsePrefix("2001::/32")
 )
 
 type ipResolver interface {
@@ -149,7 +151,7 @@ func BlockedOIDCAddr(ip netip.Addr) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
 		return true
 	}
-	return cgnatRange.Contains(ip)
+	return cgnatRange.Contains(ip) || sixToFourRange.Contains(ip) || teredoRange.Contains(ip)
 }
 
 func ValidateOIDCURL(raw string, allowHTTP bool) (*url.URL, error) {
