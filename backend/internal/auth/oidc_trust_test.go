@@ -56,6 +56,28 @@ func TestOIDCRejectsOffOriginDiscoveryAndManualToken(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "token endpoint host is not trusted") {
 		t.Fatalf("manual off-origin token err=%v", err)
 	}
+	_, err = f.manager.CreateProvider(t.Context(), OIDCProviderInput{
+		Name: "Evil JWKS", Enabled: true, Issuer: "https://accounts.example", ClientID: "client", ClientSecret: &secret,
+		AuthorizationEndpoint: "https://accounts.example/authorize",
+		TokenEndpoint:         "https://accounts.example/token",
+		JWKSURL:               "https://evil.example/jwks",
+	})
+	if err == nil || !strings.Contains(err.Error(), "JWKS URL host is not trusted") {
+		t.Fatalf("manual off-origin JWKS err=%v", err)
+	}
+	_, err = f.manager.CreateProvider(t.Context(), OIDCProviderInput{
+		Name: "Creds", Enabled: true, Issuer: "https://user:pass@accounts.example", ClientID: "client", ClientSecret: &secret,
+	})
+	if err == nil || !strings.Contains(err.Error(), "must not include credentials") {
+		t.Fatalf("issuer userinfo err=%v", err)
+	}
+	_, err = f.manager.CreateProvider(t.Context(), OIDCProviderInput{
+		Name: "Bad auth", Enabled: true, Issuer: "https://accounts.example", ClientID: "client", ClientSecret: &secret,
+		AuthorizationEndpoint: "file:///authorize",
+	})
+	if err == nil || !strings.Contains(err.Error(), "authorization endpoint is invalid") {
+		t.Fatalf("invalid auth endpoint err=%v", err)
+	}
 }
 
 func TestOIDCDiscoveredOffOriginPublicTokenIsTrusted(t *testing.T) {

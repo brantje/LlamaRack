@@ -233,6 +233,47 @@ func TestOIDCRedirectPolicy(t *testing.T) {
 	}
 }
 
+func TestOIDCOutboundEdgeBranches(t *testing.T) {
+	if SameOrigin(nil, nil) || OIDCEndpointHostTrusted(nil, nil, nil, false) || HostAllowed("", nil) || HostAllowed("idp.example", nil) {
+		t.Fatal("empty inputs should be untrusted")
+	}
+	if !BlockedOIDCAddr(netip.Addr{}) {
+		t.Fatal("invalid IP should be blocked")
+	}
+	if _, err := ValidateOIDCURL("https://", false); err == nil {
+		t.Fatal("empty host should fail")
+	}
+	if _, err := ValidateOIDCURL("http:opaque", false); err == nil {
+		t.Fatal("opaque URL should fail")
+	}
+	s := testOutboundSettings(t)
+	policy := &oidcOutboundPolicy{settings: nil}
+	if _, err := policy.snapshot(t.Context()); !errors.Is(err, ErrOIDCDestination) {
+		t.Fatalf("nil settings err=%v", err)
+	}
+	client := newOIDCClient(&oidcOutboundPolicy{settings: s})
+	if client.Timeout != oidcClientTimeout {
+		t.Fatalf("timeout=%s", client.Timeout)
+	}
+	if _, err := policy.dialContext(t.Context(), "unix", "/tmp/oidc.sock"); !errors.Is(err, ErrOIDCDestination) {
+		t.Fatalf("unix dial err=%v", err)
+	}
+	next := httptest.NewRequest(http.MethodGet, "https://idp.example/next", nil)
+	if err := newPolicy(t, s, nil, &recordingDialer{}).checkRedirect(next, nil); !errors.Is(err, ErrOIDCRedirect) {
+		t.Fatalf("empty via err=%v", err)
+	}
+	if err := allowOIDCIP(netip.Addr{}, "idp.example", nil); !errors.Is(err, ErrOIDCDestination) {
+		t.Fatalf("invalid allow IP err=%v", err)
+	}
+	missing := newPolicy(t, s, mapResolver{}, &recordingDialer{})
+	if _, err := missing.pickDialAddr(t.Context(), "missing.example", "443"); err == nil {
+		t.Fatal("missing host should fail lookup")
+	}
+	if _, err := missing.dialContext(t.Context(), "tcp", "not-an-address"); err == nil {
+		t.Fatal("invalid dial addr should fail")
+	}
+}
+
 func TestOIDCClientFollowsSameOriginRedirectsOnly(t *testing.T) {
 	s := testOutboundSettings(t)
 	if _, err := s.Set(t.Context(), settings.OIDCAllowHTTP, true); err != nil {
