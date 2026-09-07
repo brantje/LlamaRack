@@ -1,5 +1,6 @@
 <script setup lang="ts">
 type SettingValue<T> = { value: T; source: 'environment' | 'database' | 'default' | string; editable: boolean }
+type SecretSettingValue = { configured: boolean; prefix?: string; source: 'environment' | 'database' | 'default' | string; editable: boolean }
 type GeneralSettings = {
   session_lifetime_seconds: SettingValue<number>
   login_protection_enabled: SettingValue<boolean>
@@ -14,7 +15,7 @@ type GeneralSettings = {
   max_pending_requests_per_instance: SettingValue<number>
   max_pending_requests_global: SettingValue<number>
   observability_retention_days?: SettingValue<number>
-  prometheus_auth_token?: SettingValue<string>
+  prometheus_auth_token?: SecretSettingValue
   runtime: { data_dir: string; models_dir: string; database_path: string; listen_addr: string; llama_server_path: string }
 }
 type DiscoverSettings = { hybrid_recommendations_enabled: SettingValue<boolean> }
@@ -45,6 +46,14 @@ const error = ref('')
 const saved = ref(false)
 const busy = ref(false)
 const baseline = ref('')
+const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
+const prometheusToken = computed(() => settings.value?.prometheus_auth_token)
+const prometheusTokenLabel = computed(() => {
+  const token = prometheusToken.value
+  if (token?.configured && token.prefix) return `Replace Prometheus Bearer token (${token.prefix}…)`
+  return 'Prometheus Bearer token'
+})
+const canRemovePrometheusToken = computed(() => Boolean(prometheusToken.value?.configured && prometheusToken.value.source === 'database' && prometheusToken.value.editable !== false))
 const legacySettingKeys = [
   'session_lifetime_seconds', 'login_protection_enabled', 'login_failure_threshold', 'login_lockout_seconds',
   'trusted_proxies', 'allowed_origins', 'external_url', 'startup_timeout_seconds', 'idle_unload_seconds', 'always_on_reconcile_seconds',
@@ -82,9 +91,11 @@ const saveDisabledReason = computed(() => {
 const canSave = computed(() => !busy.value && !saveDisabledReason.value)
 function syncForm(value: GeneralSettings) {
   for (const key of Object.keys(form) as Array<keyof typeof form>) {
+    if (key === 'prometheus_auth_token') continue
     const setting = value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
     if (setting && typeof setting === 'object' && 'value' in setting) (form[key] as any) = setting.value
   }
+  form.prometheus_auth_token = ''
 }
 
 async function load() {
@@ -121,6 +132,11 @@ async function save() {
   saved.value = false
   const body: Record<string, unknown> = {}
   for (const key of Object.keys(form) as Array<keyof typeof form>) {
+    if (key === 'prometheus_auth_token') {
+      const typed = form.prometheus_auth_token.trim()
+      if (typed && settings.value.prometheus_auth_token?.editable !== false) body.prometheus_auth_token = typed
+      continue
+    }
     const setting = settings.value[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
     if (setting?.editable) body[key] = form[key]
   }
@@ -146,12 +162,37 @@ async function save() {
   }
 }
 
+async function removePrometheusToken() {
+  if (!canRemovePrometheusToken.value || busy.value || hasChanges.value) return
+  const confirmed = await confirmation.value?.request({
+    title: 'Remove Prometheus token',
+    description: 'Removing the stored Prometheus Bearer token leaves GET /metrics unauthenticated unless LLAMARACK_PROMETHEUS_AUTH_TOKEN is set.',
+    confirmLabel: 'Remove token',
+    confirmTone: 'destructive'
+  })
+  if (!confirmed) return
+  busy.value = true
+  error.value = ''
+  saved.value = false
+  try {
+    const value = await manager.request<GeneralSettings>('/api/v1/settings/general', { method: 'PUT', body: { prometheus_auth_token: '' } })
+    if (!isGeneralSettings(value)) throw new Error('Invalid manager settings response')
+    settings.value = value
+    syncForm(value)
+    updateBaseline()
+    saved.value = true
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to remove Prometheus token'
+  } finally {
+    busy.value = false
+  }
+}
 function source(key: keyof typeof form) {
-  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | SecretSettingValue | undefined
   return setting?.source || 'default'
 }
 function editable(key: keyof typeof form) {
-  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | undefined
+  const setting = settings.value?.[key as keyof GeneralSettings] as SettingValue<unknown> | SecretSettingValue | undefined
   return setting?.editable !== false
 }
 </script>
@@ -226,8 +267,16 @@ function editable(key: keyof typeof form) {
           <AdminSettingField v-if="settings.observability_retention_days" label="History retention (days)" :source="source('observability_retention_days')" data-testid="observability-settings">
             <UInputNumber v-model="form.observability_retention_days" class="w-full" :min="1" :max="3650" :disabled="!editable('observability_retention_days')" />
           </AdminSettingField>
-          <AdminSettingField v-if="settings.prometheus_auth_token" label="Prometheus Bearer token" :source="source('prometheus_auth_token')">
-            <UInput v-model="form.prometheus_auth_token" type="password" autocomplete="off" class="w-full" :disabled="!editable('prometheus_auth_token')" placeholder="Leave empty for unauthenticated /metrics" />
+          <AdminSettingField v-if="settings.prometheus_auth_token" :label="prometheusTokenLabel" :source="source('prometheus_auth_token')" data-testid="prometheus-token-settings">
+            <div class="flex flex-col gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <StatusTag :variant="settings.prometheus_auth_token.configured ? 'ready' : 'neutral'">{{ settings.prometheus_auth_token.configured ? 'Configured' : 'Not configured' }}</StatusTag>
+                <span class="text-xs text-[var(--neutral-700)]">{{ settings.prometheus_auth_token.configured ? 'GET /metrics requires this Bearer token.' : '/metrics is unauthenticated.' }}</span>
+              </div>
+              <UInput v-model="form.prometheus_auth_token" type="password" autocomplete="off" class="w-full" :disabled="!editable('prometheus_auth_token')" :placeholder="settings.prometheus_auth_token.configured ? 'Leave blank to keep the current token' : 'Optional Bearer token for /metrics'" />
+              <AppButton v-if="canRemovePrometheusToken" intent="ghost" tone="destructive" :disabled="busy || hasChanges" data-testid="prometheus-token-remove" @click="removePrometheusToken">Remove token</AppButton>
+            </div>
+            <template #help>The token is encrypted at rest and is never returned by the API.</template>
           </AdminSettingField>
         </div>
       </Frame>
@@ -246,5 +295,6 @@ function editable(key: keyof typeof form) {
         <AppButton data-testid="admin-general-save-bottom" intent="primary" :loading="busy" :disabled="!canSave" @click="save">Save changes</AppButton>
       </div>
     </div>
+    <AppConfirmationModal ref="confirmation" />
   </AdminShell>
 </template>

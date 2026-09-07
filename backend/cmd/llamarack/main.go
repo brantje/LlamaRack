@@ -158,6 +158,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize provider secrets: %w", err)
 	}
+	if err := providerSecrets.MigrateManagerSettingSecret(ctx, settings.PrometheusAuthToken, huggingface.SecretPrometheusAuthToken); err != nil {
+		return fmt.Errorf("migrate prometheus auth token: %w", err)
+	}
 	oidcManager := auth.NewOIDCManager(authService, managerSettings, providerSecrets)
 	hfClient, err := huggingface.NewClient(cfg.HuggingFaceBaseURL, providerSecrets.GetToken)
 	if err != nil {
@@ -236,7 +239,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	openAI := gateway.WithRequestLogContext(openAIGateway, observabilityService)
 	managementAPI.Handle("POST /api/v1/playground/chat/completions", gateway.NewManagementPlaygroundProxy(openAI))
 	metrics := observability.NewMetricsHandler(observabilityService, func(requestCtx context.Context) string {
-		value, resolveErr := managerSettings.String(requestCtx, settings.PrometheusAuthToken)
+		value, resolveErr := settings.ResolvePrometheusToken(requestCtx, providerSecrets)
 		if resolveErr != nil {
 			return ""
 		}

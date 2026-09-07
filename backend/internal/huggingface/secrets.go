@@ -14,7 +14,10 @@ import (
 	"strings"
 )
 
-const tokenSecretName = "huggingface_token"
+const (
+	tokenSecretName           = "huggingface_token"
+	SecretPrometheusAuthToken = "prometheus_auth_token"
+)
 
 type TokenStatus struct {
 	Configured bool   `json:"configured"`

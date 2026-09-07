@@ -293,6 +293,8 @@ These raw process logs are distinct from persistent inference request records in
 
 Expose Prometheus text exposition at `GET /metrics` using the `llamarack_` prefix. The endpoint remains unauthenticated by default and may be protected by the configurable Prometheus bearer token.
 
+Store that token as an encrypted provider secret. Do not persist it in `manager_settings` and never return the plaintext value from `GET /api/v1/settings/general`. Settings responses may expose only `configured`, an optional short prefix, `source`, and `editable`. `/metrics` resolves the encrypted secret internally, then `LLAMARACK_PROMETHEUS_AUTH_TOKEN` if no secret is configured. Existing plaintext `manager_settings` values must be migrated into `provider_secrets` on startup and then deleted.
+
 Expose bounded gateway, token, latency/TTFT, lifecycle, hardware, and Instance-state metrics without high-cardinality request/log metadata labels.
 
 Pending-request admission must remain visible:

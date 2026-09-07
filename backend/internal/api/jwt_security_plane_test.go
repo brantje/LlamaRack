@@ -92,6 +92,11 @@ func TestGeneralSettingsSecurityFieldsRequireJWT(t *testing.T) {
 		if startup != 75 {
 			t.Fatalf("%s startup timeout=%d", principal.name, startup)
 		}
+
+		w = adminRequest(t, handler, http.MethodPut, "/api/v1/settings/general", map[string]any{"prometheus_auth_token": "metrics-secret"}, nil, headers)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s prometheus token=%d body=%s", principal.name, w.Code, w.Body.String())
+		}
 	}
 
 	jwtHeaders := map[string]string{"Authorization": "Bearer " + login.AccessToken}

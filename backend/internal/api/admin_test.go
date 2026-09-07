@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ type adminFixture struct {
 	handler  http.Handler
 	auth     *auth.Service
 	settings *settings.Service
+	secrets  *huggingface.SecretStore
+	db       *sql.DB
 	cookie   *http.Cookie
 }
 
@@ -68,6 +71,8 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		handler:  NewAdminHandler(authService, managerSettings, secrets, network, profile),
 		auth:     authService,
 		settings: managerSettings,
+		secrets:  secrets,
+		db:       db,
 		cookie:   &http.Cookie{Name: sessionCookie, Value: token},
 	}
 }
