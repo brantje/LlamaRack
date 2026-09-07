@@ -77,6 +77,27 @@ func TestInspectRejectsRetainedMetadataBudget(t *testing.T) {
 	}
 }
 
+func TestCountingReaderReadFullDoesNotBypassSectionBudget(t *testing.T) {
+	budget := &metadataBudget{consumed: maxMetadataSectionBytes - 8}
+	r := &countingReader{r: bytes.NewReader(bytes.Repeat([]byte("x"), 64)), budget: budget}
+	buf := make([]byte, 32)
+	n, err := io.ReadFull(r, buf)
+	if !errors.Is(err, errMetadataBudgetExceeded) {
+		t.Fatalf("ReadFull n=%d err=%v", n, err)
+	}
+	if n > 8 {
+		t.Fatalf("ReadFull consumed more than remaining budget: n=%d", n)
+	}
+	if budget.consumed > maxMetadataSectionBytes {
+		t.Fatalf("consumed=%d", budget.consumed)
+	}
+
+	exhausted := &countingReader{r: bytes.NewReader(bytes.Repeat([]byte("x"), 8)), budget: &metadataBudget{consumed: maxMetadataSectionBytes}}
+	if n, err := io.ReadFull(exhausted, make([]byte, 8)); n != 0 || !errors.Is(err, errMetadataBudgetExceeded) {
+		t.Fatalf("exhausted ReadFull n=%d err=%v", n, err)
+	}
+}
+
 func TestInspectRejectsMetadataSectionBudget(t *testing.T) {
 	const stringBytes = uint64(16 * 1024 * 1024)
 	const entries = 5

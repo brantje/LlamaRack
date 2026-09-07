@@ -37,6 +37,13 @@ type countingReader struct {
 }
 
 func (c *countingReader) Read(p []byte) (int, error) {
+	if c.budget.consumed >= maxMetadataSectionBytes {
+		return 0, errMetadataBudgetExceeded
+	}
+	remaining := maxMetadataSectionBytes - c.budget.consumed
+	if uint64(len(p)) > remaining {
+		p = p[:int(remaining)]
+	}
 	n, err := c.r.Read(p)
 	if n > 0 {
 		if addErr := c.budget.addConsumed(uint64(n)); addErr != nil {
