@@ -46,6 +46,13 @@ function inputNumber(wrapper: any) {
   return found
 }
 
+function unitSelect(wrapper: any) {
+  const found = components(wrapper, ['Select', 'USelect']).find((item: any) => item.attributes('data-testid') === 'hf-max-download-unit' || item.props('aria-label') === 'Download size unit')
+    || components(wrapper, ['Select', 'USelect'])[0]
+  if (!found) throw new Error('Missing download limit unit select')
+  return found
+}
+
 beforeEach(() => {
   mocks.request.mockReset()
   resetManager()
@@ -226,7 +233,68 @@ describe('Hugging Face administration', () => {
     const locked = await mountSuspended(AdminHuggingFacePage, { route: false })
     await flushPromises()
     expect(inputNumber(locked).props('disabled')).toBe(true)
+    expect(unitSelect(locked).props('disabled')).toBe(true)
     expect(locked.get('[data-testid="hf-max-download-save"]').attributes('disabled')).toBeDefined()
     locked.unmount()
+  })
+
+  it('splits loaded byte ceilings into GiB and MiB and ignores unchanged or invalid saves', async () => {
+    let stored = 2147483648
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/huggingface/token') return { configured: false }
+      if (path === '/api/v1/huggingface/settings' && options?.method === 'PUT') {
+        throw new Error('limit save exploded')
+      }
+      if (path === '/api/v1/huggingface/settings') {
+        return { max_download_bytes: { value: stored, source: 'database', editable: true } }
+      }
+      return []
+    })
+
+    const gib = await mountSuspended(AdminHuggingFacePage, { route: false })
+    await flushPromises()
+    expect(gib.get('[data-testid="hf-max-download-bytes"]').text()).toContain('2,147,483,648 bytes')
+    await button(gib, 'Save download limit').trigger('click')
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/huggingface/settings', expect.objectContaining({ method: 'PUT' }))
+    inputNumber(gib).vm.$emit('update:modelValue', 0)
+    await flushPromises()
+    expect(gib.get('[data-testid="hf-max-download-bytes"]').text()).toContain('0 B')
+    await button(gib, 'Save download limit').trigger('click')
+    await flushPromises()
+    expect(mocks.request).not.toHaveBeenCalledWith('/api/v1/huggingface/settings', expect.objectContaining({ method: 'PUT' }))
+    inputNumber(gib).vm.$emit('update:modelValue', 4)
+    await flushPromises()
+    await button(gib, 'Save download limit').trigger('click')
+    await flushPromises()
+    expect(gib.text()).toContain('limit save exploded')
+    gib.unmount()
+
+    stored = 536870912
+    const mib = await mountSuspended(AdminHuggingFacePage, { route: false })
+    await flushPromises()
+    expect(mib.get('[data-testid="hf-max-download-bytes"]').text()).toContain('536,870,912 bytes')
+    unitSelect(mib).vm.$emit('update:modelValue', 'GiB')
+    await flushPromises()
+    expect(mib.get('[data-testid="hf-max-download-bytes"]').text()).toContain('549,755,813,888 bytes')
+    mib.unmount()
+
+    mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/huggingface/token') return { configured: false }
+      if (path === '/api/v1/huggingface/settings' && options?.method === 'PUT') throw {}
+      if (path === '/api/v1/huggingface/settings') {
+        return { max_download_bytes: { value: 0, source: 1, editable: true } }
+      }
+      return []
+    })
+    const fallback = await mountSuspended(AdminHuggingFacePage, { route: false })
+    await flushPromises()
+    expect(fallback.get('[data-testid="hf-max-download-bytes"]').text()).toContain('1,099,511,627,776 bytes')
+    inputNumber(fallback).vm.$emit('update:modelValue', 2)
+    await flushPromises()
+    await button(fallback, 'Save download limit').trigger('click')
+    await flushPromises()
+    expect(fallback.text()).toContain('Unable to save download limit')
+    fallback.unmount()
   })
 })
