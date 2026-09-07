@@ -57,17 +57,7 @@ func TestDeleteFilesRemovesPersistedSplitArtifactOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes) VALUES('job-split','huggingface','owner/repo','main','artifact','split','COMPLETED',2)`); err != nil {
-		t.Fatal(err)
-	}
-	for ordinal, path := range []string{filepath.Base(shard1), filepath.Base(shard2)} {
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES('job-split',?,1,'COMPLETED',?,?)`, filepath.Base(path), ordinal, path); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,owns_model,start_when_ready,state) VALUES('import-split','job-split',?,1,0,'COMPLETED')`, model.ID); err != nil {
-		t.Fatal(err)
-	}
+	linkDownloadArtifacts(t, s, model.ID, "job-split", shard1, shard2)
 
 	plan, err := s.PrepareFileDeletion(ctx, model.ID)
 	if err != nil {
@@ -86,7 +76,7 @@ func TestDeleteFilesRemovesPersistedSplitArtifactOnly(t *testing.T) {
 	}
 }
 
-func TestDeleteFilesIncludesExplicitHelperAndAllowsMissingFiles(t *testing.T) {
+func TestDeleteFilesKeepsUnownedCompanionAndAllowsMissingFiles(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
 	main := writeGGUF(t, dir, "vision.gguf")
@@ -108,8 +98,37 @@ func TestDeleteFilesIncludesExplicitHelperAndAllowsMissingFiles(t *testing.T) {
 	if err := s.DeleteFilesAndModel(ctx, model.ID, plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(helper); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("explicit helper was not removed: %v", err)
+	if _, err := os.Stat(helper); err != nil {
+		t.Fatalf("unowned referenced companion was removed: %v", err)
+	}
+}
+
+func TestDeleteFilesRemovesOwnedCompanionsFromDownloadJob(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	main := writeGGUF(t, dir, "vision.gguf")
+	projector := writeGGUF(t, dir, "vision-mmproj.gguf")
+	draft := writeGGUF(t, dir, "vision-mtp.gguf")
+	model, err := s.Create(ctx, CreateModelInput{
+		Name: "Vision", GGUFPath: main,
+		Options: map[string]string{"mmproj": projector, "spec-draft-model": draft},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkDownloadArtifacts(t, s, model.ID, "job-owned-helpers", main, projector, draft)
+
+	plan, err := s.PrepareFileDeletion(ctx, model.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFilesAndModel(ctx, model.ID, plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{main, projector, draft} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("owned companion %q still exists: %v", path, err)
+		}
 	}
 }
 
@@ -139,33 +158,135 @@ func TestPrepareFileDeletionRejectsEscapedAndSymlinkTargets(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES(?, 'mmproj', ?)`, model.ID, link); err != nil {
-		t.Fatal(err)
-	}
+	linkDownloadArtifacts(t, s, model.ID, "job-symlink-helper", main, link)
 	if _, err := s.PrepareFileDeletion(ctx, model.ID); !errors.Is(err, ErrUnsafeArtifactPath) {
 		t.Fatalf("expected symlink target rejection, got %v", err)
 	}
 }
 
-func TestPrepareFileDeletionRefusesSharedArtifact(t *testing.T) {
+func TestPrepareFileDeletionAllowsSharedUnownedCompanion(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
 	shared := writeGGUF(t, dir, "shared-mmproj.gguf")
-	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: writeGGUF(t, dir, "first.gguf"), Options: map[string]string{"mmproj": shared}})
+	firstPath := writeGGUF(t, dir, "first.gguf")
+	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: firstPath, Options: map[string]string{"mmproj": shared}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Create(ctx, CreateModelInput{Name: "Second", GGUFPath: writeGGUF(t, dir, "second.gguf"), Options: map[string]string{"mmproj": shared}}); err != nil {
 		t.Fatal(err)
 	}
+	plan, err := s.PrepareFileDeletion(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("unowned shared companion should not block deletion: %v", err)
+	}
+	if err := s.DeleteFilesAndModel(ctx, first.ID, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(shared); err != nil {
+		t.Fatalf("unowned shared companion was removed: %v", err)
+	}
+	if _, err := os.Stat(firstPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("primary file still exists: %v", err)
+	}
+}
+
+func TestPrepareFileDeletionRefusesSharedOwnedCompanion(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	shared := writeGGUF(t, dir, "shared-mmproj.gguf")
+	firstPath := writeGGUF(t, dir, "first.gguf")
+	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: firstPath, Options: map[string]string{"mmproj": shared}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, CreateModelInput{Name: "Second", GGUFPath: writeGGUF(t, dir, "second.gguf"), Options: map[string]string{"mmproj": shared}}); err != nil {
+		t.Fatal(err)
+	}
+	linkDownloadArtifacts(t, s, first.ID, "job-shared-owned", firstPath, shared)
 	if _, err := s.PrepareFileDeletion(ctx, first.ID); !errors.Is(err, ErrArtifactShared) {
-		t.Fatalf("expected shared artifact conflict, got %v", err)
+		t.Fatalf("expected shared owned companion conflict, got %v", err)
 	}
 	if _, err := s.GetByID(ctx, first.ID); err != nil {
 		t.Fatalf("shared conflict removed Model metadata: %v", err)
 	}
 	if _, err := os.Stat(shared); err != nil {
 		t.Fatalf("shared helper was removed: %v", err)
+	}
+}
+
+func TestPrepareFileDeletionRefusesOwnedCompanionUsedByOtherInstance(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	shared := writeGGUF(t, dir, "instance-mmproj.gguf")
+	firstPath := writeGGUF(t, dir, "first.gguf")
+	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: firstPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Create(ctx, CreateModelInput{Name: "Second", GGUFPath: writeGGUF(t, dir, "second.gguf")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-shared','inst-shared',?,'Second instance')`, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-shared','mmproj',?)`, shared); err != nil {
+		t.Fatal(err)
+	}
+	linkDownloadArtifacts(t, s, first.ID, "job-instance-owned", firstPath, shared)
+	if _, err := s.PrepareFileDeletion(ctx, first.ID); !errors.Is(err, ErrArtifactShared) {
+		t.Fatalf("expected instance companion conflict, got %v", err)
+	}
+}
+
+func TestPrepareFileDeletionIgnoresCompanionOnOwnInstance(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	helper := writeGGUF(t, dir, "own-mmproj.gguf")
+	main := writeGGUF(t, dir, "own-main.gguf")
+	model, err := s.Create(ctx, CreateModelInput{Name: "Owned", GGUFPath: main, Options: map[string]string{"mmproj": helper}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-own','inst-own',?,'Own instance')`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-own','mmproj',?)`, helper); err != nil {
+		t.Fatal(err)
+	}
+	linkDownloadArtifacts(t, s, model.ID, "job-own-instance", main, helper)
+	plan, err := s.PrepareFileDeletion(ctx, model.ID)
+	if err != nil {
+		t.Fatalf("own instance companion should not block deletion: %v", err)
+	}
+	if err := s.DeleteFilesAndModel(ctx, model.ID, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(helper); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("owned companion still exists: %v", err)
+	}
+}
+
+func TestPrepareFileDeletionRefusesOwnedCompanionReachedViaSymlink(t *testing.T) {
+	ctx := context.Background()
+	s, dir := testModelService(t)
+	shared := writeGGUF(t, dir, "real-mmproj.gguf")
+	alias := filepath.Join(dir, "alias-mmproj.gguf")
+	if err := os.Symlink(shared, alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	firstPath := writeGGUF(t, dir, "first.gguf")
+	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: firstPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, CreateModelInput{Name: "Second", GGUFPath: writeGGUF(t, dir, "second.gguf"), Options: map[string]string{"mmproj": alias}}); err != nil {
+		t.Fatal(err)
+	}
+	linkDownloadArtifacts(t, s, first.ID, "job-symlink-shared", firstPath, shared)
+	if _, err := s.PrepareFileDeletion(ctx, first.ID); !errors.Is(err, ErrArtifactShared) {
+		t.Fatalf("expected symlink companion conflict, got %v", err)
 	}
 }
 

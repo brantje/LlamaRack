@@ -34,6 +34,26 @@ func writeGGUF(t *testing.T, dir, name string) string {
 	return path
 }
 
+func linkDownloadArtifacts(t *testing.T, s *Service, modelID, jobID string, localPaths ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes) VALUES(?,'huggingface','owner/repo','main',?,'artifact','COMPLETED',?)`, jobID, jobID, len(localPaths)); err != nil {
+		t.Fatal(err)
+	}
+	for ordinal, path := range localPaths {
+		stored := path
+		if rel, err := filepath.Rel(s.modelsDir, path); err == nil && !strings.HasPrefix(rel, "..") {
+			stored = filepath.ToSlash(rel)
+		}
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES(?,?,1,'COMPLETED',?,?)`, jobID, filepath.Base(path), ordinal, stored); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,owns_model,start_when_ready,state) VALUES(?,?,?,1,0,'COMPLETED')`, "import-"+jobID, jobID, modelID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateValidation(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
