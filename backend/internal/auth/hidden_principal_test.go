@@ -112,6 +112,75 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 	_ = admin
 }
 
+func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
+	ctx := context.Background()
+	s := testService(t)
+	admin, err := s.Bootstrap(ctx, "admin", "password1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := s.EnsureHiddenServiceAccount(ctx, ManagedPrincipalName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible, err := s.CreateServiceAccount(ctx, "visible", admin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherVisible, err := s.CreateServiceAccount(ctx, "other", admin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "hidden-owned", OwnerServiceAccountID: hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("create ordinary key for hidden owner err=%v", err)
+	}
+
+	userKey, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "user-key", OwnerUserID: &admin.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saKey, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "sa-key", OwnerServiceAccountID: visible.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UpdateAPIKey(ctx, userKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("reassign user key to hidden owner err=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, saKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("reassign visible SA key to hidden owner err=%v", err)
+	}
+
+	if err := s.UpdateAPIKey(ctx, userKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &visible.ID}); err != nil {
+		t.Fatalf("reassign user key to visible SA err=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, userKey.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); err != nil {
+		t.Fatalf("reassign visible SA key to user err=%v", err)
+	}
+	if err := s.UpdateAPIKey(ctx, saKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &otherVisible.ID}); err != nil {
+		t.Fatalf("reassign between visible SAs err=%v", err)
+	}
+
+	managed, secret, err := s.EnsureManagedInferenceKey(ctx, hidden.ID)
+	if err != nil || secret == "" {
+		t.Fatalf("managed key=%+v err=%v", managed, err)
+	}
+	if err := s.UpdateAPIKey(ctx, managed.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
+		t.Fatalf("reassign managed key err=%v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+		t.Fatal(err)
+	}
+	allowlist := []string{"coder"}
+	if err := s.UpdateAPIKey(ctx, managed.ID, UpdateAPIKeyInput{InstanceIDs: &allowlist}); err != nil {
+		t.Fatalf("managed key instance update err=%v", err)
+	}
+}
+
 func TestHiddenPrincipalHelpersAreIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)

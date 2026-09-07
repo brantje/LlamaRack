@@ -35,12 +35,8 @@ func (s *Service) CreateAPIKey(ctx context.Context, in CreateAPIKeyInput) (APIKe
 		return APIKey{}, "", err
 	}
 	ownerUserID, ownerServiceAccountID := ownersFromNormalized(ownerUserValue, ownerSAValue)
-	if ownerServiceAccountID != "" {
-		if hidden, hiddenErr := s.serviceAccountHidden(ctx, ownerServiceAccountID); hiddenErr != nil {
-			return APIKey{}, "", hiddenErr
-		} else if hidden {
-			return APIKey{}, "", sql.ErrNoRows
-		}
+	if err := s.rejectHiddenOrdinaryAPIKeyOwner(ctx, ownerServiceAccountID); err != nil {
+		return APIKey{}, "", err
 	}
 	expiresOn := expiresOnString(expiresOnValue)
 	return s.insertAPIKey(ctx, name, keyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, in.CreatedByUserID)
@@ -243,6 +239,12 @@ func (s *Service) UpdateAPIKey(ctx context.Context, id string, in UpdateAPIKeyIn
 	name, _, ownerUserValue, ownerSAValue, instanceIDs, expiresOnValue, err := s.normalizeAPIKeyWrite(ctx, name, existing.KeyType, ownerUserID, ownerServiceAccountID, instanceIDs, expiresOn, in.ExpiresOn != nil, ownerChanged, in.InstanceIDs != nil)
 	if err != nil {
 		return err
+	}
+	if ownerChanged {
+		_, ownerSA := ownersFromNormalized(ownerUserValue, ownerSAValue)
+		if err := s.rejectHiddenOrdinaryAPIKeyOwner(ctx, ownerSA); err != nil {
+			return err
+		}
 	}
 	enabled := 0
 	if existing.Enabled {
@@ -705,6 +707,25 @@ func (s *Service) serviceAccountHidden(ctx context.Context, id string) (bool, er
 		return false, err
 	}
 	return hidden != 0, nil
+}
+
+// rejectHiddenOrdinaryAPIKeyOwner rejects hidden service-account owners on
+// generic/public API-key write paths. Missing accounts already fail in
+// normalizeAPIKeyWrite as ErrAPIKeyOwnerNotFound. Hidden accounts that exist
+// return sql.ErrNoRows so HTTP maps to 404 "api key not found" without
+// disclosing the hidden principal.
+func (s *Service) rejectHiddenOrdinaryAPIKeyOwner(ctx context.Context, ownerServiceAccountID string) error {
+	if strings.TrimSpace(ownerServiceAccountID) == "" {
+		return nil
+	}
+	hidden, err := s.serviceAccountHidden(ctx, ownerServiceAccountID)
+	if err != nil {
+		return err
+	}
+	if hidden {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Service) EnsureManagedInferenceKey(ctx context.Context, serviceAccountID string) (APIKey, string, error) {
