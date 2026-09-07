@@ -106,6 +106,38 @@ func TestValidateOIDCURL(t *testing.T) {
 	}
 }
 
+func TestSameOriginTreatsDefaultPortsAsEquivalent(t *testing.T) {
+	httpsBare, _ := url.Parse("https://idp.example/realms/app")
+	https443, _ := url.Parse("https://idp.example:443/.well-known/openid-configuration")
+	https444, _ := url.Parse("https://idp.example:444/")
+	httpBare, _ := url.Parse("http://idp.example/")
+	http80, _ := url.Parse("http://idp.example:80/token")
+	otherHost, _ := url.Parse("https://other.example/")
+	if !SameOrigin(httpsBare, https443) {
+		t.Fatal("https default port and :443 must be the same origin")
+	}
+	if SameOrigin(httpsBare, https444) {
+		t.Fatal("non-default port must not match")
+	}
+	if !SameOrigin(httpBare, http80) {
+		t.Fatal("http default port and :80 must be the same origin")
+	}
+	if SameOrigin(httpsBare, httpBare) {
+		t.Fatal("http and https must not match")
+	}
+	if SameOrigin(httpsBare, otherHost) {
+		t.Fatal("different hosts must not match")
+	}
+	if SameOrigin(httpsBare, nil) || SameOrigin(nil, httpsBare) {
+		t.Fatal("nil URLs must not match")
+	}
+	fileA, _ := url.Parse("file://idp.example/a")
+	fileB, _ := url.Parse("file://idp.example/b")
+	if !SameOrigin(fileA, fileB) {
+		t.Fatal("non-http(s) URLs with no port should compare by hostname")
+	}
+}
+
 func TestOIDCEndpointHostTrusted(t *testing.T) {
 	issuer, _ := url.Parse("https://accounts.example/realms/app")
 	same, _ := url.Parse("https://accounts.example/realms/app/protocol/openid-connect/token")

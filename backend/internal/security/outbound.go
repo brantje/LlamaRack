@@ -179,7 +179,23 @@ func SameOrigin(left, right *url.URL) bool {
 	if left == nil || right == nil {
 		return false
 	}
-	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		effectiveURLPort(left) == effectiveURLPort(right)
+}
+
+func effectiveURLPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
 }
 
 func OIDCEndpointHostTrusted(endpoint, issuer *url.URL, allowed []string, discovered bool) bool {
