@@ -36,25 +36,32 @@ func InspectDerivedReader(reader io.Reader) (Derived, error) {
 	if err != nil {
 		return Derived{}, err
 	}
-	if metadataCount > maxMetadataCount {
-		return Derived{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
+	if err := checkMetadataCount(metadataCount); err != nil {
+		return Derived{}, err
 	}
 
 	scalars := make(map[string]string)
+	meta, budget := boundMetadataReader(r)
 	for i := uint64(0); i < metadataCount; i++ {
-		key, err := readKey(r)
+		key, err := readKey(meta)
 		if err != nil {
 			return derive(scalars), err
 		}
-		typeID, err := readU32(r)
+		if err := budget.retain(key); err != nil {
+			return derive(scalars), err
+		}
+		typeID, err := readU32(meta)
 		if err != nil {
 			return derive(scalars), err
 		}
-		value, err := readValue(r, typeID)
+		value, err := readValue(meta, typeID)
 		if err != nil {
 			return derive(scalars), err
 		}
 		if value.scalar {
+			if err := budget.retain(value.display); err != nil {
+				return derive(scalars), err
+			}
 			scalars[key] = value.display
 		}
 	}

@@ -64,28 +64,40 @@ func ReadValuePage(path, key string, offset, limit uint64) (ValuePage, error) {
 	if err != nil {
 		return ValuePage{}, err
 	}
-	if metadataCount > maxMetadataCount {
-		return ValuePage{}, errors.New("GGUF metadata unavailable: unreasonable metadata count")
+	if err := checkMetadataCount(metadataCount); err != nil {
+		return ValuePage{}, err
 	}
 
+	meta, budget := boundMetadataReader(r)
 	for index := uint64(0); index < metadataCount; index++ {
-		candidate, err := readKey(r)
+		candidate, err := readKey(meta)
 		if err != nil {
 			return ValuePage{}, err
 		}
-		typeID, err := readU32(r)
+		if err := budget.retain(candidate); err != nil {
+			return ValuePage{}, err
+		}
+		typeID, err := readU32(meta)
 		if err != nil {
 			return ValuePage{}, err
 		}
 		if candidate == key {
-			page, err := readValuePage(r, typeID, offset, limit)
+			page, err := readValuePage(meta, typeID, offset, limit)
 			if err != nil {
 				return ValuePage{}, fmt.Errorf("GGUF metadata %q: %w", key, err)
+			}
+			if err := budget.retain(page.Value); err != nil {
+				return ValuePage{}, err
+			}
+			for _, item := range page.Items {
+				if err := budget.retain(item); err != nil {
+					return ValuePage{}, err
+				}
 			}
 			page.Key = key
 			return page, nil
 		}
-		if err := skipSummaryValue(r, typeID); err != nil {
+		if err := skipSummaryValue(meta, typeID); err != nil {
 			return ValuePage{}, fmt.Errorf("GGUF metadata %q: %w", candidate, err)
 		}
 	}
