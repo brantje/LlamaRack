@@ -14,7 +14,8 @@ V1 supports:
 - direct HTTP/HTTPS URLs;
 - GGUF artifacts, including split GGUF sets;
 - one local model storage directory;
-- one global Hugging Face token for authenticated/private/gated access.
+- one global Hugging Face token for authenticated/private/gated access;
+- a configurable Hugging Face download-size ceiling (`max_download_bytes`, default 1 TiB).
 
 ## 2. Goals
 
@@ -239,6 +240,8 @@ The token may allow access to private repositories and gated repositories for wh
 
 The manager must not attempt to bypass provider gating or automatically agree to licenses/access terms.
 
+Admin → Hugging Face also exposes `max_download_bytes`, a hard write ceiling for Hugging Face downloads. The default is 1 TiB. Operators may raise it for larger models. The setting cannot be `0` or otherwise unlimited.
+
 ## 14. Direct URL provider
 
 The direct URL workflow accepts an HTTP or HTTPS URL to a GGUF file or, where explicitly supported, a known split file set.
@@ -289,14 +292,18 @@ A logical split download may have per-file substates while exposing one aggregat
 
 ## 17. Temporary files and atomic completion
 
-Each download writes to a temporary destination, for example a `.part` file or manager-controlled temporary filename.
+Each Hugging Face download writes to a manager-created temporary file next to the intended final path, using a randomized `.lcm-<random>.part` name rather than a predictable job-id filename.
 
 Rules:
 
+- temporary files are created exclusively (`O_EXCL`) without following symlinks, and must be regular files;
+- the chosen temporary path is persisted on the download-file row so resume reopens that same object;
+- resume verifies the persisted path with no-follow open plus `fstat`; unexpected types (symlink, directory, socket) are rejected;
+- interrupted jobs from earlier releases may adopt a legacy `{final}.lcm-{jobID}.part` file only when it is a regular file;
 - temporary files are never treated as model artifacts ready for loading;
 - final filenames appear only after expected byte count/checksum validation as available;
 - promotion to final path is atomic where filesystem semantics allow;
-- interrupted jobs can discover their own partial state after restart;
+- cleanup unlinks only verified regular files under the models directory and never follows symlink targets;
 - unrelated `.part` files are not automatically trusted/imported.
 
 ## 18. Resume behavior
@@ -339,13 +346,21 @@ Cancellation:
 
 The UI should distinguish Cancel from Delete partial data if both operations exist.
 
-## 21. Disk-space checks
+## 21. Disk-space checks and download-size ceiling
 
 Before starting, estimate required disk capacity using known total download size plus safety margin.
 
 If total size is unknown, display that uncertainty and enforce a minimum free-space policy where practical.
 
 During download, disk-full errors become explicit failures without corrupting already-completed artifacts.
+
+Independently of free-space estimates and remote `Content-Length`/Hugging Face size metadata, Hugging Face downloads enforce Admin → Hugging Face `max_download_bytes` (default 1 TiB):
+
+- known-size artifacts above the ceiling are rejected before the job starts;
+- unknown-size streams abort before writing past the ceiling;
+- resumed `.part` bytes count toward the same ceiling;
+- split GGUF parts share one artifact/job budget rather than a per-file allowance;
+- the ceiling cannot be disabled by setting it to zero.
 
 V1 uses one configured model storage directory and reports its capacity/free space in Discover/Downloads/Settings.
 
@@ -485,6 +500,8 @@ Before v1, tests must demonstrate:
 - a normal main filename that contains `MTP` away from the basename prefix is not misclassified as a separate MTP helper;
 - hardware fit/recommendation can rank candidate quantizations without hiding alternatives;
 - global Hugging Face token enables authorized private/gated metadata/download access and is never returned through the API;
+- Hugging Face downloads honor a configurable `max_download_bytes` ceiling (default 1 TiB) for known-size, unknown-size, resumed, and split artifacts;
+- Hugging Face partial files use exclusive randomized temps with persisted provenance and do not follow symlinks;
 - direct URL download supports a normal single GGUF;
 - resumable HTTP range download resumes a known partial file;
 - changed remote identity causes safe restart instead of corrupt append;
