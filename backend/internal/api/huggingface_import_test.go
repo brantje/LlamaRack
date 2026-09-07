@@ -16,6 +16,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 func newHuggingFaceImportFixture(t *testing.T) huggingFaceFixture {
@@ -66,8 +67,9 @@ func newHuggingFaceImportFixture(t *testing.T) huggingFaceFixture {
 	modelService := models.New(db, modelsDir)
 	downloadManager := downloads.New(context.Background(), db, modelsDir, hf)
 	imports := modelimports.New(db, modelsDir, modelService, downloadManager, nil)
+	managerSettings := settings.New(db, settings.Defaults{})
 	return huggingFaceFixture{
-		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager, imports),
+		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager, managerSettings, imports),
 		cookie:  &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
 	}
 }

@@ -129,6 +129,9 @@ describe('Admin pages branch coverage', () => {
   it('covers Hugging Face status normalization, save/remove and error variants', async () => {
     let mode: 'empty' | 'configured' | 'malformed' | 'data-error' | 'message-error' | 'fallback-error' = 'empty'
     mocks.request.mockImplementation(async (path: string, options?: any) => {
+      if (path === '/api/v1/huggingface/settings') {
+        return { max_download_bytes: { value: 1099511627776, source: 'default', editable: true } }
+      }
       if (path !== '/api/v1/huggingface/token') return []
       if (mode === 'data-error') throw { data: { error: 'hf denied' } }
       if (mode === 'message-error') throw new Error('hf exploded')

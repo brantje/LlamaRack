@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -82,13 +83,16 @@ VALUES('cleanup-error','huggingface','acme/demo','rev','artifact','demo.gguf',''
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialDir := finalPath + ".lcm-cleanup-error.part"
-	if err := os.MkdirAll(partialDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "keep"), []byte("x"), 0o644); err != nil {
+	partialPath := legacyPartPath(finalPath, "cleanup-error")
+	if err := os.WriteFile(partialPath, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	original := removeFile
+	t.Cleanup(func() { removeFile = original })
+	removeFile = func(string) error { return errors.New("forced cleanup error") }
 	if err := manager.Remove(ctx, "cleanup-error"); err == nil {
 		t.Fatal("expected partial cleanup error")
 	}

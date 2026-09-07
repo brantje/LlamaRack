@@ -102,6 +102,53 @@ func TestGeneralDefaultsAndDatabaseOverrides(t *testing.T) {
 	}
 }
 
+func TestMaxDownloadBytesDefaultAndValidation(t *testing.T) {
+	ctx := context.Background()
+	s := testSettings(t)
+	hf, err := s.HuggingFace(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hf.MaxDownloadBytes.Value != DefaultMaxDownloadBytes || hf.MaxDownloadBytes.Source != "default" || !hf.MaxDownloadBytes.Editable {
+		t.Fatalf("max download default=%+v", hf.MaxDownloadBytes)
+	}
+	if got, err := s.Int64(ctx, MaxDownloadBytes); err != nil || got != DefaultMaxDownloadBytes {
+		t.Fatalf("int64 default=%d err=%v", got, err)
+	}
+	raised := int64(2) << 40
+	value, err := s.Set(ctx, MaxDownloadBytes, raised)
+	if err != nil || value.Value != raised || value.Source != "database" {
+		t.Fatalf("set=%+v err=%v", value, err)
+	}
+	if got, err := s.Int64(ctx, MaxDownloadBytes); err != nil || got != raised {
+		t.Fatalf("int64=%d err=%v", got, err)
+	}
+	for _, invalid := range []any{0, -1, MaxMaxDownloadBytes + 1, "nope"} {
+		if _, err := s.Set(ctx, MaxDownloadBytes, invalid); err == nil {
+			t.Fatalf("expected validation error for %v", invalid)
+		}
+	}
+	if _, err := s.Int(ctx, MaxDownloadBytes); err == nil {
+		t.Fatal("int64 setting should not satisfy Int()")
+	}
+	if _, err := s.Int64(ctx, TrustedProxies); err == nil {
+		t.Fatal("expected integer type error")
+	}
+}
+
+func TestMaxDownloadBytesHonorsEnvironment(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("LLAMARACK_MAX_DOWNLOAD_BYTES", "2048")
+	s := testSettings(t)
+	value, err := s.Resolve(ctx, MaxDownloadBytes)
+	if err != nil || value.Value != int64(2048) || value.Source != "environment" || value.Editable {
+		t.Fatalf("environment max download=%+v err=%v", value, err)
+	}
+	if _, err := s.Set(ctx, MaxDownloadBytes, int64(4096)); err == nil {
+		t.Fatal("environment-controlled setting should reject writes")
+	}
+}
+
 func TestPrometheusTokenDatabaseCanOverrideEnvironment(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LLAMARACK_PROMETHEUS_AUTH_TOKEN", "environment-token")

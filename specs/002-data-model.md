@@ -281,7 +281,7 @@ The managed `llama-server --alias` value is the current Instance slug. Process o
 
 ### 4.10 Download job / provider cache
 
-Retain the existing durable download-job model and bounded provider cache behavior.
+Retain the existing durable download-job model and bounded provider cache behavior. Hugging Face download-file rows persist an internal `temp_path` for exclusive resume provenance; that path is not part of the public download JSON.
 
 ### 4.11 Inference request OpenAI Response state
 

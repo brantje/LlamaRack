@@ -28,7 +28,11 @@ const (
 	StateCompleted   = "COMPLETED"
 	StateFailed      = "FAILED"
 	StateCancelled   = "CANCELLED"
+
+	defaultMaxDownloadBytes int64 = 1 << 40
 )
+
+type SizeLimitFunc func(ctx context.Context) (int64, error)
 
 type Job struct {
 	ID              string `json:"id"`
@@ -57,6 +61,7 @@ type File struct {
 	ETag            string `json:"etag,omitempty"`
 	Ordinal         int    `json:"ordinal"`
 	LocalPath       string `json:"local_path,omitempty"`
+	TempPath        string `json:"-"`
 }
 
 type Manager struct {
@@ -64,12 +69,17 @@ type Manager struct {
 	db        *sql.DB
 	modelsDir string
 	hf        *huggingface.Client
+	limit     SizeLimitFunc
 	mu        sync.Mutex
 	cancels   map[string]context.CancelFunc
 }
 
-func New(ctx context.Context, db *sql.DB, modelsDir string, hf *huggingface.Client) *Manager {
-	return &Manager{ctx: ctx, db: db, modelsDir: modelsDir, hf: hf, cancels: map[string]context.CancelFunc{}}
+func New(ctx context.Context, db *sql.DB, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
+	var limit SizeLimitFunc
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	return &Manager{ctx: ctx, db: db, modelsDir: modelsDir, hf: hf, limit: limit, cancels: map[string]context.CancelFunc{}}
 }
 
 func (m *Manager) CreateHuggingFace(ctx context.Context, detail huggingface.ModelDetail, artifact huggingface.Artifact) (Job, error) {
@@ -79,8 +89,15 @@ func (m *Manager) CreateHuggingFace(ctx context.Context, detail huggingface.Mode
 	if detail.ID == "" || detail.Revision == "" || artifact.ID == "" {
 		return Job{}, errors.New("incomplete Hugging Face artifact identity")
 	}
+	limit, err := m.maxDownloadBytes(ctx)
+	if err != nil {
+		return Job{}, err
+	}
+	if knownDownloadBytes(artifact) > limit {
+		return Job{}, errDownloadExceedsLimit
+	}
 	var existing string
-	err := m.db.QueryRowContext(ctx, `SELECT id FROM download_jobs WHERE provider='huggingface' AND repo_id=? AND revision=? AND artifact_id=? AND state='COMPLETED' LIMIT 1`, detail.ID, detail.Revision, artifact.ID).Scan(&existing)
+	err = m.db.QueryRowContext(ctx, `SELECT id FROM download_jobs WHERE provider='huggingface' AND repo_id=? AND revision=? AND artifact_id=? AND state='COMPLETED' LIMIT 1`, detail.ID, detail.Revision, artifact.ID).Scan(&existing)
 	if err == nil {
 		return m.Get(ctx, existing)
 	}
@@ -303,6 +320,19 @@ func (m *Manager) run(ctx context.Context, id string) error {
 	return err
 }
 
+func knownDownloadBytes(artifact huggingface.Artifact) int64 {
+	var sum int64
+	for _, file := range artifact.Files {
+		if file.Size > 0 {
+			sum += file.Size
+		}
+	}
+	if artifact.TotalBytes > sum {
+		return artifact.TotalBytes
+	}
+	return sum
+}
+
 func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	finalPath, err := m.localPath(job, file.Path)
 	if err != nil {
@@ -311,8 +341,8 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		return err
 	}
-	if info, err := os.Stat(finalPath); err == nil && (file.Size <= 0 || info.Size() == file.Size) {
-		_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=? WHERE job_id=? AND path=?", StateCompleted, info.Size(), relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
+	if info, err := os.Stat(finalPath); err == nil && info.Mode().IsRegular() && (file.Size <= 0 || info.Size() == file.Size) {
+		_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=?,temp_path='' WHERE job_id=? AND path=?", StateCompleted, info.Size(), relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
 		if err == nil {
 			_ = m.refreshAggregate(ctx, job.ID, 0)
 		}
@@ -330,17 +360,39 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	if file.Size > 0 && remoteSize > 0 && file.Size != remoteSize {
 		return fmt.Errorf("remote size changed from %d to %d", file.Size, remoteSize)
 	}
-	tempPath := finalPath + ".lcm-" + job.ID + ".part"
-	offset := int64(0)
-	if info, err := os.Stat(tempPath); err == nil {
-		offset = info.Size()
+
+	limit, err := m.maxDownloadBytes(ctx)
+	if err != nil {
+		return err
 	}
+	siblings, err := m.jobDownloadedExcept(ctx, job.ID, file.Path)
+	if err != nil {
+		return err
+	}
+	if remoteSize > 0 && siblings+remoteSize > limit {
+		return errDownloadExceedsLimit
+	}
+
+	restart := false
+	tempPath, offset, err := m.resolveTempFile(ctx, job, file, finalPath, false)
+	if err != nil {
+		return err
+	}
+	file.TempPath = relativeSlash(m.modelsDir, tempPath)
 	if offset > 0 && (file.ETag == "" || remoteETag == "" || file.ETag != remoteETag || (file.Size > 0 && offset > file.Size)) {
-		if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		restart = true
+	}
+	if restart {
+		tempPath, offset, err = m.resolveTempFile(ctx, job, file, finalPath, true)
+		if err != nil {
 			return err
 		}
-		offset = 0
+		file.TempPath = relativeSlash(m.modelsDir, tempPath)
 	}
+	if siblings+offset > limit {
+		return errDownloadExceedsLimit
+	}
+
 	_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,etag=? WHERE job_id=? AND path=?", StateDownloading, offset, remoteETag, job.ID, file.Path)
 	if err != nil {
 		return err
@@ -355,10 +407,11 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	}
 	if offset > 0 && resp.StatusCode != http.StatusPartialContent {
 		resp.Body.Close()
-		offset = 0
-		if err := os.Remove(tempPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		tempPath, offset, err = m.resolveTempFile(ctx, job, file, finalPath, true)
+		if err != nil {
 			return err
 		}
+		file.TempPath = relativeSlash(m.modelsDir, tempPath)
 		resp, err = m.get(ctx, rawURL, 0)
 		if err != nil {
 			return err
@@ -368,13 +421,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
-	flags := os.O_CREATE | os.O_WRONLY
-	if offset > 0 {
-		flags |= os.O_APPEND
-	} else {
-		flags |= os.O_TRUNC
-	}
-	out, err := os.OpenFile(tempPath, flags, 0o644)
+	out, err := openPartial(tempPath, offset)
 	if err != nil {
 		return err
 	}
@@ -387,6 +434,9 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	for {
 		n, readErr := resp.Body.Read(buffer)
 		if n > 0 {
+			if siblings+offset+int64(n) > limit {
+				return errDownloadExceedsLimit
+			}
 			if _, err := out.Write(buffer[:n]); err != nil {
 				return err
 			}
@@ -428,7 +478,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		return err
 	}
-	_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=? WHERE job_id=? AND path=?", StateCompleted, offset, relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
+	_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=?,temp_path='' WHERE job_id=? AND path=?", StateCompleted, offset, relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
 	if err == nil {
 		err = m.refreshAggregate(ctx, job.ID, 0)
 	}
@@ -487,7 +537,7 @@ func (m *Manager) refreshAggregate(ctx context.Context, id string, speed int64) 
 }
 
 func (m *Manager) files(ctx context.Context, id string) ([]File, error) {
-	rows, err := m.db.QueryContext(ctx, "SELECT path,size,oid,state,downloaded_bytes,etag,ordinal,local_path FROM download_files WHERE job_id=? ORDER BY ordinal,path", id)
+	rows, err := m.db.QueryContext(ctx, "SELECT path,size,oid,state,downloaded_bytes,etag,ordinal,local_path,temp_path FROM download_files WHERE job_id=? ORDER BY ordinal,path", id)
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +545,7 @@ func (m *Manager) files(ctx context.Context, id string) ([]File, error) {
 	var files []File
 	for rows.Next() {
 		var file File
-		if err := rows.Scan(&file.Path, &file.Size, &file.OID, &file.State, &file.DownloadedBytes, &file.ETag, &file.Ordinal, &file.LocalPath); err != nil {
+		if err := rows.Scan(&file.Path, &file.Size, &file.OID, &file.State, &file.DownloadedBytes, &file.ETag, &file.Ordinal, &file.LocalPath, &file.TempPath); err != nil {
 			return nil, err
 		}
 		files = append(files, file)

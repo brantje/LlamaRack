@@ -163,7 +163,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
 	}
-	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient)
+	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
+		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)
+	})
 	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
@@ -193,7 +195,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewRequestLogDetailHandler(observabilityService))
 	managementAPI.Handle("GET /api/v1/observability/playground/{request_id}", observability.NewPlaygroundDiagnosticsHandler(observabilityService))
 	managementAPI.Handle("/api/v1/observability/", observability.NewManagementHandler(observabilityService))
-	huggingFace := api.NewHuggingFaceHandler(authService, hfClient, providerSecrets, downloadManager, importService)
+	huggingFace := api.NewHuggingFaceHandler(authService, hfClient, providerSecrets, downloadManager, managerSettings, importService)
 	managementAPI.Handle("/api/v1/huggingface/", huggingFace)
 	liteLLMHandler := api.NewLiteLLMHandler(authService, liteLLMService)
 	managementAPI.Handle("/api/v1/litellm/", liteLLMHandler)

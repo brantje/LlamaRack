@@ -104,6 +104,8 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		{http.MethodGet, "/api/v1/huggingface/token", "getHuggingFaceTokenStatus", "Get Hugging Face token status", "Hugging Face", true, false, "200"},
 		{http.MethodPut, "/api/v1/huggingface/token", "setHuggingFaceToken", "Set the Hugging Face token", "Hugging Face", true, true, "200"},
 		{http.MethodDelete, "/api/v1/huggingface/token", "deleteHuggingFaceToken", "Remove the Hugging Face token", "Hugging Face", true, false, "204"},
+		{http.MethodGet, "/api/v1/huggingface/settings", "getHuggingFaceSettings", "Get Hugging Face download settings", "Hugging Face", true, false, "200"},
+		{http.MethodPut, "/api/v1/huggingface/settings", "updateHuggingFaceSettings", "Update Hugging Face download settings", "Hugging Face", true, true, "200"},
 		{http.MethodPost, "/api/v1/huggingface/import", "importHuggingFaceModel", "Prepare a Hugging Face model import", "Hugging Face", true, true, "201"},
 		{http.MethodGet, "/api/v1/litellm", "getLiteLLMStatus", "Get LiteLLM integration status", "LiteLLM", true, false, "200"},
 		{http.MethodPut, "/api/v1/litellm", "saveLiteLLMSettings", "Save LiteLLM integration settings", "LiteLLM", true, true, "200"},

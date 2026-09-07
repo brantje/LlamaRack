@@ -15,6 +15,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type huggingFaceFixture struct {
@@ -73,8 +74,9 @@ func newHuggingFaceFixture(t *testing.T) huggingFaceFixture {
 		t.Fatal(err)
 	}
 	downloadManager := downloads.New(context.Background(), db, filepath.Join(root, "models"), hf)
+	managerSettings := settings.New(db, settings.Defaults{})
 	return huggingFaceFixture{
-		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager),
+		handler: NewHuggingFaceHandler(authService, hf, secrets, downloadManager, managerSettings),
 		cookie:  &http.Cookie{Name: sessionCookie, Value: token}, server: provider,
 	}
 }
@@ -253,5 +255,75 @@ func TestHuggingFaceDownloadLifecycleRoutes(t *testing.T) {
 	}
 	if got := huggingFaceRequest(t, fixture, http.MethodPut, "/api/v1/downloads", nil, true).Code; got != http.StatusMethodNotAllowed {
 		t.Fatalf("collection method status=%d", got)
+	}
+}
+
+func TestHuggingFaceSettingsDefaultAndValidation(t *testing.T) {
+	fixture := newHuggingFaceFixture(t)
+	w := huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/huggingface/settings", nil, false)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized settings status=%d", w.Code)
+	}
+	w = huggingFaceRequest(t, fixture, http.MethodGet, "/api/v1/huggingface/settings", nil, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("settings GET status=%d body=%s", w.Code, w.Body.String())
+	}
+	var got settings.HuggingFace
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("settings decode: %v body=%s", err, w.Body.String())
+	}
+	value, ok := got.MaxDownloadBytes.Value.(float64)
+	if !ok || int64(value) != settings.DefaultMaxDownloadBytes || got.MaxDownloadBytes.Source != "default" || !got.MaxDownloadBytes.Editable {
+		t.Fatalf("default settings=%+v", got)
+	}
+	w = huggingFaceRequest(t, fixture, http.MethodPut, "/api/v1/huggingface/settings", map[string]any{"max_download_bytes": 2 * settings.DefaultMaxDownloadBytes}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("settings PUT status=%d body=%s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("updated settings decode: %v", err)
+	}
+	value, ok = got.MaxDownloadBytes.Value.(float64)
+	if !ok || int64(value) != 2*settings.DefaultMaxDownloadBytes || got.MaxDownloadBytes.Source != "database" {
+		t.Fatalf("updated settings=%+v", got)
+	}
+	for _, body := range []any{
+		map[string]any{},
+		map[string]any{"max_download_bytes": 0},
+		map[string]any{"max_download_bytes": -1},
+		map[string]any{"max_download_bytes": settings.MaxMaxDownloadBytes + 1},
+	} {
+		w = huggingFaceRequest(t, fixture, http.MethodPut, "/api/v1/huggingface/settings", body, true)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid settings %v status=%d body=%s", body, w.Code, w.Body.String())
+		}
+	}
+	if got := huggingFaceRequest(t, fixture, http.MethodPost, "/api/v1/huggingface/settings", map[string]any{"max_download_bytes": 1024}, true).Code; got != http.StatusMethodNotAllowed {
+		t.Fatalf("settings POST status=%d", got)
+	}
+}
+
+func TestHuggingFaceSettingsUnavailableWithoutService(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	authService := auth.New(db, time.Hour)
+	if _, err := authService.Bootstrap(ctx, "admin", "password1234"); err != nil {
+		t.Fatal(err)
+	}
+	token, _, _, err := authService.LoginWithMetadata(ctx, "admin", "password1234", "127.0.0.1", "settings-unavailable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHuggingFaceHandler(authService, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/huggingface/settings", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("nil settings status=%d body=%s", w.Code, w.Body.String())
 	}
 }
