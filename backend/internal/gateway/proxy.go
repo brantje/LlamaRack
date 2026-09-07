@@ -35,6 +35,8 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	entry := &activeRequest{
 		managerRequestID: requestID,
 		instanceID:       instance.ID,
+		ownerKind:        record.OwnerKind,
+		ownerID:          record.OwnerID,
 		target:           target,
 		cancel:           cancel,
 		endpoint:         r.URL.Path,

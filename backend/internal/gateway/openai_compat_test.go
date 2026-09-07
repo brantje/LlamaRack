@@ -219,19 +219,13 @@ func TestDuplicateOpenAIResponseIDRejectedByIndex(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UnixMilli()
 	body := `{"id":"resp_dup","object":"response"}`
-	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_1", nil, observability.RequestRecord{
-		StartedAt: now, FinishedAt: now, InstanceID: f.instanceID, Endpoint: "/v1/responses",
-		StatusCode: 200, Result: "success", ResponseBody: &body,
-	}); err != nil {
+	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_1", nil, fixtureOwnedResponseRecord(f, now, now, nil, &body)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.observability.SetOpenAIResponseID(ctx, "lr_dup_1", "resp_dup"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_2", nil, observability.RequestRecord{
-		StartedAt: now, FinishedAt: now, InstanceID: f.instanceID, Endpoint: "/v1/responses",
-		StatusCode: 200, Result: "success", ResponseBody: &body,
-	}); err != nil {
+	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_dup_2", nil, fixtureOwnedResponseRecord(f, now, now, nil, &body)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.observability.SetOpenAIResponseID(ctx, "lr_dup_2", "resp_dup"); err != observability.ErrDuplicateOpenAIResponseID {
@@ -243,10 +237,7 @@ func TestRetentionRemovesRetrievableResponse(t *testing.T) {
 	f := newGatewayFixture(t, false)
 	ctx := context.Background()
 	body := `{"id":"resp_old","object":"response","status":"completed"}`
-	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_old", nil, observability.RequestRecord{
-		StartedAt: 1, FinishedAt: 2, InstanceID: f.instanceID, Endpoint: "/v1/responses",
-		StatusCode: 200, Result: "success", ResponseBody: &body,
-	}); err != nil {
+	if err := f.observability.RecordCorrelatedRequest(ctx, "lr_old", nil, fixtureOwnedResponseRecord(f, 1, 2, nil, &body)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.observability.SetOpenAIResponseID(ctx, "lr_old", "resp_old"); err != nil {
@@ -263,18 +254,13 @@ func TestRetentionRemovesRetrievableResponse(t *testing.T) {
 func TestMalformedStoredResponseFailsSafe(t *testing.T) {
 	f := newGatewayFixture(t, false)
 	ctx := context.Background()
-	if err := f.observability.BeginCorrelatedRequest(ctx, "lr_malformed", observability.RequestRecord{
-		StartedAt: 1, InstanceID: f.instanceID, Endpoint: "/v1/responses", CallType: "response",
-	}); err != nil {
+	if err := f.observability.BeginCorrelatedRequest(ctx, "lr_malformed", fixtureOwnedResponseRecord(f, 1, 0, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.observability.SetOpenAIResponseID(ctx, "lr_malformed", "resp_bad"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.observability.FinalizeCorrelatedRequest(ctx, "lr_malformed", nil, observability.RequestRecord{
-		StartedAt: 1, FinishedAt: 2, InstanceID: f.instanceID, Endpoint: "/v1/responses",
-		StatusCode: 200, Result: "success", ResponseBody: strPtr("not-json"),
-	}); err != nil {
+	if err := f.observability.FinalizeCorrelatedRequest(ctx, "lr_malformed", nil, fixtureOwnedResponseRecord(f, 1, 2, nil, strPtr("not-json"))); err != nil {
 		t.Fatal(err)
 	}
 	w := gatewayRequest(t, f.gateway, http.MethodGet, "/v1/responses/resp_bad", f.secret, "")

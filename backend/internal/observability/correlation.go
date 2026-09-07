@@ -30,9 +30,15 @@ func (s *Service) EnsureCorrelationSchema(ctx context.Context) error {
 	return nil
 }
 
-func requestValues(record RequestRecord) (keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody any) {
+func requestValues(record RequestRecord) (keyID, keyName, keyPrefix, ownerKind, ownerID, ttft, tps, requestBody, responseBody any) {
 	if record.APIKey != nil {
 		keyID, keyName, keyPrefix = record.APIKey.ID, record.APIKey.Name, record.APIKey.Prefix
+	}
+	ownerKind = ""
+	ownerID = ""
+	if strings.TrimSpace(record.OwnerKind) != "" && strings.TrimSpace(record.OwnerID) != "" {
+		ownerKind = record.OwnerKind
+		ownerID = record.OwnerID
 	}
 	if record.TTFTMS != nil {
 		ttft = *record.TTFTMS
@@ -68,18 +74,18 @@ func (s *Service) BeginCorrelatedRequest(ctx context.Context, requestID string, 
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	keyID, keyName, keyPrefix, _, _, requestBody, _ := requestValues(record)
+	keyID, keyName, keyPrefix, ownerKind, ownerID, _, _, requestBody, _ := requestValues(record)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-		started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
+		started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
 		duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
 		trace_id,call_type,client_ip,user_agent
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		record.StartedAt, 0, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), 0, "pending",
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		record.StartedAt, 0, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), 0, "pending",
 		0, nil, 0, 0, 0, nil, 0, 0, 0, "", requestBody, nil,
 		record.TraceID, record.CallType, record.ClientIP, record.UserAgent)
 	if err != nil {
@@ -111,12 +117,12 @@ func (s *Service) UpdateCorrelatedRequest(ctx context.Context, requestID string,
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	keyID, keyName, keyPrefix, _, _, requestBody, _ := requestValues(record)
+	keyID, keyName, keyPrefix, ownerKind, ownerID, _, _, requestBody, _ := requestValues(record)
 	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET
-		instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,streaming=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,request_body=?,
+		instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,owner_kind=?,owner_id=?,streaming=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,request_body=?,
 		trace_id=?,call_type=?,client_ip=?,user_agent=?
 		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?) AND finished_at=0`,
-		record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), requestBody,
+		record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), requestBody,
 		record.TraceID, record.CallType, record.ClientIP, record.UserAgent, requestID)
 	if err != nil {
 		return err
@@ -161,7 +167,7 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 		return err
 	}
 	record = normalizeFinalRecord(record)
-	keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody := requestValues(record)
+	keyID, keyName, keyPrefix, ownerKind, ownerID, ttft, tps, requestBody, responseBody := requestValues(record)
 	var promptTPS any
 	if promptTokensPerSecond != nil {
 		promptTPS = *promptTokensPerSecond
@@ -172,11 +178,11 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE inference_requests SET
-		started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
+		started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,owner_kind=?,owner_id=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
 		prompt_tokens=?,generated_tokens=?,total_tokens=?,tokens_per_second=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,error=?,request_body=?,response_body=?,
 		trace_id=?,call_type=?,client_ip=?,user_agent=?
 		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?) AND finished_at=0`,
-		record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
+		record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
 		record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
 		record.TraceID, record.CallType, record.ClientIP, record.UserAgent, requestID)
 	if err != nil {
@@ -197,11 +203,11 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 			return err
 		}
 		inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-			started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
+			started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
 			duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
 			trace_id,call_type,client_ip,user_agent
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result,
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result,
 			record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
 			record.TraceID, record.CallType, record.ClientIP, record.UserAgent)
 		if err != nil {
@@ -292,6 +298,8 @@ func (s *Service) GetRequestByRequestID(ctx context.Context, requestID string) (
 // retrieve/delete/input-items. These fields are not part of /logs DTOs.
 type StoredOpenAIResponse struct {
 	InstanceID   string
+	OwnerKind    string
+	OwnerID      string
 	Endpoint     string
 	Streaming    bool
 	Deleted      bool
@@ -338,9 +346,9 @@ func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) 
 	var item StoredOpenAIResponse
 	var deleted, streaming int
 	var requestBody, responseBody sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT instance_id,endpoint,streaming,openai_response_deleted,started_at,request_body,response_body
+	err := s.db.QueryRowContext(ctx, `SELECT instance_id,owner_kind,owner_id,endpoint,streaming,openai_response_deleted,started_at,request_body,response_body
 		FROM inference_requests WHERE openai_response_id=? AND endpoint='/v1/responses'`, openaiID).Scan(
-		&item.InstanceID, &item.Endpoint, &streaming, &deleted, &item.StartedAt, &requestBody, &responseBody)
+		&item.InstanceID, &item.OwnerKind, &item.OwnerID, &item.Endpoint, &streaming, &deleted, &item.StartedAt, &requestBody, &responseBody)
 	if err != nil {
 		return StoredOpenAIResponse{}, err
 	}

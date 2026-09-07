@@ -168,6 +168,18 @@ Manager-side retrievability follows the Instance `request_log_mode` at request t
 
 `GET /v1/responses/{id}/input_items` reconstructs OpenAI input items from the retained original request body and honors `limit`/`after`.
 
+Response object authorization is separate from Instance allowlisting:
+
+- Instance authorization (inference key allowlist or Full Access) determines where a principal may infer;
+- Response ownership determines which stored or in-flight `resp_*` objects that principal may retrieve, delete, read input items from, or cancel;
+- ownership is stored as immutable `owner_kind` + `owner_id` on the durable request row and mirrored on the in-flight registry;
+- `owner_kind=api_key` uses the stable API-key ID; `owner_kind=management_user` uses the authenticated management-user ID for Playground-created Responses;
+- only the exact owner may access a Response; Full Access does not bypass ownership;
+- cross-owner access returns the same `404 Response not found` as an unknown ID so existence is not disclosed;
+- owner match with a stale Instance allowlist returns `403 instance_not_allowed`;
+- legacy rows with empty owner are not retrievable through `/v1/responses`;
+- worker slot state (`/v1/slots`) remains Instance-scoped and is not principal-owned.
+
 In-flight Responses may be retrieved as `status=in_progress` from the active-request registry and cancelled with `POST /v1/responses/{id}/cancel`. The registry stores immutable Instance ownership separately from the public model slug used in the OpenAI response. Completed Responses return `400` on cancel; unknown IDs return `404`.
 
 Normal observability retention is the maximum lifetime of a retrievable Response.

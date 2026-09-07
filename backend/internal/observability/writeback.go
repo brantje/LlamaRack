@@ -376,6 +376,8 @@ func (s *Service) bufferedStoredOpenAIResponse(openAIID string) (StoredOpenAIRes
 	}
 	return StoredOpenAIResponse{
 		InstanceID:   entry.record.InstanceID,
+		OwnerKind:    entry.record.OwnerKind,
+		OwnerID:      entry.record.OwnerID,
 		Endpoint:     entry.record.Endpoint,
 		Streaming:    entry.record.Streaming,
 		Deleted:      entry.openAIDeleted,
@@ -517,7 +519,7 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 
 func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry writebackEntry) error {
 	record := normalizeFinalRecord(entry.record)
-	keyID, keyName, keyPrefix, ttft, tps, requestBody, responseBody := requestValues(record)
+	keyID, keyName, keyPrefix, ownerKind, ownerID, ttft, tps, requestBody, responseBody := requestValues(record)
 	var promptTPS any
 	if entry.promptTPS != nil {
 		promptTPS = *entry.promptTPS
@@ -555,11 +557,11 @@ func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry w
 
 	if !existing {
 		inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-            started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
+            started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
             duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
             trace_id,call_type,client_ip,user_agent,model_slug,openai_response_id,openai_response_deleted
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result,
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result,
 			record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
 			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted))
 		if err != nil {
@@ -574,12 +576,12 @@ func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry w
 		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `UPDATE inference_requests SET
-            started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
+            started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,owner_kind=?,owner_id=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
             prompt_tokens=?,generated_tokens=?,total_tokens=?,tokens_per_second=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,error=?,request_body=?,response_body=?,
             trace_id=?,call_type=?,client_ip=?,user_agent=?,model_slug=?,openai_response_id=COALESCE(?,openai_response_id),
             openai_response_deleted=CASE WHEN openai_response_deleted=1 OR ?=1 THEN 1 ELSE 0 END
             WHERE id=?`,
-			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
+			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
 			record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
 			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted), rowID); err != nil {
 			return err

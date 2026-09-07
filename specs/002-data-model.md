@@ -294,8 +294,10 @@ OpenAI stored-Response support adds:
 
 - `openai_response_id` (nullable text)
 - `openai_response_deleted` (integer, default 0)
+- `owner_kind` (text, default `''`) — immutable creator principal kind (`api_key` or `management_user`)
+- `owner_id` (text, default `''`) — stable creator principal ID (API-key UUID or management-user ID)
 
-A partial unique index on non-null `openai_response_id` values enforces one Manager row per upstream Response ID. OpenAI deletion only sets `openai_response_deleted`; it does not delete the row or clear debugging bodies.
+A partial unique index on non-null `openai_response_id` values enforces one Manager row per upstream Response ID. OpenAI deletion only sets `openai_response_deleted`; it does not delete the row or clear debugging bodies. Existing rows backfill `owner_kind=api_key` / `owner_id=api_key_id` when present; empty owner rows are not retrievable through `/v1/responses`.
 
 ## 5. Configuration fingerprints
 

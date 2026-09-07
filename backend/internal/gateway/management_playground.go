@@ -2,8 +2,6 @@ package gateway
 
 import (
 	"net/http"
-
-	"github.com/brantje/llamarack/backend/internal/auth"
 )
 
 const managementPlaygroundBearer = "Bearer management-playground-internal"
@@ -19,7 +17,7 @@ func NewManagementPlaygroundProxy(next http.Handler) http.Handler {
 			return
 		}
 
-		request := r.Clone(auth.WithTrustedInferenceContext(r.Context()))
+		request := r.Clone(r.Context())
 		urlCopy := *r.URL
 		urlCopy.Path = "/v1/chat/completions"
 		urlCopy.RawPath = ""

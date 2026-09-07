@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io/fs"
 	"regexp"
 	"testing"
+	"testing/fstest"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -26,7 +28,7 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != resourceIdentityMigrationVersion {
+	if version != 3 {
 		t.Fatalf("version=%d", version)
 	}
 
@@ -177,9 +179,17 @@ func TestResourceIdentityMigrationFailureRollsBackAtomically(t *testing.T) {
 func baselineDatabasePath(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	path := t.TempDir() + "/baseline.db"
+	baselineSQL, err := fs.ReadFile(embeddedMigrations, "migrations/00001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreFS := withMigrationFS(fstest.MapFS{
+		"migrations/00001_baseline.sql": {Data: baselineSQL},
+	})
 	restore := withGoMigrations(nil)
 	db, err := Open(ctx, path)
 	restore()
+	restoreFS()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,9 +210,17 @@ func reopenWithResourceIdentityMigration(t *testing.T, ctx context.Context, path
 
 func mustOpenManaged(t *testing.T, ctx context.Context, path string) *sql.DB {
 	t.Helper()
+	baselineSQL, err := fs.ReadFile(embeddedMigrations, "migrations/00001_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreFS := withMigrationFS(fstest.MapFS{
+		"migrations/00001_baseline.sql": {Data: baselineSQL},
+	})
 	restore := withGoMigrations(nil)
 	db, err := Open(ctx, path)
 	restore()
+	restoreFS()
 	if err != nil {
 		t.Fatal(err)
 	}

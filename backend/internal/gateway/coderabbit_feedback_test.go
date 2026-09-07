@@ -17,22 +17,26 @@ func TestActiveRegistryCancellationAuthorizationIsAtomic(t *testing.T) {
 	registry.register(&activeRequest{
 		managerRequestID: "lr_atomic",
 		instanceID:       "instance-uuid",
+		ownerKind:        observability.OwnerKindAPIKey,
+		ownerID:          "key-a",
 		upstreamID:       "resp_atomic",
 		cancel:           func() { cancelled = true },
 	})
 
-	entry, didCancel, authorized := registry.cancelByUpstreamAuthorized("resp_atomic", func(instanceID string) bool {
-		return instanceID == "different-instance"
-	})
-	if authorized || didCancel || entry == nil || entry.instanceID != "instance-uuid" || cancelled {
-		t.Fatalf("unauthorized cancellation mutated request: entry=%+v didCancel=%v authorized=%v cancelled=%v", entry, didCancel, authorized, cancelled)
+	entry, didCancel, authResult := registry.cancelByUpstreamAuthorized("resp_atomic",
+		func(ownerKind, ownerID string) bool { return ownerID == "key-a" },
+		func(instanceID string) bool { return instanceID == "different-instance" },
+	)
+	if authResult != cancelAuthForbidden || didCancel || entry == nil || entry.instanceID != "instance-uuid" || cancelled {
+		t.Fatalf("unauthorized cancellation mutated request: entry=%+v didCancel=%v authResult=%v cancelled=%v", entry, didCancel, authResult, cancelled)
 	}
 
-	entry, didCancel, authorized = registry.cancelByUpstreamAuthorized("resp_atomic", func(instanceID string) bool {
-		return instanceID == "instance-uuid"
-	})
-	if !authorized || !didCancel || entry == nil || !entry.cancelled || !cancelled {
-		t.Fatalf("authorized cancellation failed: entry=%+v didCancel=%v authorized=%v cancelled=%v", entry, didCancel, authorized, cancelled)
+	entry, didCancel, authResult = registry.cancelByUpstreamAuthorized("resp_atomic",
+		func(ownerKind, ownerID string) bool { return ownerID == "key-a" },
+		func(instanceID string) bool { return instanceID == "instance-uuid" },
+	)
+	if authResult != cancelAuthOK || !didCancel || entry == nil || !entry.cancelled || !cancelled {
+		t.Fatalf("authorized cancellation failed: entry=%+v didCancel=%v authResult=%v cancelled=%v", entry, didCancel, authResult, cancelled)
 	}
 }
 

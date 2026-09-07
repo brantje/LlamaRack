@@ -2,16 +2,24 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/observability"
 )
 
 func TestManagementPlaygroundProxyReentersGatewayAndKeepsLogs(t *testing.T) {
 	f := newGatewayFixture(t, true)
 	handler := NewManagementPlaygroundProxy(f.gateway)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[{"role":"user","content":"hello"}]}`))
+	req = req.WithContext(auth.WithTrustedInferenceContext(req.Context(), auth.TrustedInferencePrincipal{
+		Kind: observability.OwnerKindManagementUser,
+		ID:   fmt.Sprintf("%d", f.ownerID),
+	}))
 	req.Header.Set("Authorization", "Bearer management-token-must-not-reach-gateway")
 	w := httptest.NewRecorder()
 

@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-const baselineVersion = resourceIdentityMigrationVersion
+const baselineVersion = 3
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()
