@@ -74,7 +74,7 @@ func TestDeleteModelFilesRoute(t *testing.T) {
 		}
 	})
 
-	t.Run("refuses deletion when an explicit helper is shared", func(t *testing.T) {
+	t.Run("deletes the model when an unowned helper is also referenced elsewhere", func(t *testing.T) {
 		f := newAPIFixture(t, nil)
 		cookie := bootstrapAndLogin(t, f)
 		shared := filepath.Join(f.dir, "shared-mmproj.gguf")
@@ -95,6 +95,44 @@ func TestDeleteModelFilesRoute(t *testing.T) {
 		if _, err := f.models.Create(context.Background(), models.CreateModelInput{Name: "Second", GGUFPath: secondPath, Options: map[string]string{"mmproj": shared}}); err != nil {
 			t.Fatal(err)
 		}
+
+		w := doRequest(t, f.server, http.MethodDelete, "/api/v1/models/"+first.ID+"?delete_files=true", nil, cookie)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("unowned shared helper delete=%d body=%s", w.Code, w.Body.String())
+		}
+		if _, err := os.Stat(shared); err != nil {
+			t.Fatalf("unowned shared helper was removed: %v", err)
+		}
+		if _, err := os.Stat(firstPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("primary file still exists: %v", err)
+		}
+	})
+
+	t.Run("refuses deletion when an owned helper is shared", func(t *testing.T) {
+		f := newAPIFixture(t, nil)
+		cookie := bootstrapAndLogin(t, f)
+		shared := filepath.Join(f.dir, "shared-mmproj.gguf")
+		if err := os.WriteFile(shared, []byte("gguf"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		firstPath := filepath.Join(f.dir, "first.gguf")
+		secondPath := filepath.Join(f.dir, "second.gguf")
+		for _, path := range []string{firstPath, secondPath} {
+			if err := os.WriteFile(path, []byte("gguf"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		first, err := f.models.Create(context.Background(), models.CreateModelInput{Name: "First", GGUFPath: firstPath, Options: map[string]string{"mmproj": shared}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.models.Create(context.Background(), models.CreateModelInput{Name: "Second", GGUFPath: secondPath, Options: map[string]string{"mmproj": shared}}); err != nil {
+			t.Fatal(err)
+		}
+		f.dbExec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes) VALUES('job-shared','huggingface','owner/repo','main','artifact','shared','COMPLETED',2)`)
+		f.dbExec(`INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES('job-shared','first.gguf',1,'COMPLETED',0,'first.gguf')`)
+		f.dbExec(`INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES('job-shared','shared-mmproj.gguf',1,'COMPLETED',1,'shared-mmproj.gguf')`)
+		f.dbExec(`INSERT INTO provider_imports(id,job_id,model_id,owns_model,start_when_ready,state) VALUES('import-shared','job-shared',?,1,0,'COMPLETED')`, first.ID)
 
 		w := doRequest(t, f.server, http.MethodDelete, "/api/v1/models/"+first.ID+"?delete_files=true", nil, cookie)
 		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "referenced by Model") {

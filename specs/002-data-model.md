@@ -396,6 +396,16 @@ If process startup fails, do not delete the successfully created Model or Instan
 
 Deleting a Model does not implicitly delete a multi-gigabyte artifact unless the user explicitly performs that action.
 
+When artifact deletion is explicitly requested (`delete_files=true`):
+
+- unlink the registered primary GGUF and any companion/shard files whose lifecycle LlamaRack owns, evidenced by completed `download_files` rows linked through `provider_imports`;
+- do not infer ownership from containment in the models directory or from a path stored in `model_options` / instance companion options;
+- leave manually placed or otherwise unregistered companion GGUFs on disk after removing the Model/configuration reference;
+- refuse to unlink an owned file while another remaining registered Model or Instance still depends on it;
+- after owned files are removed, prune empty ancestor directories inside the models root using `Lstat` (never follow symlinks), stopping at the first non-empty directory and never removing the models root itself.
+
+Existing files without download provenance are not adopted as LlamaRack-owned during upgrade.
+
 Artifact metadata cache follows the artifact's lifecycle and must not retain stale orphaned cache records after artifact deletion.
 
 ## 9. Persistence and transactions
@@ -465,6 +475,7 @@ GGUF metadata cache, when used, contains artifact metadata only and must never c
 16. The GGUF file/shard set is the source of truth; cached inspection must be invalidated/refreshed when its artifact fingerprint changes.
 17. Arbitrary GGUF metadata keys are not modeled as one schema column each.
 18. Model metadata/details never acquire Instance runtime lifecycle ownership.
+19. Automatic filesystem deletion is permitted only for files whose lifecycle LlamaRack owns; a path reference or models-root containment is not ownership.
 
 ## 14. Acceptance criteria
 

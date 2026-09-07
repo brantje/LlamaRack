@@ -6,20 +6,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 )
 
 var (
 	ErrArtifactShared     = errors.New("model artifact is still referenced by another registered Model")
 	ErrUnsafeArtifactPath = errors.New("unsafe model artifact path")
+	errPathSymlink        = errors.New("path contains a symbolic link")
 	removeArtifactFile    = os.Remove
-	removeModelDirectory  = os.RemoveAll
+	removeEmptyDirectory  = os.Remove
 )
 
 type FileDeletePlan struct {
-	modelID   string
-	files     []artifactFile
-	directory *artifactDirectory
+	modelID string
+	files   []artifactFile
 }
 
 type artifactFile struct {
@@ -41,29 +43,28 @@ type artifactReference struct {
 	size int64
 }
 
-// PrepareFileDeletion resolves the exact persisted file set owned by a Model and
-// validates every target before lifecycle shutdown begins. For a Model stored in
-// a nested directory it also validates the primary GGUF's parent as the model
-// directory. The configured models root is never eligible for recursive removal.
+const companionOptionSQL = "option_key IN ('mmproj','spec-draft-model','draft-model')"
+
+// PrepareFileDeletion resolves the LlamaRack-owned file set for a Model and
+// validates every unlink target before lifecycle shutdown begins. Ownership is
+// the primary GGUF plus completed download_files rows linked through
+// provider_imports. Companion paths that are only referenced in options are
+// not deletion targets.
 func (s *Service) PrepareFileDeletion(ctx context.Context, id string) (FileDeletePlan, error) {
 	model, err := s.GetByID(ctx, id)
 	if err != nil {
 		return FileDeletePlan{}, err
 	}
-	refs, err := s.artifactReferences(ctx, model)
+	refs, err := s.ownedArtifactReferences(ctx, model)
 	if err != nil {
 		return FileDeletePlan{}, err
 	}
 	files := make([]artifactFile, 0, len(refs))
 	seen := map[string]struct{}{}
-	var primary artifactFile
-	for index, ref := range refs {
+	for _, ref := range refs {
 		file, err := s.resolveArtifactFile(ref)
 		if err != nil {
 			return FileDeletePlan{}, err
-		}
-		if index == 0 {
-			primary = file
 		}
 		if _, exists := seen[file.canonicalPath]; exists {
 			continue
@@ -71,22 +72,17 @@ func (s *Service) PrepareFileDeletion(ctx context.Context, id string) (FileDelet
 		seen[file.canonicalPath] = struct{}{}
 		files = append(files, file)
 	}
-	directory, err := s.resolveModelDirectory(primary)
-	if err != nil {
-		return FileDeletePlan{}, err
-	}
-	plan := FileDeletePlan{modelID: id, files: files, directory: directory}
-	if err := s.ensureArtifactNotShared(ctx, id, files, directory); err != nil {
+	plan := FileDeletePlan{modelID: id, files: files}
+	if err := s.ensureArtifactNotShared(ctx, id, files); err != nil {
 		return FileDeletePlan{}, err
 	}
 	return plan, nil
 }
 
-// DeleteFilesAndModel revalidates the persisted artifact association after the
-// caller has stopped all Model Instances, removes exact artifacts outside the
-// model directory, recursively removes a safe nested model directory when one
-// exists, and deletes the database Model only after every filesystem operation
-// has succeeded.
+// DeleteFilesAndModel revalidates the owned artifact set after the caller has
+// stopped all Model Instances, unlinks those exact files, prunes resulting
+// empty directories inside the models root, and deletes the database Model
+// only after every filesystem operation has succeeded.
 func (s *Service) DeleteFilesAndModel(ctx context.Context, id string, plan FileDeletePlan) error {
 	if plan.modelID != id {
 		return errors.New("file deletion plan does not match Model")
@@ -95,25 +91,19 @@ func (s *Service) DeleteFilesAndModel(ctx context.Context, id string, plan FileD
 	if err != nil {
 		return err
 	}
+	parents := make(map[string]struct{}, len(fresh.files))
 	for _, file := range fresh.files {
-		if fresh.directory != nil && withinRoot(fresh.directory.absolutePath, file.absolutePath) {
-			continue
-		}
 		if err := removeArtifactFile(file.absolutePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("delete model artifact file %q: %w", file.relativePath, err)
 		}
+		parents[filepath.Dir(file.absolutePath)] = struct{}{}
 	}
-	if fresh.directory != nil {
-		if err := removeModelDirectory(fresh.directory.absolutePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("delete model directory %q: %w", fresh.directory.relativePath, err)
-		}
-	}
+	_ = s.pruneEmptyAncestorDirs(parents)
 	return s.Delete(ctx, id)
 }
 
-func (s *Service) artifactReferences(ctx context.Context, model Model) ([]artifactReference, error) {
+func (s *Service) ownedArtifactReferences(ctx context.Context, model Model) ([]artifactReference, error) {
 	refs := []artifactReference{{path: model.GGUFPath, size: model.TotalBytes}}
-
 	rows, err := s.db.QueryContext(ctx, `
 SELECT DISTINCT df.local_path,df.size
 FROM provider_imports pi
@@ -123,43 +113,53 @@ ORDER BY df.ordinal,df.path`, model.ID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var ref artifactReference
 		if err := rows.Scan(&ref.path, &ref.size); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		refs = append(refs, ref)
 	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
+	return refs, rows.Err()
+}
 
+func (s *Service) companionOptionReferences(ctx context.Context, modelID string) ([]artifactReference, error) {
 	optionRows, err := s.db.QueryContext(ctx, `
 SELECT option_value
 FROM model_options
-WHERE model_id=? AND option_key IN ('mmproj','spec-draft-model','draft-model')
-ORDER BY option_key`, model.ID)
+WHERE model_id=? AND `+companionOptionSQL+`
+ORDER BY option_key`, modelID)
 	if err != nil {
 		return nil, err
 	}
+	defer optionRows.Close()
+	var refs []artifactReference
 	for optionRows.Next() {
 		var value string
 		if err := optionRows.Scan(&value); err != nil {
-			_ = optionRows.Close()
 			return nil, err
 		}
 		if strings.TrimSpace(value) != "" {
 			refs = append(refs, artifactReference{path: value})
 		}
 	}
-	if err := optionRows.Close(); err != nil {
-		return nil, err
-	}
-	return refs, nil
+	return refs, optionRows.Err()
 }
 
-func (s *Service) ensureArtifactNotShared(ctx context.Context, modelID string, files []artifactFile, directory *artifactDirectory) error {
+func (s *Service) artifactReferences(ctx context.Context, model Model) ([]artifactReference, error) {
+	refs, err := s.ownedArtifactReferences(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+	options, err := s.companionOptionReferences(ctx, model.ID)
+	if err != nil {
+		return nil, err
+	}
+	return append(refs, options...), nil
+}
+
+func (s *Service) ensureArtifactNotShared(ctx context.Context, modelID string, files []artifactFile) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -189,25 +189,154 @@ func (s *Service) ensureArtifactNotShared(ctx context.Context, modelID string, f
 			return err
 		}
 		for _, ref := range refs {
-			if directory != nil {
-				candidate, err := s.artifactCandidate(ref.path)
-				if err == nil && withinRoot(directory.absolutePath, candidate) {
-					return fmt.Errorf("%w: model directory %q contains an artifact referenced by Model %q", ErrArtifactShared, directory.relativePath, other.Name)
-				}
-			}
-			file, err := s.resolveArtifactFile(ref)
-			if err != nil {
-				// A malformed artifact owned by an unrelated Model must not make a
-				// valid Model impossible to delete unless its stored path points into
-				// the directory that would be recursively removed (handled above).
-				continue
-			}
-			if target, shared := targets[file.canonicalPath]; shared {
+			if target, shared := s.sharedDeletionTarget(targets, ref.path); shared {
 				return fmt.Errorf("%w: %q is referenced by Model %q", ErrArtifactShared, target, other.Name)
 			}
 		}
 	}
+	return s.ensureInstanceCompanionNotShared(ctx, modelID, targets)
+}
+
+func (s *Service) ensureInstanceCompanionNotShared(ctx context.Context, modelID string, targets map[string]string) error {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT m.name, io.option_value
+FROM instance_options io
+JOIN instances i ON i.id=io.instance_id
+JOIN models m ON m.id=i.model_id
+WHERE i.model_id<>? AND `+companionOptionSQL+` AND TRIM(io.option_value)<>''
+ORDER BY m.name, io.option_key`, modelID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, value string
+		if err := rows.Scan(&name, &value); err != nil {
+			return err
+		}
+		if target, shared := s.sharedDeletionTarget(targets, value); shared {
+			return fmt.Errorf("%w: %q is referenced by Model %q", ErrArtifactShared, target, name)
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Service) sharedDeletionTarget(targets map[string]string, storedPath string) (string, bool) {
+	canonical, err := s.referencedCanonicalPath(storedPath)
+	if err != nil {
+		return "", false
+	}
+	target, shared := targets[canonical]
+	return target, shared
+}
+
+func (s *Service) referencedCanonicalPath(storedPath string) (string, error) {
+	candidate, err := s.artifactCandidate(storedPath)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.Abs(s.modelsDir)
+	if err != nil {
+		return "", err
+	}
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Lstat(candidate); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err == nil {
+			candidate = resolved
+		}
+	}
+	ancestor, ancestorReal, err := existingAncestor(filepath.Dir(candidate))
+	if err != nil {
+		return "", err
+	}
+	suffix, err := filepath.Rel(ancestor, candidate)
+	if err != nil {
+		return "", err
+	}
+	canonical := filepath.Clean(filepath.Join(ancestorReal, suffix))
+	if !withinRoot(rootReal, canonical) {
+		return "", errors.New("referenced artifact path resolves outside configured models directory")
+	}
+	return canonical, nil
+}
+
+func (s *Service) pruneEmptyAncestorDirs(parents map[string]struct{}) error {
+	if len(parents) == 0 {
+		return nil
+	}
+	dirs := make([]string, 0, len(parents))
+	for dir := range parents {
+		dirs = append(dirs, dir)
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return len(dirs[i]) > len(dirs[j])
+	})
+	for _, dir := range dirs {
+		if err := s.pruneEmptyAncestors(dir); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s *Service) pruneEmptyAncestors(start string) error {
+	root, err := filepath.Abs(s.modelsDir)
+	if err != nil {
+		return err
+	}
+	current := filepath.Clean(start)
+	for {
+		if current == filepath.Clean(root) || !withinRoot(root, current) {
+			return nil
+		}
+		if err := ensureNoSymlinkComponents(root, current); err != nil {
+			if errors.Is(err, errPathSymlink) {
+				return nil
+			}
+			return fmt.Errorf("inspect model directory %q: %w", current, err)
+		}
+		info, err := os.Lstat(current)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			current = filepath.Dir(current)
+			continue
+		case err != nil:
+			return fmt.Errorf("inspect model directory %q: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return nil
+		}
+		entries, err := os.ReadDir(current)
+		if err != nil {
+			return fmt.Errorf("read model directory %q: %w", current, err)
+		}
+		if len(entries) > 0 {
+			return nil
+		}
+		relative, err := filepath.Rel(root, current)
+		if err != nil {
+			return err
+		}
+		if err := removeEmptyDirectory(current); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				current = filepath.Dir(current)
+				continue
+			}
+			if isNonEmptyDirectoryError(err) {
+				return nil
+			}
+			return fmt.Errorf("delete empty model directory %q: %w", filepath.ToSlash(relative), err)
+		}
+		current = filepath.Dir(current)
+	}
+}
+
+func isNonEmptyDirectoryError(err error) bool {
+	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
 }
 
 func (s *Service) artifactCandidate(storedPath string) (string, error) {
@@ -301,7 +430,7 @@ func ensureNoSymlinkComponents(root, candidate string) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%q is a symbolic link", current)
+			return fmt.Errorf("%w: %q", errPathSymlink, current)
 		}
 	}
 	return nil
@@ -326,6 +455,9 @@ func (s *Service) resolveArtifactFile(ref artifactReference) (artifactFile, erro
 	}
 	if !strings.EqualFold(filepath.Ext(candidate), ".gguf") {
 		return artifactFile{}, fmt.Errorf("%w: %q is not a GGUF file", ErrUnsafeArtifactPath, stored)
+	}
+	if err := ensureNoSymlinkComponents(root, candidate); err != nil {
+		return artifactFile{}, fmt.Errorf("%w: %q: %v", ErrUnsafeArtifactPath, stored, err)
 	}
 
 	ancestor, ancestorReal, err := existingAncestor(filepath.Dir(candidate))
