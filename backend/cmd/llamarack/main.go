@@ -193,7 +193,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewRequestLogDetailHandler(observabilityService))
 	managementAPI.Handle("GET /api/v1/observability/playground/{request_id}", observability.NewPlaygroundDiagnosticsHandler(observabilityService))
 	managementAPI.Handle("/api/v1/observability/", observability.NewManagementHandler(observabilityService))
-	huggingFace := api.NewHuggingFaceHandler(authService, hfClient, providerSecrets, downloadManager, importService)
+	huggingFace := api.NewHuggingFaceHandler(authService, hfClient, providerSecrets, downloadManager, managerSettings, importService)
 	managementAPI.Handle("/api/v1/huggingface/", huggingFace)
 	liteLLMHandler := api.NewLiteLLMHandler(authService, liteLLMService)
 	managementAPI.Handle("/api/v1/litellm/", liteLLMHandler)

@@ -13,6 +13,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/modelimports"
+	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
 type huggingFaceHandler struct {
@@ -20,6 +21,7 @@ type huggingFaceHandler struct {
 	hf        *huggingface.Client
 	secrets   *huggingface.SecretStore
 	downloads *downloads.Manager
+	settings  *settings.Service
 	imports   *modelimports.Service
 }
 
@@ -28,12 +30,12 @@ type downloadSnapshotEvent struct {
 	Downloads []downloads.Job `json:"downloads"`
 }
 
-func NewHuggingFaceHandler(a *auth.Service, hf *huggingface.Client, secrets *huggingface.SecretStore, downloadManager *downloads.Manager, importServices ...*modelimports.Service) http.Handler {
+func NewHuggingFaceHandler(a *auth.Service, hf *huggingface.Client, secrets *huggingface.SecretStore, downloadManager *downloads.Manager, managerSettings *settings.Service, importServices ...*modelimports.Service) http.Handler {
 	var importService *modelimports.Service
 	if len(importServices) > 0 {
 		importService = importServices[0]
 	}
-	return &huggingFaceHandler{auth: a, hf: hf, secrets: secrets, downloads: downloadManager, imports: importService}
+	return &huggingFaceHandler{auth: a, hf: hf, secrets: secrets, downloads: downloadManager, settings: managerSettings, imports: importService}
 }
 
 func (h *huggingFaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +50,8 @@ func (h *huggingFaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.detail(w, r)
 	case path == "/api/v1/huggingface/token":
 		h.token(w, r)
+	case path == "/api/v1/huggingface/settings":
+		h.settingsConfig(w, r)
 	case path == "/api/v1/huggingface/import":
 		h.prepareImport(w, r)
 	case path == "/api/v1/imports":
@@ -130,6 +134,45 @@ func (h *huggingFaceHandler) token(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *huggingFaceHandler) settingsConfig(w http.ResponseWriter, r *http.Request) {
+	if h.settings == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "settings are unavailable"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		value, err := h.settings.HuggingFace(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, value)
+	case http.MethodPut:
+		var in struct {
+			MaxDownloadBytes *int64 `json:"max_download_bytes"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.MaxDownloadBytes == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "max_download_bytes is required"})
+			return
+		}
+		if _, err := h.settings.Set(r.Context(), settings.MaxDownloadBytes, *in.MaxDownloadBytes); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		value, err := h.settings.HuggingFace(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, value)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

@@ -30,6 +30,13 @@ const (
 	MaxPendingRequestsGlobal      = "max_pending_requests_global"
 	ObservabilityRetentionDays    = "observability_retention_days"
 	PrometheusAuthToken           = "prometheus_auth_token"
+	MaxDownloadBytes              = "max_download_bytes"
+)
+
+const (
+	DefaultMaxDownloadBytes int64 = 1 << 40
+	MinMaxDownloadBytes     int64 = 1
+	MaxMaxDownloadBytes     int64 = 1 << 50
 )
 
 type Defaults struct {
@@ -84,8 +91,8 @@ type definition struct {
 	env                  string
 	defaultValue         string
 	kind                 string
-	min                  int
-	max                  int
+	min                  int64
+	max                  int64
 	databaseOverridesEnv bool
 }
 
@@ -117,6 +124,7 @@ func New(db *sql.DB, defaults Defaults) *Service {
 			MaxPendingRequestsGlobal:      {env: "LLAMARACK_MAX_PENDING_REQUESTS_GLOBAL", defaultValue: "128", kind: "int", min: 0, max: 10000},
 			ObservabilityRetentionDays:    {defaultValue: "30", kind: "int", min: 1, max: 3650},
 			PrometheusAuthToken:           {env: "LLAMARACK_PROMETHEUS_AUTH_TOKEN", defaultValue: "", kind: "string", databaseOverridesEnv: true},
+			MaxDownloadBytes:              {env: "LLAMARACK_MAX_DOWNLOAD_BYTES", defaultValue: strconv.FormatInt(DefaultMaxDownloadBytes, 10), kind: "int64", min: MinMaxDownloadBytes, max: MaxMaxDownloadBytes},
 		},
 		runtime: RuntimeInfo{DataDir: defaults.DataDir, ModelsDir: defaults.ModelsDir, DatabasePath: defaults.DatabasePath, ListenAddr: defaults.ListenAddr, LlamaServerPath: defaults.LlamaServerPath},
 	}
@@ -250,6 +258,21 @@ func (s *Service) Int(ctx context.Context, key string) (int, error) {
 	return result, nil
 }
 
+func (s *Service) Int64(ctx context.Context, key string) (int64, error) {
+	value, err := s.Resolve(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	switch result := value.Value.(type) {
+	case int64:
+		return result, nil
+	case int:
+		return int64(result), nil
+	default:
+		return 0, fmt.Errorf("setting %s is not an integer", key)
+	}
+}
+
 func (s *Service) Bool(ctx context.Context, key string) (bool, error) {
 	value, err := s.Resolve(ctx, key)
 	if err != nil {
@@ -278,6 +301,15 @@ func parse(def definition, value string) (any, error) {
 		if err != nil {
 			return nil, errors.New("must be an integer")
 		}
+		if int64(parsed) < def.min || int64(parsed) > def.max {
+			return nil, fmt.Errorf("must be between %d and %d", def.min, def.max)
+		}
+		return parsed, nil
+	case "int64":
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, errors.New("must be an integer")
+		}
 		if parsed < def.min || parsed > def.max {
 			return nil, fmt.Errorf("must be between %d and %d", def.min, def.max)
 		}
@@ -293,6 +325,8 @@ func serialize(value any) string {
 		return strconv.FormatBool(typed)
 	case int:
 		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
 	default:
 		return fmt.Sprint(value)
 	}
