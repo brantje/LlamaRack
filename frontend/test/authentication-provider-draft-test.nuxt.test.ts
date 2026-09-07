@@ -11,6 +11,8 @@ const authSettings = {
   local_login_enabled: { value: true, source: 'default', editable: true },
   oidc_jit_provisioning_enabled: { value: true, source: 'default', editable: true },
   oidc_auto_link_enabled: { value: false, source: 'default', editable: true },
+  oidc_allow_http: { value: false, source: 'default', editable: true },
+  oidc_allowed_hosts: { value: '', source: 'default', editable: true },
   external_url: { value: 'https://manager.example.test/', source: 'database', editable: true }
 }
 

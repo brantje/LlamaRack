@@ -11,6 +11,8 @@ const authSettings = {
   local_login_enabled: { value: true, source: 'default', editable: true },
   oidc_jit_provisioning_enabled: { value: true, source: 'default', editable: true },
   oidc_auto_link_enabled: { value: false, source: 'default', editable: true },
+  oidc_allow_http: { value: false, source: 'default', editable: true },
+  oidc_allowed_hosts: { value: '', source: 'default', editable: true },
   external_url: { value: 'https://llamarack.example.test', source: 'environment', editable: false },
   frontend_url: { value: 'https://ui.example.test', source: 'database', editable: true }
 }
@@ -55,6 +57,8 @@ describe('Admin authentication environment-owned settings', () => {
         local_login_enabled: true,
         oidc_jit_provisioning_enabled: true,
         oidc_auto_link_enabled: false,
+        oidc_allow_http: false,
+        oidc_allowed_hosts: '',
         frontend_url: 'https://ui.example.test'
       }
     })

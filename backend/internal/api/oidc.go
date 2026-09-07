@@ -113,12 +113,24 @@ func (h *oidcHandler) writeAuthSettings(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	allowHTTP, err := h.settings.Resolve(r.Context(), settings.OIDCAllowHTTP)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	allowedHosts, err := h.settings.Resolve(r.Context(), settings.OIDCAllowedHosts)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]settings.Value{
 		"local_login_enabled":           local,
 		"oidc_jit_provisioning_enabled": jit,
 		"oidc_auto_link_enabled":        autoLink,
 		"external_url":                  externalURL,
 		"frontend_url":                  frontendURL,
+		"oidc_allow_http":               allowHTTP,
+		"oidc_allowed_hosts":            allowedHosts,
 	})
 }
 
@@ -137,6 +149,8 @@ func (h *oidcHandler) authSettings(w http.ResponseWriter, r *http.Request) {
 		OIDCAutoLinkEnabled        *bool   `json:"oidc_auto_link_enabled"`
 		ExternalURL                *string `json:"external_url"`
 		FrontendURL                *string `json:"frontend_url"`
+		OIDCAllowHTTP              *bool   `json:"oidc_allow_http"`
+		OIDCAllowedHosts           *string `json:"oidc_allowed_hosts"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -179,6 +193,12 @@ func (h *oidcHandler) authSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.FrontendURL != nil {
 		updates[settings.FrontendURL] = *in.FrontendURL
+	}
+	if in.OIDCAllowHTTP != nil {
+		updates[settings.OIDCAllowHTTP] = *in.OIDCAllowHTTP
+	}
+	if in.OIDCAllowedHosts != nil {
+		updates[settings.OIDCAllowedHosts] = *in.OIDCAllowedHosts
 	}
 	for key, value := range updates {
 		if _, err := h.settings.Set(r.Context(), key, value); err != nil {
