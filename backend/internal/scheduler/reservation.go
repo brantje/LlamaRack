@@ -135,10 +135,14 @@ func (l *Ledger) Acquire(req AcquireRequest) (ResourceLease, error) {
 		credits = nil
 	}
 	usableCredits, creditBytes := l.usableCreditsLocked(requesterInstance, credits)
-	adjusted := adjustSnapshot(req.Snapshot, l.occupancyLocked(ownerKey, usableCredits), creditBytes)
+	gpuOccupancy, hostOccupancy := l.occupancyLocked(ownerKey, usableCredits)
+	adjusted := adjustSnapshot(req.Snapshot, gpuOccupancy, hostOccupancy, creditBytes)
 	placement, err := PlanPlacement(adjusted, req.Placement)
 	if err != nil {
 		return ResourceLease{}, err
+	}
+	if placement.Fits && req.HostRAM > 0 && (adjusted.RAMTotalBytes > 0 || adjusted.RAMAvailableBytes > 0) && adjusted.RAMAvailableBytes < req.HostRAM {
+		placement.Fits = false
 	}
 	if !placement.Fits {
 		return ResourceLease{Owner: owner, Placement: placement}, nil
@@ -384,11 +388,22 @@ type deviceOccupancy struct {
 	committed int64
 }
 
-func (l *Ledger) occupancyLocked(ignoreOwner string, credit map[string]bool) map[string]deviceOccupancy {
+type hostOccupancy struct {
+	pending   int64
+	committed int64
+}
+
+func (l *Ledger) occupancyLocked(ignoreOwner string, credit map[string]bool) (map[string]deviceOccupancy, hostOccupancy) {
 	out := map[string]deviceOccupancy{}
+	var host hostOccupancy
 	for _, lease := range l.leases {
 		if resourceOwnerKey(lease.Owner) == ignoreOwner || (lease.InstanceID != "" && credit[lease.InstanceID]) {
 			continue
+		}
+		if lease.State == LeasePending {
+			host.pending += lease.HostRAM
+		} else {
+			host.committed += lease.HostRAM
 		}
 		for _, gpu := range lease.GPUs {
 			occ := out[gpu.DeviceID]
@@ -400,11 +415,32 @@ func (l *Ledger) occupancyLocked(ignoreOwner string, credit map[string]bool) map
 			out[gpu.DeviceID] = occ
 		}
 	}
-	return out
+	return out, host
 }
 
-func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccupancy, creditBytes map[string]int64) hardware.Snapshot {
+func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccupancy, host hostOccupancy, creditBytes map[string]int64) hardware.Snapshot {
 	adjusted := snapshot
+	if adjusted.RAMTotalBytes > 0 {
+		used := adjusted.RAMTotalBytes - adjusted.RAMAvailableBytes
+		if used < 0 {
+			used = 0
+		}
+		unmanaged := used - host.committed
+		if unmanaged < 0 {
+			unmanaged = 0
+		}
+		available := adjusted.RAMTotalBytes - host.pending - host.committed - unmanaged
+		if available < 0 {
+			available = 0
+		}
+		adjusted.RAMAvailableBytes = available
+	} else if adjusted.RAMAvailableBytes > 0 {
+		available := adjusted.RAMAvailableBytes - host.pending - host.committed
+		if available < 0 {
+			available = 0
+		}
+		adjusted.RAMAvailableBytes = available
+	}
 	if len(adjusted.GPUs) == 0 {
 		return adjusted
 	}

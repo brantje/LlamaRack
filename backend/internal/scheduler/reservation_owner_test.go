@@ -84,3 +84,20 @@ func TestBackgroundOwnerCannotUseEvictionCredits(t *testing.T) {
 		t.Fatalf("benchmark incorrectly used eviction credit: %+v", lease.Placement)
 	}
 }
+
+func TestBenchmarkOwnersCannotOvercommitHostRAM(t *testing.T) {
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{RAMTotalBytes: 16 * ownerTestGiB, RAMAvailableBytes: 16 * ownerTestGiB}
+	placement := PlacementRequest{RequiredBytes: 0, Mode: "auto"}
+	first, err := ledger.Acquire(AcquireRequest{Owner: ResourceOwner{Kind: ResourceOwnerBenchmark, ID: "cpu-1"}, Snapshot: snapshot, Placement: placement, HostRAM: 10 * ownerTestGiB})
+	if err != nil || !first.Placement.Fits {
+		t.Fatalf("first CPU benchmark lease=%+v err=%v", first, err)
+	}
+	second, err := ledger.Acquire(AcquireRequest{Owner: ResourceOwner{Kind: ResourceOwnerBenchmark, ID: "cpu-2"}, Snapshot: snapshot, Placement: placement, HostRAM: 10 * ownerTestGiB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Placement.Fits {
+		t.Fatalf("second CPU benchmark unexpectedly fit: %+v", second)
+	}
+}
