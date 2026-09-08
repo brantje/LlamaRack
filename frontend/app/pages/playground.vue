@@ -321,7 +321,8 @@ function requestBodyForSend(messages: ThreadMessage[] = conversation.value, useR
 }
 
 async function requestBodyForSendAsync(options: { messages?: ThreadMessage[], useRaw?: boolean, preserveConversation?: boolean } = {}) {
-  const body = requestBodyForSend(options.messages, options.useRaw)
+  const useRaw = options.useRaw ?? rawDirty.value
+  const body = requestBodyForSend(options.messages, useRaw)
   let encodedAttachments: Array<{ dataUrl: string, mediaType: string }>
   try {
     encodedAttachments = await Promise.all(attachments.value.map(async attachment => ({
@@ -341,7 +342,15 @@ async function requestBodyForSendAsync(options: { messages?: ThreadMessage[], us
   const target = String(body.model || '').trim()
   if (!target) body.model = selectedInstanceSlug.value
   else if (!manager.instances.value.some(item => item.slug === target)) throw new Error(`Unknown Instance “${target}”.`)
-  if (!options.preserveConversation) adoptBody(body)
+  if (!options.preserveConversation) {
+    if (useRaw) {
+      adoptBody(body)
+    } else {
+      const sentMessages = parseBodyMessages(body.messages)
+      const sentUser = sentMessages.at(-1)
+      if (sentUser?.role === 'user') conversation.value.push(toThreadMessage('user', sentUser.parts))
+    }
+  }
   rawDirty.value = false
   rawRequest.value = JSON.stringify(body, null, 2)
   return body
