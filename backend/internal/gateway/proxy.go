@@ -67,6 +67,7 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	}
 
 	var completed *responseMetrics
+	var streamUsage *usageStreamCollector
 	onUpstreamID := func(id string) {
 		if id == "" {
 			return
@@ -89,7 +90,9 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 			return nil
 		}
 		if stream {
-			resp.Body = &idCaptureStream{ReadCloser: resp.Body, onID: onUpstreamID, captureResponse: spec.CaptureResponseID, captureCompletion: spec.CaptureCompletionID}
+			streamUsage = newUsageStreamCollector()
+			captured := &usageCaptureStream{ReadCloser: resp.Body, collector: streamUsage}
+			resp.Body = &idCaptureStream{ReadCloser: captured, onID: onUpstreamID, captureResponse: spec.CaptureResponseID, captureCompletion: spec.CaptureCompletionID}
 			return nil
 		}
 		tracked := &firstReadCloser{ReadCloser: resp.Body}
@@ -139,7 +142,11 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	if completed != nil {
 		metrics = *completed
 	} else {
-		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, parseUsage(responseSample))
+		usage := parseUsage(responseSample)
+		if streamUsage != nil {
+			usage = streamUsage.Result()
+		}
+		metrics = calculateResponseMetrics(workerStarted, observed.FirstByte(), finished, usage)
 	}
 	record.TTFTMS = metrics.ttftMS
 	record.PromptTokens = metrics.promptTokens
@@ -147,6 +154,13 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	record.TotalTokens = metrics.totalTokens
 	record.TokensPerSecond = metrics.generationTPS
 	*promptTPS = metrics.promptTPS
+	if g.observability != nil && !metrics.turnStats.Empty() {
+		persistCtx, cancelPersist := g.persistenceContext(r.Context())
+		if err := g.observability.StageInferenceTurnStats(persistCtx, requestID, metrics.turnStats); err != nil {
+			slog.Warn("stage inference turn stats failed", "request_id", requestID, "instance_id", instance.ID, "error", err)
+		}
+		cancelPersist()
+	}
 	if record.Result == "error" && record.Error == "" {
 		record.Error = responseError(record.StatusCode, responseSample)
 	}

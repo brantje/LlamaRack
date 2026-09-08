@@ -40,11 +40,47 @@ func nullableValue[T any](value *T) any {
 	return *value
 }
 
-func upsertInferenceTurnStats(ctx context.Context, tx *sql.Tx, requestID string, stats InferenceTurnStats) error {
+// StageInferenceTurnStats records specialist per-request telemetry before the
+// correlated request is finalized. Database triggers promote the staged row
+// into inference_request_timings in the same transaction that finalizes the
+// request (or creates its recovery correlation).
+func (s *Service) StageInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
 	if stats.Empty() {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO inference_request_timings(
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return err
+	}
+	return s.stageInferenceTurnStats(ctx, requestID, stats)
+}
+
+// SaveInferenceTurnStats preserves the existing post-correlation API used by
+// tests and management code. A finalized request is promoted immediately; a
+// pending request is promoted by its finalization trigger.
+func (s *Service) SaveInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if stats.Empty() {
+		return nil
+	}
+	if err := s.EnsureCorrelationSchema(ctx); err != nil {
+		return err
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&exists); err != nil {
+		return err
+	}
+	return s.stageInferenceTurnStats(ctx, requestID, stats)
+}
+
+func (s *Service) stageInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO inference_request_timing_staging(
 		request_id,prompt_n,prompt_ms,prompt_per_second,prompt_per_token_ms,
 		predicted_n,predicted_ms,predicted_per_second,predicted_per_token_ms,
 		cache_n,draft_n,draft_n_accepted,finish_reason,tool_call_count
@@ -59,35 +95,6 @@ func upsertInferenceTurnStats(ctx context.Context, tx *sql.Tx, requestID string,
 		nullableValue(stats.CacheN), nullableValue(stats.DraftN), nullableValue(stats.DraftNAccepted), nullableValue(stats.FinishReason), nullableValue(stats.ToolCallCount),
 	)
 	return err
-}
-
-// SaveInferenceTurnStats persists specialist per-request telemetry after a
-// correlated request row exists. Gateway finalization uses the transaction-level
-// helper directly so the request and its stats settle atomically.
-func (s *Service) SaveInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return fmt.Errorf("request_id is required")
-	}
-	if stats.Empty() {
-		return nil
-	}
-	if err := s.EnsureCorrelationSchema(ctx); err != nil {
-		return err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&exists); err != nil {
-		return err
-	}
-	if err := upsertInferenceTurnStats(ctx, tx, requestID, stats); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (s *Service) inferenceTurnStats(ctx context.Context, requestID string) (*InferenceTurnStats, error) {
