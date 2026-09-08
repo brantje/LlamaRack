@@ -13,6 +13,7 @@ type Config struct {
 	ModelsDir                 string
 	DatabasePath              string
 	LlamaServerPath           string
+	LlamaBenchPath            string
 	HuggingFaceBaseURL        string
 	WorkerHost                string
 	WorkerPortStart           int
@@ -30,12 +31,18 @@ func Load() Config {
 	if err != nil || alwaysOnSeconds < 0 {
 		alwaysOnSeconds = 15
 	}
+	llamaServerPath := env("LLAMARACK_LLAMA_SERVER", "llama-server")
+	llamaBenchDefault := "llama-bench"
+	if dir := filepath.Dir(llamaServerPath); dir != "." && dir != "" {
+		llamaBenchDefault = filepath.Join(dir, "llama-bench")
+	}
 	return Config{
 		ListenAddr:                env("LLAMARACK_LISTEN_ADDR", ":8000"),
 		DataDir:                   dataDir,
 		ModelsDir:                 env("LLAMARACK_MODELS_DIR", "/models"),
 		DatabasePath:              env("LLAMARACK_DATABASE_PATH", filepath.Join(dataDir, "manager.db")),
-		LlamaServerPath:           env("LLAMARACK_LLAMA_SERVER", "llama-server"),
+		LlamaServerPath:           llamaServerPath,
+		LlamaBenchPath:            env("LLAMARACK_LLAMA_BENCH", llamaBenchDefault),
 		HuggingFaceBaseURL:        env("LLAMARACK_HUGGINGFACE_BASE_URL", "https://huggingface.co"),
 		WorkerHost:                env("LLAMARACK_WORKER_HOST", "127.0.0.1"),
 		WorkerPortStart:           workerPort,
