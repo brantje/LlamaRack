@@ -22,9 +22,9 @@ mocks.manager = {
 
 mockNuxtImport('useManager', () => () => mocks.manager)
 
-function instance(id = 'coder', enabled = true) {
+function instance(slug = 'coder', enabled = true) {
   return {
-    id, model_id: 'model-1', name: id, enabled, autoload_enabled: true, always_on: false,
+    id: '550e8400-e29b-41d4-a716-446655440000', slug, model_id: 'model-1', name: slug, enabled, autoload_enabled: true, always_on: false,
     priority: 'normal', eviction_enabled: true, idle_unload_seconds: 300, gpu_mode: 'auto'
   }
 }

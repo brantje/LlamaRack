@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 mocks.manager = {
   apiBase: { value: 'http://manager.test:8888' },
   instances: { value: [{
-    id: 'coder', model_id: 'model-1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false,
+    id: '550e8400-e29b-41d4-a716-446655440000', slug: 'coder', model_id: 'model-1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false,
     priority: 'normal', eviction_enabled: true, idle_unload_seconds: 300, gpu_mode: 'auto'
   }] },
   models: { value: [{ id: 'model-1', name: 'Qwen Coder', gguf_path: 'qwen.gguf', total_bytes: 1, context_length: 32768 }] },
