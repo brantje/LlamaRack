@@ -1,10 +1,39 @@
 package gateway
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 )
 
 const managementPlaygroundBearer = "Bearer management-playground-internal"
+
+type managementPlaygroundContextKey struct{}
+
+func withManagementPlaygroundContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, managementPlaygroundContextKey{}, true)
+}
+
+func isManagementPlaygroundRequest(ctx context.Context) bool {
+	value, _ := ctx.Value(managementPlaygroundContextKey{}).(bool)
+	return value
+}
+
+func ensurePlaygroundTimings(body []byte) []byte {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return body
+	}
+	if _, exists := object["timings_per_token"]; exists {
+		return body
+	}
+	object["timings_per_token"] = json.RawMessage("true")
+	updated, err := json.Marshal(object)
+	if err != nil {
+		return body
+	}
+	return updated
+}
 
 // NewManagementPlaygroundProxy re-enters the normal OpenAI-compatible gateway
 // after the management API has authenticated the operator. It deliberately
@@ -17,7 +46,7 @@ func NewManagementPlaygroundProxy(next http.Handler) http.Handler {
 			return
 		}
 
-		request := r.Clone(r.Context())
+		request := r.Clone(withManagementPlaygroundContext(r.Context()))
 		urlCopy := *r.URL
 		urlCopy.Path = "/v1/chat/completions"
 		urlCopy.RawPath = ""
