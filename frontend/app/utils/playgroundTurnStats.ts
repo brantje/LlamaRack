@@ -105,6 +105,8 @@ export function playgroundTurnStatsFromDiagnostics(
   const cacheTokens = nonNegative(inference.cache_n)
   const promptMs = nonNegative(inference.prompt_ms)
   const generationMs = nonNegative(inference.predicted_ms)
+  const wallMs = nonNegative(request.duration_ms)
+  const ttftMs = nonNegative(request.ttft_ms)
   const promptRate = nonNegative(inference.prompt_per_second) ?? positive(request.prompt_tokens_per_second)
   const generationRate = nonNegative(inference.predicted_per_second)
     ?? positive(request.generation_tokens_per_second)
@@ -129,8 +131,8 @@ export function playgroundTurnStatsFromDiagnostics(
     promptRate,
     generationRate,
     queueMs: nonNegative(request.queue_duration_ms),
-    wallMs: nonNegative(request.duration_ms),
-    ttftMs: nonNegative(request.ttft_ms),
+    wallMs,
+    ttftMs,
     promptMs,
     promptPerTokenMs,
     generationMs,
@@ -145,8 +147,8 @@ export function playgroundTurnStatsFromDiagnostics(
     contextPercent: percent(contextUsed, normalizedContextMax),
     finishReason: trimmed(inference.finish_reason) ?? trimmed(fallbackFinishReason),
     toolCallCount: nonNegative(inference.tool_call_count),
-    wallEstimated: false,
-    ttftEstimated: false
+    wallEstimated: wallMs === undefined ? undefined : false,
+    ttftEstimated: ttftMs === undefined ? undefined : false
   }
 }
 
