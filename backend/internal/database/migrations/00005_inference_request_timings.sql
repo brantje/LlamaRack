@@ -36,6 +36,7 @@ CREATE TABLE inference_request_timing_staging (
     tool_call_count INTEGER
 );
 
+-- +goose StatementBegin
 CREATE TRIGGER inference_request_timing_stage_after_insert
 AFTER INSERT ON inference_request_timing_staging
 BEGIN
@@ -63,7 +64,9 @@ BEGIN
           WHERE c.request_id=NEW.request_id AND r.finished_at<>0
       );
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER inference_request_timing_stage_after_update
 AFTER UPDATE ON inference_request_timing_staging
 BEGIN
@@ -91,7 +94,9 @@ BEGIN
           WHERE c.request_id=NEW.request_id AND r.finished_at<>0
       );
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER inference_request_timing_promote_after_request_finalize
 AFTER UPDATE OF finished_at ON inference_requests
 WHEN NEW.finished_at<>0
@@ -116,7 +121,9 @@ BEGIN
         SELECT request_id FROM inference_request_correlations WHERE inference_request_id=NEW.id
     );
 END;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE TRIGGER inference_request_timing_promote_after_correlation_insert
 AFTER INSERT ON inference_request_correlations
 BEGIN
@@ -139,6 +146,7 @@ BEGIN
     WHERE request_id=NEW.request_id
       AND EXISTS (SELECT 1 FROM inference_requests WHERE id=NEW.inference_request_id AND finished_at<>0);
 END;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP TRIGGER inference_request_timing_promote_after_correlation_insert;
