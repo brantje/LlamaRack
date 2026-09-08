@@ -170,10 +170,10 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTableColumn(ctx, service.db, "playground_lifecycle_events", "correlation_id") {
+	if !hasTableColumn(t, ctx, service.db, "playground_lifecycle_events", "correlation_id") {
 		t.Fatal("expected playground_lifecycle_events.correlation_id from migrations")
 	}
-	if !hasTableColumn(ctx, service.db, "inference_request_timings", "predicted_ms") {
+	if !hasTableColumn(t, ctx, service.db, "inference_request_timings", "predicted_ms") {
 		t.Fatal("expected inference_request_timings.predicted_ms from migrations")
 	}
 	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
@@ -181,10 +181,11 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	}
 }
 
-func hasTableColumn(ctx context.Context, db *sql.DB, table, column string) bool {
+func hasTableColumn(t *testing.T, ctx context.Context, db *sql.DB, table, column string) bool {
+	t.Helper()
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
-		return false
+		t.Fatal(err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -192,11 +193,14 @@ func hasTableColumn(ctx context.Context, db *sql.DB, table, column string) bool 
 		var name, columnType string
 		var defaultValue any
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return false
+			t.Fatal(err)
 		}
 		if name == column {
 			return true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	return false
 }
