@@ -9,6 +9,7 @@ const navigation: NavigationMenuItem[] = [
   { label: 'Dashboard', icon: 'i-lucide-layout-dashboard', to: '/' },
   { label: 'Models', icon: 'i-lucide-box', to: '/models' },
   { label: 'Instances', icon: 'i-lucide-server', to: '/instances' },
+  { label: 'Benchmarks', icon: 'i-lucide-gauge', to: '/benchmarks' },
   { label: 'Downloads', icon: 'i-lucide-download', to: '/downloads' },
   { label: 'Playground', icon: 'i-lucide-terminal-square', to: '/playground' },
   { label: 'Logs', icon: 'i-lucide-list-start', to: '/logs' },

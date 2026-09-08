@@ -403,6 +403,7 @@ defineExpose({ setSelectedWindow })
       </div>
       <div v-if="instance" class="flex flex-wrap items-center justify-end gap-2">
         <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
+        <BenchmarkInstanceAction :instance="instance" :model="model" />
         <AppButton :to="`/instances/${encodeURIComponent(instance.slug)}/edit`" intent="secondary">Edit</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
@@ -442,6 +443,8 @@ defineExpose({ setSelectedWindow })
           <div class="mt-3 space-y-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]"><p>Utilization <span class="float-right font-mono tabular-nums text-[var(--color-text)]">{{ formatPercent(currentVRAMPercent) }}</span></p><p>Placement <span class="float-right font-mono text-[var(--color-text)]">{{ placementIDs.length ? placementIDs.join(', ') : '—' }}</span></p></div>
         </Frame>
       </section>
+
+      <BenchmarkHistory :instance="instance" />
 
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h2 class="text-base font-semibold">Performance history</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Server-bucketed history for this Instance only.</p></div>
