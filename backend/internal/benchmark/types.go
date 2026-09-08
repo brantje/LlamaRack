@@ -104,15 +104,17 @@ type ArtifactSnapshot struct {
 }
 
 type CPUSnapshot struct {
-	Model          string `json:"model,omitempty"`
-	LogicalThreads int    `json:"logical_threads"`
-	Architecture   string `json:"architecture"`
-	OS             string `json:"os"`
+	Model            string `json:"model,omitempty"`
+	LogicalThreads   int    `json:"logical_threads"`
+	EffectiveThreads int    `json:"effective_threads,omitempty"`
+	Architecture     string `json:"architecture"`
+	OS               string `json:"os"`
 }
 
 type HardwareSnapshot struct {
-	Observed hardware.Snapshot `json:"observed"`
-	CPU      CPUSnapshot       `json:"cpu"`
+	Observed        hardware.Snapshot `json:"observed"`
+	CPU             CPUSnapshot       `json:"cpu"`
+	SelectedDevices []string          `json:"selected_devices,omitempty"`
 }
 
 type BuildSnapshot struct {
