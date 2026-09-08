@@ -321,6 +321,7 @@ func run(ctx context.Context, cfg config.Config) error {
 func newMux(apiServer, openAI, frontendHandler http.Handler, metrics ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	openAPIDoc := newOpenAPIDocument()
+	registerBenchmarkOpenAPIOperations(openAPIDoc)
 	mux.Handle("GET /openapi.json", openAPIDoc.JSONHandler())
 	mux.Handle("GET /docs", openAPIDoc.DocsHandler("/openapi.json"))
 	mux.Handle("/api/v1/", apiServer)
