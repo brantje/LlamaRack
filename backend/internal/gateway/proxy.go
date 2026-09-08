@@ -154,7 +154,7 @@ func (g *Gateway) proxyToTarget(observed *responseObserver, r *http.Request, spe
 	record.TotalTokens = metrics.totalTokens
 	record.TokensPerSecond = metrics.generationTPS
 	*promptTPS = metrics.promptTPS
-	if g.observability != nil && !metrics.turnStats.Empty() {
+	if isManagementPlaygroundRequest(r.Context()) && g.observability != nil && !metrics.turnStats.Empty() {
 		persistCtx, cancelPersist := g.persistenceContext(r.Context())
 		if err := g.observability.StageInferenceTurnStats(persistCtx, requestID, metrics.turnStats); err != nil {
 			slog.Warn("stage inference turn stats failed", "request_id", requestID, "instance_id", instance.ID, "error", err)
