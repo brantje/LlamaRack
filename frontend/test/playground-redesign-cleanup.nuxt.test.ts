@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(resolve(process.cwd(), 'app/pages/playground.vue'), 'utf8')
+const turnStatsSource = readFileSync(resolve(process.cwd(), 'app/components/playground/TurnStats.vue'), 'utf8')
 
 describe('Playground redesign cleanup', () => {
   it('pins the chat composer to the bottom of a viewport-locked thread', () => {
@@ -48,13 +49,17 @@ describe('Playground redesign cleanup', () => {
     expect(source).not.toContain('bg-[var(--accent-100)] px-3 py-2 text-xs text-[var(--accent-900)]')
   })
 
-  it('uses mono tabular typography for numeric parameters and diagnostics', () => {
-    expect(source.match(/class="font-mono tabular-nums"/g)).toHaveLength(18)
+  it('uses mono tabular typography for numeric parameters and per-turn diagnostics', () => {
+    expect(source.match(/class="font-mono tabular-nums"/g)?.length ?? 0).toBeGreaterThanOrEqual(18)
     expect(source).toContain('messageStats(message.id)')
-    expect(source).toContain('class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums')
+    expect(source).toContain('<PlaygroundTurnStats')
+    expect(turnStatsSource).toContain('font-mono text-[length:var(--font-size-table-header)] tabular-nums')
     expect(source).toContain('Prompt tokens</dt><dd class="font-mono tabular-nums"')
+    expect(source).toContain('Prompt tokens / second</dt><dd class="font-mono tabular-nums"')
     expect(source).toContain('Tokens / second</dt><dd class="font-mono tabular-nums"')
-    expect(source).toContain('completion (incl. reasoning)')
+    expect(source).toContain('Generation duration</dt><dd class="font-mono tabular-nums"')
+    expect(source).toContain('Generated tokens (incl. reasoning)')
+    expect(source).not.toContain('duration_ms - (diagnostics.request.ttft_ms')
   })
 
   it('keeps instance and runtime chrome on the thread without duplicating parameter controls', () => {
