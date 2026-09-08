@@ -16,9 +16,10 @@ var (
 )
 
 type PlaygroundDiagnostics struct {
-	Request            RequestLogDetail `json:"request"`
-	StateTrace         []string         `json:"state_trace"`
-	EvictionsTriggered []string         `json:"evictions_triggered"`
+	Request            RequestLogDetail    `json:"request"`
+	InferenceStats     *InferenceTurnStats `json:"inference_stats,omitempty"`
+	StateTrace         []string            `json:"state_trace"`
+	EvictionsTriggered []string            `json:"evictions_triggered"`
 }
 
 func (s *Service) ensurePlaygroundSchema(ctx context.Context) error {
@@ -100,12 +101,17 @@ func (s *Service) PlaygroundDiagnostics(ctx context.Context, requestID string) (
 	if err != nil {
 		return PlaygroundDiagnostics{}, err
 	}
+	stats, err := s.inferenceTurnStats(ctx, requestID)
+	if err != nil {
+		return PlaygroundDiagnostics{}, err
+	}
 	evictions, err := s.playgroundEvictions(ctx, request.RequestRecord)
 	if err != nil {
 		return PlaygroundDiagnostics{}, err
 	}
 	return PlaygroundDiagnostics{
 		Request:            request,
+		InferenceStats:     stats,
 		StateTrace:         requestStateTrace(request.RequestRecord),
 		EvictionsTriggered: evictions,
 	}, nil

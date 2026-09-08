@@ -39,6 +39,17 @@ func TestPlaygroundDiagnosticsUsesRequestRecordAndCorrelatedLifecycle(t *testing
 	if err := service.FinalizeCorrelatedRequest(ctx, "req-playground", nil, record); err != nil {
 		t.Fatal(err)
 	}
+	promptN, predictedN, cacheN, draftN, draftAccepted, toolCalls := int64(12), int64(24), int64(4), int64(10), int64(8), int64(2)
+	promptMS, predictedMS, promptPerSecond, predictedPerSecond := 15.5, 500.0, 774.2, 48.0
+	promptPerTokenMS, predictedPerTokenMS := 1.29, 20.83
+	finishReason := "tool_calls"
+	if err := service.SaveInferenceTurnStats(ctx, "req-playground", InferenceTurnStats{
+		PromptN: &promptN, PromptMS: &promptMS, PromptPerSecond: &promptPerSecond, PromptPerTokenMS: &promptPerTokenMS,
+		PredictedN: &predictedN, PredictedMS: &predictedMS, PredictedPerSecond: &predictedPerSecond, PredictedPerTokenMS: &predictedPerTokenMS,
+		CacheN: &cacheN, DraftN: &draftN, DraftNAccepted: &draftAccepted, FinishReason: &finishReason, ToolCallCount: &toolCalls,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	correlated := lifecycle.WithRequestCorrelation(ctx, traceID)
 	if err := service.RecordLifecycle(correlated, LifecycleEviction, "victim-a", 0); err != nil {
 		t.Fatal(err)
@@ -61,11 +72,53 @@ func TestPlaygroundDiagnosticsUsesRequestRecordAndCorrelatedLifecycle(t *testing
 	if diagnostics.Request.InstanceID != "target" || diagnostics.Request.PromptTokens != 12 || diagnostics.Request.GeneratedTokens != 24 {
 		t.Fatalf("request=%+v", diagnostics.Request)
 	}
+	if diagnostics.InferenceStats == nil || diagnostics.InferenceStats.PredictedMS == nil || *diagnostics.InferenceStats.PredictedMS != predictedMS {
+		t.Fatalf("inference stats=%+v", diagnostics.InferenceStats)
+	}
+	if diagnostics.InferenceStats.CacheN == nil || *diagnostics.InferenceStats.CacheN != cacheN || diagnostics.InferenceStats.FinishReason == nil || *diagnostics.InferenceStats.FinishReason != finishReason {
+		t.Fatalf("inference stats=%+v", diagnostics.InferenceStats)
+	}
 	if got := diagnostics.StateTrace; len(got) != 3 || got[0] != "UNLOADED" || got[1] != "STARTING" || got[2] != "READY" {
 		t.Fatalf("state trace=%v", got)
 	}
 	if got := diagnostics.EvictionsTriggered; len(got) != 1 || got[0] != "victim-a" {
 		t.Fatalf("evictions=%v", got)
+	}
+}
+
+func TestInferenceTurnStatsPreserveUnavailableVersusZero(t *testing.T) {
+	service := playgroundTestService(t)
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+	if err := service.FinalizeCorrelatedRequest(ctx, "req-nullable", nil, RequestRecord{
+		StartedAt: now, FinishedAt: now + 1, InstanceID: "target", Endpoint: "/v1/chat/completions", StatusCode: http.StatusOK, Result: "success",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := service.SaveInferenceTurnStats(ctx, "req-nullable", InferenceTurnStats{CacheN: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := service.inferenceTurnStats(ctx, "req-nullable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats == nil || stats.CacheN == nil || *stats.CacheN != 0 {
+		t.Fatalf("cache_n=%+v", stats)
+	}
+	if stats.PromptMS != nil || stats.DraftN != nil || stats.FinishReason != nil {
+		t.Fatalf("unavailable values must remain nil: %+v", stats)
+	}
+}
+
+func TestInferenceTurnStatsRequiresCorrelatedRequest(t *testing.T) {
+	service := playgroundTestService(t)
+	value := 1.0
+	if err := service.SaveInferenceTurnStats(context.Background(), "missing", InferenceTurnStats{PromptMS: &value}); err != sql.ErrNoRows {
+		t.Fatalf("missing correlation err=%v", err)
+	}
+	if err := service.SaveInferenceTurnStats(context.Background(), " ", InferenceTurnStats{PromptMS: &value}); err == nil {
+		t.Fatal("expected empty request id error")
 	}
 }
 
@@ -117,16 +170,19 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !hasPlaygroundCorrelationColumn(ctx, service.db) {
+	if !hasTableColumn(ctx, service.db, "playground_lifecycle_events", "correlation_id") {
 		t.Fatal("expected playground_lifecycle_events.correlation_id from migrations")
+	}
+	if !hasTableColumn(ctx, service.db, "inference_request_timings", "predicted_ms") {
+		t.Fatal("expected inference_request_timings.predicted_ms from migrations")
 	}
 	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
 		t.Fatalf("insert playground event: %v", err)
 	}
 }
 
-func hasPlaygroundCorrelationColumn(ctx context.Context, db *sql.DB) bool {
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(playground_lifecycle_events)`)
+func hasTableColumn(ctx context.Context, db *sql.DB, table, column string) bool {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
 		return false
 	}
@@ -138,7 +194,7 @@ func hasPlaygroundCorrelationColumn(ctx context.Context, db *sql.DB) bool {
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
 			return false
 		}
-		if name == "correlation_id" {
+		if name == column {
 			return true
 		}
 	}
