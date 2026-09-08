@@ -71,7 +71,7 @@ type Parameters = {
 
 const manager = useManager()
 const route = useRoute()
-const selectedInstanceID = ref('')
+const selectedInstanceSlug = ref('')
 const activePanel = ref<'parameters' | 'request' | 'response'>('parameters')
 const composer = ref('')
 const attachments = ref<PendingAttachment[]>([])
@@ -111,13 +111,13 @@ const parameters = reactive<Parameters>({
   systemPrompt: ''
 })
 
-const selectedInstance = computed<Instance | undefined>(() => manager.instances.value.find(item => item.id === selectedInstanceID.value))
+const selectedInstance = computed<Instance | undefined>(() => manager.instances.value.find(item => item.slug === selectedInstanceSlug.value))
 const selectedModel = computed<Model | undefined>(() => manager.models.value.find(item => item.id === selectedInstance.value?.model_id))
 const selectedRuntime = computed(() => selectedInstance.value ? manager.runtimeForInstance(selectedInstance.value) : undefined)
 const selectedTelemetry = computed<RuntimeTelemetry | undefined>(() => selectedInstance.value ? manager.telemetryForInstance(selectedInstance.value) : undefined)
 const runtimeState = computed(() => selectedRuntime.value?.state || 'UNLOADED')
 const isLoaded = computed(() => runtimeState.value === 'READY')
-const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.id, value: instance.id })))
+const instanceOptions = computed(() => manager.instances.value.map(instance => ({ label: instance.slug, value: instance.slug })))
 const phaseLabel = computed(() => ({ cold: 'Cold start — autoload in progress', generating: 'Generating', completed: 'Completed', failed: 'Last request failed', '': '' }[phase.value]))
 const hasComposerPayload = computed(() => Boolean(composer.value.trim()) || attachments.value.length > 0)
 const canSend = computed(() => Boolean(selectedInstance.value) && (hasComposerPayload.value || rawDirty.value))
@@ -185,9 +185,9 @@ function runtimeVariant(state: string) {
 }
 
 function selectInstance(value: unknown) {
-  const id = String(value || '')
-  if (!manager.instances.value.some(instance => instance.id === id)) return
-  selectedInstanceID.value = id
+  const slug = String(value || '')
+  if (!manager.instances.value.some(instance => instance.slug === slug)) return
+  selectedInstanceSlug.value = slug
   rawDirty.value = false
   syncRawRequest()
 }
@@ -233,7 +233,7 @@ function parseBodyMessages(value: unknown): Array<{ role: Role, parts: ChatPart[
 
 function parameterBody(messages: ThreadMessage[] = conversation.value) {
   const body: Record<string, unknown> = {
-    model: selectedInstanceID.value,
+    model: selectedInstanceSlug.value,
     messages: [
       ...(parameters.systemPrompt.trim() ? [{ role: 'system', content: parameters.systemPrompt.trim() }] : []),
       ...messages.map(message => ({ role: message.role, content: threadPartsToApiContent(message.parts) }))
@@ -255,13 +255,13 @@ function parameterBody(messages: ThreadMessage[] = conversation.value) {
 }
 
 function syncRawRequest() {
-  if (rawDirty.value || !selectedInstanceID.value) return
+  if (rawDirty.value || !selectedInstanceSlug.value) return
   rawRequest.value = JSON.stringify(parameterBody(), null, 2)
 }
 
 function adoptBody(body: Record<string, any>) {
   const model = String(body.model || '').trim()
-  if (model && manager.instances.value.some(item => item.id === model)) selectedInstanceID.value = model
+  if (model && manager.instances.value.some(item => item.slug === model)) selectedInstanceSlug.value = model
   if (Number.isFinite(Number(body.temperature))) parameters.temperature = Number(body.temperature)
   if (Number.isFinite(Number(body.top_p))) parameters.topP = Number(body.top_p)
   if (Number.isFinite(Number(body.max_tokens))) parameters.maxTokens = Number(body.max_tokens)
@@ -320,8 +320,8 @@ async function requestBodyForSendAsync() {
   }
 
   const target = String(body.model || '').trim()
-  if (!target) body.model = selectedInstanceID.value
-  else if (!manager.instances.value.some(item => item.id === target)) throw new Error(`Unknown Instance “${target}”.`)
+  if (!target) body.model = selectedInstanceSlug.value
+  else if (!manager.instances.value.some(item => item.slug === target)) throw new Error(`Unknown Instance “${target}”.`)
   adoptBody(body)
   rawDirty.value = false
   rawRequest.value = JSON.stringify(body, null, 2)
@@ -591,13 +591,13 @@ async function send(options: { allowEmpty?: boolean } = {}) {
     return
   }
 
-  const target = manager.instances.value.find(item => item.id === String(body.model))
+  const target = manager.instances.value.find(item => item.slug === String(body.model))
   if (!target) {
     error.value = 'The request model must be an existing Instance slug.'
     inFlight.value = false
     return
   }
-  selectedInstanceID.value = target.id
+  selectedInstanceSlug.value = target.slug
 
   conversation.value.push(toThreadMessage('assistant', [{ type: 'text', text: '', state: 'streaming' }], `assistant-${conversation.value.length}`))
   composer.value = ''
@@ -759,19 +759,21 @@ const capturedHeaders = computed(() => responseHeaders.value.filter(([key]) => k
 
 watch(() => manager.instances.value, instances => {
   if (!instances.length) {
-    selectedInstanceID.value = ''
+    selectedInstanceSlug.value = ''
     return
   }
-  if (instances.some(item => item.id === selectedInstanceID.value)) return
+  if (instances.some(item => item.slug === selectedInstanceSlug.value)) return
   const query = Array.isArray(route.query.instance) ? route.query.instance[0] : route.query.instance
-  selectedInstanceID.value = typeof query === 'string' && instances.some(item => item.id === query) ? query : (instances.find(item => item.enabled)?.id || instances[0]!.id)
+  selectedInstanceSlug.value = typeof query === 'string' && instances.some(item => item.slug === query)
+    ? query
+    : (instances.find(item => item.enabled)?.slug || instances[0]!.slug)
 }, { immediate: true, deep: true })
 
 watch(runtimeState, state => {
   if (inFlight.value && phase.value === 'cold' && state === 'READY') phase.value = 'generating'
 })
 
-watch([selectedInstanceID, () => parameters.temperature, () => parameters.topP, () => parameters.maxTokens, () => parameters.seed, () => parameters.topK, () => parameters.minP, () => parameters.repeatPenalty, () => parameters.stop, () => parameters.stream, () => parameters.systemPrompt, conversation], syncRawRequest, { deep: true, immediate: true })
+watch([selectedInstanceSlug, () => parameters.temperature, () => parameters.topP, () => parameters.maxTokens, () => parameters.seed, () => parameters.topK, () => parameters.minP, () => parameters.repeatPenalty, () => parameters.stop, () => parameters.stream, () => parameters.systemPrompt, conversation], syncRawRequest, { deep: true, immediate: true })
 
 onBeforeUnmount(() => {
   controller?.abort()
@@ -811,7 +813,7 @@ onBeforeUnmount(() => {
         <div class="shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3" data-testid="playground-thread-chrome">
           <div class="flex min-w-0 items-center gap-2">
             <USelect
-              :model-value="selectedInstanceID"
+              :model-value="selectedInstanceSlug"
               :items="instanceOptions"
               value-key="value"
               class="min-w-0 flex-1 font-mono xl:hidden"
@@ -1010,12 +1012,12 @@ onBeforeUnmount(() => {
                 :key="instance.id"
                 type="button"
                 class="block w-full border px-3 py-2 text-left"
-                :class="selectedInstanceID === instance.id
+                :class="selectedInstanceSlug === instance.slug
                   ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'
                   : 'border-[var(--color-divider)] bg-transparent'"
-                @click="selectInstance(instance.id)"
+                @click="selectInstance(instance.slug)"
               >
-                <span class="block font-mono text-[length:var(--font-size-h6)] font-semibold">{{ instance.id }}</span>
+                <span class="block font-mono text-[length:var(--font-size-h6)] font-semibold">{{ instance.slug }}</span>
                 <span class="mt-0.5 block text-[length:var(--font-size-kicker)] opacity-75">{{ manager.instanceState(instance) }} · {{ manager.models.value.find(model => model.id === instance.model_id)?.name || instance.model_id }}</span>
               </button>
             </div>
