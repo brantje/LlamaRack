@@ -144,27 +144,29 @@ model_id="$(printf '%s' "$model_response" | json_value 'data["model"]["id"]')"
 instance_response="$(auth_request POST /api/v1/instances \
   "{\"model_id\":\"$model_id\",\"name\":\"Compatibility Dense\",\"slug\":\"compatibility-dense\",\"autoload_enabled\":true,\"gpu_mode\":\"auto\",\"request_log_mode\":\"full\"}")"
 instance_id="$(printf '%s' "$instance_response" | json_value 'data["id"]')"
-auth_request POST "/api/v1/instances/${instance_id}/start" >/dev/null
+instance_slug="$(printf '%s' "$instance_response" | json_value 'data["slug"]')"
+[[ -n "$instance_id" && -n "$instance_slug" ]]
+auth_request POST "/api/v1/instances/${instance_slug}/start" >/dev/null
 
 for _ in $(seq 1 180); do
-  runtime="$(auth_request GET "/api/v1/instances/${instance_id}/runtime")"
+  runtime="$(auth_request GET "/api/v1/instances/${instance_slug}/runtime")"
   state="$(printf '%s' "$runtime" | json_value 'data["state"]')"
   [[ "$state" == "READY" ]] && break
   [[ "$state" == "FAILED" ]] && { echo "compatibility fixture failed to start" >&2; printf '%s\n' "$runtime" >&2; exit 1; }
   sleep 1
 done
-[[ "$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["state"]')" == "READY" ]] || {
+[[ "$(auth_request GET "/api/v1/instances/${instance_slug}/runtime" | json_value 'data["state"]')" == "READY" ]] || {
   echo "compatibility fixture did not reach READY" >&2
   exit 1
 }
 
 export LLAMARACK_BASE_URL="$manager_url/v1"
 export LLAMARACK_API_KEY="$inference_key"
-export LLAMARACK_CHAT_MODEL="$instance_id"
-export LLAMARACK_RESPONSES_MODEL="$instance_id"
+export LLAMARACK_CHAT_MODEL="$instance_slug"
+export LLAMARACK_RESPONSES_MODEL="$instance_slug"
 export LLAMARACK_MANAGEMENT_BASE_URL="$manager_url"
 export LLAMARACK_MANAGEMENT_KEY="$management_token"
-export LLAMARACK_LIFECYCLE_MODEL="$instance_id"
+export LLAMARACK_LIFECYCLE_MODEL="$instance_slug"
 export LLAMARACK_REQUIRED_CAPABILITIES="lifecycle_ready,lifecycle_autoload,lifecycle_no_autoload"
 export LLAMARACK_REQUIRE_LITELLM_PROXY=1
 export LLAMARACK_TARGET_ID="$image"
@@ -173,6 +175,6 @@ export LLAMARACK_ARTIFACT_DIR="$artifact_dir/evidence"
 bash "$script_dir/compat.sh"
 
 # Record only non-secret fixture identity/configuration.
-printf 'target=%s\nmodel=%s\ninstance=%s\ngguf=%s\n' \
-  "$image" "$model_id" "$instance_id" "$(basename "$dense_host")" \
+printf 'target=%s\nmodel=%s\ninstance=%s\ninstance_id=%s\ngguf=%s\n' \
+  "$image" "$model_id" "$instance_slug" "$instance_id" "$(basename "$dense_host")" \
   >"$artifact_dir/fixture.txt"

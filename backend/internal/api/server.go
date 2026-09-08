@@ -340,6 +340,19 @@ func (s *Server) resolveModelRoute(r *http.Request, value string) (models.Model,
 	return s.models.GetByID(r.Context(), value)
 }
 
+func (s *Server) resolveInstanceRoute(r *http.Request, value string) (instances.Instance, error) {
+	item, err := s.lifecycle.Instances().GetBySlug(r.Context(), value)
+	if err == nil {
+		return item, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return instances.Instance{}, err
+	}
+	// Transitional compatibility for old opaque-ID management links. Frontend
+	// navigation always emits the canonical slug route.
+	return s.lifecycle.Instances().GetByID(r.Context(), value)
+}
+
 func modelsSlug(value string) string { return instances.Slugify(value) }
 
 func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path string) {
@@ -352,7 +365,7 @@ func (s *Server) instanceRoute(w http.ResponseWriter, r *http.Request, path stri
 	if !validInstanceRouteMethod(w, r.Method, parts) {
 		return
 	}
-	instance, err := s.lifecycle.Instances().GetBySlug(r.Context(), parts[0])
+	instance, err := s.resolveInstanceRoute(r, parts[0])
 	if err != nil {
 		writeResourceLookupError(w, "instance", err)
 		return

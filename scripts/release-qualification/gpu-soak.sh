@@ -289,7 +289,8 @@ wait_process_gone() {
 }
 
 worker_count() {
-  local instance_id="$1"
+  local instance_id
+  instance_id="$(durable_id "$1")"
   # The managed worker runs as the image's USER (1000). Linux ptrace/procfs
   # access rules may deny /proc/<pid>/environ to a root docker-exec process
   # without CAP_SYS_PTRACE, while the same-UID runtime user can read its child.
@@ -311,7 +312,8 @@ assert_single_worker() {
 }
 
 assert_worker_identity() {
-  local pid="$1" instance_id="$2"
+  local pid="$1" instance_id
+  instance_id="$(durable_id "$2")"
   docker exec "$container_name" sh -c '
     pid="$1"; instance="$2"
     (tr "\000" "\n" <"/proc/${pid}/environ") 2>/dev/null \
@@ -361,17 +363,38 @@ cancel_stream() {
   sleep 0.5
 }
 
+# Management URLs and OpenAI `model` values use instance slugs. Durable UUIDs
+# stay in this map for worker-identity checks that cannot call the API (for
+# example after a manager crash).
+declare -A instance_durable_ids=()
+
 create_model() {
   local name="$1" path="$2" context="${3:-4096}"
   auth_request POST /api/v1/models "{\"name\":\"$name\",\"gguf_path\":\"$path\",\"context_length\":${context}}" \
     | json_value 'data["model"]["id"]'
 }
 
+durable_id() {
+  local slug="$1" id="${instance_durable_ids[$1]:-}"
+  [[ -n "$id" ]] || { echo "missing durable instance id for slug $slug" >&2; return 1; }
+  printf '%s\n' "$id"
+}
+
+# Assigns the public slug through a nameref so this can run in the current
+# shell. Command substitution would drop the durable-ID map update.
 create_instance() {
-  local model_id="$1" name="$2" slug="$3" body="$4"
-  auth_request POST /api/v1/instances \
-    "{\"model_id\":\"$model_id\",\"name\":\"$name\",\"slug\":\"$slug\"${body}}" \
-    | json_value 'data["id"]'
+  local -n _created_instance_slug="$1"
+  local model_id="$2" name="$3" slug="$4" body="$5" response id created_slug
+  response="$(auth_request POST /api/v1/instances \
+    "{\"model_id\":\"$model_id\",\"name\":\"$name\",\"slug\":\"$slug\"${body}}")"
+  id="$(printf '%s' "$response" | json_value 'data["id"]')"
+  created_slug="$(printf '%s' "$response" | json_value 'data["slug"]')"
+  [[ -n "$id" && -n "$created_slug" ]] || {
+    echo "create instance did not return id and slug" >&2
+    return 1
+  }
+  instance_durable_ids["$created_slug"]="$id"
+  _created_instance_slug="$created_slug"
 }
 
 model_total_bytes() {
@@ -386,7 +409,7 @@ smoke_model() {
   local extra="${4:-,\"gpu_mode\":\"auto\"}"
   local instance_id
   log_step "smoke ${label}"
-  instance_id="$(create_instance "$model_id" "Smoke ${label}" "$slug" "$extra")"
+  create_instance instance_id "$model_id" "Smoke ${label}" "$slug" "$extra"
   printf 'starting smoke instance %s (%s)\n' "$instance_id" "$slug"
   auth_request POST "/api/v1/instances/${instance_id}/start" >/dev/null
   wait_state "$instance_id" READY
@@ -399,7 +422,8 @@ smoke_model() {
 
 verify_moe_launch() {
   local instance_id="$1" expected_devices="$2" args_file="$3" environ_file="$4"
-  local worker_pid
+  local worker_pid durable
+  durable="$(durable_id "$instance_id")"
   worker_pid="$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["pid"]')"
   assert_worker_identity "$worker_pid" "$instance_id"
   docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${worker_pid}/cmdline" >"$args_file"
@@ -416,12 +440,13 @@ assert index + 1 < len(args), args
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
   docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${worker_pid}/environ) 2>/dev/null" >"$environ_file"
-  grep -qx "LLAMARACK_INSTANCE_ID=${instance_id}" "$environ_file"
+  grep -qx "LLAMARACK_INSTANCE_ID=${durable}" "$environ_file"
 }
 
 verify_dense_multi_launch() {
   local instance_id="$1" expected_devices="$2" args_file="$3" environ_file="$4"
-  local worker_pid
+  local worker_pid durable
+  durable="$(durable_id "$instance_id")"
   worker_pid="$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["pid"]')"
   assert_worker_identity "$worker_pid" "$instance_id"
   docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${worker_pid}/cmdline" >"$args_file"
@@ -434,7 +459,7 @@ index = args.index("--device")
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
   docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${worker_pid}/environ) 2>/dev/null" >"$environ_file"
-  grep -qx "LLAMARACK_INSTANCE_ID=${instance_id}" "$environ_file"
+  grep -qx "LLAMARACK_INSTANCE_ID=${durable}" "$environ_file"
 }
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -488,7 +513,7 @@ fi
 
 log_step "dense lifecycle soak (${cycles} cycles, 8B)"
 dense_model_id="$dense_lifecycle_model_id"
-dense_instance_id="$(create_instance "$dense_model_id" 'Qualification Dense' 'qualification-dense' ',"gpu_mode":"auto"')"
+create_instance dense_instance_id "$dense_model_id" 'Qualification Dense' 'qualification-dense' ',"gpu_mode":"auto"'
 auth_request POST "/api/v1/instances/${dense_instance_id}/start" >/dev/null
 wait_state "$dense_instance_id" READY
 assert_single_worker "$dense_instance_id"
@@ -559,7 +584,7 @@ wait_state "$dense_instance_id" UNLOADED
 # Autoload must start an unloaded Instance on first inference without creating
 # duplicate workers.
 log_step "autoload"
-autoload_instance_id="$(create_instance "$dense_model_id" 'Qualification Autoload' 'qualification-autoload' ',"autoload_enabled":true,"gpu_mode":"auto"')"
+create_instance autoload_instance_id "$dense_model_id" 'Qualification Autoload' 'qualification-autoload' ',"autoload_enabled":true,"gpu_mode":"auto"'
 infer "$autoload_instance_id"
 wait_state "$autoload_instance_id" READY
 assert_single_worker "$autoload_instance_id"
@@ -569,7 +594,7 @@ wait_state "$autoload_instance_id" UNLOADED
 # Concurrent explicit starts must single-flight to one worker. Then cancel a
 # real streaming request and prove the same worker remains healthy for inference.
 log_step "concurrent start + stream cancel"
-concurrent_instance_id="$(create_instance "$dense_model_id" 'Qualification Concurrent' 'qualification-concurrent' ',"gpu_mode":"auto"')"
+create_instance concurrent_instance_id "$dense_model_id" 'Qualification Concurrent' 'qualification-concurrent' ',"gpu_mode":"auto"'
 auth_request POST "/api/v1/instances/${concurrent_instance_id}/start" >"$artifact_dir/concurrent-start-1.json" & start_one=$!
 auth_request POST "/api/v1/instances/${concurrent_instance_id}/start" >"$artifact_dir/concurrent-start-2.json" & start_two=$!
 wait "$start_one"; wait "$start_two"
@@ -584,7 +609,7 @@ wait_state "$concurrent_instance_id" UNLOADED
 # Per-Instance idle unload must stop an inactive worker after the configured
 # timeout. Autoload is enabled so a follow-up inference also proves recovery.
 log_step "idle unload and reload"
-idle_instance_id="$(create_instance "$dense_model_id" 'Qualification Idle' 'qualification-idle' ',"autoload_enabled":true,"idle_unload_seconds":1,"gpu_mode":"auto"')"
+create_instance idle_instance_id "$dense_model_id" 'Qualification Idle' 'qualification-idle' ',"autoload_enabled":true,"idle_unload_seconds":1,"gpu_mode":"auto"'
 infer "$idle_instance_id"
 wait_state "$idle_instance_id" READY
 wait_state "$idle_instance_id" UNLOADED
@@ -598,7 +623,7 @@ wait_state "$idle_instance_id" UNLOADED
 # explicit Stop. Use a direct process kill here: the management Kill action is
 # an operator command, while this scenario specifically qualifies crash recovery.
 log_step "Always-On crash recovery"
-always_instance_id="$(create_instance "$dense_model_id" 'Qualification Always On' 'qualification-always-on' ',"always_on":true,"gpu_mode":"auto"')"
+create_instance always_instance_id "$dense_model_id" 'Qualification Always On' 'qualification-always-on' ',"always_on":true,"gpu_mode":"auto"'
 wait_state "$always_instance_id" READY
 assert_single_worker "$always_instance_id"
 always_worker_pid="$(auth_request GET "/api/v1/instances/${always_instance_id}/runtime" | json_value 'data["pid"]')"
@@ -671,7 +696,7 @@ pressure_common=",\"gpu_mode\":\"manual\",\"gpu_devices\":[\"${target_gpu}\"],\"
 # Active-request protection: the only resident worker with in-flight work must
 # not be evicted to admit another copy on the same GPU.
 log_step "8B pressure: active-request protection"
-protected_id="$(create_instance "$dense_lifecycle_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common")"
+create_instance protected_id "$dense_lifecycle_model_id" 'Qualification Pressure Protected' 'qualification-pressure-protected' "$pressure_common"
 auth_request POST "/api/v1/instances/${protected_id}/start" >/dev/null
 wait_state "$protected_id" READY
 assert_single_worker "$protected_id"
@@ -687,7 +712,7 @@ kill -0 "$protected_stream_pid" 2>/dev/null || {
   echo "protected pressure stream ended before the eviction challenge could run" >&2
   exit 1
 }
-blocked_id="$(create_instance "$dense_lifecycle_model_id" 'Qualification Pressure Blocked' 'qualification-pressure-blocked' "$pressure_common")"
+create_instance blocked_id "$dense_lifecycle_model_id" 'Qualification Pressure Blocked' 'qualification-pressure-blocked' "$pressure_common"
 if auth_request POST "/api/v1/instances/${blocked_id}/start" >"$artifact_dir/pressure-blocked-start.json" 2>"$artifact_dir/pressure-blocked-start.err"; then
   # Start may enqueue while eviction is attempted; the protected resident must
   # remain READY and the challenger must not become the sole survivor.
@@ -721,7 +746,7 @@ eviction_observed=0
 max_pressure_workers=4
 for index in $(seq 1 "$max_pressure_workers"); do
   log_step "8B pressure worker ${index}/${max_pressure_workers}"
-  pressure_id="$(create_instance "$dense_lifecycle_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common")"
+  create_instance pressure_id "$dense_lifecycle_model_id" "Qualification Pressure ${index}" "qualification-pressure-${index}" "$pressure_common"
   pressure_ids+=("$pressure_id")
   if ! auth_request POST "/api/v1/instances/${pressure_id}/start" >"$artifact_dir/pressure-start-${index}.json" 2>"$artifact_dir/pressure-start-${index}.err"; then
     echo "pressure worker ${index} failed to start on ${target_gpu} (ctx-size=${pressure_ctx}); see pressure-start-${index}.err" >&2
@@ -756,7 +781,7 @@ log_step "12B multi-GPU dense placement"
 if (( ${#gpu_ids[@]} >= 2 )); then
   dense_multi_gpu_json="$(printf '%s\n%s\n' "${gpu_ids[0]}" "${gpu_ids[1]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_dense_multi_devices="${gpu_ids[0]},${gpu_ids[1]}"
-  dense_multi_instance_id="$(create_instance "$dense_multi_model_id" 'Qualification Dense Multi' 'qualification-dense-multi' ",\"gpu_mode\":\"manual\",\"gpu_devices\":${dense_multi_gpu_json},\"tensor_split\":\"1,1\"")"
+  create_instance dense_multi_instance_id "$dense_multi_model_id" 'Qualification Dense Multi' 'qualification-dense-multi' ",\"gpu_mode\":\"manual\",\"gpu_devices\":${dense_multi_gpu_json},\"tensor_split\":\"1,1\""
   auth_request POST "/api/v1/instances/${dense_multi_instance_id}/start" >/dev/null
   wait_state "$dense_multi_instance_id" READY
   assert_single_worker "$dense_multi_instance_id"
@@ -773,9 +798,7 @@ fi
 # Small MoE: always exercise n-cpu-moe on the first GPU.
 log_step "MoE small n-cpu-moe"
 moe_small_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
-moe_small_instance_id="$(auth_request POST /api/v1/instances \
-  "{\"model_id\":\"$moe_small_model_id\",\"name\":\"Qualification MoE Small\",\"slug\":\"qualification-moe-small\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
-  | json_value 'data["id"]')"
+create_instance moe_small_instance_id "$moe_small_model_id" 'Qualification MoE Small' 'qualification-moe-small' ",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}"
 auth_request POST "/api/v1/instances/${moe_small_instance_id}/start" >/dev/null
 wait_state "$moe_small_instance_id" READY
 assert_single_worker "$moe_small_instance_id"
@@ -795,9 +818,7 @@ else
   moe_large_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_moe_large_devices="${gpu_ids[0]}"
 fi
-moe_large_instance_id="$(auth_request POST /api/v1/instances \
-  "{\"model_id\":\"$moe_large_model_id\",\"name\":\"Qualification MoE Large\",\"slug\":\"qualification-moe-large\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_large_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
-  | json_value 'data["id"]')"
+create_instance moe_large_instance_id "$moe_large_model_id" 'Qualification MoE Large' 'qualification-moe-large' ",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_large_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}"
 auth_request POST "/api/v1/instances/${moe_large_instance_id}/start" >/dev/null
 wait_state "$moe_large_instance_id" READY
 assert_single_worker "$moe_large_instance_id"

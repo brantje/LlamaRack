@@ -14,8 +14,8 @@ All probes use these environment variables:
 
 - `LLAMARACK_BASE_URL` — public OpenAI base URL including `/v1`, for example `http://127.0.0.1:8080/v1`.
 - `LLAMARACK_API_KEY` — inference key used by the real clients.
-- `LLAMARACK_CHAT_MODEL` — Instance ID used for baseline chat, streaming, error and disconnect checks.
-- `LLAMARACK_RESPONSES_MODEL` — Responses-capable Instance ID; defaults to the chat model when omitted.
+- `LLAMARACK_CHAT_MODEL` — Instance slug (OpenAI `model`) used for baseline chat, streaming, error and disconnect checks.
+- `LLAMARACK_RESPONSES_MODEL` — Responses-capable Instance slug; defaults to the chat model when omitted.
 - `LLAMARACK_ARTIFACT_DIR` — evidence output directory; defaults to `artifacts/compat`.
 
 Optional capability fixtures:
@@ -35,7 +35,7 @@ Lifecycle tests put existing Instances into a known state with the management AP
 
 - `LLAMARACK_MANAGEMENT_BASE_URL` — manager origin without `/v1`, for example `http://127.0.0.1:8080`.
 - `LLAMARACK_MANAGEMENT_KEY` — management/full API key accepted by `/api/v1/instances/*`.
-- `LLAMARACK_LIFECYCLE_MODEL` — Instance ID safe for stop/start/autoload mutation during qualification.
+- `LLAMARACK_LIFECYCLE_MODEL` — Instance slug safe for stop/start/autoload mutation during qualification.
 - `LLAMARACK_FAILED_START_MODEL` — optional fixture intentionally configured to fail startup.
 
 The lifecycle probe snapshots the Instance configuration before changing `autoload_enabled` and restores it before exit. The tested inference path itself remains `/v1`.

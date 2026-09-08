@@ -13,6 +13,37 @@ fail() {
   exit 1
 }
 
+soak="$repo_root/scripts/release-qualification/gpu-soak.sh"
+compat="$repo_root/scripts/release-qualification/compat-gpu.sh"
+grep -F 'instance_durable_ids["$created_slug"]' "$soak" >/dev/null \
+  || fail "gpu-soak must keep durable IDs for worker identity checks"
+grep -F 'local -n _created_instance_slug' "$soak" >/dev/null \
+  || fail "gpu-soak create_instance must assign the slug in the parent shell"
+if grep -E '\$\(create_instance ' "$soak" >/dev/null; then
+  fail "create_instance must not run in command substitution"
+fi
+grep -F 'LLAMARACK_CHAT_MODEL="$instance_slug"' "$compat" >/dev/null \
+  || fail "compat-gpu must export the instance slug as the OpenAI model"
+grep -F '/api/v1/instances/${instance_slug}/start' "$compat" >/dev/null \
+  || fail "compat-gpu must start instances by slug"
+if grep -F '/api/v1/instances/${instance_id}/start' "$compat" >/dev/null; then
+  fail "compat-gpu still starts instances by opaque ID"
+fi
+if grep -F 'qualification-moe-small' "$soak" | grep -F 'data["id"]' >/dev/null; then
+  fail "gpu-soak MoE fixtures still address instances by opaque ID"
+fi
+
+declare -A parent_ids=()
+create_in_parent() {
+  local -n _out="$1"
+  parent_ids["slug-a"]="uuid-a"
+  _out="slug-a"
+}
+parent_slug=""
+create_in_parent parent_slug
+[[ "$parent_slug" == "slug-a" && "${parent_ids[$parent_slug]}" == "uuid-a" ]] \
+  || fail "parent-shell instance registration lost durable IDs"
+
 fake_real_curl="$tmpdir/fake-real-curl"
 cat >"$fake_real_curl" <<'EOF'
 #!/usr/bin/env bash
