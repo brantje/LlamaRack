@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-const baselineVersion = 5
+const baselineVersion = 6
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()
@@ -29,7 +29,7 @@ func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	if version != baselineVersion {
 		t.Fatalf("version=%d want %d", version, baselineVersion)
 	}
-	for _, table := range []string{"users", "oidc_providers", "playground_lifecycle_events"} {
+	for _, table := range []string{"users", "oidc_providers", "playground_lifecycle_events", "benchmark_runs", "benchmark_results"} {
 		if !tableExistsQuick(ctx, db, table) {
 			t.Fatalf("missing table %s", table)
 		}

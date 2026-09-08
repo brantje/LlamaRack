@@ -90,11 +90,25 @@ func TestBenchmarkCreateResolvesInstanceAndAcceptsOnlyWorkload(t *testing.T) {
 	mux := benchmarkTestMux(service, resolver)
 	w := benchmarkRequest(t, mux, http.MethodPost, "/api/v1/instances/coder/benchmarks", map[string]any{
 		"workload": map[string]any{"prompt_tokens": []int{256}, "generation_tokens": []int{32}, "repetitions": 3, "warmup": true},
-		"model_path": "/tmp/evil.gguf", "gpu_devices": []string{"CUDA9"},
 	}, true)
 	if w.Code != http.StatusCreated { t.Fatalf("status=%d body=%s", w.Code, w.Body.String()) }
 	if service.createdID != "instance-uuid" || service.createdWork == nil || service.createdWork.Repetitions != 3 {
 		t.Fatalf("created id=%q workload=%+v", service.createdID, service.createdWork)
+	}
+}
+
+func TestBenchmarkCreateRejectsRuntimeAndFilesystemOverrides(t *testing.T) {
+	service := &fakeBenchmarkManagementService{run: benchmark.Run{ID: "run-1", Status: benchmark.StatusQueued}}
+	resolver := fakeBenchmarkInstanceResolver{bySlug: map[string]instances.Instance{"coder": {ID: "instance-uuid", Slug: "coder"}}}
+	mux := benchmarkTestMux(service, resolver)
+	w := benchmarkRequest(t, mux, http.MethodPost, "/api/v1/instances/coder/benchmarks", map[string]any{
+		"workload": map[string]any{"prompt_tokens": []int{256}, "generation_tokens": []int{32}, "repetitions": 3, "warmup": true},
+		"model_path": "/tmp/evil.gguf",
+		"gpu_devices": []string{"CUDA9"},
+	}, true)
+	if w.Code != http.StatusBadRequest { t.Fatalf("status=%d body=%s", w.Code, w.Body.String()) }
+	if service.createdID != "" || service.createdWork != nil {
+		t.Fatalf("forbidden overrides reached service: id=%q workload=%+v", service.createdID, service.createdWork)
 	}
 }
 

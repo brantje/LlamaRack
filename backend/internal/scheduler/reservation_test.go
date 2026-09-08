@@ -316,7 +316,7 @@ func TestLedgerSkipsSelfAndClaimedCredits(t *testing.T) {
 }
 
 func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
-	if got := adjustSnapshot(hardware.Snapshot{}, nil, nil); len(got.GPUs) != 0 {
+	if got := adjustSnapshot(hardware.Snapshot{}, nil, hostOccupancy{}, nil); len(got.GPUs) != 0 {
 		t.Fatalf("empty snapshot=%+v", got)
 	}
 	if got := reservationsFor(Placement{}, hardware.Snapshot{}, PlacementRequest{RequiredBytes: 1}); got != nil {

@@ -55,7 +55,12 @@ function parseIntegerList(value: string, label: string) {
 function resolvedWorkload(): BenchmarkWorkloadProfile {
   const caps = capabilities.value
   if (!caps) throw new Error('Benchmark capabilities are unavailable.')
-  const workload = structuredClone(caps.workload.default) as BenchmarkWorkloadProfile
+  const defaults = caps.workload.default
+  const workload: BenchmarkWorkloadProfile = {
+    ...defaults,
+    prompt_tokens: [...(defaults.prompt_tokens || [])],
+    generation_tokens: [...(defaults.generation_tokens || [])]
+  }
   for (const field of caps.workload.fields || []) {
     if (field.kind === 'integer-list') (workload as unknown as Record<string, unknown>)[field.key] = parseIntegerList(listValues[field.key] || '', field.label)
     else if (field.kind === 'integer') (workload as unknown as Record<string, unknown>)[field.key] = Number(scalarValues[field.key])
