@@ -170,6 +170,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if spec.Body != bodyNone {
 		body, bodyReadErr, bodyTooLarge = readBoundedRequestBody(r.Body)
 		if spec.Body == bodyJSON && bodyReadErr == nil && !bodyTooLarge {
+			if isManagementPlaygroundRequest(r.Context()) {
+				body = ensurePlaygroundTimings(body)
+			}
 			if looksLikeJSON(body) {
 				parseErr = json.Unmarshal(body, &envelope)
 			} else if len(bytes.TrimSpace(body)) > 0 {

@@ -28,7 +28,7 @@ func TestResourceIdentityMigrationPreservesPublicIdentityAndReferences(t *testin
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
+	if version != 5 {
 		t.Fatalf("version=%d", version)
 	}
 
