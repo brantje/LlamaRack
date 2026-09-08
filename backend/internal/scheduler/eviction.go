@@ -245,7 +245,7 @@ func planFromSelection(selected []Candidate, placement Placement) Plan {
 }
 
 func snapshotWithCandidateCredits(snapshot hardware.Snapshot, selected []Candidate) hardware.Snapshot {
-	return adjustSnapshot(snapshot, nil, creditBytesFromCandidates(selected))
+	return adjustSnapshot(snapshot, nil, hostOccupancy{}, creditBytesFromCandidates(selected))
 }
 
 // ApplyCandidateCredits pretends selected instances have already released
