@@ -15,6 +15,9 @@ const (
 	LeasePending   = "pending"
 	LeaseCommitted = "committed"
 
+	ResourceOwnerInstance  = "instance"
+	ResourceOwnerBenchmark = "benchmark"
+
 	defaultLeaseTTL = 180 * time.Second
 )
 
@@ -23,14 +26,26 @@ type GPUReservation struct {
 	Bytes    int64
 }
 
+type ResourceOwner struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
 type ResourceLease struct {
-	ID         string
-	InstanceID string
-	Placement  Placement
-	GPUs       []GPUReservation
-	HostRAM    int64
-	State      string
-	ExpiresAt  time.Time
+	ID string `json:"id"`
+
+	// Owner is the scheduler identity that owns this reservation. InstanceID is
+	// retained for existing lifecycle callers and is populated only for Instance
+	// owners. Jobs such as benchmarks use their own owner namespace so a run for
+	// an already-loaded Instance cannot replace that Instance's worker lease.
+	Owner      ResourceOwner `json:"owner"`
+	InstanceID string        `json:"instance_id,omitempty"`
+
+	Placement Placement        `json:"placement"`
+	GPUs      []GPUReservation `json:"gpus,omitempty"`
+	HostRAM   int64            `json:"host_ram"`
+	State     string           `json:"state"`
+	ExpiresAt time.Time        `json:"expires_at,omitempty"`
 }
 
 // Credit treats another Instance's reserved/estimated capacity as available to
@@ -47,6 +62,10 @@ type Credit struct {
 }
 
 type AcquireRequest struct {
+	// Owner is the preferred scheduler identity. InstanceID remains the legacy
+	// spelling for Instance lifecycle callers; when Owner is empty it is treated
+	// as ResourceOwner{Kind: "instance", ID: InstanceID}.
+	Owner      ResourceOwner
 	InstanceID string
 	Snapshot   hardware.Snapshot
 	Placement  PlacementRequest
@@ -60,7 +79,7 @@ type Ledger struct {
 	now     func() time.Time
 	newID   func() string
 	leases  map[string]*ResourceLease
-	byInst  map[string]string
+	byOwner map[string]string
 	claimed map[string]string
 }
 
@@ -77,7 +96,7 @@ func NewLedgerWithTTL(ttl time.Duration) *Ledger {
 		now:     time.Now,
 		newID:   newLeaseID,
 		leases:  map[string]*ResourceLease{},
-		byInst:  map[string]string{},
+		byOwner: map[string]string{},
 		claimed: map[string]string{},
 	}
 }
@@ -92,39 +111,53 @@ func (l *Ledger) SetClock(now func() time.Time) {
 }
 
 // Acquire atomically places against the snapshot minus existing leases and,
-// when the placement fits, records a pending lease owned by InstanceID.
+// when the placement fits, records a pending lease owned by the supplied owner.
+// Legacy callers that only set InstanceID continue to own an Instance lease.
 func (l *Ledger) Acquire(req AcquireRequest) (ResourceLease, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweepExpiredLocked()
 
-	instanceID := req.InstanceID
-	if instanceID == "" {
-		return ResourceLease{}, errors.New("lease instance id is required")
+	owner, err := normalizeOwner(req.Owner, req.InstanceID)
+	if err != nil {
+		return ResourceLease{}, err
 	}
-	l.releaseInstanceLocked(instanceID)
+	ownerKey := resourceOwnerKey(owner)
+	l.releaseOwnerLocked(owner)
 
-	usableCredits, creditBytes := l.usableCreditsLocked(instanceID, req.Credits)
-	adjusted := adjustSnapshot(req.Snapshot, l.occupancyLocked(instanceID, usableCredits), creditBytes)
+	requesterInstance := ""
+	credits := req.Credits
+	if owner.Kind == ResourceOwnerInstance {
+		requesterInstance = owner.ID
+	} else {
+		// Credits are eviction semantics and only make sense for normal Instance
+		// starts. Background jobs are deliberately non-preemptive by default.
+		credits = nil
+	}
+	usableCredits, creditBytes := l.usableCreditsLocked(requesterInstance, credits)
+	adjusted := adjustSnapshot(req.Snapshot, l.occupancyLocked(ownerKey, usableCredits), creditBytes)
 	placement, err := PlanPlacement(adjusted, req.Placement)
 	if err != nil {
 		return ResourceLease{}, err
 	}
 	if !placement.Fits {
-		return ResourceLease{Placement: placement}, nil
+		return ResourceLease{Owner: owner, Placement: placement}, nil
 	}
 
 	lease := &ResourceLease{
-		ID:         l.newID(),
-		InstanceID: instanceID,
-		Placement:  placement,
-		GPUs:       reservationsFor(placement, adjusted, req.Placement),
-		HostRAM:    req.HostRAM,
-		State:      LeasePending,
-		ExpiresAt:  l.now().Add(l.ttl),
+		ID:        l.newID(),
+		Owner:     owner,
+		Placement: placement,
+		GPUs:      reservationsFor(placement, adjusted, req.Placement),
+		HostRAM:   req.HostRAM,
+		State:     LeasePending,
+		ExpiresAt: l.now().Add(l.ttl),
+	}
+	if owner.Kind == ResourceOwnerInstance {
+		lease.InstanceID = owner.ID
 	}
 	l.leases[lease.ID] = lease
-	l.byInst[instanceID] = lease.ID
+	l.byOwner[ownerKey] = lease.ID
 	for victim := range usableCredits {
 		l.claimed[victim] = lease.ID
 	}
@@ -146,10 +179,14 @@ func (l *Ledger) Commit(id string) error {
 	return nil
 }
 
-func (l *Ledger) CommitInstance(instanceID string) error {
+func (l *Ledger) CommitOwner(owner ResourceOwner) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	id := l.byInst[instanceID]
+	owner, err := normalizeOwner(owner, "")
+	if err != nil {
+		return err
+	}
+	id := l.byOwner[resourceOwnerKey(owner)]
 	if id == "" {
 		return nil
 	}
@@ -165,16 +202,34 @@ func (l *Ledger) CommitInstance(instanceID string) error {
 	return nil
 }
 
+func (l *Ledger) CommitInstance(instanceID string) error {
+	if strings.TrimSpace(instanceID) == "" {
+		return nil
+	}
+	return l.CommitOwner(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})
+}
+
 func (l *Ledger) Release(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.releaseLocked(id)
 }
 
-func (l *Ledger) ReleaseInstance(instanceID string) {
+func (l *Ledger) ReleaseOwner(owner ResourceOwner) {
+	owner, err := normalizeOwner(owner, "")
+	if err != nil {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.releaseInstanceLocked(instanceID)
+	l.releaseOwnerLocked(owner)
+}
+
+func (l *Ledger) ReleaseInstance(instanceID string) {
+	if strings.TrimSpace(instanceID) == "" {
+		return
+	}
+	l.ReleaseOwner(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})
 }
 
 func (l *Ledger) Get(id string) (ResourceLease, bool) {
@@ -188,11 +243,15 @@ func (l *Ledger) Get(id string) (ResourceLease, bool) {
 	return cloneLease(lease), true
 }
 
-func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
+func (l *Ledger) GetByOwner(owner ResourceOwner) (ResourceLease, bool) {
+	owner, err := normalizeOwner(owner, "")
+	if err != nil {
+		return ResourceLease{}, false
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweepExpiredLocked()
-	id := l.byInst[instanceID]
+	id := l.byOwner[resourceOwnerKey(owner)]
 	if id == "" {
 		return ResourceLease{}, false
 	}
@@ -201,6 +260,13 @@ func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
 		return ResourceLease{}, false
 	}
 	return cloneLease(lease), true
+}
+
+func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
+	if strings.TrimSpace(instanceID) == "" {
+		return ResourceLease{}, false
+	}
+	return l.GetByOwner(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})
 }
 
 func (l *Ledger) Pending() []ResourceLease {
@@ -243,8 +309,8 @@ func (l *Ledger) sweepExpiredLocked() {
 	}
 }
 
-func (l *Ledger) releaseInstanceLocked(instanceID string) {
-	if id := l.byInst[instanceID]; id != "" {
+func (l *Ledger) releaseOwnerLocked(owner ResourceOwner) {
+	if id := l.byOwner[resourceOwnerKey(owner)]; id != "" {
 		l.releaseLocked(id)
 	}
 }
@@ -255,8 +321,9 @@ func (l *Ledger) releaseLocked(id string) {
 		return
 	}
 	delete(l.leases, id)
-	if l.byInst[lease.InstanceID] == id {
-		delete(l.byInst, lease.InstanceID)
+	key := resourceOwnerKey(lease.Owner)
+	if l.byOwner[key] == id {
+		delete(l.byOwner, key)
 	}
 	for victim, owner := range l.claimed {
 		if owner == id {
@@ -301,7 +368,7 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 }
 
 func (l *Ledger) leaseByInstanceLocked(instanceID string) (*ResourceLease, bool) {
-	id := l.byInst[instanceID]
+	id := l.byOwner[resourceOwnerKey(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})]
 	if id == "" {
 		return nil, false
 	}
@@ -317,10 +384,10 @@ type deviceOccupancy struct {
 	committed int64
 }
 
-func (l *Ledger) occupancyLocked(ignoreInstance string, credit map[string]bool) map[string]deviceOccupancy {
+func (l *Ledger) occupancyLocked(ignoreOwner string, credit map[string]bool) map[string]deviceOccupancy {
 	out := map[string]deviceOccupancy{}
 	for _, lease := range l.leases {
-		if lease.InstanceID == ignoreInstance || credit[lease.InstanceID] {
+		if resourceOwnerKey(lease.Owner) == ignoreOwner || (lease.InstanceID != "" && credit[lease.InstanceID]) {
 			continue
 		}
 		for _, gpu := range lease.GPUs {
@@ -410,6 +477,29 @@ func reservationsFor(placement Placement, snapshot hardware.Snapshot, request Pl
 		}
 	}
 	return out
+}
+
+func normalizeOwner(owner ResourceOwner, legacyInstanceID string) (ResourceOwner, error) {
+	owner.Kind = strings.ToLower(strings.TrimSpace(owner.Kind))
+	owner.ID = strings.TrimSpace(owner.ID)
+	legacyInstanceID = strings.TrimSpace(legacyInstanceID)
+	if owner.Kind == "" && owner.ID == "" && legacyInstanceID != "" {
+		owner = ResourceOwner{Kind: ResourceOwnerInstance, ID: legacyInstanceID}
+	}
+	if owner.ID == "" {
+		return ResourceOwner{}, errors.New("resource lease owner id is required")
+	}
+	if owner.Kind != ResourceOwnerInstance && owner.Kind != ResourceOwnerBenchmark {
+		return ResourceOwner{}, errors.New("resource lease owner kind must be instance or benchmark")
+	}
+	if legacyInstanceID != "" && (owner.Kind != ResourceOwnerInstance || owner.ID != legacyInstanceID) {
+		return ResourceOwner{}, errors.New("resource lease owner conflicts with legacy instance id")
+	}
+	return owner, nil
+}
+
+func resourceOwnerKey(owner ResourceOwner) string {
+	return owner.Kind + "\x00" + owner.ID
 }
 
 func cloneLease(lease *ResourceLease) ResourceLease {
