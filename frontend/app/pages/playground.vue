@@ -618,9 +618,11 @@ async function send(options: SendOptions = {}) {
     return
   }
 
-  const regenerateBase = options.regenerate && conversation.value.at(-1)?.role === 'assistant'
-    ? conversation.value.slice(0, -1)
-    : conversation.value
+  let regenerateEnd = conversation.value.length
+  if (options.regenerate) {
+    while (regenerateEnd > 0 && conversation.value[regenerateEnd - 1]?.role === 'assistant') regenerateEnd -= 1
+  }
+  const regenerateBase = options.regenerate ? conversation.value.slice(0, regenerateEnd) : conversation.value
   let body: Record<string, any>
   try {
     body = await requestBodyForSendAsync({
@@ -763,9 +765,15 @@ function formatBytes(value?: number) {
   return `${(Number(value) / 1024 ** 3).toFixed(2)} GiB`
 }
 
-const diagnosticTurnStats = computed(() => diagnostics.value
-  ? playgroundTurnStatsFromDiagnostics(diagnostics.value, selectedModel.value?.context_length)
-  : undefined)
+const diagnosticTurnStats = computed(() => {
+  const currentDiagnostics = diagnostics.value
+  if (!currentDiagnostics) return undefined
+  const requestID = currentDiagnostics.request.request_id
+  const owner = requestID
+    ? conversation.value.find(message => message.role === 'assistant' && message.requestId === requestID)
+    : undefined
+  return playgroundTurnStatsFromDiagnostics(currentDiagnostics, owner?.contextMax)
+})
 const contextUsage = computed(() => {
   const stats = diagnosticTurnStats.value
   if (!stats || !Number.isFinite(stats.contextUsed)) return '—'
