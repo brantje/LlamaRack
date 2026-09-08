@@ -13,6 +13,23 @@ fail() {
   exit 1
 }
 
+soak="$repo_root/scripts/release-qualification/gpu-soak.sh"
+compat="$repo_root/scripts/release-qualification/compat-gpu.sh"
+grep -F 'instance_durable_ids["$created_slug"]' "$soak" >/dev/null \
+  || fail "gpu-soak must keep durable IDs for worker identity checks"
+grep -F 'printf '"'"'%s\n'"'"' "$created_slug"' "$soak" >/dev/null \
+  || fail "gpu-soak create_instance must print the public instance slug"
+grep -F 'LLAMARACK_CHAT_MODEL="$instance_slug"' "$compat" >/dev/null \
+  || fail "compat-gpu must export the instance slug as the OpenAI model"
+grep -F '/api/v1/instances/${instance_slug}/start' "$compat" >/dev/null \
+  || fail "compat-gpu must start instances by slug"
+if grep -F '/api/v1/instances/${instance_id}/start' "$compat" >/dev/null; then
+  fail "compat-gpu still starts instances by opaque ID"
+fi
+if grep -F 'qualification-moe-small' "$soak" | grep -F 'data["id"]' >/dev/null; then
+  fail "gpu-soak MoE fixtures still address instances by opaque ID"
+fi
+
 fake_real_curl="$tmpdir/fake-real-curl"
 cat >"$fake_real_curl" <<'EOF'
 #!/usr/bin/env bash

@@ -230,3 +230,42 @@ func TestModelCreationFirstInstanceBranches(t *testing.T) {
 		t.Fatalf("invalid first instance=%d body=%s", invalidInstance.Code, invalidInstance.Body.String())
 	}
 }
+
+func TestInstanceManagementOpaqueIDRemainsCompatible(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	model := createModel(t, f, cookie)
+	create := doRequest(t, f.server, http.MethodPost, "/api/v1/instances", map[string]any{
+		"model_id": model.ID, "name": "Opaque ID Instance", "slug": "opaque-id-instance",
+	}, cookie)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create instance=%d body=%s", create.Code, create.Body.String())
+	}
+	var created instances.Instance
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID == "" || created.ID == created.Slug || created.Slug != "opaque-id-instance" {
+		t.Fatalf("created=%+v", created)
+	}
+
+	bySlug := doRequest(t, f.server, http.MethodGet, "/api/v1/instances/"+created.Slug, nil, cookie)
+	if bySlug.Code != http.StatusOK || !strings.Contains(bySlug.Body.String(), created.ID) {
+		t.Fatalf("GET by slug=%d body=%s", bySlug.Code, bySlug.Body.String())
+	}
+	byID := doRequest(t, f.server, http.MethodGet, "/api/v1/instances/"+created.ID, nil, cookie)
+	if byID.Code != http.StatusOK || !strings.Contains(byID.Body.String(), `"opaque-id-instance"`) {
+		t.Fatalf("legacy opaque-ID route=%d body=%s", byID.Code, byID.Body.String())
+	}
+	runtime := doRequest(t, f.server, http.MethodGet, "/api/v1/instances/"+created.ID+"/runtime", nil, cookie)
+	if runtime.Code != http.StatusOK || !strings.Contains(runtime.Body.String(), "UNLOADED") {
+		t.Fatalf("runtime by opaque ID=%d body=%s", runtime.Code, runtime.Body.String())
+	}
+	started := doRequest(t, f.server, http.MethodPost, "/api/v1/instances/"+created.ID+"/start", nil, cookie)
+	if started.Code == http.StatusNotFound {
+		t.Fatalf("opaque-ID start was not found: body=%s", started.Body.String())
+	}
+	if started.Code != http.StatusServiceUnavailable {
+		t.Fatalf("opaque-ID start=%d body=%s", started.Code, started.Body.String())
+	}
+}

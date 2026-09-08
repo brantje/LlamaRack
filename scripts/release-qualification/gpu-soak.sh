@@ -289,7 +289,8 @@ wait_process_gone() {
 }
 
 worker_count() {
-  local instance_id="$1"
+  local instance_id
+  instance_id="$(durable_id "$1")"
   # The managed worker runs as the image's USER (1000). Linux ptrace/procfs
   # access rules may deny /proc/<pid>/environ to a root docker-exec process
   # without CAP_SYS_PTRACE, while the same-UID runtime user can read its child.
@@ -311,7 +312,8 @@ assert_single_worker() {
 }
 
 assert_worker_identity() {
-  local pid="$1" instance_id="$2"
+  local pid="$1" instance_id
+  instance_id="$(durable_id "$2")"
   docker exec "$container_name" sh -c '
     pid="$1"; instance="$2"
     (tr "\000" "\n" <"/proc/${pid}/environ") 2>/dev/null \
@@ -361,17 +363,35 @@ cancel_stream() {
   sleep 0.5
 }
 
+# Management URLs and OpenAI `model` values use instance slugs. Durable UUIDs
+# stay in this map for worker-identity checks that cannot call the API (for
+# example after a manager crash).
+declare -A instance_durable_ids=()
+
 create_model() {
   local name="$1" path="$2" context="${3:-4096}"
   auth_request POST /api/v1/models "{\"name\":\"$name\",\"gguf_path\":\"$path\",\"context_length\":${context}}" \
     | json_value 'data["model"]["id"]'
 }
 
+durable_id() {
+  local slug="$1" id="${instance_durable_ids[$1]:-}"
+  [[ -n "$id" ]] || { echo "missing durable instance id for slug $slug" >&2; return 1; }
+  printf '%s\n' "$id"
+}
+
 create_instance() {
-  local model_id="$1" name="$2" slug="$3" body="$4"
-  auth_request POST /api/v1/instances \
-    "{\"model_id\":\"$model_id\",\"name\":\"$name\",\"slug\":\"$slug\"${body}}" \
-    | json_value 'data["id"]'
+  local model_id="$1" name="$2" slug="$3" body="$4" response id created_slug
+  response="$(auth_request POST /api/v1/instances \
+    "{\"model_id\":\"$model_id\",\"name\":\"$name\",\"slug\":\"$slug\"${body}}")"
+  id="$(printf '%s' "$response" | json_value 'data["id"]')"
+  created_slug="$(printf '%s' "$response" | json_value 'data["slug"]')"
+  [[ -n "$id" && -n "$created_slug" ]] || {
+    echo "create instance did not return id and slug" >&2
+    return 1
+  }
+  instance_durable_ids["$created_slug"]="$id"
+  printf '%s\n' "$created_slug"
 }
 
 model_total_bytes() {
@@ -399,7 +419,8 @@ smoke_model() {
 
 verify_moe_launch() {
   local instance_id="$1" expected_devices="$2" args_file="$3" environ_file="$4"
-  local worker_pid
+  local worker_pid durable
+  durable="$(durable_id "$instance_id")"
   worker_pid="$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["pid"]')"
   assert_worker_identity "$worker_pid" "$instance_id"
   docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${worker_pid}/cmdline" >"$args_file"
@@ -416,12 +437,13 @@ assert index + 1 < len(args), args
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
   docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${worker_pid}/environ) 2>/dev/null" >"$environ_file"
-  grep -qx "LLAMARACK_INSTANCE_ID=${instance_id}" "$environ_file"
+  grep -qx "LLAMARACK_INSTANCE_ID=${durable}" "$environ_file"
 }
 
 verify_dense_multi_launch() {
   local instance_id="$1" expected_devices="$2" args_file="$3" environ_file="$4"
-  local worker_pid
+  local worker_pid durable
+  durable="$(durable_id "$instance_id")"
   worker_pid="$(auth_request GET "/api/v1/instances/${instance_id}/runtime" | json_value 'data["pid"]')"
   assert_worker_identity "$worker_pid" "$instance_id"
   docker exec -u 0 "$container_name" sh -c "tr '\\000' '\\n' </proc/${worker_pid}/cmdline" >"$args_file"
@@ -434,7 +456,7 @@ index = args.index("--device")
 assert args[index + 1] == expected_devices, (args, expected_devices)
 PY
   docker exec "$container_name" sh -c "(tr '\\000' '\\n' </proc/${worker_pid}/environ) 2>/dev/null" >"$environ_file"
-  grep -qx "LLAMARACK_INSTANCE_ID=${instance_id}" "$environ_file"
+  grep -qx "LLAMARACK_INSTANCE_ID=${durable}" "$environ_file"
 }
 
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -773,9 +795,7 @@ fi
 # Small MoE: always exercise n-cpu-moe on the first GPU.
 log_step "MoE small n-cpu-moe"
 moe_small_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
-moe_small_instance_id="$(auth_request POST /api/v1/instances \
-  "{\"model_id\":\"$moe_small_model_id\",\"name\":\"Qualification MoE Small\",\"slug\":\"qualification-moe-small\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
-  | json_value 'data["id"]')"
+moe_small_instance_id="$(create_instance "$moe_small_model_id" 'Qualification MoE Small' 'qualification-moe-small' ",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_small_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}")"
 auth_request POST "/api/v1/instances/${moe_small_instance_id}/start" >/dev/null
 wait_state "$moe_small_instance_id" READY
 assert_single_worker "$moe_small_instance_id"
@@ -795,9 +815,7 @@ else
   moe_large_gpu_json="$(printf '%s\n' "${gpu_ids[0]}" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))')"
   expected_moe_large_devices="${gpu_ids[0]}"
 fi
-moe_large_instance_id="$(auth_request POST /api/v1/instances \
-  "{\"model_id\":\"$moe_large_model_id\",\"name\":\"Qualification MoE Large\",\"slug\":\"qualification-moe-large\",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_large_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}}" \
-  | json_value 'data["id"]')"
+moe_large_instance_id="$(create_instance "$moe_large_model_id" 'Qualification MoE Large' 'qualification-moe-large' ",\"gpu_mode\":\"manual\",\"gpu_devices\":$moe_large_gpu_json,\"options\":{\"n-cpu-moe\":\"1\"}")"
 auth_request POST "/api/v1/instances/${moe_large_instance_id}/start" >/dev/null
 wait_state "$moe_large_instance_id" READY
 assert_single_worker "$moe_large_instance_id"
