@@ -258,7 +258,9 @@ function parameterBody(messages: ThreadMessage[] = conversation.value) {
     model: selectedInstanceSlug.value,
     messages: [
       ...(parameters.systemPrompt.trim() ? [{ role: 'system', content: parameters.systemPrompt.trim() }] : []),
-      ...messages.map(message => ({ role: message.role, content: threadPartsToApiContent(message.parts) }))
+      ...messages
+        .filter((message, index, all) => message.role !== 'assistant' || all[index + 1]?.role !== 'assistant')
+        .map(message => ({ role: message.role, content: threadPartsToApiContent(message.parts) }))
     ],
     temperature: parameters.temperature,
     top_p: parameters.topP,
