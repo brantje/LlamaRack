@@ -166,27 +166,13 @@ func testBenchmarkService(t *testing.T, executor benchmarkExecutor) (*Service, *
 		t.Fatal(err)
 	}
 	inst := &benchmarkTestInstanceSource{item: instances.Instance{ID: "instance-1", Slug: "coder", ModelID: "model-1", Name: "Coder", GPUMode: "auto"}}
-	model := &benchmarkTestModelSource{
-		item: models.Model{ID: "model-1", Slug: "model", Name: "Model", GGUFPath: "model.gguf", TotalBytes: 11, Quantization: "Q4_K_M"},
-		root: root,
-		inspection: models.GGUFInspection{ID: "model.gguf", Name: "model.gguf", ModelBytes: 11, ShardCount: 1, ExpectedShards: 1, Complete: true, Files: []models.GGUFArtifactFile{{Path: "model.gguf", Size: 11}}},
-	}
+	model := &benchmarkTestModelSource{item: models.Model{ID: "model-1", Slug: "model", Name: "Model", GGUFPath: "model.gguf", TotalBytes: 11, Quantization: "Q4_K_M"}, root: root, inspection: models.GGUFInspection{ID: "model.gguf", Name: "model.gguf", ModelBytes: 11, ShardCount: 1, ExpectedShards: 1, Complete: true, Files: []models.GGUFArtifactFile{{Path: "model.gguf", Size: 11}}}}
 	cfg := &benchmarkTestConfigSource{effective: llamaconfig.Effective{Values: map[string]string{"n-gpu-layers": "0"}, Sources: map[string]string{"n-gpu-layers": "instance"}}}
 	store := newBenchmarkMemoryStore()
 	ledger := scheduler.NewLedger()
-	s := &Service{
-		root: context.Background(), store: store, instances: inst, models: model, config: cfg,
-		hardware: benchmarkTestHardware{snapshot: hardware.Snapshot{RAMTotalBytes: 2 << 30, RAMAvailableBytes: 2 << 30}},
-		reservations: ledger, executor: executor, binaryPath: "/app/llama-bench",
-		discoverCapabilities: func(context.Context, string) (Capabilities, error) {
-			return testCapabilities(llamacpp.Option{Key: "n-gpu-layers", Kind: "integer"}), nil
-		},
-		readMetadata: func(string) (recommendations.Metadata, error) { return recommendations.Metadata{}, nil },
-		buildIdentity: func() buildinfo.Identity {
-			return buildinfo.Identity{Version: "test", Commit: "abc", Variant: "cpu"}
-		},
-		newID: func() (string, error) { return "run-1", nil }, now: time.Now, active: map[string]context.CancelFunc{},
-	}
+	s := &Service{root: context.Background(), store: store, instances: inst, models: model, config: cfg, hardware: benchmarkTestHardware{snapshot: hardware.Snapshot{RAMTotalBytes: 2 << 30, RAMAvailableBytes: 2 << 30}}, reservations: ledger, executor: executor, binaryPath: "/app/llama-bench", discoverCapabilities: func(context.Context, string) (Capabilities, error) {
+		return testCapabilities(llamacpp.Option{Key: "n-gpu-layers", Kind: "integer"}), nil
+	}, readMetadata: func(string) (recommendations.Metadata, error) { return recommendations.Metadata{}, nil }, buildIdentity: func() buildinfo.Identity { return buildinfo.Identity{Version: "test", Commit: "abc", Variant: "cpu"} }, newID: func() (string, error) { return "run-1", nil }, now: time.Now, active: map[string]context.CancelFunc{}}
 	return s, store, ledger, inst, cfg
 }
 
