@@ -16,11 +16,20 @@ const mocks = vi.hoisted(() => ({
 
 mocks.manager = {
   apiBase: { value: 'http://manager.test:8888' },
-  instances: { value: [{
-    id: '550e8400-e29b-41d4-a716-446655440000', slug: 'coder', model_id: 'model-1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false,
-    priority: 'normal', eviction_enabled: true, idle_unload_seconds: 300, gpu_mode: 'auto'
-  }] },
-  models: { value: [{ id: 'model-1', name: 'Qwen Coder', gguf_path: 'qwen.gguf', total_bytes: 1, context_length: 32768 }] },
+  instances: { value: [
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000', slug: 'coder', model_id: 'model-1', name: 'Coder', enabled: true, autoload_enabled: true, always_on: false,
+      priority: 'normal', eviction_enabled: true, idle_unload_seconds: 300, gpu_mode: 'auto'
+    },
+    {
+      id: '550e8400-e29b-41d4-a716-446655440001', slug: 'other', model_id: 'model-2', name: 'Other', enabled: true, autoload_enabled: true, always_on: false,
+      priority: 'normal', eviction_enabled: true, idle_unload_seconds: 300, gpu_mode: 'auto'
+    }
+  ] },
+  models: { value: [
+    { id: 'model-1', name: 'Qwen Coder', gguf_path: 'qwen.gguf', total_bytes: 1, context_length: 32768 },
+    { id: 'model-2', name: 'Other Model', gguf_path: 'other.gguf', total_bytes: 1, context_length: 4096 }
+  ] },
   runtimeForInstance: vi.fn(() => mocks.runtime),
   telemetryForInstance: vi.fn(() => undefined),
   instanceState: vi.fn(() => 'READY'),
@@ -66,7 +75,7 @@ beforeEach(() => {
 })
 
 describe('Playground CodeRabbit regressions', () => {
-  it('keeps regenerated alternatives visible but excludes superseded replies from later model context', async () => {
+  it('keeps regenerated alternatives visible but excludes the full trailing alternative group from model context', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       const requestID = path.split('/').at(-1) || 'req-1'
       const turn = Number(requestID.split('-').at(-1)) || 1
@@ -89,19 +98,50 @@ describe('Playground CodeRabbit regressions', () => {
     await send(wrapper, 'original prompt')
     await wrapper.get('[data-testid="playground-regenerate"]').trigger('click')
     await flushPromises()
+    await wrapper.get('[data-testid="playground-regenerate"]').trigger('click')
+    await flushPromises()
     await send(wrapper, 'follow up')
 
-    expect(publicFetch).toHaveBeenCalledTimes(3)
-    const thirdBody = JSON.parse(String(publicFetch.mock.calls[2]![1].body))
-    expect(thirdBody.messages).toEqual([
+    expect(publicFetch).toHaveBeenCalledTimes(4)
+    const secondRegenerateBody = JSON.parse(String(publicFetch.mock.calls[2]![1].body))
+    expect(secondRegenerateBody.messages).toEqual([
+      { role: 'user', content: 'original prompt' }
+    ])
+
+    const followUpBody = JSON.parse(String(publicFetch.mock.calls[3]![1].body))
+    expect(followUpBody.messages).toEqual([
       { role: 'user', content: 'original prompt' },
-      { role: 'assistant', content: 'reply 2' },
+      { role: 'assistant', content: 'reply 3' },
       { role: 'user', content: 'follow up' }
     ])
 
     const assistantTexts = wrapper.findAll('[data-testid="playground-assistant-text"]').map(item => item.text())
-    expect(assistantTexts).toEqual(expect.arrayContaining(['reply 1', 'reply 2', 'reply 3']))
-    expect(wrapper.findAll('[data-testid="playground-turn-stats-summary"]').length).toBe(3)
+    expect(assistantTexts).toEqual(expect.arrayContaining(['reply 1', 'reply 2', 'reply 3', 'reply 4']))
+    expect(wrapper.findAll('[data-testid="playground-turn-stats-summary"]').length).toBe(4)
+    wrapper.unmount()
+  })
+
+  it('keeps diagnostics context usage bound to the assistant turn after switching instances', async () => {
+    mocks.request.mockImplementation(async (path: string) => diagnostic(path.split('/').at(-1) || 'req-1', 4))
+    const publicFetch = vi.fn(async () => new Response('data: {"choices":[{"delta":{"content":"reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'X-LlamaRack-Request-ID': 'req-1' }
+    }))
+    vi.stubGlobal('fetch', publicFetch)
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    await send(wrapper, 'original prompt')
+
+    expect(wrapper.get('[data-testid="playground-diagnostics"]').text()).toContain('16 / 32768')
+    const instanceButtons = wrapper.findAll('[data-testid="playground-instance-list"] button')
+    expect(instanceButtons).toHaveLength(2)
+    await instanceButtons[1]!.trigger('click')
+    await flushPromises()
+
+    const diagnosticsText = wrapper.get('[data-testid="playground-diagnostics"]').text()
+    expect(diagnosticsText).toContain('16 / 32768')
+    expect(diagnosticsText).not.toContain('16 / 4096')
     wrapper.unmount()
   })
 
