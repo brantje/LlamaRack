@@ -20,15 +20,33 @@ import {
   parseSSEDataLine,
   playgroundEmptyContentFallback
 } from '~/utils/playgroundChatStream'
+import {
+  type InferenceTurnStats,
+  type PlaygroundTurnStats,
+  livePlaygroundTurnStats,
+  mergePlaygroundTurnStats,
+  parsePlaygroundSSETurnStats,
+  playgroundTurnStatsFromDiagnostics,
+  playgroundTurnStatsFromResponsePayload
+} from '~/utils/playgroundTurnStats'
 import { isPartStreaming } from '@nuxt/ui/utils/ai'
 import { newPlaygroundSessionID } from '~/utils/playgroundSession'
 
 type Role = 'system' | 'user' | 'assistant'
 type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
-type MessageStats = { prompt: number; completion: number; rate?: number; ttft?: number }
 type FileChatPart = { type: 'file', url: string, mediaType: string, filename: string }
 type ChatPart = { type: 'text' | 'reasoning', text: string, state?: 'streaming' } | FileChatPart
-type ThreadMessage = { id: string, role: Role, parts: ChatPart[], stats?: MessageStats, finishReason?: string }
+type ThreadMessage = {
+  id: string
+  role: Role
+  parts: ChatPart[]
+  requestId?: string
+  stats?: PlaygroundTurnStats
+  finishReason?: string
+  contextMax?: number
+  startedAtMs?: number
+  firstTokenAtMs?: number
+}
 type PendingAttachment = {
   id: string
   file: File
@@ -47,12 +65,16 @@ type RequestRecord = {
   generated_tokens: number
   total_tokens: number
   tokens_per_second?: number
+  prompt_tokens_per_second?: number
+  generation_tokens_per_second?: number
+  queue_duration_ms?: number
   load_duration_ms: number
   autoloaded: boolean
   error?: string
 }
 type PlaygroundDiagnostics = {
   request: RequestRecord
+  inference_stats?: InferenceTurnStats
   state_trace: string[] | null
   evictions_triggered: string[] | null
 }
@@ -68,11 +90,15 @@ type Parameters = {
   stream: boolean
   systemPrompt: string
 }
+type SendOptions = {
+  allowEmpty?: boolean
+  regenerate?: boolean
+}
 
 const manager = useManager()
 const route = useRoute()
 const selectedInstanceSlug = ref('')
-const activePanel = ref<'parameters' | 'request' | 'response'>('parameters')
+const activePanel = ref<'parameters' | 'request' | 'response' | 'session'>('parameters')
 const composer = ref('')
 const attachments = ref<PendingAttachment[]>([])
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -97,6 +123,7 @@ const confirmation = ref<{ request: (options: {
   confirmTone?: 'default' | 'destructive'
 }) => Promise<boolean> } | null>(null)
 let controller: AbortController | null = null
+let liveStatsTimer: ReturnType<typeof setInterval> | null = null
 
 const parameters = reactive<Parameters>({
   temperature: 0.7,
@@ -151,14 +178,12 @@ const chatMessages = computed(() => conversation.value.map(message => ({
     ? message.parts.map(part => ({ ...part }))
     : [{ type: 'text' as const, text: '', state: inFlight.value && message.role === 'assistant' ? 'streaming' as const : undefined }]
 })))
-
 const panelItems = [
   { label: 'Parameters', value: 'parameters', slot: 'parameters' },
   { label: 'Request', value: 'request', slot: 'request' },
   { label: 'Response', value: 'response', slot: 'response' },
-  { label: 'Session', value: 'session', slot: 'session' },
+  { label: 'Session', value: 'session', slot: 'session' }
 ]
-
 const chatPromptUi = {
   root: 'relative flex w-full flex-col items-stretch gap-2 rounded-none bg-[var(--color-surface)] px-2.5 py-2 ring ring-[var(--color-divider)] has-[textarea:focus-visible]:ring-[var(--color-divider)] has-[textarea:focus-visible]:outline-none'
 }
@@ -173,9 +198,7 @@ function resetChatSession() {
   chatSessionID.value = reuseSession.value ? newPlaygroundSessionID() : ''
 }
 
-watch(reuseSession, () => {
-  resetChatSession()
-})
+watch(reuseSession, resetChatSession)
 
 function runtimeVariant(state: string) {
   if (state === 'READY') return 'ready' as const
@@ -204,7 +227,6 @@ function messageText(message: Pick<ThreadMessage, 'parts'>) {
 }
 
 let messageCounter = 0
-
 function nextMessageId(prefix: string) {
   messageCounter += 1
   return `${prefix}-${messageCounter}`
@@ -244,7 +266,8 @@ function parameterBody(messages: ThreadMessage[] = conversation.value) {
     top_k: parameters.topK,
     min_p: parameters.minP,
     repeat_penalty: parameters.repeatPenalty,
-    stream: parameters.stream
+    stream: parameters.stream,
+    timings_per_token: true
   }
   const seed = Number(parameters.seed)
   if (parameters.seed.trim() !== '' && Number.isFinite(seed)) body.seed = seed
@@ -277,12 +300,12 @@ function adoptBody(body: Record<string, any>) {
   parameters.systemPrompt = system ? messageText({ parts: system.parts }) : ''
   conversation.value = messages
     .filter(item => item.role !== 'system')
-    .map((item, index) => toThreadMessage(item.role, item.parts, `${item.role}-${index}`))
+    .map(item => toThreadMessage(item.role, item.parts))
 }
 
-function requestBodyForSend() {
+function requestBodyForSend(messages: ThreadMessage[] = conversation.value, useRaw = rawDirty.value) {
   let body: Record<string, any>
-  if (rawDirty.value) {
+  if (useRaw) {
     try {
       body = JSON.parse(rawRequest.value)
     } catch {
@@ -290,39 +313,33 @@ function requestBodyForSend() {
     }
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Request JSON must be an object.')
   } else {
-    body = parameterBody() as Record<string, any>
+    body = parameterBody(messages) as Record<string, any>
   }
-
   return body
 }
 
-async function requestBodyForSendAsync() {
-  const body = requestBodyForSend()
+async function requestBodyForSendAsync(options: { messages?: ThreadMessage[], useRaw?: boolean, preserveConversation?: boolean } = {}) {
+  const body = requestBodyForSend(options.messages, options.useRaw)
   let encodedAttachments: Array<{ dataUrl: string, mediaType: string }>
   try {
-    encodedAttachments = await Promise.all(
-      attachments.value.map(async attachment => ({
-        dataUrl: await readFileAsDataUrl(attachment.file),
-        mediaType: attachment.mediaType
-      }))
-    )
+    encodedAttachments = await Promise.all(attachments.value.map(async attachment => ({
+      dataUrl: await readFileAsDataUrl(attachment.file),
+      mediaType: attachment.mediaType
+    })))
   } catch {
     throw new Error('Unable to read one or more attachments.')
   }
 
   if (composer.value.trim() || encodedAttachments.length) {
     const messages = Array.isArray(body.messages) ? [...body.messages] : []
-    messages.push({
-      role: 'user',
-      content: buildApiMessageContent(composer.value, encodedAttachments)
-    })
+    messages.push({ role: 'user', content: buildApiMessageContent(composer.value, encodedAttachments) })
     body.messages = messages
   }
 
   const target = String(body.model || '').trim()
   if (!target) body.model = selectedInstanceSlug.value
   else if (!manager.instances.value.some(item => item.slug === target)) throw new Error(`Unknown Instance “${target}”.`)
-  adoptBody(body)
+  if (!options.preserveConversation) adoptBody(body)
   rawDirty.value = false
   rawRequest.value = JSON.stringify(body, null, 2)
   return body
@@ -361,23 +378,19 @@ async function copyText(text: string, label: string) {
 }
 
 function revokeAttachmentPreview(attachment: PendingAttachment) {
-  if (!attachment.previewUrl) return
-  URL.revokeObjectURL(attachment.previewUrl)
+  if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl)
 }
-
 function clearAttachments() {
   for (const attachment of attachments.value) revokeAttachmentPreview(attachment)
   attachments.value = []
   if (fileInputRef.value) fileInputRef.value.value = ''
 }
-
 function removeAttachment(id: string) {
   const index = attachments.value.findIndex(attachment => attachment.id === id)
   if (index < 0) return
   const [removed] = attachments.value.splice(index, 1)
   if (removed) revokeAttachmentPreview(removed)
 }
-
 async function onAttachmentInput(event: Event) {
   error.value = ''
   const input = event.target as HTMLInputElement
@@ -396,25 +409,32 @@ async function onAttachmentInput(event: Event) {
       error.value = `Playground supports up to ${PLAYGROUND_MAX_ATTACHMENTS} images per message.`
       break
     }
-    attachments.value.push({
-      id: nextMessageId('attachment'),
-      file,
-      previewUrl: safePreviewUrl(file),
-      mediaType: file.type,
-      filename: file.name
-    })
+    attachments.value.push({ id: nextMessageId('attachment'), file, previewUrl: safePreviewUrl(file), mediaType: file.type, filename: file.name })
   }
 }
-
 function safePreviewUrl(file: File) {
-  try {
-    return URL.createObjectURL(file)
-  } catch {
-    return ''
-  }
+  try { return URL.createObjectURL(file) } catch { return '' }
+}
+
+function clearLiveStatsTimer() {
+  if (liveStatsTimer !== null) clearInterval(liveStatsTimer)
+  liveStatsTimer = null
+}
+function updateLiveStats(messageID: string, now = Date.now()) {
+  const index = conversation.value.findIndex(item => item.id === messageID)
+  const message = conversation.value[index]
+  if (!message || message.role !== 'assistant' || message.startedAtMs === undefined) return
+  const live = livePlaygroundTurnStats(message.startedAtMs, message.firstTokenAtMs, now)
+  replaceAssistantMessage(index, { ...message, stats: mergePlaygroundTurnStats(message.stats, live) })
+}
+function startLiveStats(messageID: string) {
+  clearLiveStatsTimer()
+  updateLiveStats(messageID)
+  liveStatsTimer = setInterval(() => updateLiveStats(messageID), 250)
 }
 
 function clearConversation() {
+  clearLiveStatsTimer()
   conversation.value = []
   composer.value = ''
   clearAttachments()
@@ -428,7 +448,6 @@ function clearConversation() {
   resetChatSession()
   syncRawRequest()
 }
-
 async function requestClearConversation() {
   const confirmed = await confirmation.value?.request({
     title: 'Clear chat',
@@ -444,11 +463,17 @@ async function requestClearConversation() {
 function replaceAssistantMessage(index: number, message: ThreadMessage) {
   conversation.value = [...conversation.value.slice(0, index), message, ...conversation.value.slice(index + 1)]
 }
-
+function currentAssistantIndex() {
+  for (let index = conversation.value.length - 1; index >= 0; index--) {
+    if (conversation.value[index]?.role === 'assistant') return index
+  }
+  return -1
+}
 function appendAssistantPart(type: 'text' | 'reasoning', content: string) {
-  const index = conversation.value.length - 1
+  if (!content) return
+  const index = currentAssistantIndex()
   const current = conversation.value[index]
-  if (current?.role !== 'assistant' || current.stats) return
+  if (!current || current.role !== 'assistant') return
   const parts = current.parts.map(part => ({ ...part }))
   const streamingMatch = [...parts].reverse().find(part => (part.type === 'text' || part.type === 'reasoning') && part.type === type && part.state === 'streaming')
   const emptyMatch = parts.find(part => (part.type === 'text' || part.type === 'reasoning') && part.type === type && !part.text)
@@ -459,20 +484,28 @@ function appendAssistantPart(type: 'text' | 'reasoning', content: string) {
   } else {
     parts.push({ type, text: content, state: 'streaming' })
   }
-  replaceAssistantMessage(index, { ...current, parts })
+  const firstTokenAtMs = current.firstTokenAtMs ?? Date.now()
+  const next = { ...current, parts, firstTokenAtMs }
+  if (next.startedAtMs !== undefined) next.stats = mergePlaygroundTurnStats(next.stats, livePlaygroundTurnStats(next.startedAtMs, firstTokenAtMs))
+  replaceAssistantMessage(index, next)
 }
-
 function setAssistantFinishReason(reason: string) {
-  const index = conversation.value.length - 1
+  const index = currentAssistantIndex()
   const current = conversation.value[index]
-  if (current?.role !== 'assistant' || current.stats) return
-  replaceAssistantMessage(index, { ...current, finishReason: reason })
+  if (!current || current.role !== 'assistant') return
+  replaceAssistantMessage(index, { ...current, finishReason: reason, stats: mergePlaygroundTurnStats(current.stats, { finishReason: reason }) })
 }
-
-function finalizeStreamingParts() {
-  const index = conversation.value.length - 1
+function mergeCurrentAssistantStats(stats?: PlaygroundTurnStats) {
+  if (!stats) return
+  const index = currentAssistantIndex()
   const current = conversation.value[index]
-  if (current?.role !== 'assistant') return
+  if (!current || current.role !== 'assistant') return
+  replaceAssistantMessage(index, { ...current, stats: mergePlaygroundTurnStats(current.stats, stats) })
+}
+function finalizeStreamingParts() {
+  const index = currentAssistantIndex()
+  const current = conversation.value[index]
+  if (!current || current.role !== 'assistant') return
   const parts = current.parts
     .map(part => {
       if ((part.type === 'text' || part.type === 'reasoning') && part.state === 'streaming') {
@@ -484,29 +517,25 @@ function finalizeStreamingParts() {
     })
     .filter(part => part.type === 'file' || Boolean(part.text))
   if (!parts.length && phase.value !== 'completed') {
-    conversation.value = conversation.value.slice(0, index)
+    conversation.value = conversation.value.filter((_, itemIndex) => itemIndex !== index)
     return
   }
   replaceAssistantMessage(index, { ...current, parts })
 }
-
 function applyChatDelta(delta: ChatDelta) {
   if (delta.reasoning) appendAssistantPart('reasoning', delta.reasoning)
   if (delta.text) appendAssistantPart('text', delta.text)
   if (delta.finishReason) setAssistantFinishReason(delta.finishReason)
 }
-
 function consumeChoicePayload(choice: unknown) {
   applyChatDelta(extractChatDelta(choice))
 }
-
-function consumeSSELine(line: string) {
+function consumeSSELine(line: string, contextMax?: number) {
+  mergeCurrentAssistantStats(parsePlaygroundSSETurnStats(line, contextMax))
   const delta = parseSSEDataLine(line)
-  if (!delta) return
-  applyChatDelta(delta)
+  if (delta) applyChatDelta(delta)
 }
-
-async function readStreamingResponse(response: Response) {
+async function readStreamingResponse(response: Response, contextMax?: number) {
   if (!response.body) {
     rawResponse.value = await response.text()
     return
@@ -522,14 +551,13 @@ async function readStreamingResponse(response: Response) {
     pending += chunk
     const lines = pending.split(/\r?\n/)
     pending = lines.pop() || ''
-    for (const line of lines) consumeSSELine(line)
+    for (const line of lines) consumeSSELine(line, contextMax)
     await nextTick()
   }
   pending += decoder.decode()
-  if (pending) consumeSSELine(pending)
+  if (pending) consumeSSELine(pending, contextMax)
   await nextTick()
 }
-
 function responseErrorMessage(response: Response, body: string) {
   try {
     const parsed = JSON.parse(body)
@@ -544,16 +572,13 @@ async function loadDiagnostics(requestID: string) {
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const result = await manager.request<PlaygroundDiagnostics>(`/api/v1/observability/playground/${encodeURIComponent(requestID)}`)
-      diagnostics.value = result
-      const last = [...conversation.value].reverse().find(item => item.role === 'assistant')
-      if (last) {
-        last.stats = {
-          prompt: result.request.prompt_tokens || 0,
-          completion: result.request.generated_tokens || 0,
-          rate: result.request.tokens_per_second,
-          ttft: result.request.ttft_ms
-        }
-        conversation.value = [...conversation.value]
+      const index = conversation.value.findIndex(item => item.requestId === requestID)
+      const message = conversation.value[index]
+      if (message?.role === 'assistant') {
+        const finalStats = playgroundTurnStatsFromDiagnostics(result, message.contextMax, message.finishReason)
+        replaceAssistantMessage(index, { ...message, finishReason: finalStats.finishReason || message.finishReason, stats: mergePlaygroundTurnStats(message.stats, finalStats) })
+        const latestAssistantIndex = [...conversation.value].map((item, itemIndex) => ({ item, itemIndex })).reverse().find(entry => entry.item.role === 'assistant')?.itemIndex
+        if (latestAssistantIndex === index) diagnostics.value = result
       }
       return
     } catch (value) {
@@ -564,7 +589,7 @@ async function loadDiagnostics(requestID: string) {
   error.value ||= lastError?.data?.error || lastError?.message || 'Request completed, but diagnostics could not be loaded.'
 }
 
-async function send(options: { allowEmpty?: boolean } = {}) {
+async function send(options: SendOptions = {}) {
   if (inFlight.value) return
   if (!options.allowEmpty && !hasComposerPayload.value && !rawDirty.value) return
   inFlight.value = true
@@ -582,9 +607,16 @@ async function send(options: { allowEmpty?: boolean } = {}) {
     return
   }
 
+  const regenerateBase = options.regenerate && conversation.value.at(-1)?.role === 'assistant'
+    ? conversation.value.slice(0, -1)
+    : conversation.value
   let body: Record<string, any>
   try {
-    body = await requestBodyForSendAsync()
+    body = await requestBodyForSendAsync({
+      messages: regenerateBase,
+      useRaw: options.regenerate ? false : rawDirty.value,
+      preserveConversation: Boolean(options.regenerate)
+    })
   } catch (value: any) {
     error.value = value?.message || 'Unable to build request.'
     inFlight.value = false
@@ -598,8 +630,17 @@ async function send(options: { allowEmpty?: boolean } = {}) {
     return
   }
   selectedInstanceSlug.value = target.slug
-
-  conversation.value.push(toThreadMessage('assistant', [{ type: 'text', text: '', state: 'streaming' }], `assistant-${conversation.value.length}`))
+  const contextMax = manager.models.value.find(model => model.id === target.model_id)?.context_length
+  const assistantID = nextMessageId('assistant')
+  const startedAtMs = Date.now()
+  conversation.value.push({
+    id: assistantID,
+    role: 'assistant',
+    parts: [{ type: 'text', text: '', state: 'streaming' }],
+    contextMax: Number.isFinite(contextMax) ? Number(contextMax) : undefined,
+    startedAtMs
+  })
+  startLiveStats(assistantID)
   composer.value = ''
   clearAttachments()
   rawResponse.value = ''
@@ -622,6 +663,11 @@ async function send(options: { allowEmpty?: boolean } = {}) {
     })
     responseHeaders.value = Array.from(response.headers.entries())
     requestID = response.headers.get('X-LlamaRack-Request-ID') || ''
+    if (requestID) {
+      const index = conversation.value.findIndex(item => item.id === assistantID)
+      const message = conversation.value[index]
+      if (message) replaceAssistantMessage(index, { ...message, requestId: requestID })
+    }
 
     if (!response.ok) {
       activePanel.value = 'response'
@@ -629,13 +675,14 @@ async function send(options: { allowEmpty?: boolean } = {}) {
       rawResponse.value = text
       error.value = responseErrorMessage(response, text)
     } else if (body.stream !== false) {
-      await readStreamingResponse(response)
+      await readStreamingResponse(response, Number.isFinite(contextMax) ? Number(contextMax) : undefined)
     } else {
       const text = await response.text()
       rawResponse.value = text
       try {
         const parsed = JSON.parse(text)
         consumeChoicePayload(parsed?.choices?.[0])
+        mergeCurrentAssistantStats(playgroundTurnStatsFromResponsePayload(parsed, Number.isFinite(contextMax) ? Number(contextMax) : undefined))
       } catch {
         // Keep the raw response visible even when it is not JSON.
       }
@@ -650,17 +697,16 @@ async function send(options: { allowEmpty?: boolean } = {}) {
       phase.value = 'failed'
     }
   } finally {
+    updateLiveStats(assistantID)
+    clearLiveStatsTimer()
     finalizeStreamingParts()
     inFlight.value = false
     controller = null
-    if (requestID) await loadDiagnostics(requestID)
+    if (requestID) void loadDiagnostics(requestID)
   }
 }
 
-function stop() {
-  controller?.abort()
-}
-
+function stop() { controller?.abort() }
 function onPromptAction(event: MouseEvent) {
   if (chatStatus.value === 'submitted' || chatStatus.value === 'streaming') {
     stop()
@@ -669,92 +715,59 @@ function onPromptAction(event: MouseEvent) {
   event.preventDefault()
   void send()
 }
-
 function isLastAssistant(id: string) {
-  const last = conversation.value.at(-1)
-  return last?.role === 'assistant' && last.id === id
+  const lastAssistant = [...conversation.value].reverse().find(item => item.role === 'assistant')
+  return lastAssistant?.id === id
 }
-
 async function copyAssistantMessage(id: string) {
   const message = conversation.value.find(item => item.id === id)
   if (!message) return
-  const text = message.parts
-    .filter((part): part is Extract<ChatPart, { type: 'text' }> => part.type === 'text')
-    .map(part => part.text)
-    .join('')
-    .trim()
+  const text = message.parts.filter((part): part is Extract<ChatPart, { type: 'text' }> => part.type === 'text').map(part => part.text).join('').trim()
   if (!text) return
   await copyText(text, 'Message')
 }
-
 async function regenerate() {
   if (inFlight.value) return
-  const last = conversation.value.at(-1)
-  if (last?.role === 'assistant') conversation.value = conversation.value.slice(0, -1)
-  await send({ allowEmpty: true })
+  await send({ allowEmpty: true, regenerate: true })
 }
-
-function messageStats(id: string) {
-  return conversation.value.find(item => item.id === id)?.stats
-}
-
-function messageReasoningParts(parts: ChatPart[]) {
-  return parts.filter(part => part.type === 'reasoning')
-}
-
-function messageTextParts(parts: ChatPart[]) {
-  return parts.filter(part => part.type === 'text')
-}
-
-function assistantHasText(parts: ChatPart[]) {
-  return parts.some(part => part.type === 'text' && part.text)
-}
-
-function assistantHasReasoning(parts: ChatPart[]) {
-  return parts.some(part => part.type === 'reasoning' && part.text)
-}
-
+function messageStats(id: string) { return conversation.value.find(item => item.id === id)?.stats }
+function messageReasoningParts(parts: ChatPart[]) { return parts.filter(part => part.type === 'reasoning') }
+function messageTextParts(parts: ChatPart[]) { return parts.filter(part => part.type === 'text') }
+function assistantHasText(parts: ChatPart[]) { return parts.some(part => part.type === 'text' && part.text) }
+function assistantHasReasoning(parts: ChatPart[]) { return parts.some(part => part.type === 'reasoning' && part.text) }
 function emptyContentFallback(message: { role: string, parts: ChatPart[] }) {
   if (message.role !== 'assistant' || inFlight.value || assistantHasText(message.parts) || phase.value !== 'completed') return ''
   return playgroundEmptyContentFallback(assistantHasReasoning(message.parts))
 }
-
-function messageTruncated(id: string) {
-  return isLengthFinishReason(conversation.value.find(item => item.id === id)?.finishReason)
-}
-
+function messageTruncated(id: string) { return isLengthFinishReason(conversation.value.find(item => item.id === id)?.finishReason) }
 function formatMS(value?: number) {
   if (!Number.isFinite(value)) return '—'
   const number = Number(value)
   return number < 1000 ? `${Math.round(number)} ms` : `${(number / 1000).toFixed(2)} s`
 }
-
-function formatRate(value?: number) {
-  return Number.isFinite(value) ? `${Number(value).toFixed(2)} tok/s` : '—'
-}
-
+function formatRate(value?: number) { return Number.isFinite(value) ? `${Number(value).toFixed(2)} tok/s` : '—' }
+function formatPercent(value?: number) { return Number.isFinite(value) ? `${Number(value).toFixed(1)}%` : '—' }
 function formatBytes(value?: number) {
   if (!Number.isFinite(value)) return '—'
   return `${(Number(value) / 1024 ** 3).toFixed(2)} GiB`
 }
 
+const diagnosticTurnStats = computed(() => diagnostics.value
+  ? playgroundTurnStatsFromDiagnostics(diagnostics.value, selectedModel.value?.context_length)
+  : undefined)
 const contextUsage = computed(() => {
-  const used = diagnostics.value?.request.total_tokens
-  const total = selectedModel.value?.context_length
-  if (!Number.isFinite(used) || !Number.isFinite(total) || !total) return '—'
-  return `${used} / ${total}`
+  const stats = diagnosticTurnStats.value
+  if (!stats || !Number.isFinite(stats.contextUsed)) return '—'
+  if (!Number.isFinite(stats.contextMax)) return String(stats.contextUsed)
+  return `${stats.contextUsed} / ${stats.contextMax}`
 })
-
 const gpuAllocation = computed(() => {
   const telemetry = selectedTelemetry.value
   if (!telemetry) return '—'
-  if (telemetry.gpus?.length) {
-    return telemetry.gpus.map(gpu => `${gpu.device_id} ${formatBytes(gpu.vram_used_bytes)}`).join(' · ')
-  }
+  if (telemetry.gpus?.length) return telemetry.gpus.map(gpu => `${gpu.device_id} ${formatBytes(gpu.vram_used_bytes)}`).join(' · ')
   const devices = telemetry.gpu_devices || []
   return devices.length ? `${devices.join(', ')} · ${formatBytes(telemetry.vram_used_bytes)}` : '—'
 })
-
 const capturedHeaders = computed(() => responseHeaders.value.filter(([key]) => key.toLowerCase() !== 'x-llamarack-upstream-port'))
 
 watch(() => manager.instances.value, instances => {
@@ -768,15 +781,13 @@ watch(() => manager.instances.value, instances => {
     ? query
     : (instances.find(item => item.enabled)?.slug || instances[0]!.slug)
 }, { immediate: true, deep: true })
-
 watch(runtimeState, state => {
   if (inFlight.value && phase.value === 'cold' && state === 'READY') phase.value = 'generating'
 })
-
 watch([selectedInstanceSlug, () => parameters.temperature, () => parameters.topP, () => parameters.maxTokens, () => parameters.seed, () => parameters.topK, () => parameters.minP, () => parameters.repeatPenalty, () => parameters.stop, () => parameters.stream, () => parameters.systemPrompt, conversation], syncRawRequest, { deep: true, immediate: true })
-
 onBeforeUnmount(() => {
   controller?.abort()
+  clearLiveStatsTimer()
   clearAttachments()
 })
 </script>
@@ -806,10 +817,7 @@ onBeforeUnmount(() => {
     <p v-if="notice" class="shrink-0 border-y border-[var(--color-divider)] py-2 text-xs text-[var(--neutral-700)]" data-testid="playground-notice">{{ notice }}</p>
 
     <div class="grid min-h-0 flex-1 gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_24rem] xl:items-stretch xl:overflow-hidden">
-      <Frame
-        class="flex min-h-[calc(100dvh-15rem)] min-w-0 flex-col overflow-hidden p-0 xl:h-full xl:min-h-0"
-        data-testid="playground-thread"
-      >
+      <Frame class="flex min-h-[calc(100dvh-15rem)] min-w-0 flex-col overflow-hidden p-0 xl:h-full xl:min-h-0" data-testid="playground-thread">
         <div class="shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-surface)] p-3" data-testid="playground-thread-chrome">
           <div class="flex min-w-0 items-center gap-2">
             <USelect
@@ -822,24 +830,17 @@ onBeforeUnmount(() => {
               @update:model-value="selectInstance"
             />
             <StatusTag :variant="runtimeVariant(runtimeState)">{{ runtimeState === 'READY' ? 'Instance READY' : runtimeState }}</StatusTag>
-            <span
-              data-testid="playground-model-name"
-              class="min-w-0 truncate font-mono text-[length:var(--font-size-h5)] font-semibold"
-            >{{ selectedModel?.name || selectedInstance?.model_id || 'Select an Instance' }}</span>
+            <span data-testid="playground-model-name" class="min-w-0 truncate font-mono text-[length:var(--font-size-h5)] font-semibold">{{ selectedModel?.name || selectedInstance?.model_id || 'Select an Instance' }}</span>
             <StatusTag v-if="phase === 'failed'" variant="failed">{{ phaseLabel }}</StatusTag>
             <StatusTag v-else-if="phase === 'completed'" variant="ready">{{ phaseLabel }}</StatusTag>
           </div>
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div
-            v-if="parameters.systemPrompt.trim()"
-            class="shrink-0 border-b border-[var(--color-divider)] px-5 py-3"
-          >
+          <div v-if="parameters.systemPrompt.trim()" class="shrink-0 border-b border-[var(--color-divider)] px-5 py-3">
             <p class="mb-1 font-mono text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">system</p>
             <p class="whitespace-pre-wrap font-mono text-[length:var(--font-size-h6)] text-[var(--neutral-700)]">{{ parameters.systemPrompt }}</p>
           </div>
-
           <UEmpty
             v-if="!conversation.length"
             variant="naked"
@@ -848,7 +849,6 @@ onBeforeUnmount(() => {
             description="The composer stays at the bottom of this thread. Attach an image or type a message, then send."
             data-testid="playground-empty-state"
           />
-
           <UChatMessages
             v-else
             :messages="chatMessages"
@@ -868,13 +868,7 @@ onBeforeUnmount(() => {
               </div>
             </template>
             <template #files="{ parts }">
-              <img
-                v-for="(part, index) in parts"
-                :key="`${part.url}-${index}`"
-                :src="part.url"
-                :alt="part.filename || 'attachment'"
-                class="max-h-48 max-w-full border border-[var(--color-divider)] object-contain"
-              >
+              <img v-for="(part, index) in parts" :key="`${part.url}-${index}`" :src="part.url" :alt="part.filename || 'attachment'" class="max-h-48 max-w-full border border-[var(--color-divider)] object-contain">
             </template>
             <template #content="{ message }">
               <UChatReasoning
@@ -890,47 +884,16 @@ onBeforeUnmount(() => {
                 v-show="part.text"
                 class="whitespace-pre-wrap text-sm leading-6"
                 :data-testid="message.role === 'assistant' ? 'playground-assistant-text' : 'playground-user-text'"
-              >
-                {{ part.text }}
-              </p>
-              <p
-                v-if="emptyContentFallback(message)"
-                class="whitespace-pre-wrap text-sm leading-6 text-[var(--neutral-800)]"
-                data-testid="playground-empty-content"
-              >
-                {{ emptyContentFallback(message) }}
-              </p>
-              <div
-                v-if="messageTruncated(message.id)"
-                class="mt-2 flex items-start gap-2"
-              >
+              >{{ part.text }}</p>
+              <p v-if="emptyContentFallback(message)" class="whitespace-pre-wrap text-sm leading-6 text-[var(--neutral-800)]" data-testid="playground-empty-content">{{ emptyContentFallback(message) }}</p>
+              <div v-if="messageTruncated(message.id)" class="mt-2 flex items-start gap-2">
                 <StatusTag variant="pending">Truncated</StatusTag>
-                <p
-                  class="min-w-0 text-xs leading-5 text-[var(--neutral-800)]"
-                  data-testid="playground-truncation-warning"
-                >
-                  {{ PLAYGROUND_TRUNCATION_WARNING }}
-                </p>
+                <p class="min-w-0 text-xs leading-5 text-[var(--neutral-800)]" data-testid="playground-truncation-warning">{{ PLAYGROUND_TRUNCATION_WARNING }}</p>
               </div>
-              <p
-                v-if="message.role === 'assistant' && messageStats(message.id)"
-                class="mt-2 font-mono text-[length:var(--font-size-table-header)] tabular-nums text-[var(--neutral-700)]"
-                data-testid="playground-token-stats"
-              >
-                {{ messageStats(message.id)?.prompt }} prompt ·
-                {{ messageStats(message.id)?.completion }} completion (incl. reasoning) ·
-                {{ formatRate(messageStats(message.id)?.rate) }} ·
-                ttft {{ formatMS(messageStats(message.id)?.ttft) }}
-              </p>
+              <PlaygroundTurnStats v-if="message.role === 'assistant' && messageStats(message.id)" :stats="messageStats(message.id)!" />
               <div v-if="message.role === 'assistant' && !inFlight" class="mt-2 flex flex-wrap gap-1">
                 <AppButton intent="ghost" size="xs" data-testid="playground-copy-message" @click="copyAssistantMessage(message.id)">Copy</AppButton>
-                <AppButton
-                  v-if="isLastAssistant(message.id)"
-                  intent="ghost"
-                  size="xs"
-                  data-testid="playground-regenerate"
-                  @click="regenerate"
-                >Regenerate</AppButton>
+                <AppButton v-if="isLastAssistant(message.id)" intent="ghost" size="xs" data-testid="playground-regenerate" @click="regenerate">Regenerate</AppButton>
               </div>
             </template>
           </UChatMessages>
@@ -938,14 +901,7 @@ onBeforeUnmount(() => {
 
         <div class="mt-auto shrink-0 border-t border-[var(--color-divider)] p-4" data-testid="playground-composer">
           <p v-if="selectedInstance && !isLoaded" class="mb-2 text-xs text-[var(--neutral-700)]">This Instance is not loaded — sending will trigger autoload through the gateway.</p>
-          <UChatPrompt
-            v-model="composer"
-            aria-label="Playground message"
-            :disabled="!selectedInstance"
-            class="w-full"
-            :ui="chatPromptUi"
-            @submit="() => send()"
-          >
+          <UChatPrompt v-model="composer" aria-label="Playground message" :disabled="!selectedInstance" class="w-full" :ui="chatPromptUi" @submit="() => send()">
             <template v-if="attachments.length" #header>
               <div class="flex flex-wrap gap-2">
                 <UButton
@@ -965,24 +921,8 @@ onBeforeUnmount(() => {
             <template #footer>
               <div class="flex w-full items-center justify-between gap-2">
                 <div class="flex items-center gap-1">
-                  <AppButton
-                    intent="ghost"
-                    size="sm"
-                    icon="i-lucide-plus"
-                    aria-label="Attach images"
-                    data-testid="playground-attach-files"
-                    :disabled="!selectedInstance"
-                    @click="fileInputRef?.click()"
-                  />
-                  <input
-                    ref="fileInputRef"
-                    type="file"
-                    :accept="PLAYGROUND_ATTACHMENT_ACCEPT"
-                    multiple
-                    class="hidden"
-                    data-testid="playground-file-input"
-                    @change="onAttachmentInput"
-                  >
+                  <AppButton intent="ghost" size="sm" icon="i-lucide-plus" aria-label="Attach images" data-testid="playground-attach-files" :disabled="!selectedInstance" @click="fileInputRef?.click()" />
+                  <input ref="fileInputRef" type="file" :accept="PLAYGROUND_ATTACHMENT_ACCEPT" multiple class="hidden" data-testid="playground-file-input" @change="onAttachmentInput">
                 </div>
                 <UChatPromptSubmit
                   :status="chatStatus"
@@ -1012,9 +952,7 @@ onBeforeUnmount(() => {
                 :key="instance.id"
                 type="button"
                 class="block w-full border px-3 py-2 text-left"
-                :class="selectedInstanceSlug === instance.slug
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]'
-                  : 'border-[var(--color-divider)] bg-transparent'"
+                :class="selectedInstanceSlug === instance.slug ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-on-accent)]' : 'border-[var(--color-divider)] bg-transparent'"
                 @click="selectInstance(instance.slug)"
               >
                 <span class="block font-mono text-[length:var(--font-size-h6)] font-semibold">{{ instance.slug }}</span>
@@ -1022,61 +960,27 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <UTabs
-            v-model="activePanel"
-            :items="panelItems"
-            :unmount-on-hide="false"
-            variant="link"
-            class="w-full gap-0"
-            :ui="{ list: 'border-b border-[var(--color-divider)] px-2', trigger: 'grow' }"
-            aria-label="Playground inspector"
-          >
+          <UTabs v-model="activePanel" :items="panelItems" :unmount-on-hide="false" variant="link" class="w-full gap-0" :ui="{ list: 'border-b border-[var(--color-divider)] px-2', trigger: 'grow' }" aria-label="Playground inspector">
             <template #parameters>
               <div class="space-y-4 p-4" data-testid="playground-parameters">
                 <div class="grid grid-cols-2 gap-3">
-                  <UFormField label="temperature" description="Sampling randomness. 0 is near-deterministic.">
-                    <UInput v-model.number="parameters.temperature" type="number" step="0.05" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="top_p" description="Nucleus sampling cutoff.">
-                    <UInput v-model.number="parameters.topP" type="number" step="0.05" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="max_tokens" description="Maximum generated tokens, including reasoning.">
-                    <UInput v-model.number="parameters.maxTokens" type="number" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="seed" description="Optional integer for reproducible sampling.">
-                    <UInput v-model="parameters.seed" type="number" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="top_k">
-                    <UInput v-model.number="parameters.topK" type="number" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="min_p">
-                    <UInput v-model.number="parameters.minP" type="number" step="0.01" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="repeat_penalty">
-                    <UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="font-mono tabular-nums" />
-                  </UFormField>
-                  <UFormField label="stop" description="Stop sequences as a comma list, or one per line.">
-                    <UInput v-model="parameters.stop" class="font-mono" placeholder="token, or one per line" />
-                  </UFormField>
+                  <UFormField label="temperature" description="Sampling randomness. 0 is near-deterministic."><UInput v-model.number="parameters.temperature" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="top_p" description="Nucleus sampling cutoff."><UInput v-model.number="parameters.topP" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="max_tokens" description="Maximum generated tokens, including reasoning."><UInput v-model.number="parameters.maxTokens" type="number" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="seed" description="Optional integer for reproducible sampling."><UInput v-model="parameters.seed" type="number" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="top_k"><UInput v-model.number="parameters.topK" type="number" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="min_p"><UInput v-model.number="parameters.minP" type="number" step="0.01" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="repeat_penalty"><UInput v-model.number="parameters.repeatPenalty" type="number" step="0.05" class="font-mono tabular-nums" /></UFormField>
+                  <UFormField label="stop" description="Stop sequences as a comma list, or one per line."><UInput v-model="parameters.stop" class="font-mono" placeholder="token, or one per line" /></UFormField>
                 </div>
                 <UCheckbox v-model="parameters.stream" label="stream" />
-               
-                <UFormField label="system prompt" description="Sent as a system message before the thread.">
-                  <UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" />
-                </UFormField>
+                <UFormField label="system prompt" description="Sent as a system message before the thread."><UTextarea v-model="parameters.systemPrompt" :rows="6" autoresize class="w-full font-mono text-[length:var(--font-size-h6)]" /></UFormField>
               </div>
             </template>
             <template #request>
               <div class="space-y-4 p-4" data-testid="playground-request">
                 <UFormField label="RAW JSON">
-                  <UTextarea
-                    v-model="rawRequest"
-                    :rows="12"
-                    autoresize
-                    class="w-full font-mono text-[length:var(--font-size-table-header)] leading-5"
-                    aria-label="Raw request JSON"
-                    @update:model-value="rawDirty = true"
-                  />
+                  <UTextarea v-model="rawRequest" :rows="12" autoresize class="w-full font-mono text-[length:var(--font-size-table-header)] leading-5" aria-label="Raw request JSON" @update:model-value="rawDirty = true" />
                 </UFormField>
                 <div>
                   <p class="mb-2 text-[length:var(--font-size-kicker)] font-extrabold tracking-[0.18em] text-[var(--neutral-700)]">CURL</p>
@@ -1101,17 +1005,10 @@ onBeforeUnmount(() => {
             </template>
             <template #session>
               <div class="space-y-4 p-4" data-testid="playground-session">
-                <UFormField
-                  label="Reuse session"
-                  description="Follow-up sends share one session ID while this page stays open. Turn off for a new session on every request."
-                >
+                <UFormField label="Reuse session" description="Follow-up sends share one session ID while this page stays open. Turn off for a new session on every request.">
                   <USwitch v-model="reuseSession" data-testid="playground-reuse-session" aria-label="Reuse session" />
                 </UFormField>
-                <p
-                  v-if="reuseSession && chatSessionID"
-                  data-testid="playground-session-id"
-                  class="min-w-0 break-all font-mono text-[length:var(--font-size-table-header)]"
-                >{{ chatSessionID }}</p>
+                <p v-if="reuseSession && chatSessionID" data-testid="playground-session-id" class="min-w-0 break-all font-mono text-[length:var(--font-size-table-header)]">{{ chatSessionID }}</p>
               </div>
             </template>
           </UTabs>
@@ -1125,12 +1022,19 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Instance state</dt><dd class="font-mono tabular-nums">{{ diagnostics.state_trace?.join(' → ') || '—' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Cold start</dt><dd>{{ diagnostics.request.autoloaded ? 'yes — autoload' : 'no' }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Startup time</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnostics.request.load_duration_ms) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">TTFT</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnostics.request.ttft_ms) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generation time</dt><dd class="font-mono tabular-nums">{{ formatMS(Math.max(0, diagnostics.request.duration_ms - (diagnostics.request.ttft_ms || 0))) }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.prompt_tokens }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens (incl. reasoning)</dt><dd class="font-mono tabular-nums">{{ diagnostics.request.generated_tokens }}</dd></div>
-            <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tokens / second</dt><dd class="font-mono tabular-nums">{{ formatRate(diagnostics.request.tokens_per_second) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.queueMs)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Queue duration</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnosticTurnStats?.queueMs) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.ttftMs)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">TTFT</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnosticTurnStats?.ttftMs) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.wallMs)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Wall duration</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnosticTurnStats?.wallMs) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.generationMs)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generation duration</dt><dd class="font-mono tabular-nums">{{ formatMS(diagnosticTurnStats?.generationMs) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.promptTokens)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.promptTokens }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.generatedTokens)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Generated tokens (incl. reasoning)</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.generatedTokens }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.promptRate)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Prompt tokens / second</dt><dd class="font-mono tabular-nums">{{ formatRate(diagnosticTurnStats?.promptRate) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.generationRate)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tokens / second</dt><dd class="font-mono tabular-nums">{{ formatRate(diagnosticTurnStats?.generationRate) }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Context usage</dt><dd class="font-mono tabular-nums">{{ contextUsage }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.cacheTokens)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Cache reused</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.cacheTokens }} · {{ formatPercent(diagnosticTurnStats?.cachePercent) }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.draftProposed)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Draft accepted</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.draftAccepted ?? '—' }} / {{ diagnosticTurnStats?.draftProposed }} · {{ formatPercent(diagnosticTurnStats?.draftAcceptancePercent) }}</dd></div>
+            <div v-if="diagnosticTurnStats?.finishReason" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Stop reason</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.finishReason }}</dd></div>
+            <div v-if="Number.isFinite(diagnosticTurnStats?.toolCallCount)" class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Tool calls</dt><dd class="font-mono tabular-nums">{{ diagnosticTurnStats?.toolCallCount }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">GPU allocation</dt><dd class="font-mono tabular-nums">{{ gpuAllocation }}</dd></div>
             <div class="grid grid-cols-[110px_1fr] gap-2 py-2"><dt class="text-[var(--neutral-700)]">Evictions triggered</dt><dd class="font-mono tabular-nums">{{ diagnostics.evictions_triggered?.join(', ') || 'none' }}</dd></div>
           </dl>
@@ -1150,8 +1054,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* Nuxt UI ChatPrompt still merges a decorative blur utility. Naming that utility in
-   class would fail the design-rule scanner, so force an opaque composer surface here. */
 :deep([data-testid='playground-composer'] form) {
   backdrop-filter: none;
 }

@@ -49,12 +49,19 @@ async function sendPlayground(wrapper: any) {
   await promptSubmit(wrapper).trigger('click')
 }
 
-function diagnostic() {
+function diagnostic(requestID = 'req-1', generatedTokens = 24, generationRate = 48) {
   return {
     request: {
-      request_id: 'req-1', instance_id: 'coder', status_code: 200, result: 'success', duration_ms: 900,
-      ttft_ms: 150, prompt_tokens: 12, generated_tokens: 24, total_tokens: 36, tokens_per_second: 32,
-      load_duration_ms: 420, autoloaded: true
+      request_id: requestID, instance_id: 'coder', status_code: 200, result: 'success', duration_ms: 900,
+      ttft_ms: 150, prompt_tokens: 12, generated_tokens: generatedTokens, total_tokens: 12 + generatedTokens,
+      tokens_per_second: generationRate, prompt_tokens_per_second: 800, generation_tokens_per_second: generationRate,
+      queue_duration_ms: 40, load_duration_ms: 420, autoloaded: true
+    },
+    inference_stats: {
+      prompt_n: 12, prompt_ms: 15, prompt_per_second: 800, prompt_per_token_ms: 1.25,
+      predicted_n: generatedTokens, predicted_ms: 500, predicted_per_second: generationRate,
+      predicted_per_token_ms: 500 / generatedTokens, cache_n: 4,
+      draft_n: 10, draft_n_accepted: 8, finish_reason: 'stop', tool_call_count: 2
     },
     state_trace: ['UNLOADED', 'STARTING', 'READY'],
     evictions_triggered: ['victim-a']
@@ -74,7 +81,7 @@ beforeEach(() => {
 describe('Playground', () => {
   it('uses the management bridge, streams output and loads correlated gateway diagnostics', async () => {
     mocks.request.mockResolvedValue(diagnostic())
-    const publicFetch = vi.fn(async (_url: string, init: RequestInit) => new Response(
+    const publicFetch = vi.fn(async (_url: string, _init: RequestInit) => new Response(
       'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\n\ndata: [DONE]\n\n',
       {
         status: 200,
@@ -113,17 +120,29 @@ describe('Playground', () => {
     expect(body.model).not.toBe('550e8400-e29b-41d4-a716-446655440000')
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'Explain this code' })
     expect(body.stream).toBe(true)
+    expect(body.timings_per_token).toBe(true)
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/playground/req-1')
 
     expect(wrapper.text()).toContain('Hello world')
-    expect(wrapper.text()).toContain('12 prompt · 24 completion (incl. reasoning) · 32.00 tok/s · ttft 150 ms')
+    expect(wrapper.get('[data-testid="playground-turn-stats-summary"]').text()).toContain('48.00 tok/s · 24 generated · 150 ms TTFT · 900 ms wall')
+    await wrapper.get('[data-testid="playground-turn-stats-summary"]').trigger('click')
+    await flushPromises()
+    const details = wrapper.get('[data-testid="playground-turn-stats-details"]').text()
+    expect(details).toContain('Prompt')
+    expect(details).toContain('Generation')
+    expect(details).toContain('500 ms')
+    expect(details).toContain('4 reused · 25.0%')
+    expect(details).toContain('8 / 10 accepted · 80.0%')
+    expect(details).toContain('40 / 32768')
+    expect(details).toContain('Tool calls2')
     expect(wrapper.get('[data-testid="playground-parameters"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="playground-model-name"]').text()).toBe('Qwen Coder')
     await activateTab(wrapper, 'Response')
     expect(wrapper.text()).toContain('UNLOADED → STARTING → READY')
     expect(wrapper.text()).toContain('yes — autoload')
     expect(wrapper.text()).toContain('victim-a')
-    expect(wrapper.text()).toContain('36 / 32768')
+    expect(wrapper.text()).toContain('40 / 32768')
+    expect(wrapper.text()).toContain('Generation duration500 ms')
     expect(wrapper.text()).toContain('CUDA0 8.00 GiB')
     expect(wrapper.text()).toContain('x-llamarack-instance: coder')
     expect(wrapper.text()).not.toContain('x-llamarack-upstream-port')
@@ -148,7 +167,8 @@ describe('Playground', () => {
       messages: [{ role: 'system', content: 'Be terse' }, { role: 'user', content: 'from raw JSON' }],
       temperature: 0.2,
       max_tokens: 9,
-      stream: false
+      stream: false,
+      timings_per_token: false
     }
     await wrapper.get('textarea[aria-label="Raw request JSON"]').setValue(JSON.stringify(raw))
     await sendPlayground(wrapper)
@@ -160,6 +180,46 @@ describe('Playground', () => {
     expect(wrapper.text()).toContain('from raw JSON')
     expect(wrapper.text()).toContain('raw reply')
     expect(wrapper.text()).toContain('Instance READY')
+    wrapper.unmount()
+  })
+
+  it('keeps prior per-turn stats when regenerating and binds diagnostics by request id', async () => {
+    mocks.runtime.state = 'READY'
+    mocks.request.mockImplementation(async (path: string) => path.endsWith('req-2')
+      ? diagnostic('req-2', 8, 20)
+      : diagnostic('req-1', 24, 48))
+    let call = 0
+    const publicFetch = vi.fn(async () => {
+      call += 1
+      return new Response(`data: {"choices":[{"delta":{"content":"reply ${call}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n`, {
+        status: 200,
+        headers: { 'X-LlamaRack-Request-ID': `req-${call}` }
+      })
+    })
+    vi.stubGlobal('fetch', publicFetch)
+
+    const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="Playground message"]').setValue('again please')
+    await sendPlayground(wrapper)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="playground-turn-stats-summary"]').text()).toContain('48.00 tok/s · 24 generated')
+
+    await wrapper.get('[data-testid="playground-regenerate"]').trigger('click')
+    await flushPromises()
+
+    expect(publicFetch).toHaveBeenCalledTimes(2)
+    const summaries = wrapper.findAll('[data-testid="playground-turn-stats-summary"]').map(item => item.text())
+    expect(summaries).toHaveLength(2)
+    expect(summaries[0]).toContain('48.00 tok/s · 24 generated')
+    expect(summaries[1]).toContain('20.00 tok/s · 8 generated')
+    const assistantTexts = wrapper.findAll('[data-testid="playground-assistant-text"]').map(item => item.text())
+    expect(assistantTexts).toContain('reply 1')
+    expect(assistantTexts).toContain('reply 2')
+    const secondBody = JSON.parse(String(publicFetch.mock.calls[1]![1].body))
+    expect(secondBody.messages).toEqual([{ role: 'user', content: 'again please' }])
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/playground/req-1')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/observability/playground/req-2')
     wrapper.unmount()
   })
 
@@ -211,8 +271,8 @@ describe('Playground', () => {
   })
 
   it('sends image attachments as OpenAI-compatible multimodal message content', async () => {
-    mocks.request.mockResolvedValue(diagnostic())
-    const publicFetch = vi.fn(async (_url: string, init: RequestInit) => new Response(
+    mocks.request.mockResolvedValue(diagnostic('req-image'))
+    const publicFetch = vi.fn(async () => new Response(
       'data: {"choices":[{"delta":{"content":"I see an image"}}]}\n\ndata: [DONE]\n\n',
       { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-image' } }
     ))
@@ -293,11 +353,15 @@ describe('Playground', () => {
 
   it('reuses one LiteLLM session for follow-up sends and omits it when reuse is turned off', async () => {
     mocks.runtime.state = 'READY'
-    mocks.request.mockResolvedValue({ ...diagnostic(), state_trace: ['READY'], evictions_triggered: [] })
-    const publicFetch = vi.fn(async () => new Response(
-      'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
-      { status: 200, headers: { 'X-LlamaRack-Request-ID': 'req-session' } }
-    ))
+    let requestSequence = 0
+    mocks.request.mockImplementation(async () => diagnostic(`req-session-${requestSequence}`))
+    const publicFetch = vi.fn(async () => {
+      requestSequence += 1
+      return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { 'X-LlamaRack-Request-ID': `req-session-${requestSequence}` }
+      })
+    })
     vi.stubGlobal('fetch', publicFetch)
 
     const wrapper = await mountSuspended(PlaygroundPage, { route: '/playground' })
@@ -322,9 +386,7 @@ describe('Playground', () => {
     expect(wrapper.get('[data-testid="playground-diagnostics-session"]').text()).toBe(sessionID)
 
     const reuseSwitch = wrapper.get('[data-testid="playground-reuse-session"]')
-    const switchControl = reuseSwitch.find('[role="switch"]').exists()
-      ? reuseSwitch.get('[role="switch"]')
-      : reuseSwitch
+    const switchControl = reuseSwitch.find('[role="switch"]').exists() ? reuseSwitch.get('[role="switch"]') : reuseSwitch
     await switchControl.trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="playground-session-id"]').exists()).toBe(false)
