@@ -20,9 +20,10 @@ type WorkloadField struct {
 }
 
 type WorkloadSchema struct {
-	Version int             `json:"version"`
-	Default WorkloadProfile `json:"default"`
-	Fields  []WorkloadField `json:"fields"`
+	Version int               `json:"version"`
+	Default WorkloadProfile   `json:"default"`
+	Presets []WorkloadProfile `json:"presets"`
+	Fields  []WorkloadField   `json:"fields"`
 }
 
 type Capabilities struct {
