@@ -31,6 +31,11 @@ type benchmarkHandler struct {
 	instances benchmarkInstanceResolver
 }
 
+type benchmarkWorkloadInput struct {
+	benchmark.WorkloadProfile
+	Warmup *bool `json:"warmup"`
+}
+
 func NewBenchmarkHandler(service benchmarkManagementService, instanceResolver benchmarkInstanceResolver) http.Handler {
 	return &benchmarkHandler{service: service, instances: instanceResolver}
 }
@@ -122,17 +127,42 @@ func (h *benchmarkHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Workload *benchmark.WorkloadProfile `json:"workload"`
+		Workload *benchmarkWorkloadInput `json:"workload"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
-	run, err := h.service.Create(r.Context(), instanceID, input.Workload)
+	workload, err := benchmarkCreateWorkload(input.Workload)
+	if err != nil {
+		writeBenchmarkError(w, err)
+		return
+	}
+	run, err := h.service.Create(r.Context(), instanceID, workload)
 	if err != nil {
 		writeBenchmarkError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, run)
+}
+
+func benchmarkCreateWorkload(input *benchmarkWorkloadInput) (*benchmark.WorkloadProfile, error) {
+	if input == nil {
+		return nil, nil
+	}
+	workload := input.WorkloadProfile
+	if input.Warmup == nil {
+		return &workload, nil
+	}
+	if *input.Warmup {
+		workload.Warmup = true
+		return &workload, nil
+	}
+	resolved, err := benchmark.NormalizeWorkload(&workload)
+	if err != nil {
+		return nil, err
+	}
+	resolved.Warmup = false
+	return &resolved, nil
 }
 
 func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) (string, error) {
