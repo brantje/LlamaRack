@@ -94,7 +94,7 @@ func TestDiscoverCapabilitiesFiltersOptionalWorkloadPresets(t *testing.T) {
 		path := filepath.Join(t.TempDir(), name)
 		script := "#!/bin/sh\ncase \"$1\" in\n" +
 			"  --version) echo test ;;\n" +
-			"  --help) printf '%s' '--model <FNAME>  model\\n--output <json>  output\\n--repetitions <n>  repetitions\\n--n-prompt <n>  prompt\\n--n-gen <n>  generation\\n" + optional + "' ;;\n" +
+			"  --help) printf '%b' '--model <FNAME>  model\\n--output <json>  output\\n--repetitions <n>  repetitions\\n--n-prompt <n>  prompt\\n--n-gen <n>  generation\\n" + optional + "' ;;\n" +
 			"  --list-devices) echo 'Available devices:' ;;\n" +
 			"esac\n"
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
