@@ -51,9 +51,14 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 	base.Version = profile.Version
 	base.Fingerprint = profile.Fingerprint
 	base.profile = profile
-	base.SupportedOptions = make([]string, 0, len(profile.Options))
+	base.SupportedOptions = make([]string, 0, len(profile.Options)+len(profile.ShortOptions))
 	for _, option := range profile.Options {
 		base.SupportedOptions = append(base.SupportedOptions, option.Key)
+	}
+	for _, option := range profile.ShortOptions {
+		if option == "pg" {
+			base.SupportedOptions = append(base.SupportedOptions, option)
+		}
 	}
 	sort.Strings(base.SupportedOptions)
 
@@ -81,18 +86,40 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 			return base, nil
 		}
 	}
-	if !profile.Has("n-depth") {
-		fields := make([]WorkloadField, 0, len(base.Workload.Fields))
-		for _, field := range base.Workload.Fields {
-			if field.Key != "context_depths" {
-				fields = append(fields, field)
-			}
-		}
-		base.Workload.Fields = fields
-	}
+	base.Workload = workloadSchemaForProfile(base.Workload, profile)
 	base.Available = true
 	base.OutputFormat = "json"
 	return base, nil
+}
+
+func workloadSchemaForProfile(schema WorkloadSchema, profile llamacpp.Profile) WorkloadSchema {
+	supportsDepth := profile.Has("n-depth")
+	supportsCombined := profile.HasShort("pg")
+
+	fields := make([]WorkloadField, 0, len(schema.Fields))
+	for _, field := range schema.Fields {
+		if field.Key == "context_depths" && !supportsDepth {
+			continue
+		}
+		if field.Key == "combined_cases" && !supportsCombined {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	schema.Fields = fields
+
+	presets := make([]WorkloadProfile, 0, len(schema.Presets))
+	for _, preset := range schema.Presets {
+		if len(preset.ContextDepths) > 0 && !supportsDepth {
+			continue
+		}
+		if len(preset.CombinedCases) > 0 && !supportsCombined {
+			continue
+		}
+		presets = append(presets, preset)
+	}
+	schema.Presets = presets
+	return schema
 }
 
 func (c Capabilities) profileForMapping() llamacpp.Profile { return c.profile }
