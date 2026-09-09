@@ -68,18 +68,24 @@ type TuningHint struct {
 	Reason string `json:"reason"`
 }
 
+type WorkloadCombinedCase struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	GenerationTokens int `json:"generation_tokens"`
+}
+
 type WorkloadProfile struct {
-	ID               string       `json:"id"`
-	Version          int          `json:"version"`
-	Name             string       `json:"name,omitempty"`
-	Description      string       `json:"description,omitempty"`
-	Focus            string       `json:"focus,omitempty"`
-	TuningHints      []TuningHint `json:"tuning_hints,omitempty"`
-	PromptTokens     []int        `json:"prompt_tokens"`
-	GenerationTokens []int        `json:"generation_tokens"`
-	ContextDepths    []int        `json:"context_depths,omitempty"`
-	Repetitions      int          `json:"repetitions"`
-	Warmup           bool         `json:"warmup"`
+	ID               string                 `json:"id"`
+	Version          int                    `json:"version"`
+	Name             string                 `json:"name,omitempty"`
+	Description      string                 `json:"description,omitempty"`
+	Focus            string                 `json:"focus,omitempty"`
+	TuningHints      []TuningHint           `json:"tuning_hints,omitempty"`
+	PromptTokens     []int                  `json:"prompt_tokens"`
+	GenerationTokens []int                  `json:"generation_tokens"`
+	CombinedCases    []WorkloadCombinedCase `json:"combined_cases,omitempty"`
+	ContextDepths    []int                  `json:"context_depths,omitempty"`
+	Repetitions      int                    `json:"repetitions"`
+	Warmup           bool                   `json:"warmup"`
 }
 
 type InstanceConfigSnapshot struct {
