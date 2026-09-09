@@ -2,9 +2,19 @@ import type { HardwareSnapshot, Instance, Model } from '~/composables/useManager
 
 export type BenchmarkStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
+export type BenchmarkTuningHint = {
+  key: string
+  impact: string
+  reason: string
+}
+
 export type BenchmarkWorkloadProfile = {
   id?: string
   version?: number
+  name?: string
+  description?: string
+  focus?: string
+  tuning_hints?: BenchmarkTuningHint[]
   prompt_tokens: number[]
   generation_tokens: number[]
   repetitions: number
@@ -31,6 +41,7 @@ export type BenchmarkCapabilities = {
   workload: {
     version: number
     default: BenchmarkWorkloadProfile
+    presets?: BenchmarkWorkloadProfile[]
     fields: BenchmarkWorkloadField[]
   }
 }
@@ -137,6 +148,35 @@ export type EffectiveLlamaConfig = {
   unsupported?: string[]
 }
 
+export type BenchmarkConfigChange = {
+  key: string
+  label: string
+  before: string
+  after: string
+  tunable: boolean
+}
+
+const controlledTuningOptions = new Set([
+  'n-gpu-layers', 'batch-size', 'ubatch-size', 'threads', 'cache-type-k', 'cache-type-v',
+  'flash-attn', 'kv-offload', 'no-kv-offload', 'split-mode', 'main-gpu', 'n-cpu-moe',
+  'cpu-moe', 'mmap', 'no-mmap', 'mlock', 'override-tensor'
+])
+
+const fallbackPromptHints: BenchmarkTuningHint[] = [
+  { key: 'batch-size', impact: 'Prompt processing', reason: 'Logical batch size is a primary prefill-throughput tuning knob.' },
+  { key: 'ubatch-size', impact: 'Prompt processing', reason: 'Micro-batch size trades prompt throughput against working-memory pressure.' },
+  { key: 'flash-attn', impact: 'Prompt + memory', reason: 'Flash attention can change attention-heavy prompt throughput and memory use.' },
+  { key: 'n-gpu-layers', impact: 'Prompt processing', reason: 'GPU offload can reduce CPU work when sufficient VRAM is available.' }
+]
+
+const fallbackGenerationHints: BenchmarkTuningHint[] = [
+  { key: 'n-gpu-layers', impact: 'Generation', reason: 'Keeping repeated model work on the accelerator can improve generation when VRAM permits.' },
+  { key: 'tensor-split', impact: 'Multi-GPU generation', reason: 'A better split can reduce imbalance when the model spans multiple GPUs.' },
+  { key: 'cache-type-k', impact: 'Generation + KV memory', reason: 'KV precision changes memory pressure and can affect generation throughput.' },
+  { key: 'cache-type-v', impact: 'Generation + KV memory', reason: 'KV precision changes memory pressure and can affect generation throughput.' },
+  { key: 'flash-attn', impact: 'Generation + memory', reason: 'Flash attention can change attention cost and memory use as context grows.' }
+]
+
 export function benchmarkStatusVariant(status?: BenchmarkStatus): 'ready' | 'pending' | 'neutral' | 'failed' {
   if (status === 'COMPLETED') return 'ready'
   if (status === 'QUEUED' || status === 'RUNNING') return 'pending'
@@ -172,10 +212,21 @@ export function benchmarkDuration(run: BenchmarkRun) {
   return end - start
 }
 
+function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
+  return {
+    id: workload.id,
+    version: workload.version,
+    prompt_tokens: workload.prompt_tokens,
+    generation_tokens: workload.generation_tokens,
+    repetitions: workload.repetitions,
+    warmup: workload.warmup
+  }
+}
+
 export function benchmarkComparisonDifferences(left: BenchmarkRun, right: BenchmarkRun) {
   const differences: string[] = []
   if (left.artifact_snapshot.fingerprint !== right.artifact_snapshot.fingerprint) differences.push('Model artifact')
-  if (canonicalBenchmarkValue(left.workload_profile) !== canonicalBenchmarkValue(right.workload_profile)) differences.push('Workload')
+  if (canonicalBenchmarkValue(workloadComparisonValue(left.workload_profile)) !== canonicalBenchmarkValue(workloadComparisonValue(right.workload_profile))) differences.push('Workload')
   const config = (run: BenchmarkRun) => ({ ...run.instance_config_snapshot, sources: undefined })
   if (canonicalBenchmarkValue(config(left)) !== canonicalBenchmarkValue(config(right))) differences.push('Instance configuration')
   const gpus = (run: BenchmarkRun) => benchmarkGPUs(run).map(({ id, name, backend, total_bytes }) => ({ id, name, backend, total_bytes }))
@@ -186,6 +237,54 @@ export function benchmarkComparisonDifferences(left: BenchmarkRun, right: Benchm
   if (left.build.llama_cpp_build !== right.build.llama_cpp_build) differences.push('llama.cpp build')
   if (left.build.llama_bench_fingerprint !== right.build.llama_bench_fingerprint || left.build.llama_bench_version !== right.build.llama_bench_version) differences.push('llama-bench build')
   return differences
+}
+
+export function benchmarkTuningHints(run: BenchmarkRun): BenchmarkTuningHint[] {
+  if (run.workload_profile.tuning_hints?.length) return run.workload_profile.tuning_hints
+  const hasPrompt = (run.workload_profile.prompt_tokens || []).length > 0
+  const hasGeneration = (run.workload_profile.generation_tokens || []).length > 0
+  if (hasPrompt && !hasGeneration) return fallbackPromptHints
+  if (hasGeneration && !hasPrompt) return fallbackGenerationHints
+  return [...fallbackPromptHints.slice(0, 3), ...fallbackGenerationHints.slice(0, 3)]
+}
+
+function valueLabel(value: unknown) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : 'Automatic'
+  if (value === undefined || value === null || value === '') return 'Automatic'
+  return String(value)
+}
+
+export function benchmarkConfigChanges(left: BenchmarkRun, right: BenchmarkRun): BenchmarkConfigChange[] {
+  const changes: BenchmarkConfigChange[] = []
+  const a = left.instance_config_snapshot || { schema_version: 1 }
+  const b = right.instance_config_snapshot || { schema_version: 1 }
+  const add = (key: string, label: string, before: unknown, after: unknown, tunable: boolean) => {
+    if (canonicalBenchmarkValue(before) === canonicalBenchmarkValue(after)) return
+    changes.push({ key, label, before: valueLabel(before), after: valueLabel(after), tunable })
+  }
+  add('gpu_mode', 'GPU mode', a.gpu_mode, b.gpu_mode, false)
+  add('gpu_devices', 'GPU devices', a.gpu_devices || [], b.gpu_devices || [], true)
+  add('tensor-split', '--tensor-split', a.tensor_split, b.tensor_split, true)
+  const keys = new Set([...Object.keys(a.options || {}), ...Object.keys(b.options || {})])
+  for (const key of [...keys].sort()) {
+    add(key, `--${key}`, a.options?.[key], b.options?.[key], controlledTuningOptions.has(key))
+  }
+  return changes
+}
+
+function staticCPUIdentity(run: BenchmarkRun) {
+  const cpu = run.hardware_snapshot?.cpu
+  return cpu ? { model: cpu.model, logical_threads: cpu.logical_threads, architecture: cpu.architecture, os: cpu.os } : cpu
+}
+
+export function benchmarkControlledConfigChange(left: BenchmarkRun, right: BenchmarkRun): BenchmarkConfigChange | undefined {
+  const changes = benchmarkConfigChanges(left, right)
+  if (changes.length !== 1 || !changes[0]?.tunable) return undefined
+  let differences = benchmarkComparisonDifferences(left, right).filter(value => value !== 'Instance configuration')
+  if (changes[0].key === 'threads' && canonicalBenchmarkValue(staticCPUIdentity(left)) === canonicalBenchmarkValue(staticCPUIdentity(right))) {
+    differences = differences.filter(value => value !== 'CPU hardware')
+  }
+  return differences.length === 0 ? changes[0] : undefined
 }
 
 function canonicalBenchmarkValue(value: unknown): string {
