@@ -8,6 +8,32 @@ import (
 
 const ownerTestGiB = int64(1024 * 1024 * 1024)
 
+func TestAcquireOwnerValidationPreservesLegacyContract(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  AcquireRequest
+		want string
+	}{
+		{"empty legacy id", AcquireRequest{}, "instance id is required"},
+		{"blank legacy id", AcquireRequest{InstanceID: " \t", Owner: ResourceOwner{Kind: " ", ID: " "}}, "instance id is required"},
+		{"explicit instance missing id", AcquireRequest{Owner: ResourceOwner{Kind: ResourceOwnerInstance}}, "resource lease owner id is required"},
+		{"explicit benchmark missing id", AcquireRequest{Owner: ResourceOwner{Kind: ResourceOwnerBenchmark}}, "resource lease owner id is required"},
+		{"missing kind", AcquireRequest{Owner: ResourceOwner{ID: "job"}}, "resource lease owner kind must be instance or benchmark"},
+		{"unknown kind", AcquireRequest{Owner: ResourceOwner{Kind: "other", ID: "job"}}, "resource lease owner kind must be instance or benchmark"},
+		{"conflicting legacy id", AcquireRequest{InstanceID: "worker", Owner: ResourceOwner{Kind: ResourceOwnerBenchmark, ID: "worker"}}, "resource lease owner conflicts with legacy instance id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := NewLedger()
+			if _, err := ledger.Acquire(tc.req); err == nil || err.Error() != tc.want {
+				t.Fatalf("Acquire error = %v, want %q", err, tc.want)
+			}
+			if len(ledger.leases) != 0 {
+				t.Fatal("invalid owner created a lease")
+			}
+		})
+	}
+}
+
 func TestBenchmarkOwnerDoesNotReplaceInstanceLease(t *testing.T) {
 	ledger := NewLedger()
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 32 * ownerTestGiB, FreeBytes: 32 * ownerTestGiB}}}

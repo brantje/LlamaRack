@@ -118,6 +118,11 @@ func (l *Ledger) Acquire(req AcquireRequest) (ResourceLease, error) {
 	defer l.mu.Unlock()
 	l.sweepExpiredLocked()
 
+	// Preserve the validation contract for legacy Instance-only callers while
+	// leaving explicit resource-owner validation to normalizeOwner.
+	if strings.TrimSpace(req.Owner.Kind) == "" && strings.TrimSpace(req.Owner.ID) == "" && strings.TrimSpace(req.InstanceID) == "" {
+		return ResourceLease{}, errors.New("instance id is required")
+	}
 	owner, err := normalizeOwner(req.Owner, req.InstanceID)
 	if err != nil {
 		return ResourceLease{}, err
