@@ -81,6 +81,15 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 			return base, nil
 		}
 	}
+	if !profile.Has("n-depth") {
+		fields := make([]WorkloadField, 0, len(base.Workload.Fields))
+		for _, field := range base.Workload.Fields {
+			if field.Key != "context_depths" {
+				fields = append(fields, field)
+			}
+		}
+		base.Workload.Fields = fields
+	}
 	base.Available = true
 	base.OutputFormat = "json"
 	return base, nil
