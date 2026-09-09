@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
@@ -221,10 +222,19 @@ func TestServiceReconciliationFailuresAndTransitions(t *testing.T) {
 		s, store, _, _, _ := testBenchmarkService(t, benchmarkTestExecutor{})
 		store.runs["old"] = Run{ID: "old", Status: StatusRunning}
 		s.store = failingBenchmarkStore{Store: store, transitionErr: failure}
-		if !errors.Is(failure, ErrTransitionConflict) {
-			if err := s.ReconcileInterrupted(context.Background()); !errors.Is(err, failure) {
+		done := make(chan error, 1)
+		go func() { done <- s.ReconcileInterrupted(context.Background()) }()
+		select {
+		case err := <-done:
+			if errors.Is(failure, ErrTransitionConflict) {
+				if err != nil {
+					t.Fatalf("conflict reconcile err=%v", err)
+				}
+			} else if !errors.Is(err, failure) {
 				t.Fatalf("err=%v", err)
 			}
+		case <-time.After(time.Second):
+			t.Fatal("ReconcileInterrupted did not return")
 		}
 		// The runner must release ownership even if it cannot transition to RUNNING.
 		s.wg.Add(1)

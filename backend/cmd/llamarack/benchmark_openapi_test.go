@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -23,5 +24,16 @@ func TestBenchmarkOpenAPIOperations(t *testing.T) {
 	create := doc.Paths["/api/v1/instances/{id}/benchmarks"]["post"]
 	if create.Security == nil || create.RequestBody == nil || len(create.Parameters) != 1 || create.Parameters[0].Name != "id" {
 		t.Fatalf("benchmark create contract=%+v", create)
+	}
+	list := doc.Paths["/api/v1/benchmarks"]["get"]
+	names := make([]string, 0, len(list.Parameters))
+	for _, parameter := range list.Parameters {
+		if parameter.In != "query" {
+			t.Fatalf("list parameter %+v is not a query parameter", parameter)
+		}
+		names = append(names, parameter.Name)
+	}
+	if strings.Join(names, ",") != "instance_id,model_id,status,limit,offset" {
+		t.Fatalf("list query parameters=%v", names)
 	}
 }

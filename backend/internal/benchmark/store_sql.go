@@ -84,11 +84,11 @@ func (s *SQLStore) GetRun(ctx context.Context, id string) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	results, err := loadResults(ctx, s.db, run.ID)
+	grouped, err := loadResultsByRunIDs(ctx, s.db, []string{run.ID})
 	if err != nil {
 		return Run{}, err
 	}
-	run.Results = results
+	run.Results = grouped[run.ID]
 	return run, nil
 }
 
@@ -134,16 +134,24 @@ func (s *SQLStore) ListRuns(ctx context.Context, filter Filter) (Page, error) {
 	if err := rows.Close(); err != nil {
 		return Page{}, err
 	}
+	ids := make([]string, len(items))
 	for index := range items {
-		items[index].Results, err = loadResults(ctx, s.db, items[index].ID)
-		if err != nil {
-			return Page{}, err
-		}
+		ids[index] = items[index].ID
+	}
+	grouped, err := loadResultsByRunIDs(ctx, s.db, ids)
+	if err != nil {
+		return Page{}, err
+	}
+	for index := range items {
+		items[index].Results = grouped[items[index].ID]
 	}
 	return Page{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 
 func (s *SQLStore) TransitionRun(ctx context.Context, id string, from, to Status, update TransitionUpdate) (Run, error) {
+	if s == nil || s.db == nil {
+		return Run{}, errors.New("benchmark store is not configured")
+	}
 	if !from.Valid() || !to.Valid() {
 		return Run{}, errors.New("invalid benchmark transition status")
 	}
@@ -163,6 +171,9 @@ func (s *SQLStore) TransitionRun(ctx context.Context, id string, from, to Status
 }
 
 func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Completion, results []Result) (Run, error) {
+	if s == nil || s.db == nil {
+		return Run{}, errors.New("benchmark store is not configured")
+	}
 	if completion.CompletedAt.IsZero() {
 		completion.CompletedAt = time.Now().UTC()
 	}
@@ -296,21 +307,31 @@ func scanRun(row rowScanner) (Run, error) {
 	return run, nil
 }
 
-func loadResults(ctx context.Context, q interface {
+func loadResultsByRunIDs(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, runID string) ([]Result, error) {
-	rows, err := q.QueryContext(ctx, `SELECT case_index,case_id,prompt_tokens,generation_tokens,repetitions,avg_ns,stddev_ns,avg_ts,stddev_ts,raw_fields FROM benchmark_results WHERE run_id=? ORDER BY case_index`, runID)
+}, ids []string) (map[string][]Result, error) {
+	out := make(map[string][]Result, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for index, id := range ids {
+		placeholders[index] = "?"
+		args[index] = id
+	}
+	rows, err := q.QueryContext(ctx, `SELECT run_id,case_index,case_id,prompt_tokens,generation_tokens,repetitions,avg_ns,stddev_ns,avg_ts,stddev_ts,raw_fields FROM benchmark_results WHERE run_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY run_id, case_index`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Result
 	for rows.Next() {
+		var runID string
 		var result Result
 		var avgNS, stddevNS sql.NullInt64
 		var avgTS, stddevTS sql.NullFloat64
 		var raw string
-		if err := rows.Scan(&result.CaseIndex, &result.CaseID, &result.PromptTokens, &result.GenerationTokens, &result.Repetitions, &avgNS, &stddevNS, &avgTS, &stddevTS, &raw); err != nil {
+		if err := rows.Scan(&runID, &result.CaseIndex, &result.CaseID, &result.PromptTokens, &result.GenerationTokens, &result.Repetitions, &avgNS, &stddevNS, &avgTS, &stddevTS, &raw); err != nil {
 			return nil, err
 		}
 		if avgNS.Valid {
@@ -326,7 +347,7 @@ func loadResults(ctx context.Context, q interface {
 			result.StdDevTokensPS = stddevTS.Float64
 		}
 		result.RawFields = json.RawMessage(raw)
-		out = append(out, result)
+		out[runID] = append(out[runID], result)
 	}
 	return out, rows.Err()
 }

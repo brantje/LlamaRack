@@ -41,6 +41,14 @@ func registerBenchmarkOpenAPIOperations(doc *manageropenapi.Document) {
 			op.Description = "Starts llama-bench from an immutable server-resolved snapshot of the saved Instance. The request body contains workload dimensions only; executable paths, model paths, GPU placement, and llama.cpp runtime overrides are not accepted. Admission is non-preemptive."
 		} else if path == "/api/v1/benchmarks/{id}" || path == "/api/v1/benchmarks/{id}/cancel" {
 			op.Parameters = []manageropenapi.Parameter{pathParameter("id", "Benchmark run identifier")}
+		} else if path == "/api/v1/benchmarks" {
+			op.Parameters = []manageropenapi.Parameter{
+				{Name: "instance_id", In: "query", Description: "Filter history to a saved Instance ID.", Schema: manageropenapi.Schema{Type: "string"}},
+				{Name: "model_id", In: "query", Description: "Filter history to a saved Model ID.", Schema: manageropenapi.Schema{Type: "string"}},
+				{Name: "status", In: "query", Description: "Filter history to a benchmark run status.", Schema: manageropenapi.Schema{Type: "string", Enum: []string{"QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"}}},
+				{Name: "limit", In: "query", Description: "Maximum number of items to return. Defaults to 50 and is capped at 100.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
+				{Name: "offset", In: "query", Description: "Number of items to skip before returning results.", Schema: manageropenapi.Schema{Type: "integer", Format: "int64"}},
+			}
 		}
 		doc.MustRegister(method, path, op)
 	}

@@ -331,6 +331,7 @@ func (s *Service) ReconcileInterrupted(ctx context.Context) error {
 			if len(page.Items) == 0 {
 				break
 			}
+			transitioned := 0
 			for _, run := range page.Items {
 				completedAt := s.now().UTC()
 				to := StatusFailed
@@ -341,8 +342,13 @@ func (s *Service) ReconcileInterrupted(ctx context.Context) error {
 				}
 				if _, err := s.store.TransitionRun(ctx, run.ID, status, to, TransitionUpdate{CompletedAt: &completedAt, Failure: reason}); err != nil && !errors.Is(err, ErrTransitionConflict) {
 					return err
+				} else if err == nil {
+					transitioned++
 				}
 				s.reservations.ReleaseOwner(scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerBenchmark, ID: run.ID})
+			}
+			if transitioned == 0 {
+				break
 			}
 		}
 	}

@@ -12,9 +12,18 @@ const total = ref(0)
 const limit = 25
 const offset = ref(0)
 const allFilterValue = '__all__'
+const knownStatuses: BenchmarkStatus[] = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']
+const statusLabels: Record<BenchmarkStatus, string> = {
+  QUEUED: 'Queued',
+  RUNNING: 'Running',
+  COMPLETED: 'Completed',
+  FAILED: 'Failed',
+  CANCELLED: 'Cancelled'
+}
 const instanceID = ref(typeof route.query.instance_id === 'string' ? route.query.instance_id : allFilterValue)
 const modelID = ref(typeof route.query.model_id === 'string' ? route.query.model_id : allFilterValue)
-const status = ref<BenchmarkStatus | typeof allFilterValue>(typeof route.query.status === 'string' ? route.query.status.toUpperCase() as BenchmarkStatus : allFilterValue)
+const queryStatus = typeof route.query.status === 'string' ? route.query.status.toUpperCase() : ''
+const status = ref<BenchmarkStatus | typeof allFilterValue>((knownStatuses as readonly string[]).includes(queryStatus) ? queryStatus as BenchmarkStatus : allFilterValue)
 const selected = ref<string[]>([])
 const deleting = ref<BenchmarkRun | null>(null)
 const mutating = ref('')
@@ -22,11 +31,7 @@ const deleteOpen = computed({ get: () => Boolean(deleting.value), set: (value: b
 
 const statusItems = [
   { label: 'All statuses', value: allFilterValue },
-  { label: 'Queued', value: 'QUEUED' },
-  { label: 'Running', value: 'RUNNING' },
-  { label: 'Completed', value: 'COMPLETED' },
-  { label: 'Failed', value: 'FAILED' },
-  { label: 'Cancelled', value: 'CANCELLED' }
+  ...knownStatuses.map(value => ({ label: statusLabels[value], value }))
 ]
 const instanceItems = computed(() => [{ label: 'All Instances', value: allFilterValue }, ...manager.instances.value.map(item => ({ label: item.name, value: item.id }))])
 const modelItems = computed(() => [{ label: 'All Models', value: allFilterValue }, ...manager.models.value.map(item => ({ label: item.name, value: item.id }))])

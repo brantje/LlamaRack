@@ -99,6 +99,15 @@ it('filters and paginates history, translating All selections without leaking UI
   expect(vm.selected).toEqual(['run-1'])
 })
 
+it('ignores unknown status query values instead of requesting them', async () => {
+  serveRuns()
+  const wrapper = await mountSuspended(BenchmarksPage, { route: '/benchmarks?status=bogus' })
+  await flushPromises()
+  expect(mocks.request).toHaveBeenCalledWith('/api/v1/benchmarks?limit=25&offset=0')
+  expect((wrapper.vm as any).status).toBe('__all__')
+  wrapper.unmount()
+})
+
 it.each([undefined, { message: 'transport failed' }, { data: { error: 'access denied' } }])('shows history load, cancellation and deletion failures (%j)', async (failure) => {
   serveRuns()
   const wrapper = await mountSuspended(BenchmarksPage, { route: '/benchmarks' })

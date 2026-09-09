@@ -63,6 +63,20 @@ func TestMapInstanceConfigAndBuildArgv(t *testing.T) {
 	if len(mapped.Differences) != 2 || mapped.Differences[0].Key != "ctx-size" {
 		t.Fatalf("differences=%+v", mapped.Differences)
 	}
+	prefixed, err := MapInstanceConfig(InstanceConfigSnapshot{
+		Options: map[string]string{"--batch-size": "512", "--flash-attn": "false", "--port": "8000"},
+		Sources: map[string]string{"--batch-size": "instance", "--flash-attn": "instance", "--port": "global"},
+	}, scheduler.Placement{}, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixedArgs := strings.Join(prefixed.Args, " ")
+	if !strings.Contains(prefixedArgs, "--batch-size 512") || !strings.Contains(prefixedArgs, "--no-flash-attn") {
+		t.Fatalf("prefixed option keys dropped values: %q", prefixedArgs)
+	}
+	if len(prefixed.Differences) != 1 || prefixed.Differences[0].Key != "port" || prefixed.Differences[0].Severity != "ignored" {
+		t.Fatalf("prefixed sources=%+v", prefixed.Differences)
+	}
 	workload := WorkloadProfile{ID: DefaultWorkloadID, Version: WorkloadSchemaVersion, PromptTokens: []int{512, 2048}, GenerationTokens: []int{128}, Repetitions: 3, Warmup: false}
 	argv, err := BuildArgv("/app/llama-bench", "/models/model.gguf", mapped, workload, caps)
 	if err != nil {

@@ -219,6 +219,12 @@ func TestSQLStoreValidationRollbackAndStorageErrors(t *testing.T) {
 		if _, err := absent.ListRuns(ctx, Filter{}); err == nil {
 			t.Fatal("nil store list")
 		}
+		if _, err := absent.TransitionRun(ctx, run.ID, StatusQueued, StatusRunning, TransitionUpdate{}); err == nil {
+			t.Fatal("nil store transition")
+		}
+		if _, err := absent.CompleteRun(ctx, run.ID, Completion{}, nil); err == nil {
+			t.Fatal("nil store complete")
+		}
 		if err := absent.DeleteRun(ctx, run.ID); err == nil {
 			t.Fatal("nil store delete")
 		}

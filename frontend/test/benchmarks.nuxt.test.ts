@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import BenchmarkInstanceAction from '~/components/benchmark/BenchmarkInstanceAction.vue'
 import BenchmarkHistory from '~/components/benchmark/BenchmarkHistory.vue'
@@ -72,6 +72,8 @@ function bodyButton(text: string) {
   if (!button) throw new Error(`missing body button ${text}`)
   return button
 }
+
+enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   mocks.request.mockReset()

@@ -45,16 +45,17 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 	mapped := MappedConfig{}
 	keys := make([]string, 0, len(config.Options))
 	for key := range config.Options {
-		keys = append(keys, strings.TrimPrefix(strings.TrimSpace(key), "--"))
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	seen := map[string]bool{}
-	for _, key := range keys {
+	for _, original := range keys {
+		key := strings.TrimPrefix(strings.TrimSpace(original), "--")
 		if key == "" || seen[key] || workloadOwnedOptions[key] || placementOwnedOptions[key] {
 			continue
 		}
 		seen[key] = true
-		value := config.Options[key]
+		value := config.Options[original]
 		if key == "ctx-size" {
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "info", Reason: "llama-bench workload cases are bounded by the saved context size rather than overriding it"})
 			continue
@@ -71,7 +72,10 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "ignored", Reason: "server/network option does not participate in llama-bench execution"})
 			continue
 		}
-		source := strings.TrimSpace(config.Sources[key])
+		source := strings.TrimSpace(config.Sources[original])
+		if source == "" {
+			source = strings.TrimSpace(config.Sources[key])
+		}
 		if materialRuntimeOptions[key] || source == "instance" || source == "model" || source == "global" {
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "blocking", Reason: "saved performance-relevant option is not supported by this llama-bench build"})
 			return mapped, fmt.Errorf("%w: --%s is not supported by this llama-bench build", ErrUnsupportedConfig, key)
