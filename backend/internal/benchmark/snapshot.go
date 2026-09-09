@@ -71,6 +71,22 @@ func captureTarget(ctx context.Context, instanceID string, instanceSource instan
 	if err != nil {
 		return capturedTarget{}, err
 	}
+	// Inspection suggests companions, but only the resolved Instance options
+	// determine which artifacts will actually participate in this benchmark.
+	for _, dependency := range []struct{ option, kind string }{{"mmproj", "mmproj"}, {"spec-draft-model", "draft"}} {
+		path := strings.TrimSpace(effective.Values[dependency.option])
+		if path == "" {
+			continue
+		}
+		selected, err := captureArtifact(ctx, modelSource, models.Model{GGUFPath: path})
+		if err != nil {
+			return capturedTarget{}, fmt.Errorf("benchmark --%s dependency: %w", dependency.option, err)
+		}
+		artifact.Dependencies = append(artifact.Dependencies, ArtifactDependencySnapshot{
+			Kind: dependency.kind, Name: filepath.Base(selected.Path), Quantization: selected.Quantization, Files: selected.Files,
+		})
+	}
+	artifact.Fingerprint = artifactFingerprint(artifact)
 	return capturedTarget{
 		Instance: instance,
 		Model:    model,
@@ -120,17 +136,6 @@ func captureArtifact(ctx context.Context, modelSource modelReader, model models.
 		if inspection.ModelBytes <= 0 {
 			artifact.Size += snapshot.Size
 		}
-	}
-	for _, dependency := range inspection.Dependencies {
-		captured := ArtifactDependencySnapshot{Kind: dependency.Kind, Name: dependency.Name, Quantization: dependency.Quantization}
-		for _, file := range dependency.Files {
-			snapshot, err := captureArtifactFile(ctx, modelSource, file)
-			if err != nil {
-				return ArtifactSnapshot{}, err
-			}
-			captured.Files = append(captured.Files, snapshot)
-		}
-		artifact.Dependencies = append(artifact.Dependencies, captured)
 	}
 	artifact.Fingerprint = artifactFingerprint(artifact)
 	return artifact, nil
