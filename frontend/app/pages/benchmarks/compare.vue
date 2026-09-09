@@ -121,7 +121,7 @@ onMounted(() => { void load() })
         </Frame>
 
         <Frame class="p-4" data-testid="benchmark-comparison-differences">
-          <div class="flex flex-wrap items-center gap-2"><StatusTag :variant="differences.length ? 'neutral' : 'ready'">{{ differences.length ? 'Inputs differ' : 'Like-for-like inputs' }}</StatusTag><p class="text-sm">{{ differences.length ? differences.join(', ') : 'Artifact, workload, captured configuration, GPU identity, backend and llama.cpp build match.' }}</p></div>
+          <div class="flex flex-wrap items-center gap-2"><StatusTag :variant="differences.length ? 'neutral' : 'ready'">{{ differences.length ? 'Inputs differ' : 'Like-for-like inputs' }}</StatusTag><p class="text-sm">{{ differences.length ? differences.join(', ') : 'Artifact, workload, captured configuration, hardware and executable identities match.' }}</p></div>
           <div v-if="differences.length" class="mt-4 grid gap-4 border-t border-[var(--color-divider)] pt-4 lg:grid-cols-2"><div><p class="text-xs font-medium text-muted">Run A configuration</p><p class="mt-1 text-xs font-mono leading-5">{{ configSummary(left) }}</p></div><div><p class="text-xs font-medium text-muted">Run B configuration</p><p class="mt-1 text-xs font-mono leading-5">{{ configSummary(right) }}</p></div></div>
         </Frame>
 

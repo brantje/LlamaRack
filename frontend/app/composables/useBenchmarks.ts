@@ -104,7 +104,8 @@ export type BenchmarkRun = {
   }
   hardware_snapshot: {
     observed?: HardwareSnapshot
-    cpu?: { model?: string; logical_threads?: number; architecture?: string; os?: string }
+    cpu?: { model?: string; logical_threads?: number; effective_threads?: number; architecture?: string; os?: string }
+    selected_devices?: string[]
   }
   benchmark_schema_version?: number
   parser_schema_version?: number
@@ -146,17 +147,20 @@ export function benchmarkStatusVariant(status?: BenchmarkStatus): 'ready' | 'pen
 export function benchmarkHeadline(run: BenchmarkRun) {
   const results = run.results || []
   const prompt = results.find(result => result.prompt_tokens > 0 && result.generation_tokens === 0)?.average_tokens_per_second
-    ?? results.find(result => result.prompt_tokens > 0)?.average_tokens_per_second
   const generation = results.find(result => result.generation_tokens > 0 && result.prompt_tokens === 0)?.average_tokens_per_second
-    ?? results.find(result => result.generation_tokens > 0)?.average_tokens_per_second
   return { prompt, generation }
 }
 
-export function benchmarkGPULabel(run: BenchmarkRun) {
+function benchmarkGPUs(run: BenchmarkRun) {
   const gpus = run.hardware_snapshot?.observed?.gpus || []
-  const selected = new Set(run.instance_config_snapshot?.gpu_devices || [])
-  const relevant = selected.size ? gpus.filter(gpu => selected.has(gpu.id)) : gpus
-  const names = relevant.map(gpu => gpu.name || gpu.id).filter(Boolean)
+  if (run.instance_config_snapshot?.options?.['n-gpu-layers'] === '0') return []
+  const admitted = run.hardware_snapshot?.selected_devices
+  const selected = new Set(admitted || run.instance_config_snapshot?.gpu_devices || [])
+  return admitted || selected.size ? gpus.filter(gpu => selected.has(gpu.id)) : gpus
+}
+
+export function benchmarkGPULabel(run: BenchmarkRun) {
+  const names = benchmarkGPUs(run).map(gpu => gpu.name || gpu.id).filter(Boolean)
   return names.length ? [...new Set(names)].join(', ') : 'CPU / unknown GPU'
 }
 
@@ -171,12 +175,23 @@ export function benchmarkDuration(run: BenchmarkRun) {
 export function benchmarkComparisonDifferences(left: BenchmarkRun, right: BenchmarkRun) {
   const differences: string[] = []
   if (left.artifact_snapshot.fingerprint !== right.artifact_snapshot.fingerprint) differences.push('Model artifact')
-  if (JSON.stringify(left.workload_profile) !== JSON.stringify(right.workload_profile)) differences.push('Workload')
-  if (JSON.stringify(left.instance_config_snapshot) !== JSON.stringify(right.instance_config_snapshot)) differences.push('Instance configuration')
-  if (benchmarkGPULabel(left) !== benchmarkGPULabel(right)) differences.push('GPU hardware')
+  if (canonicalBenchmarkValue(left.workload_profile) !== canonicalBenchmarkValue(right.workload_profile)) differences.push('Workload')
+  const config = (run: BenchmarkRun) => ({ ...run.instance_config_snapshot, sources: undefined })
+  if (canonicalBenchmarkValue(config(left)) !== canonicalBenchmarkValue(config(right))) differences.push('Instance configuration')
+  const gpus = (run: BenchmarkRun) => benchmarkGPUs(run).map(({ id, name, backend, total_bytes }) => ({ id, name, backend, total_bytes }))
+  if (canonicalBenchmarkValue(gpus(left)) !== canonicalBenchmarkValue(gpus(right))) differences.push('GPU hardware')
+  if (canonicalBenchmarkValue(left.hardware_snapshot?.cpu) !== canonicalBenchmarkValue(right.hardware_snapshot?.cpu)) differences.push('CPU hardware')
+  if (left.hardware_snapshot?.observed?.ram_total_bytes !== right.hardware_snapshot?.observed?.ram_total_bytes) differences.push('Host memory')
   if (left.build.runtime_variant !== right.build.runtime_variant) differences.push('Runtime backend')
   if (left.build.llama_cpp_build !== right.build.llama_cpp_build) differences.push('llama.cpp build')
+  if (left.build.llama_bench_fingerprint !== right.build.llama_bench_fingerprint || left.build.llama_bench_version !== right.build.llama_bench_version) differences.push('llama-bench build')
   return differences
+}
+
+function canonicalBenchmarkValue(value: unknown): string {
+  if (Array.isArray(value)) return JSON.stringify(value.map(item => canonicalBenchmarkValue(item)))
+  if (value && typeof value === 'object') return JSON.stringify(Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalBenchmarkValue(item)]))
+  return JSON.stringify(value) ?? ''
 }
 
 export function useBenchmarks() {

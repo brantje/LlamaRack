@@ -183,3 +183,60 @@ describe('benchmark frontend contract', () => {
     wrapper.unmount()
   })
 })
+
+it('compares actual hardware and executable identity while ignoring observations and property ordering', () => {
+  const left = runFixture()
+  const reordered = runFixture({ instance_config_snapshot: { schema_version: 1, gpu_mode: 'manual', gpu_devices: ['CUDA0'], tensor_split: '1', options: { threads: '4', 'ctx-size': '4096' }, sources: { threads: 'global' } } })
+  expect(benchmarkComparisonDifferences(left, reordered)).toEqual([])
+  const observed = structuredClone(left)
+  observed.hardware_snapshot.observed!.gpus[0]!.free_bytes = 2
+  observed.hardware_snapshot.observed!.ram_available_bytes = 1
+  expect(benchmarkComparisonDifferences(left, observed)).toEqual([])
+  const right = structuredClone(left)
+  right.hardware_snapshot.cpu!.effective_threads = 3
+  right.hardware_snapshot.observed!.ram_total_bytes = 9999
+  right.hardware_snapshot.observed!.gpus[0]!.total_bytes = 9999
+  right.build.llama_bench_fingerprint = 'other-build'
+  expect(benchmarkComparisonDifferences(left, right)).toEqual(['GPU hardware', 'CPU hardware', 'Host memory', 'llama-bench build'])
+  right.hardware_snapshot = {}
+  expect(benchmarkComparisonDifferences(left, right)).toContain('CPU hardware')
+})
+
+it('labels admitted GPUs rather than every visible device and keeps CPU runs independent of unused GPUs', () => {
+  const run = runFixture()
+  run.instance_config_snapshot.gpu_devices = []
+  run.hardware_snapshot.observed!.gpus.push({ ...run.hardware_snapshot.observed!.gpus[0]!, id: 'CUDA1', name: '' })
+  run.hardware_snapshot.selected_devices = ['CUDA1']
+  expect(benchmarkGPULabel(run)).toBe('CUDA1')
+  run.hardware_snapshot.selected_devices = []
+  expect(benchmarkGPULabel(run)).toBe('CPU / unknown GPU')
+  delete run.hardware_snapshot.selected_devices
+  run.instance_config_snapshot.options!['n-gpu-layers'] = '0'
+  expect(benchmarkGPULabel(run)).toBe('CPU / unknown GPU')
+  const other = structuredClone(run)
+  other.hardware_snapshot.observed!.gpus = []
+  expect(benchmarkComparisonDifferences(run, other)).toEqual([])
+  run.hardware_snapshot = {}
+  expect(benchmarkGPULabel(run)).toBe('CPU / unknown GPU')
+})
+
+it('reuses live hardware and cached capabilities and exposes missing-history fallbacks', async () => {
+  const manager = resetManager()
+  mocks.request.mockResolvedValue(capabilities)
+  const api = useBenchmarks()
+  await api.loadCapabilities(); await api.loadCapabilities()
+  expect(mocks.request).toHaveBeenCalledTimes(1)
+  await api.loadCapabilities(true)
+  expect(mocks.request).toHaveBeenCalledTimes(2)
+  manager.observabilityLive.value = { hardware: runFixture().hardware_snapshot.observed } as any
+  expect(await api.hardware()).toEqual(runFixture().hardware_snapshot.observed)
+  expect(mocks.request).toHaveBeenCalledTimes(2)
+  expect(api.modelFor(runFixture(), [model])).toEqual(model)
+  expect(api.modelFor(runFixture(), [])).toBeUndefined()
+  expect(benchmarkHeadline(runFixture({ results: undefined }))).toEqual({ prompt: undefined, generation: undefined })
+  expect(benchmarkHeadline(runFixture({ results: [{ case_index: 0, case_id: 'pg-10-2', prompt_tokens: 10, generation_tokens: 2, repetitions: 1, average_tokens_per_second: 20 }] }))).toEqual({ prompt: undefined, generation: undefined })
+  expect(benchmarkDuration(runFixture({ started_at: 'invalid' }))).toBeUndefined()
+  expect(benchmarkDuration(runFixture({ completed_at: '2000-01-01' }))).toBeUndefined()
+  expect(benchmarkStatusVariant('QUEUED')).toBe('pending')
+  expect(benchmarkStatusVariant()).toBe('neutral')
+})
