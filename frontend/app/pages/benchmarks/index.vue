@@ -11,24 +11,25 @@ const runs = ref<BenchmarkRun[]>([])
 const total = ref(0)
 const limit = 25
 const offset = ref(0)
-const instanceID = ref(typeof route.query.instance_id === 'string' ? route.query.instance_id : '')
-const modelID = ref(typeof route.query.model_id === 'string' ? route.query.model_id : '')
-const status = ref<BenchmarkStatus | ''>(typeof route.query.status === 'string' ? route.query.status.toUpperCase() as BenchmarkStatus : '')
+const allFilterValue = '__all__'
+const instanceID = ref(typeof route.query.instance_id === 'string' ? route.query.instance_id : allFilterValue)
+const modelID = ref(typeof route.query.model_id === 'string' ? route.query.model_id : allFilterValue)
+const status = ref<BenchmarkStatus | typeof allFilterValue>(typeof route.query.status === 'string' ? route.query.status.toUpperCase() as BenchmarkStatus : allFilterValue)
 const selected = ref<string[]>([])
 const deleting = ref<BenchmarkRun | null>(null)
 const mutating = ref('')
 const deleteOpen = computed({ get: () => Boolean(deleting.value), set: (value: boolean) => { if (!value) deleting.value = null } })
 
 const statusItems = [
-  { label: 'All statuses', value: '' },
+  { label: 'All statuses', value: allFilterValue },
   { label: 'Queued', value: 'QUEUED' },
   { label: 'Running', value: 'RUNNING' },
   { label: 'Completed', value: 'COMPLETED' },
   { label: 'Failed', value: 'FAILED' },
   { label: 'Cancelled', value: 'CANCELLED' }
 ]
-const instanceItems = computed(() => [{ label: 'All Instances', value: '' }, ...manager.instances.value.map(item => ({ label: item.name, value: item.id }))])
-const modelItems = computed(() => [{ label: 'All Models', value: '' }, ...manager.models.value.map(item => ({ label: item.name, value: item.id }))])
+const instanceItems = computed(() => [{ label: 'All Instances', value: allFilterValue }, ...manager.instances.value.map(item => ({ label: item.name, value: item.id }))])
+const modelItems = computed(() => [{ label: 'All Models', value: allFilterValue }, ...manager.models.value.map(item => ({ label: item.name, value: item.id }))])
 const canPrevious = computed(() => offset.value > 0)
 const canNext = computed(() => offset.value + runs.value.length < total.value)
 const comparisonURL = computed(() => selected.value.length === 2 ? `/benchmarks/compare?ids=${selected.value.map(encodeURIComponent).join(',')}` : '')
@@ -61,7 +62,13 @@ async function load() {
   error.value = ''
   try {
     if (!manager.instances.value.length && !manager.models.value.length) await manager.refresh()
-    const page = await benchmarks.list({ instanceID: instanceID.value, modelID: modelID.value, status: status.value, limit, offset: offset.value })
+    const page = await benchmarks.list({
+      instanceID: instanceID.value === allFilterValue ? undefined : instanceID.value,
+      modelID: modelID.value === allFilterValue ? undefined : modelID.value,
+      status: status.value === allFilterValue ? undefined : status.value,
+      limit,
+      offset: offset.value
+    })
     runs.value = page.items || []
     total.value = page.total || 0
     selected.value = selected.value.filter(id => runs.value.some(run => run.id === id && run.status === 'COMPLETED'))
@@ -73,7 +80,14 @@ async function load() {
 }
 async function applyFilters() {
   offset.value = 0
-  await navigateTo({ path: '/benchmarks', query: { ...(instanceID.value ? { instance_id: instanceID.value } : {}), ...(modelID.value ? { model_id: modelID.value } : {}), ...(status.value ? { status: status.value } : {}) } }, { replace: true })
+  await navigateTo({
+    path: '/benchmarks',
+    query: {
+      ...(instanceID.value !== allFilterValue ? { instance_id: instanceID.value } : {}),
+      ...(modelID.value !== allFilterValue ? { model_id: modelID.value } : {}),
+      ...(status.value !== allFilterValue ? { status: status.value } : {})
+    }
+  }, { replace: true })
   await load()
 }
 async function page(direction: -1 | 1) {
