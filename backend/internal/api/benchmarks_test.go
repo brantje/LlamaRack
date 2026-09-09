@@ -115,6 +115,34 @@ func TestBenchmarkCreateResolvesInstanceAndAcceptsOnlyWorkload(t *testing.T) {
 	}
 }
 
+func TestBenchmarkCreatePreservesPresetWarmupPresence(t *testing.T) {
+	resolver := fakeBenchmarkInstanceResolver{bySlug: map[string]instances.Instance{"coder": {ID: "instance-uuid", Slug: "coder"}}}
+	for _, tc := range []struct {
+		name       string
+		workload   map[string]any
+		wantWarmup bool
+	}{
+		{name: "omitted uses preset default", workload: map[string]any{"id": benchmark.DefaultWorkloadID}, wantWarmup: true},
+		{name: "explicit false disables warmup", workload: map[string]any{"id": benchmark.DefaultWorkloadID, "warmup": false}, wantWarmup: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeBenchmarkManagementService{run: benchmark.Run{ID: "run-1", Status: benchmark.StatusQueued}}
+			mux := benchmarkTestMux(service, resolver)
+			w := benchmarkRequest(t, mux, http.MethodPost, "/api/v1/instances/coder/benchmarks", map[string]any{"workload": tc.workload}, true)
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			resolved, err := benchmark.NormalizeWorkload(service.createdWork)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Warmup != tc.wantWarmup {
+				t.Fatalf("warmup=%v want=%v workload=%+v", resolved.Warmup, tc.wantWarmup, service.createdWork)
+			}
+		})
+	}
+}
+
 func TestBenchmarkCreateRejectsRuntimeAndFilesystemOverrides(t *testing.T) {
 	service := &fakeBenchmarkManagementService{run: benchmark.Run{ID: "run-1", Status: benchmark.StatusQueued}}
 	resolver := fakeBenchmarkInstanceResolver{bySlug: map[string]instances.Instance{"coder": {ID: "instance-uuid", Slug: "coder"}}}
