@@ -15,6 +15,7 @@ const (
 	ConfigSchemaVersion    = 1
 	WorkloadSchemaVersion  = 1
 	DefaultWorkloadID      = "standard-v1"
+	CustomWorkloadID       = "custom-v1"
 )
 
 type Status string
@@ -60,13 +61,23 @@ func CanTransition(from, to Status) bool {
 	}
 }
 
+type TuningHint struct {
+	Key    string `json:"key"`
+	Impact string `json:"impact"`
+	Reason string `json:"reason"`
+}
+
 type WorkloadProfile struct {
-	ID               string `json:"id"`
-	Version          int    `json:"version"`
-	PromptTokens     []int  `json:"prompt_tokens"`
-	GenerationTokens []int  `json:"generation_tokens"`
-	Repetitions      int    `json:"repetitions"`
-	Warmup           bool   `json:"warmup"`
+	ID               string       `json:"id"`
+	Version          int          `json:"version"`
+	Name             string       `json:"name,omitempty"`
+	Description      string       `json:"description,omitempty"`
+	Focus            string       `json:"focus,omitempty"`
+	TuningHints      []TuningHint `json:"tuning_hints,omitempty"`
+	PromptTokens     []int        `json:"prompt_tokens"`
+	GenerationTokens []int        `json:"generation_tokens"`
+	Repetitions      int          `json:"repetitions"`
+	Warmup           bool         `json:"warmup"`
 }
 
 type InstanceConfigSnapshot struct {
