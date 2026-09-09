@@ -225,11 +225,9 @@ export function benchmarkDuration(run: BenchmarkRun) {
 
 function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
   return {
-    id: workload.id,
-    version: workload.version,
     prompt_tokens: workload.prompt_tokens,
     generation_tokens: workload.generation_tokens,
-    context_depths: workload.context_depths,
+    context_depths: workload.context_depths || [],
     repetitions: workload.repetitions,
     warmup: workload.warmup
   }
