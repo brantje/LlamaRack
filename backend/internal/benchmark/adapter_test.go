@@ -211,3 +211,64 @@ func TestMapBenchNumericBooleans(t *testing.T) {
 		})
 	}
 }
+
+func TestAdapterRejectsUnavailableAndUnrepresentableConfigurations(t *testing.T) {
+	if _, err := MapInstanceConfig(InstanceConfigSnapshot{}, scheduler.Placement{}, Capabilities{Reason: "missing"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err=%v", err)
+	}
+	if _, err := BuildArgv("bench", "model", MappedConfig{}, DefaultWorkload(), Capabilities{}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err=%v", err)
+	}
+	for _, config := range []InstanceConfigSnapshot{
+		{Options: map[string]string{"": "ignored", "detected": "x"}, Sources: map[string]string{"detected": "detected"}},
+		{TensorSplit: "1,1"},
+	} {
+		mapped, err := MapInstanceConfig(config, scheduler.Placement{}, testCapabilities())
+		if config.TensorSplit != "" {
+			if !errors.Is(err, ErrUnsupportedConfig) {
+				t.Fatalf("err=%v", err)
+			}
+		} else if err != nil || len(mapped.Differences) != 1 || mapped.Differences[0].Severity != "ignored" {
+			t.Fatalf("mapped=%+v err=%v", mapped, err)
+		}
+	}
+	if _, err := MapInstanceConfig(InstanceConfigSnapshot{}, scheduler.Placement{Devices: []string{"CUDA0"}}, testCapabilities()); !errors.Is(err, ErrUnsupportedConfig) {
+		t.Fatalf("device error=%v", err)
+	}
+	caps := testCapabilities(llamacpp.Option{Key: "no-mmap", Kind: "boolean"}, llamacpp.Option{Key: "mmap", Kind: "boolean"})
+	mapped, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"no-mmap": "false"}}, scheduler.Placement{}, caps)
+	if err != nil || !reflect.DeepEqual(mapped.Args, []string{"--mmap"}) {
+		t.Fatalf("mapped=%+v err=%v", mapped, err)
+	}
+	for _, value := range []string{"false", "invalid"} {
+		caps := testCapabilities(llamacpp.Option{Key: "mlock", Kind: "boolean"})
+		if _, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"mlock": value}}, scheduler.Placement{}, caps); !errors.Is(err, ErrUnsupportedConfig) {
+			t.Fatalf("value=%s err=%v", value, err)
+		}
+	}
+	for _, path := range []string{"", filepath.Join(t.TempDir(), "missing")} {
+		caps, err := DiscoverCapabilities(context.Background(), path)
+		if err != nil || caps.Available || caps.Reason == "" {
+			t.Fatalf("caps=%+v err=%v", caps, err)
+		}
+	}
+}
+
+func TestWorkloadValidationRejectsInvalidCases(t *testing.T) {
+	for _, input := range []WorkloadProfile{
+		{Version: 99, Repetitions: 1, PromptTokens: []int{1}},
+		{Repetitions: 1, PromptTokens: []int{-1}},
+		{Repetitions: 1, GenerationTokens: []int{maxWorkloadTokens + 1}},
+		{Repetitions: 1},
+	} {
+		if _, err := NormalizeWorkload(&input); !errors.Is(err, ErrInvalidWorkload) {
+			t.Fatalf("input=%+v err=%v", input, err)
+		}
+	}
+	if err := ValidateWorkloadContext(DefaultWorkload(), InstanceConfigSnapshot{Options: map[string]string{"ctx-size": "bad"}}); !errors.Is(err, ErrUnsupportedConfig) {
+		t.Fatalf("err=%v", err)
+	}
+	if err := ValidateWorkloadContext(DefaultWorkload(), InstanceConfigSnapshot{Options: map[string]string{"ctx-size": "4096"}}); err != nil {
+		t.Fatal(err)
+	}
+}

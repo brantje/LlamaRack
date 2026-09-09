@@ -139,3 +139,88 @@ func testRun(created time.Time) Run {
 		ParserSchemaVersion:    ParserSchemaVersion,
 	}
 }
+
+func TestSQLStoreValidationRollbackAndStorageErrors(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := NewSQLStore(db)
+	for _, run := range []Run{{}, {ID: "id", Status: "INVALID"}} {
+		if err := store.CreateRun(ctx, run); err == nil {
+			t.Fatalf("accepted invalid run %+v", run)
+		}
+	}
+	run := testRun(time.Time{})
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetRun(ctx, run.ID)
+	if err != nil || got.CreatedAt.IsZero() {
+		t.Fatalf("run=%+v err=%v", got, err)
+	}
+	if _, err := store.TransitionRun(ctx, run.ID, "INVALID", StatusRunning, TransitionUpdate{}); err == nil {
+		t.Fatal("accepted invalid status")
+	}
+	if _, err := store.TransitionRun(ctx, run.ID, StatusQueued, StatusRunning, TransitionUpdate{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CompleteRun(ctx, run.ID, Completion{}, []Result{{RawFields: []byte("bad")}}); err == nil {
+		t.Fatal("accepted invalid raw JSON")
+	}
+	got, _ = store.GetRun(ctx, run.ID)
+	if got.Status != StatusRunning || len(got.Results) != 0 {
+		t.Fatalf("partial completion persisted: %+v", got)
+	}
+	got, err = store.CompleteRun(ctx, run.ID, Completion{}, []Result{{CaseID: "pp-1", PromptTokens: 1, AverageNS: 20, StdDevNS: 2}})
+	if err != nil || len(got.Results) != 1 || got.Results[0].AverageNS != 20 || got.Results[0].StdDevNS != 2 || string(got.Results[0].RawFields) != "{}" {
+		t.Fatalf("completion=%+v err=%v", got, err)
+	}
+	if err := store.DeleteRun(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+	// Broken persisted JSON must be reported, never silently treated as a valid run.
+	if _, err := db.ExecContext(ctx, `UPDATE benchmark_runs SET instance_config_snapshot='invalid' WHERE id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRun(ctx, run.ID); err == nil {
+		t.Fatal("corrupt config was accepted")
+	}
+	if _, err := store.ListRuns(ctx, Filter{}); err == nil {
+		t.Fatal("corrupt history was accepted")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []func() error{
+		func() error { return store.CreateRun(ctx, testRun(time.Now())) },
+		func() error { _, err := store.GetRun(ctx, "id"); return err },
+		func() error { _, err := store.ListRuns(ctx, Filter{}); return err },
+		func() error {
+			_, err := store.TransitionRun(ctx, "id", StatusQueued, StatusRunning, TransitionUpdate{})
+			return err
+		},
+		func() error { _, err := store.CompleteRun(ctx, "id", Completion{}, nil); return err },
+		func() error { return store.DeleteRun(ctx, "id") },
+	} {
+		if err := call(); err == nil {
+			t.Fatal("closed store error ignored")
+		}
+	}
+	for _, absent := range []*SQLStore{nil, NewSQLStore(nil)} {
+		if err := absent.CreateRun(ctx, run); err == nil {
+			t.Fatal("nil store create")
+		}
+		if _, err := absent.GetRun(ctx, run.ID); err == nil {
+			t.Fatal("nil store get")
+		}
+		if _, err := absent.ListRuns(ctx, Filter{}); err == nil {
+			t.Fatal("nil store list")
+		}
+		if err := absent.DeleteRun(ctx, run.ID); err == nil {
+			t.Fatal("nil store delete")
+		}
+	}
+}
