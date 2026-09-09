@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BenchmarkResult, BenchmarkRun } from '~/composables/useBenchmarks'
-import { benchmarkComparisonDifferences, benchmarkGPULabel } from '~/composables/useBenchmarks'
+import { benchmarkComparisonDifferences, benchmarkConfigChanges, benchmarkControlledConfigChange, benchmarkGPULabel } from '~/composables/useBenchmarks'
 
 const route = useRoute()
 const benchmarks = useBenchmarks()
@@ -17,6 +17,9 @@ const queryIDs = computed(() => {
 })
 const candidateItems = computed(() => candidates.value.filter(run => run.id !== left.value?.id).map(run => ({ label: `${run.instance_name_snapshot} · ${formatDate(run.created_at)} · ${benchmarkGPULabel(run)}`, value: run.id })))
 const differences = computed(() => left.value && right.value ? benchmarkComparisonDifferences(left.value, right.value) : [])
+const configChanges = computed(() => left.value && right.value ? benchmarkConfigChanges(left.value, right.value) : [])
+const controlledChange = computed(() => left.value && right.value ? benchmarkControlledConfigChange(left.value, right.value) : undefined)
+const onlyConfigurationDiffers = computed(() => differences.value.length === 1 && differences.value[0] === 'Instance configuration')
 const cases = computed(() => {
   if (!left.value || !right.value) return []
   const rightByCase = new Map((right.value.results || []).map(result => [result.case_id, result]))
@@ -122,10 +125,19 @@ onMounted(() => { void load() })
 
         <Frame class="p-4" data-testid="benchmark-comparison-differences">
           <div class="flex flex-wrap items-center gap-2"><StatusTag :variant="differences.length ? 'neutral' : 'ready'">{{ differences.length ? 'Inputs differ' : 'Like-for-like inputs' }}</StatusTag><p class="text-sm">{{ differences.length ? differences.join(', ') : 'Artifact, workload, captured configuration, hardware and executable identities match.' }}</p></div>
+          <div v-if="controlledChange" class="mt-4 border-t border-[var(--color-divider)] pt-4" data-testid="benchmark-controlled-change">
+            <div class="flex items-start gap-2"><StatusTag variant="ready">Controlled setting test</StatusTag><p class="text-sm leading-6">Only <code class="font-mono">{{ controlledChange.label }}</code> changed among captured benchmark inputs: <code class="font-mono">{{ controlledChange.before }}</code> → <code class="font-mono">{{ controlledChange.after }}</code>. Matching case deltas are evidence for this setting on this model, hardware and build.</p></div>
+          </div>
+          <div v-else-if="onlyConfigurationDiffers && configChanges.length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-4">
+            <div class="flex items-start gap-2"><StatusTag variant="neutral">Multiple settings changed</StatusTag><p class="text-sm leading-6">Performance changed with {{ configChanges.length }} captured configuration differences. Change one setting at a time before attributing an improvement to a specific parameter.</p></div>
+          </div>
+          <div v-if="configChanges.length" class="mt-4 overflow-x-auto border-t border-[var(--color-divider)] pt-4">
+            <table class="w-full min-w-[620px] text-left text-xs"><thead class="text-muted"><tr><th class="pb-2 pr-4 font-medium">Changed setting</th><th class="pb-2 pr-4 font-medium">Run A</th><th class="pb-2 font-medium">Run B</th></tr></thead><tbody class="divide-y divide-[var(--color-divider)]"><tr v-for="change in configChanges" :key="change.key"><td class="py-2 pr-4 font-mono">{{ change.label }}</td><td class="py-2 pr-4 font-mono">{{ change.before }}</td><td class="py-2 font-mono">{{ change.after }}</td></tr></tbody></table>
+          </div>
           <div v-if="differences.length" class="mt-4 grid gap-4 border-t border-[var(--color-divider)] pt-4 lg:grid-cols-2"><div><p class="text-xs font-medium text-muted">Run A configuration</p><p class="mt-1 text-xs font-mono leading-5">{{ configSummary(left) }}</p></div><div><p class="text-xs font-medium text-muted">Run B configuration</p><p class="mt-1 text-xs font-mono leading-5">{{ configSummary(right) }}</p></div></div>
         </Frame>
 
-        <section class="space-y-3"><div><h2 class="text-base font-semibold">Matching benchmark cases</h2><p class="mt-1 text-xs text-muted">Delta is Run B minus Run A. No overall winner is inferred when inputs differ.</p></div><Frame class="overflow-hidden"><div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-xs"><thead class="border-b border-[var(--color-divider)] text-muted"><tr><th class="px-4 py-3 font-medium">Case</th><th class="px-4 py-3 font-medium">Type</th><th class="px-4 py-3 font-medium">Tokens</th><th class="px-4 py-3 font-medium">Run A</th><th class="px-4 py-3 font-medium">Run B</th><th class="px-4 py-3 font-medium">Δ / Δ%</th></tr></thead><tbody class="divide-y divide-[var(--color-divider)]"><tr v-for="entry in cases" :key="entry.id"><td class="px-4 py-3 font-mono">{{ entry.id }}</td><td class="px-4 py-3">{{ caseKind(entry.left) }}</td><td class="px-4 py-3 font-mono">P {{ entry.left.prompt_tokens }} / G {{ entry.left.generation_tokens }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ rate(entry.left.average_tokens_per_second) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ rate(entry.right.average_tokens_per_second) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ delta(entry.left.average_tokens_per_second, entry.right.average_tokens_per_second) }}</td></tr><tr v-if="!cases.length"><td colspan="6" class="px-4 py-8 text-center text-muted">These runs do not share any benchmark case identities.</td></tr></tbody></table></div></Frame></section>
+        <section class="space-y-3"><div><h2 class="text-base font-semibold">Matching benchmark cases</h2><p class="mt-1 text-xs text-muted">Delta is Run B minus Run A. {{ controlledChange ? `This isolates ${controlledChange.label}; judge it per matching workload case rather than as one opaque score.` : 'No overall winner is inferred when material inputs differ.' }}</p></div><Frame class="overflow-hidden"><div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-xs"><thead class="border-b border-[var(--color-divider)] text-muted"><tr><th class="px-4 py-3 font-medium">Case</th><th class="px-4 py-3 font-medium">Type</th><th class="px-4 py-3 font-medium">Tokens</th><th class="px-4 py-3 font-medium">Run A</th><th class="px-4 py-3 font-medium">Run B</th><th class="px-4 py-3 font-medium">Δ / Δ%</th></tr></thead><tbody class="divide-y divide-[var(--color-divider)]"><tr v-for="entry in cases" :key="entry.id"><td class="px-4 py-3 font-mono">{{ entry.id }}</td><td class="px-4 py-3">{{ caseKind(entry.left) }}</td><td class="px-4 py-3 font-mono">P {{ entry.left.prompt_tokens }} / G {{ entry.left.generation_tokens }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ rate(entry.left.average_tokens_per_second) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ rate(entry.right.average_tokens_per_second) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ delta(entry.left.average_tokens_per_second, entry.right.average_tokens_per_second) }}</td></tr><tr v-if="!cases.length"><td colspan="6" class="px-4 py-8 text-center text-muted">These runs do not share any benchmark case identities.</td></tr></tbody></table></div></Frame></section>
       </template>
     </template>
   </div>
