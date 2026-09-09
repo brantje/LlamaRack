@@ -43,6 +43,11 @@ const profileItems = computed(() => [
 ])
 const canRun = computed(() => Boolean(capabilities.value?.available) && !loading.value && !submitting.value)
 
+function formatCombinedCases(value: unknown) {
+  if (!Array.isArray(value)) return ''
+  return value.map((item: any) => `${item?.prompt_tokens ?? ''}:${item?.generation_tokens ?? ''}`).filter(value => !value.startsWith(':') && !value.endsWith(':')).join(', ')
+}
+
 function applyWorkload(caps: BenchmarkCapabilities, workload: BenchmarkWorkloadProfile) {
   for (const key of Object.keys(listValues)) delete listValues[key]
   for (const key of Object.keys(scalarValues)) delete scalarValues[key]
@@ -50,6 +55,7 @@ function applyWorkload(caps: BenchmarkCapabilities, workload: BenchmarkWorkloadP
   for (const field of caps.workload.fields || []) {
     const value = (workload as unknown as Record<string, unknown>)[field.key]
     if (field.kind === 'integer-list') listValues[field.key] = Array.isArray(value) ? value.join(', ') : ''
+    else if (field.kind === 'token-pair-list') listValues[field.key] = formatCombinedCases(value)
     else if (field.kind === 'integer') scalarValues[field.key] = Number(value || 0)
     else if (field.kind === 'boolean') booleanValues[field.key] = Boolean(value)
   }
@@ -68,6 +74,21 @@ function parseIntegerList(value: string, label: string) {
   return values
 }
 
+function parseTokenPairList(value: string, label: string) {
+  const parts = value.split(',').map(part => part.trim()).filter(Boolean)
+  if (!parts.length) return []
+  return parts.map(part => {
+    const values = part.split(':').map(value => value.trim())
+    if (values.length !== 2) throw new Error(`${label} must use prompt:generation pairs separated by commas.`)
+    const prompt = Number(values[0])
+    const generation = Number(values[1])
+    if (!Number.isInteger(prompt) || prompt < 1 || !Number.isInteger(generation) || generation < 1) {
+      throw new Error(`${label} must use positive whole-number prompt:generation pairs.`)
+    }
+    return { prompt_tokens: prompt, generation_tokens: generation }
+  })
+}
+
 function resolvedWorkload(): BenchmarkWorkloadProfile {
   const caps = capabilities.value
   if (!caps) throw new Error('Benchmark capabilities are unavailable.')
@@ -77,6 +98,8 @@ function resolvedWorkload(): BenchmarkWorkloadProfile {
       ...preset,
       prompt_tokens: [...(preset.prompt_tokens || [])],
       generation_tokens: [...(preset.generation_tokens || [])],
+      combined_cases: preset.combined_cases?.map(item => ({ ...item })),
+      context_depths: preset.context_depths ? [...preset.context_depths] : undefined,
       tuning_hints: preset.tuning_hints ? [...preset.tuning_hints] : undefined
     }
   }
@@ -90,6 +113,7 @@ function resolvedWorkload(): BenchmarkWorkloadProfile {
   }
   for (const field of caps.workload.fields || []) {
     if (field.kind === 'integer-list') (workload as unknown as Record<string, unknown>)[field.key] = parseIntegerList(listValues[field.key] || '', field.label)
+    else if (field.kind === 'token-pair-list') (workload as unknown as Record<string, unknown>)[field.key] = parseTokenPairList(listValues[field.key] || '', field.label)
     else if (field.kind === 'integer') (workload as unknown as Record<string, unknown>)[field.key] = Number(scalarValues[field.key])
     else if (field.kind === 'boolean') (workload as unknown as Record<string, unknown>)[field.key] = Boolean(booleanValues[field.key])
   }
@@ -193,7 +217,7 @@ watch(open, value => { if (value) void load() })
               <p class="mt-1 text-xs text-muted">Choose what this Instance is meant to do. Runtime settings still come only from the saved Instance.</p>
             </div>
             <template v-if="capabilities?.available">
-              <UFormField label="Workload profile" description="Profiles change only controlled llama-bench token cases, repetitions and warm-up behavior.">
+              <UFormField label="Workload profile" description="Profiles change only controlled llama-bench cases, context depths, repetitions and warm-up behavior.">
                 <USelect v-model="selectedProfileID" :items="profileItems" value-key="value" label-key="label" class="w-full" data-testid="benchmark-workload-profile" />
               </UFormField>
 
@@ -206,6 +230,8 @@ watch(open, value => { if (value) void load() })
                 <dl class="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
                   <div><dt class="text-muted">Prompt cases</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.prompt_tokens?.join(', ') || 'None' }}</dd></div>
                   <div><dt class="text-muted">Generation cases</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.generation_tokens?.join(', ') || 'None' }}</dd></div>
+                  <div><dt class="text-muted">Combined turns</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.combined_cases?.length ? selectedPreset.combined_cases.map(item => `${item.prompt_tokens}:${item.generation_tokens}`).join(', ') : 'None' }}</dd></div>
+                  <div><dt class="text-muted">Context depths</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.context_depths?.length ? selectedPreset.context_depths.join(', ') : '0 / default' }}</dd></div>
                   <div><dt class="text-muted">Repetitions</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.repetitions }}</dd></div>
                 </dl>
                 <div v-if="selectedPreset.tuning_hints?.length" class="border-t border-[var(--color-divider)] pt-3">
@@ -218,8 +244,8 @@ watch(open, value => { if (value) void load() })
 
               <div v-if="isCustom" class="grid gap-4 border-t border-[var(--color-divider)] pt-3 sm:grid-cols-2" data-testid="benchmark-custom-workload">
                 <div class="sm:col-span-2"><p class="text-xs font-medium">Advanced workload fields</p><p class="mt-1 text-xs text-muted">Use this only when the supplied workload intents do not represent what you need to measure.</p></div>
-                <UFormField v-for="field in capabilities.workload.fields" :key="field.key" :label="field.label" :description="field.description" :class="field.kind === 'integer-list' ? 'sm:col-span-2' : ''">
-                  <UInput v-if="field.kind === 'integer-list'" v-model="listValues[field.key]" class="w-full" :placeholder="'512, 2048'" />
+                <UFormField v-for="field in capabilities.workload.fields" :key="field.key" :label="field.label" :description="field.description" :class="field.kind === 'integer-list' || field.kind === 'token-pair-list' ? 'sm:col-span-2' : ''">
+                  <UInput v-if="field.kind === 'integer-list' || field.kind === 'token-pair-list'" v-model="listValues[field.key]" class="w-full" :placeholder="field.kind === 'token-pair-list' ? '512:128, 1024:128' : '512, 2048'" />
                   <UInput v-else-if="field.kind === 'integer'" v-model.number="scalarValues[field.key]" class="w-full" type="number" :min="field.minimum" :max="field.maximum" />
                   <UCheckbox v-else-if="field.kind === 'boolean'" v-model="booleanValues[field.key]" :label="field.label" />
                 </UFormField>
