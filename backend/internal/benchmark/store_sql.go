@@ -347,6 +347,10 @@ func loadResultsByRunIDs(ctx context.Context, q interface {
 			result.StdDevTokensPS = stddevTS.Float64
 		}
 		result.RawFields = json.RawMessage(raw)
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(result.RawFields, &fields) == nil {
+			result.ContextDepth = jsonInt64(fields, "n_depth")
+		}
 		out[runID] = append(out[runID], result)
 	}
 	return out, rows.Err()
