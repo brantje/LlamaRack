@@ -8,6 +8,11 @@ export type BenchmarkTuningHint = {
   reason: string
 }
 
+export type BenchmarkCombinedCase = {
+  prompt_tokens: number
+  generation_tokens: number
+}
+
 export type BenchmarkWorkloadProfile = {
   id?: string
   version?: number
@@ -17,6 +22,7 @@ export type BenchmarkWorkloadProfile = {
   tuning_hints?: BenchmarkTuningHint[]
   prompt_tokens: number[]
   generation_tokens: number[]
+  combined_cases?: BenchmarkCombinedCase[]
   context_depths?: number[]
   repetitions: number
   warmup: boolean
@@ -25,7 +31,7 @@ export type BenchmarkWorkloadProfile = {
 export type BenchmarkWorkloadField = {
   key: string
   label: string
-  kind: 'integer-list' | 'integer' | 'boolean' | string
+  kind: 'integer-list' | 'token-pair-list' | 'integer' | 'boolean' | string
   minimum?: number
   maximum?: number
   advanced?: boolean
@@ -227,6 +233,7 @@ function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
   return {
     prompt_tokens: workload.prompt_tokens,
     generation_tokens: workload.generation_tokens,
+    combined_cases: workload.combined_cases || [],
     context_depths: workload.context_depths || [],
     repetitions: workload.repetitions,
     warmup: workload.warmup
