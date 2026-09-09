@@ -38,6 +38,22 @@ func WorkloadPresets() []WorkloadProfile {
 			Warmup:           true,
 		},
 		{
+			ID:          "chat-turn-v1",
+			Version:     WorkloadSchemaVersion,
+			Name:        "Interactive turn",
+			Description: "Measures prompt processing, generation, and complete prompt-then-generation turns for interactive assistants.",
+			Focus:       "Show whether a tuning change helps the whole interactive turn instead of only prefill or generation in isolation.",
+			TuningHints: balancedTuningHints(),
+			PromptTokens:     []int{256, 1024},
+			GenerationTokens: []int{64, 128},
+			CombinedCases: []WorkloadCombinedCase{
+				{PromptTokens: 256, GenerationTokens: 64},
+				{PromptTokens: 1024, GenerationTokens: 128},
+			},
+			Repetitions: 5,
+			Warmup:      true,
+		},
+		{
 			ID:          "prompt-heavy-v1",
 			Version:     WorkloadSchemaVersion,
 			Name:        "Prompt-heavy / RAG",
@@ -73,6 +89,18 @@ func WorkloadPresets() []WorkloadProfile {
 			Repetitions:      5,
 			Warmup:           true,
 		},
+		{
+			ID:          "context-depth-v1",
+			Version:     WorkloadSchemaVersion,
+			Name:        "Generation at context",
+			Description: "Runs the same generation case with an empty and a prefilled KV cache to expose context-sensitive generation behavior.",
+			Focus:       "Measure how generation throughput changes as the active context grows, especially for KV-cache and attention tuning.",
+			TuningHints: generationTuningHints(),
+			GenerationTokens: []int{128},
+			ContextDepths:    []int{0, 2048},
+			Repetitions:      5,
+			Warmup:           true,
+		},
 	}
 }
 
@@ -89,6 +117,7 @@ func DefaultWorkloadSchema() WorkloadSchema {
 		Fields: []WorkloadField{
 			{Key: "prompt_tokens", Label: "Prompt processing", Kind: "integer-list", Minimum: 1, Maximum: maxWorkloadTokens, Description: "Prompt token counts measured as controlled prompt-processing cases."},
 			{Key: "generation_tokens", Label: "Generation", Kind: "integer-list", Minimum: 1, Maximum: maxWorkloadTokens, Description: "Generation token counts measured as controlled token-generation cases."},
+			{Key: "combined_cases", Label: "Combined prompt + generation", Kind: "token-pair-list", Minimum: 1, Maximum: maxWorkloadTokens, Advanced: true, Description: "Optional prompt:generation pairs measured as complete llama-bench PG turns, for example 512:128."},
 			{Key: "context_depths", Label: "Context depths", Kind: "integer-list", Minimum: 0, Maximum: maxWorkloadTokens, Advanced: true, Description: "Optional llama-bench KV prefill depths. Each selected test is repeated at these context depths; depth plus test tokens must fit the saved Instance context size."},
 			{Key: "repetitions", Label: "Repetitions", Kind: "integer", Minimum: 1, Maximum: maxWorkloadRepetitions},
 			{Key: "warmup", Label: "Warm up", Kind: "boolean", Advanced: true, Description: "Run llama-bench warm-up before measured repetitions."},
@@ -118,8 +147,8 @@ func NormalizeWorkload(input *WorkloadProfile) (WorkloadProfile, error) {
 	if workload.Version != LegacyWorkloadSchemaVersion && workload.Version != WorkloadSchemaVersion {
 		return WorkloadProfile{}, fmt.Errorf("%w: unsupported workload schema version %d", ErrInvalidWorkload, workload.Version)
 	}
-	if workload.Version == LegacyWorkloadSchemaVersion && len(workload.ContextDepths) > 0 {
-		return WorkloadProfile{}, fmt.Errorf("%w: context_depths requires workload schema version %d", ErrInvalidWorkload, WorkloadSchemaVersion)
+	if workload.Version == LegacyWorkloadSchemaVersion && (len(workload.ContextDepths) > 0 || len(workload.CombinedCases) > 0) {
+		return WorkloadProfile{}, fmt.Errorf("%w: context_depths and combined_cases require workload schema version %d", ErrInvalidWorkload, WorkloadSchemaVersion)
 	}
 	if workload.Repetitions < 1 || workload.Repetitions > maxWorkloadRepetitions {
 		return WorkloadProfile{}, fmt.Errorf("%w: repetitions must be between 1 and %d", ErrInvalidWorkload, maxWorkloadRepetitions)
@@ -134,13 +163,17 @@ func NormalizeWorkload(input *WorkloadProfile) (WorkloadProfile, error) {
 		return WorkloadProfile{}, err
 	}
 	if workload.Version == WorkloadSchemaVersion {
+		workload.CombinedCases, err = normalizeCombinedCases(workload.CombinedCases)
+		if err != nil {
+			return WorkloadProfile{}, err
+		}
 		workload.ContextDepths, err = normalizeContextDepths(workload.ContextDepths)
 		if err != nil {
 			return WorkloadProfile{}, err
 		}
 	}
-	if len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 {
-		return WorkloadProfile{}, fmt.Errorf("%w: at least one prompt or generation case is required", ErrInvalidWorkload)
+	if len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.CombinedCases) == 0 {
+		return WorkloadProfile{}, fmt.Errorf("%w: at least one prompt, generation, or combined case is required", ErrInvalidWorkload)
 	}
 	return decorateWorkload(workload), nil
 }
@@ -172,6 +205,11 @@ func ValidateWorkloadContext(workload WorkloadProfile, config InstanceConfigSnap
 				return fmt.Errorf("%w: generation case %d at context depth %d exceeds saved context size %d", ErrInvalidWorkload, tokens, depth, contextSize)
 			}
 		}
+		for _, combined := range workload.CombinedCases {
+			if depth+combined.PromptTokens+combined.GenerationTokens > contextSize {
+				return fmt.Errorf("%w: combined case %d:%d at context depth %d exceeds saved context size %d", ErrInvalidWorkload, combined.PromptTokens, combined.GenerationTokens, depth, contextSize)
+			}
+		}
 	}
 	return nil
 }
@@ -197,6 +235,8 @@ func decorateWorkload(workload WorkloadProfile) WorkloadProfile {
 	workload.Description = "User-defined controlled llama-bench workload."
 	workload.Focus = "Use comparison runs to determine which saved Instance settings matter for these cases."
 	switch {
+	case len(workload.CombinedCases) > 0:
+		workload.TuningHints = balancedTuningHints()
 	case len(workload.PromptTokens) > 0 && len(workload.GenerationTokens) == 0:
 		workload.TuningHints = promptTuningHints()
 	case len(workload.GenerationTokens) > 0 && len(workload.PromptTokens) == 0:
@@ -208,12 +248,24 @@ func decorateWorkload(workload WorkloadProfile) WorkloadProfile {
 }
 
 func workloadDimensionsEmpty(workload WorkloadProfile) bool {
-	return len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0
+	return len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.CombinedCases) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0
 }
 
 func sameWorkloadShape(left, right WorkloadProfile) bool {
-	if left.Repetitions != right.Repetitions || left.Warmup != right.Warmup || !intSlicesEqual(left.PromptTokens, right.PromptTokens) || !intSlicesEqual(left.GenerationTokens, right.GenerationTokens) || !intSlicesEqual(left.ContextDepths, right.ContextDepths) {
+	if left.Repetitions != right.Repetitions || left.Warmup != right.Warmup || !intSlicesEqual(left.PromptTokens, right.PromptTokens) || !intSlicesEqual(left.GenerationTokens, right.GenerationTokens) || !combinedCasesEqual(left.CombinedCases, right.CombinedCases) || !intSlicesEqual(left.ContextDepths, right.ContextDepths) {
 		return false
+	}
+	return true
+}
+
+func combinedCasesEqual(left, right []WorkloadCombinedCase) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
 	}
 	return true
 }
@@ -231,7 +283,7 @@ func intSlicesEqual(left, right []int) bool {
 }
 
 func workloadIsZero(workload WorkloadProfile) bool {
-	return workload.ID == "" && workload.Version == 0 && len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0 && !workload.Warmup
+	return workload.ID == "" && workload.Version == 0 && len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.CombinedCases) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0 && !workload.Warmup
 }
 
 func normalizeTokenCounts(values []int, field string) ([]int, error) {
@@ -240,6 +292,22 @@ func normalizeTokenCounts(values []int, field string) ([]int, error) {
 	for _, value := range values {
 		if value < 1 || value > maxWorkloadTokens {
 			return nil, fmt.Errorf("%w: %s values must be between 1 and %d", ErrInvalidWorkload, field, maxWorkloadTokens)
+		}
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func normalizeCombinedCases(values []WorkloadCombinedCase) ([]WorkloadCombinedCase, error) {
+	seen := map[WorkloadCombinedCase]bool{}
+	out := make([]WorkloadCombinedCase, 0, len(values))
+	for _, value := range values {
+		if value.PromptTokens < 1 || value.PromptTokens > maxWorkloadTokens || value.GenerationTokens < 1 || value.GenerationTokens > maxWorkloadTokens {
+			return nil, fmt.Errorf("%w: combined_cases prompt and generation values must be between 1 and %d", ErrInvalidWorkload, maxWorkloadTokens)
 		}
 		if seen[value] {
 			continue
