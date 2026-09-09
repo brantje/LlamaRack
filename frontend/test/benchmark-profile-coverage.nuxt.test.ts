@@ -134,7 +134,7 @@ describe('benchmark workload profile UI', () => {
     expect(vm.selectedProfileID).toBe('standard-v1')
     expect(vm.selectedPreset.name).toBe('Balanced')
     expect(vm.profileItems.map((item: any) => item.value)).toEqual(['standard-v1', 'generation-heavy-v1', 'custom-v1'])
-    expect(wrapper.text()).toContain('Settings this workload is useful for testing')
+    expect(document.body.textContent).toContain('Settings this workload is useful for testing')
 
     vm.selectedProfileID = 'generation-heavy-v1'
     await flushPromises()
@@ -144,7 +144,7 @@ describe('benchmark workload profile UI', () => {
 
     vm.selectedProfileID = 'custom-v1'
     await flushPromises()
-    expect(wrapper.find('[data-testid="benchmark-custom-workload"]').exists()).toBe(true)
+    expect(document.body.querySelector('[data-testid="benchmark-custom-workload"]')).not.toBeNull()
     vm.listValues.prompt_tokens = '64, 64, 256'
     vm.listValues.generation_tokens = ''
     vm.scalarValues.repetitions = 3
@@ -166,7 +166,7 @@ describe('benchmark workload profile UI', () => {
     const unavailable = await mountSuspended(BenchmarkInstanceAction, { props: { instance } })
     await unavailable.get('[data-testid="instance-benchmark-action"]').trigger('click')
     await flushPromises()
-    expect(unavailable.text()).toContain('llama-bench missing')
+    expect(document.body.textContent).toContain('llama-bench missing')
     expect((unavailable.vm as any).canRun).toBe(false)
     unavailable.unmount()
 
@@ -176,7 +176,7 @@ describe('benchmark workload profile UI', () => {
     const failed = await mountSuspended(BenchmarkInstanceAction, { props: { instance } })
     await failed.get('[data-testid="instance-benchmark-action"]').trigger('click')
     await flushPromises()
-    expect(failed.text()).toContain('capability failed')
+    expect(document.body.textContent).toContain('capability failed')
     expect((failed.vm as any).loading).toBe(false)
   })
 })
