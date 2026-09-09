@@ -3,8 +3,6 @@ package benchmark
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,30 +70,17 @@ func TestParseMachineOutputIdentifiesContextDepth(t *testing.T) {
 }
 
 func TestDiscoverCapabilitiesOnlyAdvertisesDepthWhenSupported(t *testing.T) {
-	writeBench := func(name string, withDepth bool) string {
-		path := filepath.Join(t.TempDir(), name)
-		depth := ""
-		if withDepth {
-			depth = "--n-depth <n>  depth\n"
-		}
-		script := "#!/bin/sh\ncase \"$1\" in\n" +
-			"  --version) echo test ;;\n" +
-			"  --help) printf '%s' '--model <FNAME>  model\n--output <json>  output\n--repetitions <n>  repetitions\n--n-prompt <n>  prompt\n--n-gen <n>  generation\n" + depth + "' ;;\n" +
-			"  --list-devices) echo 'Available devices:' ;;\n" +
-			"esac\n"
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-
 	for _, tc := range []struct {
 		name      string
 		withDepth bool
 		wantField bool
 	}{{"old", false, false}, {"depth", true, true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			caps, err := DiscoverCapabilities(context.Background(), writeBench(tc.name, tc.withDepth))
+			optional := ""
+			if tc.withDepth {
+				optional = "--n-depth <n>  depth\\n"
+			}
+			caps, err := DiscoverCapabilities(context.Background(), writeBenchScript(t, tc.name, optional))
 			if err != nil || !caps.Available {
 				t.Fatalf("caps=%+v err=%v", caps, err)
 			}
