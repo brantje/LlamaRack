@@ -86,3 +86,64 @@ func TestCaptureTargetUsesOnlyEffectiveDependencies(t *testing.T) {
 		t.Fatalf("incomplete dependency error = %v", err)
 	}
 }
+
+func TestCaptureCPUUsesExecutableDefaultAndRejectsUnknownCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name, saved, description string
+		want                     int
+	}{
+		{"explicit", " 3 ", "(default: 12)", 3},
+		{"implicit", "", "number of threads (default: 12)", 12},
+		{"unknown", "", "number of threads", 0},
+		{"zero", "0", "(default: 12)", 0},
+		{"negative", "-1", "(default: 12)", 0},
+		{"invalid", "many", "(default: 12)", 0},
+		{"sweep", "2,4", "(default: 12)", 0},
+		{"ambiguous default", "", "(default: 2,4)", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := testCapabilities()
+			for i := range caps.profile.Options {
+				if caps.profile.Options[i].Key == "threads" {
+					caps.profile.Options[i].Description = tc.description
+				}
+			}
+			cpu, err := captureCPU(InstanceConfigSnapshot{Options: map[string]string{"threads": tc.saved}}, caps)
+			if tc.want == 0 {
+				if !errors.Is(err, ErrUnsupportedConfig) {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err != nil || cpu.EffectiveThreads != tc.want || cpu.LogicalThreads <= 0 || cpu.Architecture == "" || cpu.OS == "" {
+				t.Fatalf("cpu=%+v err=%v", cpu, err)
+			}
+		})
+	}
+}
+
+func TestCreatePinsCapturedThreadCountWithoutChangingSavedConfig(t *testing.T) {
+	for _, threads := range []string{"", "7"} {
+		t.Run("saved="+threads, func(t *testing.T) {
+			s, _, _, _, cfg := testBenchmarkService(t, benchmarkTestExecutor{output: RunOutput{MachineOutput: []byte(`[{"n_prompt":512,"avg_ts":12}]`)}})
+			if threads != "" {
+				cfg.effective.Values["threads"] = threads
+			}
+			run, err := s.Create(context.Background(), "instance-1", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.wg.Wait()
+			want := "4"
+			if threads != "" {
+				want = threads
+			}
+			if !strings.Contains(strings.Join(run.ResolvedArgv, " "), "--threads "+want) || run.Hardware.CPU.EffectiveThreads != map[string]int{"4": 4, "7": 7}[want] {
+				t.Fatalf("thread snapshot does not match argv: %+v", run)
+			}
+			if run.InstanceConfig.Options["threads"] != threads || cfg.effective.Values["threads"] != threads {
+				t.Fatal("changed saved configuration")
+			}
+		})
+	}
+}

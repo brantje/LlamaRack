@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -247,13 +248,19 @@ func cloneStringMap(input map[string]string) map[string]string {
 	return out
 }
 
-func captureCPU(config InstanceConfigSnapshot) CPUSnapshot {
-	threads := 0
-	if raw := strings.TrimSpace(config.Options["threads"]); raw != "" {
-		threads, _ = strconv.Atoi(raw)
-		if threads < 0 {
-			threads = 0
+var benchmarkThreadDefault = regexp.MustCompile(`(?i)\(default:\s*([0-9]+)\s*\)`)
+
+func captureCPU(config InstanceConfigSnapshot, caps Capabilities) (CPUSnapshot, error) {
+	raw := strings.TrimSpace(config.Options["threads"])
+	if raw == "" {
+		option, _ := profileOption(caps.profileForMapping(), "threads")
+		if match := benchmarkThreadDefault.FindStringSubmatch(option.Description); len(match) == 2 {
+			raw = match[1]
 		}
+	}
+	threads, err := strconv.Atoi(raw)
+	if err != nil || threads <= 0 {
+		return CPUSnapshot{}, fmt.Errorf("%w: cannot resolve a positive llama-bench thread count from the saved configuration or executable default", ErrUnsupportedConfig)
 	}
 	return CPUSnapshot{
 		Model:            readCPUModel(),
@@ -261,7 +268,7 @@ func captureCPU(config InstanceConfigSnapshot) CPUSnapshot {
 		EffectiveThreads: threads,
 		Architecture:     runtime.GOARCH,
 		OS:               runtime.GOOS,
-	}
+	}, nil
 }
 
 func readCPUModel() string {

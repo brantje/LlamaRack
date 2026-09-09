@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,6 +113,10 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	if !caps.Available {
 		return Run{}, fmt.Errorf("%w: %s", ErrUnavailable, caps.Reason)
 	}
+	cpu, err := captureCPU(target.Config, caps)
+	if err != nil {
+		return Run{}, err
+	}
 	snapshot, err := s.hardware.Snapshot(ctx)
 	if err != nil {
 		return Run{}, fmt.Errorf("benchmark hardware snapshot: %w", err)
@@ -125,7 +130,7 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	lease, err := s.reservations.Acquire(scheduler.AcquireRequest{
 		Owner: owner, Snapshot: snapshot,
 		Placement: scheduler.PlacementRequest{RequiredBytes: demand.VRAMBytes(), Mode: target.Config.GPUMode, Devices: target.Config.GPUDevices, TensorSplit: target.Config.TensorSplit},
-		HostRAM: demand.HostRAMBytes,
+		HostRAM:   demand.HostRAMBytes,
 	})
 	if err != nil {
 		return Run{}, err
@@ -138,7 +143,12 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 			s.reservations.ReleaseOwner(owner)
 		}
 	}()
-	mapped, err := MapInstanceConfig(target.Config, lease.Placement, caps)
+	// Pin the executable's reported default in argv so the captured thread
+	// count is also the one used, without changing the saved Instance snapshot.
+	executionConfig := target.Config
+	executionConfig.Options = cloneStringMap(target.Config.Options)
+	executionConfig.Options["threads"] = strconv.Itoa(cpu.EffectiveThreads)
+	mapped, err := MapInstanceConfig(executionConfig, lease.Placement, caps)
 	if err != nil {
 		return Run{}, err
 	}
@@ -152,7 +162,7 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	identity := s.buildIdentity()
 	now := s.now().UTC()
 	run := Run{
-		ID: runID,
+		ID:         runID,
 		InstanceID: target.Instance.ID, InstanceSlugSnapshot: target.Instance.Slug, InstanceNameSnapshot: target.Instance.Name, InstanceConfig: target.Config,
 		ModelID: target.Model.ID, ModelSlugSnapshot: target.Model.Slug, ModelNameSnapshot: target.Model.Name, Artifact: target.Artifact,
 		Workload: workload, ResolvedArgv: append([]string(nil), argv...), MappingDifferences: append([]MappingDifference(nil), mapped.Differences...), Status: StatusQueued,
@@ -162,7 +172,7 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 			LlamaCppRelease: identity.LlamaCpp.Release, LlamaCppBuild: identity.LlamaCpp.Build,
 			LlamaBenchVersion: caps.Version, LlamaBenchFingerprint: caps.Fingerprint,
 		},
-		Hardware: HardwareSnapshot{Observed: snapshot, CPU: captureCPU(target.Config), SelectedDevices: append([]string(nil), lease.Placement.Devices...)},
+		Hardware:               HardwareSnapshot{Observed: snapshot, CPU: cpu, SelectedDevices: append([]string(nil), lease.Placement.Devices...)},
 		BenchmarkSchemaVersion: BenchmarkSchemaVersion, ParserSchemaVersion: ParserSchemaVersion,
 	}
 	if err = s.store.CreateRun(ctx, run); err != nil {

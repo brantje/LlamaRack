@@ -156,6 +156,7 @@ func testCapabilities(extra ...llamacpp.Option) Capabilities {
 	options := []llamacpp.Option{
 		{Key: "model", Kind: "string"}, {Key: "output", Kind: "enum", Choices: []string{"json"}},
 		{Key: "repetitions", Kind: "integer"}, {Key: "n-prompt", Kind: "integer"}, {Key: "n-gen", Kind: "integer"},
+		{Key: "threads", Kind: "integer", Description: "(default: 4)"},
 	}
 	options = append(options, extra...)
 	profile := llamacpp.Profile{Version: "test", Fingerprint: "fingerprint", Options: options}
