@@ -17,6 +17,7 @@ export type BenchmarkWorkloadProfile = {
   tuning_hints?: BenchmarkTuningHint[]
   prompt_tokens: number[]
   generation_tokens: number[]
+  context_depths?: number[]
   repetitions: number
   warmup: boolean
 }
@@ -79,6 +80,7 @@ export type BenchmarkResult = {
   case_id: string
   prompt_tokens: number
   generation_tokens: number
+  context_depth?: number
   repetitions: number
   average_ns?: number
   stddev_ns?: number
@@ -184,10 +186,19 @@ export function benchmarkStatusVariant(status?: BenchmarkStatus): 'ready' | 'pen
   return 'neutral'
 }
 
+export function benchmarkResultDepth(result: BenchmarkResult) {
+  if (Number.isFinite(result.context_depth)) return Number(result.context_depth)
+  const raw = result.raw_fields?.n_depth
+  const value = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(value) ? value : 0
+}
+
 export function benchmarkHeadline(run: BenchmarkRun) {
   const results = run.results || []
-  const prompt = results.find(result => result.prompt_tokens > 0 && result.generation_tokens === 0)?.average_tokens_per_second
-  const generation = results.find(result => result.generation_tokens > 0 && result.prompt_tokens === 0)?.average_tokens_per_second
+  const promptRows = results.filter(result => result.prompt_tokens > 0 && result.generation_tokens === 0)
+  const generationRows = results.filter(result => result.generation_tokens > 0 && result.prompt_tokens === 0)
+  const prompt = (promptRows.find(result => benchmarkResultDepth(result) === 0) || promptRows[0])?.average_tokens_per_second
+  const generation = (generationRows.find(result => benchmarkResultDepth(result) === 0) || generationRows[0])?.average_tokens_per_second
   return { prompt, generation }
 }
 
@@ -218,6 +229,7 @@ function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
     version: workload.version,
     prompt_tokens: workload.prompt_tokens,
     generation_tokens: workload.generation_tokens,
+    context_depths: workload.context_depths,
     repetitions: workload.repetitions,
     warmup: workload.warmup
   }
