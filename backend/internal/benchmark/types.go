@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	BenchmarkSchemaVersion = 1
-	ParserSchemaVersion    = 1
-	ConfigSchemaVersion    = 1
-	WorkloadSchemaVersion  = 1
-	DefaultWorkloadID      = "standard-v1"
-	CustomWorkloadID       = "custom-v1"
+	BenchmarkSchemaVersion      = 1
+	ParserSchemaVersion         = 1
+	ConfigSchemaVersion         = 1
+	LegacyWorkloadSchemaVersion = 1
+	WorkloadSchemaVersion       = 2
+	DefaultWorkloadID           = "standard-v1"
+	CustomWorkloadID            = "custom-v1"
 )
 
 type Status string
@@ -76,6 +77,7 @@ type WorkloadProfile struct {
 	TuningHints      []TuningHint `json:"tuning_hints,omitempty"`
 	PromptTokens     []int        `json:"prompt_tokens"`
 	GenerationTokens []int        `json:"generation_tokens"`
+	ContextDepths    []int        `json:"context_depths,omitempty"`
 	Repetitions      int          `json:"repetitions"`
 	Warmup           bool         `json:"warmup"`
 }
