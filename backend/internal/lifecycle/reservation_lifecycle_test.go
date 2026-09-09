@@ -233,10 +233,11 @@ func TestEvictionRequesterKeepsReservationDuringStopStartGap(t *testing.T) {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	victim := items[0]
+	exec("UPDATE models SET total_bytes=? WHERE id=?", 8*testGiB, m.ID)
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * testGiB}}}}}
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
-	exec("UPDATE models SET total_bytes=? WHERE id=?", 8*testGiB, m.ID)
 	enabled, autoload, eviction := true, true, false
 	requester, err := s.instances.Create(ctx, instances.CreateInput{
 		ModelID: m.ID, Name: "Requester", Enabled: &enabled, Autoload: &autoload, EvictionEnabled: &eviction,
@@ -305,10 +306,11 @@ func TestPreparePlacementFailsWhenEvictionRefreshLosesDevice(t *testing.T) {
 		t.Fatalf("instances=%+v err=%v", items, err)
 	}
 	victim := items[0]
+	exec("UPDATE models SET total_bytes=? WHERE id=?", 2*testGiB, m.ID)
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * testGiB}}}}}
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
-	exec("UPDATE models SET total_bytes=? WHERE id=?", 2*testGiB, m.ID)
 	s.hardware = &stagedHardware{snapshots: []hardware.Snapshot{
 		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: testGiB}}},
 		{GPUs: []hardware.GPU{{ID: "CUDA1", FreeBytes: 8 * testGiB}}},
