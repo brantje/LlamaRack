@@ -7,9 +7,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/brantje/llamarack/backend/internal/llamacpp"
 )
+
+func writeBenchScript(t *testing.T, name, optional string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	script := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  --version) echo test ;;\n" +
+		"  --help) printf '%b' '--model <FNAME>  model\\n--output <json>  output\\n--repetitions <n>  repetitions\\n--n-prompt <n>  prompt\\n--n-gen <n>  generation\\n" + optional + "' ;;\n" +
+		"  --list-devices) echo 'Available devices:' ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestCombinedWorkloadNormalizationAndContextBounds(t *testing.T) {
 	workload, err := NormalizeWorkload(&WorkloadProfile{
@@ -90,24 +102,11 @@ func TestParseCombinedContextDepthCase(t *testing.T) {
 }
 
 func TestDiscoverCapabilitiesFiltersOptionalWorkloadPresets(t *testing.T) {
-	writeBench := func(name string, optional string) string {
-		path := filepath.Join(t.TempDir(), name)
-		script := "#!/bin/sh\ncase \"$1\" in\n" +
-			"  --version) echo test ;;\n" +
-			"  --help) printf '%b' '--model <FNAME>  model\\n--output <json>  output\\n--repetitions <n>  repetitions\\n--n-prompt <n>  prompt\\n--n-gen <n>  generation\\n" + optional + "' ;;\n" +
-			"  --list-devices) echo 'Available devices:' ;;\n" +
-			"esac\n"
-		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
-
 	for _, tc := range []struct {
-		name       string
-		optional   string
-		wantPG     bool
-		wantDepth  bool
+		name      string
+		optional  string
+		wantPG    bool
+		wantDepth bool
 	}{
 		{name: "base"},
 		{name: "pg", optional: "-pg <pp,tg>  combined\\n", wantPG: true},
@@ -115,19 +114,23 @@ func TestDiscoverCapabilitiesFiltersOptionalWorkloadPresets(t *testing.T) {
 		{name: "both", optional: "-pg <pp,tg>  combined\\n-d, --n-depth <n>  depth\\n", wantPG: true, wantDepth: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			caps, err := DiscoverCapabilities(context.Background(), writeBench(tc.name, tc.optional))
+			caps, err := DiscoverCapabilities(context.Background(), writeBenchScript(t, tc.name, tc.optional))
 			if err != nil || !caps.Available {
 				t.Fatalf("caps=%+v err=%v", caps, err)
 			}
 			field := func(key string) bool {
 				for _, candidate := range caps.Workload.Fields {
-					if candidate.Key == key { return true }
+					if candidate.Key == key {
+						return true
+					}
 				}
 				return false
 			}
 			preset := func(id string) bool {
 				for _, candidate := range caps.Workload.Presets {
-					if candidate.ID == id { return true }
+					if candidate.ID == id {
+						return true
+					}
 				}
 				return false
 			}
@@ -137,7 +140,7 @@ func TestDiscoverCapabilitiesFiltersOptionalWorkloadPresets(t *testing.T) {
 			if field("context_depths") != tc.wantDepth || preset("context-depth-v1") != tc.wantDepth {
 				t.Fatalf("depth capability fields=%+v presets=%+v", caps.Workload.Fields, caps.Workload.Presets)
 			}
-			if preset(DefaultWorkloadID) == false {
+			if !preset(DefaultWorkloadID) {
 				t.Fatal("default workload was filtered")
 			}
 			if tc.wantPG && !contains(caps.SupportedOptions, "pg") {
@@ -149,9 +152,9 @@ func TestDiscoverCapabilitiesFiltersOptionalWorkloadPresets(t *testing.T) {
 
 func TestOptionalWorkloadPresetResolution(t *testing.T) {
 	for _, tc := range []struct {
-		id string
+		id           string
 		wantCombined bool
-		wantDepth bool
+		wantDepth    bool
 	}{
 		{id: "chat-turn-v1", wantCombined: true},
 		{id: "context-depth-v1", wantDepth: true},
@@ -165,5 +168,3 @@ func TestOptionalWorkloadPresetResolution(t *testing.T) {
 		}
 	}
 }
-
-var _ = llamacpp.Option{}
