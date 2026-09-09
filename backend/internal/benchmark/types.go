@@ -152,6 +152,7 @@ type Result struct {
 	CaseID           string          `json:"case_id"`
 	PromptTokens     int64           `json:"prompt_tokens"`
 	GenerationTokens int64           `json:"generation_tokens"`
+	ContextDepth     int64           `json:"context_depth,omitempty"`
 	Repetitions      int             `json:"repetitions"`
 	AverageNS        int64           `json:"average_ns,omitempty"`
 	StdDevNS         int64           `json:"stddev_ns,omitempty"`
