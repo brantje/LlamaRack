@@ -13,6 +13,7 @@ const error = ref('')
 const capabilities = ref<BenchmarkCapabilities | null>(null)
 const effective = ref<EffectiveLlamaConfig | null>(null)
 const hardware = ref<HardwareSnapshot | null>(null)
+const selectedProfileID = ref('')
 const listValues = reactive<Record<string, string>>({})
 const scalarValues = reactive<Record<string, number>>({})
 const booleanValues = reactive<Record<string, boolean>>({})
@@ -29,19 +30,34 @@ const currentGPUs = computed(() => {
   const gpus = hardware.value?.gpus || []
   return selected.size ? gpus.filter(gpu => selected.has(gpu.id)) : gpus
 })
+const presetProfiles = computed(() => {
+  const caps = capabilities.value
+  if (!caps) return []
+  return caps.workload.presets?.length ? caps.workload.presets : [caps.workload.default]
+})
+const selectedPreset = computed(() => presetProfiles.value.find(profile => profile.id === selectedProfileID.value))
+const isCustom = computed(() => selectedProfileID.value === 'custom-v1')
+const profileItems = computed(() => [
+  ...presetProfiles.value.map(profile => ({ label: profile.name || profile.id || 'Workload', value: profile.id || '' })),
+  { label: 'Custom / advanced', value: 'custom-v1' }
+])
 const canRun = computed(() => Boolean(capabilities.value?.available) && !loading.value && !submitting.value)
 
-function resetDraft(caps: BenchmarkCapabilities) {
-  const defaults = caps.workload.default
+function applyWorkload(caps: BenchmarkCapabilities, workload: BenchmarkWorkloadProfile) {
   for (const key of Object.keys(listValues)) delete listValues[key]
   for (const key of Object.keys(scalarValues)) delete scalarValues[key]
   for (const key of Object.keys(booleanValues)) delete booleanValues[key]
   for (const field of caps.workload.fields || []) {
-    const value = (defaults as unknown as Record<string, unknown>)[field.key]
+    const value = (workload as unknown as Record<string, unknown>)[field.key]
     if (field.kind === 'integer-list') listValues[field.key] = Array.isArray(value) ? value.join(', ') : ''
     else if (field.kind === 'integer') scalarValues[field.key] = Number(value || 0)
     else if (field.kind === 'boolean') booleanValues[field.key] = Boolean(value)
   }
+}
+
+function resetDraft(caps: BenchmarkCapabilities) {
+  selectedProfileID.value = caps.workload.default.id || ''
+  applyWorkload(caps, caps.workload.default)
 }
 
 function parseIntegerList(value: string, label: string) {
@@ -55,11 +71,22 @@ function parseIntegerList(value: string, label: string) {
 function resolvedWorkload(): BenchmarkWorkloadProfile {
   const caps = capabilities.value
   if (!caps) throw new Error('Benchmark capabilities are unavailable.')
-  const defaults = caps.workload.default
+  const preset = selectedPreset.value
+  if (!isCustom.value && preset) {
+    return {
+      ...preset,
+      prompt_tokens: [...(preset.prompt_tokens || [])],
+      generation_tokens: [...(preset.generation_tokens || [])],
+      tuning_hints: preset.tuning_hints ? [...preset.tuning_hints] : undefined
+    }
+  }
   const workload: BenchmarkWorkloadProfile = {
-    ...defaults,
-    prompt_tokens: [...(defaults.prompt_tokens || [])],
-    generation_tokens: [...(defaults.generation_tokens || [])]
+    id: 'custom-v1',
+    version: caps.workload.version,
+    prompt_tokens: [],
+    generation_tokens: [],
+    repetitions: 0,
+    warmup: true
   }
   for (const field of caps.workload.fields || []) {
     if (field.kind === 'integer-list') (workload as unknown as Record<string, unknown>)[field.key] = parseIntegerList(listValues[field.key] || '', field.label)
@@ -113,6 +140,12 @@ async function runBenchmark() {
   }
 }
 
+watch(selectedProfileID, value => {
+  const caps = capabilities.value
+  if (!caps || value === 'custom-v1') return
+  const preset = presetProfiles.value.find(profile => profile.id === value)
+  if (preset) applyWorkload(caps, preset)
+})
 watch(open, value => { if (value) void load() })
 </script>
 
@@ -154,18 +187,44 @@ watch(open, value => { if (value) void load() })
             </div>
           </section>
 
-          <section class="space-y-3 border-t border-[var(--color-divider)] pt-5">
+          <section class="space-y-4 border-t border-[var(--color-divider)] pt-5">
             <div>
               <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.14em] text-[var(--neutral-700)]">Benchmark workload</p>
-              <p class="mt-1 text-xs text-muted">Only controlled workload dimensions are editable. Defaults are owned by the backend and versioned with the run.</p>
+              <p class="mt-1 text-xs text-muted">Choose what this Instance is meant to do. Runtime settings still come only from the saved Instance.</p>
             </div>
-            <div v-if="capabilities?.available" class="grid gap-4 sm:grid-cols-2">
-              <UFormField v-for="field in capabilities.workload.fields" :key="field.key" :label="field.label" :description="field.description" :class="field.kind === 'integer-list' ? 'sm:col-span-2' : ''">
-                <UInput v-if="field.kind === 'integer-list'" v-model="listValues[field.key]" class="w-full" :placeholder="'512, 2048'" />
-                <UInput v-else-if="field.kind === 'integer'" v-model.number="scalarValues[field.key]" class="w-full" type="number" :min="field.minimum" :max="field.maximum" />
-                <UCheckbox v-else-if="field.kind === 'boolean'" v-model="booleanValues[field.key]" :label="field.label" />
+            <template v-if="capabilities?.available">
+              <UFormField label="Workload profile" description="Profiles change only controlled llama-bench token cases, repetitions and warm-up behavior.">
+                <USelect v-model="selectedProfileID" :items="profileItems" value-key="value" label-key="label" class="w-full" data-testid="benchmark-workload-profile" />
               </UFormField>
-            </div>
+
+              <div v-if="selectedPreset" class="space-y-3 border-t border-[var(--color-divider)] pt-3">
+                <div>
+                  <p class="text-sm font-medium">{{ selectedPreset.name || selectedPreset.id }}</p>
+                  <p v-if="selectedPreset.description" class="mt-1 text-xs leading-5 text-muted">{{ selectedPreset.description }}</p>
+                  <p v-if="selectedPreset.focus" class="mt-1 text-xs leading-5"><span class="font-medium">Optimization focus:</span> {{ selectedPreset.focus }}</p>
+                </div>
+                <dl class="grid gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
+                  <div><dt class="text-muted">Prompt cases</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.prompt_tokens?.join(', ') || 'None' }}</dd></div>
+                  <div><dt class="text-muted">Generation cases</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.generation_tokens?.join(', ') || 'None' }}</dd></div>
+                  <div><dt class="text-muted">Repetitions</dt><dd class="mt-0.5 font-mono">{{ selectedPreset.repetitions }}</dd></div>
+                </dl>
+                <div v-if="selectedPreset.tuning_hints?.length" class="border-t border-[var(--color-divider)] pt-3">
+                  <p class="text-xs font-medium">Settings this workload is useful for testing</p>
+                  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                    <code v-for="hint in selectedPreset.tuning_hints" :key="hint.key" class="font-mono">--{{ hint.key }}</code>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="isCustom" class="grid gap-4 border-t border-[var(--color-divider)] pt-3 sm:grid-cols-2" data-testid="benchmark-custom-workload">
+                <div class="sm:col-span-2"><p class="text-xs font-medium">Advanced workload fields</p><p class="mt-1 text-xs text-muted">Use this only when the supplied workload intents do not represent what you need to measure.</p></div>
+                <UFormField v-for="field in capabilities.workload.fields" :key="field.key" :label="field.label" :description="field.description" :class="field.kind === 'integer-list' ? 'sm:col-span-2' : ''">
+                  <UInput v-if="field.kind === 'integer-list'" v-model="listValues[field.key]" class="w-full" :placeholder="'512, 2048'" />
+                  <UInput v-else-if="field.kind === 'integer'" v-model.number="scalarValues[field.key]" class="w-full" type="number" :min="field.minimum" :max="field.maximum" />
+                  <UCheckbox v-else-if="field.kind === 'boolean'" v-model="booleanValues[field.key]" :label="field.label" />
+                </UFormField>
+              </div>
+            </template>
             <div v-else class="flex items-start gap-2"><StatusTag variant="failed">Unavailable</StatusTag><p class="text-xs leading-5 text-muted">{{ capabilities?.reason || 'The bundled llama-bench interface is unavailable.' }}</p></div>
           </section>
 
