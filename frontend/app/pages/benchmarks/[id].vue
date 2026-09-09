@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BenchmarkRun } from '~/composables/useBenchmarks'
-import { benchmarkDuration, benchmarkGPULabel, benchmarkHeadline, benchmarkStatusVariant } from '~/composables/useBenchmarks'
+import { benchmarkDuration, benchmarkGPULabel, benchmarkHeadline, benchmarkStatusVariant, benchmarkTuningHints } from '~/composables/useBenchmarks'
 
 const route = useRoute()
 const benchmarks = useBenchmarks()
@@ -14,6 +14,7 @@ let timer: ReturnType<typeof setInterval> | undefined
 const runID = computed(() => String(route.params.id || ''))
 const headline = computed(() => run.value ? benchmarkHeadline(run.value) : {})
 const duration = computed(() => run.value ? benchmarkDuration(run.value) : undefined)
+const tuningHints = computed(() => run.value ? benchmarkTuningHints(run.value) : [])
 const configOptions = computed(() => Object.entries(run.value?.instance_config_snapshot.options || {}).sort(([left], [right]) => left.localeCompare(right)))
 const gpus = computed(() => run.value?.hardware_snapshot?.observed?.gpus || [])
 const active = computed(() => run.value?.status === 'QUEUED' || run.value?.status === 'RUNNING')
@@ -98,8 +99,19 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
       <section class="space-y-3">
         <div><h2 class="text-base font-semibold">Workload and command</h2><p class="mt-1 text-xs text-muted">Backend-owned workload profile and the exact resolved argv retained for auditability.</p></div>
-        <Frame class="p-4 space-y-4"><dl class="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt class="text-xs text-muted">Profile</dt><dd class="mt-1 font-mono">{{ run.workload_profile.id || 'standard' }} v{{ run.workload_profile.version || 1 }}</dd></div><div><dt class="text-xs text-muted">Prompt tokens</dt><dd class="mt-1 font-mono">{{ run.workload_profile.prompt_tokens?.join(', ') || '—' }}</dd></div><div><dt class="text-xs text-muted">Generation tokens</dt><dd class="mt-1 font-mono">{{ run.workload_profile.generation_tokens?.join(', ') || '—' }}</dd></div><div><dt class="text-xs text-muted">Repetitions</dt><dd class="mt-1 font-mono">{{ run.workload_profile.repetitions }}</dd></div></dl><pre class="overflow-x-auto whitespace-pre-wrap break-all border-t border-[var(--color-divider)] pt-3 font-mono text-xs">{{ run.resolved_argv.join(' ') }}</pre></Frame>
+        <Frame class="p-4 space-y-4">
+          <div><p class="text-sm font-medium">{{ run.workload_profile.name || run.workload_profile.id || 'Standard' }}</p><p v-if="run.workload_profile.description" class="mt-1 text-xs leading-5 text-muted">{{ run.workload_profile.description }}</p><p v-if="run.workload_profile.focus" class="mt-1 text-xs leading-5"><span class="font-medium">Optimization focus:</span> {{ run.workload_profile.focus }}</p></div>
+          <dl class="grid gap-x-8 gap-y-3 border-t border-[var(--color-divider)] pt-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt class="text-xs text-muted">Profile ID</dt><dd class="mt-1 font-mono">{{ run.workload_profile.id || 'standard' }} v{{ run.workload_profile.version || 1 }}</dd></div><div><dt class="text-xs text-muted">Prompt tokens</dt><dd class="mt-1 font-mono">{{ run.workload_profile.prompt_tokens?.join(', ') || '—' }}</dd></div><div><dt class="text-xs text-muted">Generation tokens</dt><dd class="mt-1 font-mono">{{ run.workload_profile.generation_tokens?.join(', ') || '—' }}</dd></div><div><dt class="text-xs text-muted">Repetitions</dt><dd class="mt-1 font-mono">{{ run.workload_profile.repetitions }}</dd></div></dl>
+          <pre class="overflow-x-auto whitespace-pre-wrap break-all border-t border-[var(--color-divider)] pt-3 font-mono text-xs">{{ run.resolved_argv.join(' ') }}</pre>
+        </Frame>
         <Frame v-if="run.mapping_differences?.length" class="p-4"><div class="space-y-2"><div v-for="difference in run.mapping_differences" :key="`${difference.key}:${difference.reason}`" class="flex items-start gap-2"><StatusTag :variant="difference.severity === 'blocking' ? 'failed' : 'neutral'">{{ difference.severity }}</StatusTag><p class="text-xs"><code class="font-mono">--{{ difference.key }}</code> · {{ difference.reason }}</p></div></div></Frame>
+      </section>
+
+      <section class="space-y-3" data-testid="benchmark-tuning-guidance">
+        <div><h2 class="text-base font-semibold">Settings worth testing</h2><p class="mt-1 text-xs text-muted">These are workload-specific candidates, not automatic recommendations. Create another Instance changing one setting at a time, run the same profile, then compare the matching cases.</p></div>
+        <Frame class="overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full min-w-[680px] text-left text-xs"><thead class="border-b border-[var(--color-divider)] text-muted"><tr><th class="px-4 py-3 font-medium">Instance setting</th><th class="px-4 py-3 font-medium">Mostly affects</th><th class="px-4 py-3 font-medium">Why test it</th></tr></thead><tbody class="divide-y divide-[var(--color-divider)]"><tr v-for="hint in tuningHints" :key="hint.key"><td class="px-4 py-3 font-mono">--{{ hint.key }}</td><td class="px-4 py-3">{{ hint.impact }}</td><td class="px-4 py-3 leading-5 text-muted">{{ hint.reason }}</td></tr><tr v-if="!tuningHints.length"><td colspan="3" class="px-4 py-8 text-center text-muted">No tuning candidates are recorded for this workload.</td></tr></tbody></table></div>
+        </Frame>
       </section>
 
       <section class="space-y-3">
