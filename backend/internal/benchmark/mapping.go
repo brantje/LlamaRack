@@ -84,7 +84,8 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: "device", Value: strings.Join(placement.Devices, ","), Severity: "blocking", Reason: "selected benchmark devices cannot be expressed by this llama-bench build"})
 			return mapped, fmt.Errorf("%w: selected GPU devices cannot be expressed", ErrUnsupportedConfig)
 		}
-		mapped.Args = append(mapped.Args, "--device", strings.Join(placement.Devices, ","))
+		// llama-bench uses '/' within one configuration; ',' requests a sweep.
+		mapped.Args = append(mapped.Args, "--device", strings.Join(placement.Devices, "/"))
 	}
 	tensorSplit := strings.TrimSpace(config.TensorSplit)
 	if tensorSplit == "" {
@@ -95,7 +96,7 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: "tensor-split", Value: tensorSplit, Severity: "blocking", Reason: "effective tensor split cannot be expressed by this llama-bench build"})
 			return mapped, fmt.Errorf("%w: tensor split cannot be expressed", ErrUnsupportedConfig)
 		}
-		mapped.Args = append(mapped.Args, "--tensor-split", tensorSplit)
+		mapped.Args = append(mapped.Args, "--tensor-split", strings.ReplaceAll(tensorSplit, ",", "/"))
 	}
 	return mapped, nil
 }
@@ -109,12 +110,16 @@ func BuildArgv(binaryPath, modelPath string, mapped MappedConfig, workload Workl
 	}
 	args := []string{binaryPath, "--model", modelPath}
 	args = append(args, mapped.Args...)
-	if len(workload.PromptTokens) > 0 {
-		args = append(args, "--n-prompt", joinInts(workload.PromptTokens))
+	// An omitted flag enables llama-bench's default cases. Explicit zero is
+	// required to disable the unselected workload family.
+	prompt, generation := joinInts(workload.PromptTokens), joinInts(workload.GenerationTokens)
+	if prompt == "" {
+		prompt = "0"
 	}
-	if len(workload.GenerationTokens) > 0 {
-		args = append(args, "--n-gen", joinInts(workload.GenerationTokens))
+	if generation == "" {
+		generation = "0"
 	}
+	args = append(args, "--n-prompt", prompt, "--n-gen", generation)
 	args = append(args, "--repetitions", strconv.Itoa(workload.Repetitions), "--output", "json")
 	if !workload.Warmup {
 		if !capabilities.profileForMapping().Has("no-warmup") {
@@ -131,6 +136,17 @@ func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, er
 		return nil, fmt.Errorf("unknown llama-bench option --%s", key)
 	}
 	trimmed := strings.TrimSpace(value)
+	// Server switches become explicit values for llama-bench's <0|1> options.
+	if len(option.Choices) == 2 && containsChoice(option.Choices, "0") && containsChoice(option.Choices, "1") {
+		switch strings.ToLower(trimmed) {
+		case "", "true", "1", "yes", "on":
+			return []string{"--" + key, "1"}, nil
+		case "false", "0", "no", "off":
+			return []string{"--" + key, "0"}, nil
+		default:
+			return nil, fmt.Errorf("--%s expects a boolean value", key)
+		}
+	}
 	if isBooleanBenchmarkOption(option) {
 		switch strings.ToLower(trimmed) {
 		case "", "true", "1", "yes", "on":
@@ -147,6 +163,15 @@ func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, er
 		}
 	}
 	return []string{"--" + key, value}, nil
+}
+
+func containsChoice(choices []string, value string) bool {
+	for _, choice := range choices {
+		if choice == value {
+			return true
+		}
+	}
+	return false
 }
 
 func profileOption(profile llamacpp.Profile, key string) (llamacpp.Option, bool) {

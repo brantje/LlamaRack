@@ -55,7 +55,7 @@ func TestMapInstanceConfigAndBuildArgv(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(mapped.Args, " ")
-	for _, expected := range []string{"--batch-size 512", "--no-flash-attn", "--device CUDA0,CUDA1", "--tensor-split 1,1"} {
+	for _, expected := range []string{"--batch-size 512", "--no-flash-attn", "--device CUDA0/CUDA1", "--tensor-split 1/1"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("mapped args %q missing %q", joined, expected)
 		}
@@ -170,4 +170,44 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func TestWorkloadArgvDisablesUnselectedCases(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		prompt, gen []int
+		want        string
+	}{
+		{"prompt only", []int{512}, nil, "--n-prompt 512 --n-gen 0"},
+		{"generation only", nil, []int{128}, "--n-prompt 0 --n-gen 128"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argv, err := BuildArgv("bench", "model.gguf", MappedConfig{}, WorkloadProfile{PromptTokens: tc.prompt, GenerationTokens: tc.gen, Repetitions: 2, Warmup: true}, testCapabilities())
+			if err != nil || !strings.Contains(strings.Join(argv, " "), tc.want) {
+				t.Fatalf("argv=%v err=%v", argv, err)
+			}
+		})
+	}
+}
+
+func TestMapBenchNumericBooleans(t *testing.T) {
+	caps := testCapabilities(llamacpp.Option{Key: "no-kv-offload", Kind: "enum", Choices: []string{"0", "1"}})
+	for _, value := range []string{"", "true", "1", "yes", "on", "false", "0", "no", "off", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			mapped, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"no-kv-offload": value}}, scheduler.Placement{}, caps)
+			if value == "invalid" {
+				if !errors.Is(err, ErrUnsupportedConfig) {
+					t.Fatalf("err=%v", err)
+				}
+				return
+			}
+			want := "1"
+			if value == "false" || value == "0" || value == "no" || value == "off" {
+				want = "0"
+			}
+			if err != nil || !reflect.DeepEqual(mapped.Args, []string{"--no-kv-offload", want}) {
+				t.Fatalf("mapped=%+v err=%v", mapped, err)
+			}
+		})
+	}
 }
