@@ -25,6 +25,7 @@ func ParseMachineOutput(data []byte, workload WorkloadProfile) ([]Result, error)
 	for index, row := range rows {
 		prompt := jsonInt64(row, "n_prompt")
 		generation := jsonInt64(row, "n_gen")
+		depth := jsonInt64(row, "n_depth")
 		repetitions := int(jsonInt64(row, "repetitions"))
 		if repetitions <= 0 {
 			repetitions = int(jsonInt64(row, "n_repetitions"))
@@ -46,9 +47,10 @@ func ParseMachineOutput(data []byte, workload WorkloadProfile) ([]Result, error)
 		}
 		results = append(results, Result{
 			CaseIndex:        index,
-			CaseID:           benchmarkCaseID(index, prompt, generation),
+			CaseID:           benchmarkCaseID(index, prompt, generation, depth),
 			PromptTokens:     prompt,
 			GenerationTokens: generation,
+			ContextDepth:     depth,
 			Repetitions:      repetitions,
 			AverageNS:        jsonInt64(row, "avg_ns"),
 			StdDevNS:         jsonInt64(row, "stddev_ns"),
@@ -136,17 +138,22 @@ func jsonFloat64(row map[string]json.RawMessage, key string) float64 {
 	return 0
 }
 
-func benchmarkCaseID(index int, prompt, generation int64) string {
+func benchmarkCaseID(index int, prompt, generation, depth int64) string {
+	var base string
 	switch {
 	case prompt > 0 && generation > 0:
-		return fmt.Sprintf("pg-%d-%d", prompt, generation)
+		base = fmt.Sprintf("pg-%d-%d", prompt, generation)
 	case prompt > 0:
-		return fmt.Sprintf("pp-%d", prompt)
+		base = fmt.Sprintf("pp-%d", prompt)
 	case generation > 0:
-		return fmt.Sprintf("tg-%d", generation)
+		base = fmt.Sprintf("tg-%d", generation)
 	default:
-		return fmt.Sprintf("case-%d", index+1)
+		base = fmt.Sprintf("case-%d", index+1)
 	}
+	if depth > 0 {
+		return fmt.Sprintf("%s-d%d", base, depth)
+	}
+	return base
 }
 
 func errorsForParser(message string) error {
