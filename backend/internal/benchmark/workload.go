@@ -89,6 +89,7 @@ func DefaultWorkloadSchema() WorkloadSchema {
 		Fields: []WorkloadField{
 			{Key: "prompt_tokens", Label: "Prompt processing", Kind: "integer-list", Minimum: 1, Maximum: maxWorkloadTokens, Description: "Prompt token counts measured as controlled prompt-processing cases."},
 			{Key: "generation_tokens", Label: "Generation", Kind: "integer-list", Minimum: 1, Maximum: maxWorkloadTokens, Description: "Generation token counts measured as controlled token-generation cases."},
+			{Key: "context_depths", Label: "Context depths", Kind: "integer-list", Minimum: 0, Maximum: maxWorkloadTokens, Advanced: true, Description: "Optional llama-bench KV prefill depths. Each selected test is repeated at these context depths; depth plus test tokens must fit the saved Instance context size."},
 			{Key: "repetitions", Label: "Repetitions", Kind: "integer", Minimum: 1, Maximum: maxWorkloadRepetitions},
 			{Key: "warmup", Label: "Warm up", Kind: "boolean", Advanced: true, Description: "Run llama-bench warm-up before measured repetitions."},
 		},
@@ -114,8 +115,11 @@ func NormalizeWorkload(input *WorkloadProfile) (WorkloadProfile, error) {
 	if workload.Version == 0 {
 		workload.Version = WorkloadSchemaVersion
 	}
-	if workload.Version != WorkloadSchemaVersion {
+	if workload.Version != LegacyWorkloadSchemaVersion && workload.Version != WorkloadSchemaVersion {
 		return WorkloadProfile{}, fmt.Errorf("%w: unsupported workload schema version %d", ErrInvalidWorkload, workload.Version)
+	}
+	if workload.Version == LegacyWorkloadSchemaVersion && len(workload.ContextDepths) > 0 {
+		return WorkloadProfile{}, fmt.Errorf("%w: context_depths requires workload schema version %d", ErrInvalidWorkload, WorkloadSchemaVersion)
 	}
 	if workload.Repetitions < 1 || workload.Repetitions > maxWorkloadRepetitions {
 		return WorkloadProfile{}, fmt.Errorf("%w: repetitions must be between 1 and %d", ErrInvalidWorkload, maxWorkloadRepetitions)
@@ -128,6 +132,12 @@ func NormalizeWorkload(input *WorkloadProfile) (WorkloadProfile, error) {
 	workload.GenerationTokens, err = normalizeTokenCounts(workload.GenerationTokens, "generation_tokens")
 	if err != nil {
 		return WorkloadProfile{}, err
+	}
+	if workload.Version == WorkloadSchemaVersion {
+		workload.ContextDepths, err = normalizeContextDepths(workload.ContextDepths)
+		if err != nil {
+			return WorkloadProfile{}, err
+		}
 	}
 	if len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 {
 		return WorkloadProfile{}, fmt.Errorf("%w: at least one prompt or generation case is required", ErrInvalidWorkload)
@@ -144,9 +154,23 @@ func ValidateWorkloadContext(workload WorkloadProfile, config InstanceConfigSnap
 	if err != nil || contextSize <= 0 {
 		return fmt.Errorf("%w: saved ctx-size %q is invalid", ErrUnsupportedConfig, raw)
 	}
-	for _, tokens := range append(append([]int(nil), workload.PromptTokens...), workload.GenerationTokens...) {
-		if tokens > contextSize {
-			return fmt.Errorf("%w: workload case %d tokens exceeds saved context size %d", ErrInvalidWorkload, tokens, contextSize)
+	depths := workload.ContextDepths
+	if len(depths) == 0 {
+		depths = []int{0}
+	}
+	for _, depth := range depths {
+		if depth < 0 || depth > contextSize {
+			return fmt.Errorf("%w: context depth %d exceeds saved context size %d", ErrInvalidWorkload, depth, contextSize)
+		}
+		for _, tokens := range workload.PromptTokens {
+			if depth+tokens > contextSize {
+				return fmt.Errorf("%w: prompt case %d at context depth %d exceeds saved context size %d", ErrInvalidWorkload, tokens, depth, contextSize)
+			}
+		}
+		for _, tokens := range workload.GenerationTokens {
+			if depth+tokens > contextSize {
+				return fmt.Errorf("%w: generation case %d at context depth %d exceeds saved context size %d", ErrInvalidWorkload, tokens, depth, contextSize)
+			}
 		}
 	}
 	return nil
@@ -184,11 +208,11 @@ func decorateWorkload(workload WorkloadProfile) WorkloadProfile {
 }
 
 func workloadDimensionsEmpty(workload WorkloadProfile) bool {
-	return len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && workload.Repetitions == 0
+	return len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0
 }
 
 func sameWorkloadShape(left, right WorkloadProfile) bool {
-	if left.Repetitions != right.Repetitions || left.Warmup != right.Warmup || !intSlicesEqual(left.PromptTokens, right.PromptTokens) || !intSlicesEqual(left.GenerationTokens, right.GenerationTokens) {
+	if left.Repetitions != right.Repetitions || left.Warmup != right.Warmup || !intSlicesEqual(left.PromptTokens, right.PromptTokens) || !intSlicesEqual(left.GenerationTokens, right.GenerationTokens) || !intSlicesEqual(left.ContextDepths, right.ContextDepths) {
 		return false
 	}
 	return true
@@ -207,7 +231,7 @@ func intSlicesEqual(left, right []int) bool {
 }
 
 func workloadIsZero(workload WorkloadProfile) bool {
-	return workload.ID == "" && workload.Version == 0 && len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && workload.Repetitions == 0 && !workload.Warmup
+	return workload.ID == "" && workload.Version == 0 && len(workload.PromptTokens) == 0 && len(workload.GenerationTokens) == 0 && len(workload.ContextDepths) == 0 && workload.Repetitions == 0 && !workload.Warmup
 }
 
 func normalizeTokenCounts(values []int, field string) ([]int, error) {
@@ -216,6 +240,22 @@ func normalizeTokenCounts(values []int, field string) ([]int, error) {
 	for _, value := range values {
 		if value < 1 || value > maxWorkloadTokens {
 			return nil, fmt.Errorf("%w: %s values must be between 1 and %d", ErrInvalidWorkload, field, maxWorkloadTokens)
+		}
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+func normalizeContextDepths(values []int) ([]int, error) {
+	seen := map[int]bool{}
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		if value < 0 || value > maxWorkloadTokens {
+			return nil, fmt.Errorf("%w: context_depths values must be between 0 and %d", ErrInvalidWorkload, maxWorkloadTokens)
 		}
 		if seen[value] {
 			continue
