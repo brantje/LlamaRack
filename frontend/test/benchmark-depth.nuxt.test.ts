@@ -74,23 +74,35 @@ describe('benchmark context depth helpers', () => {
     expect(benchmarkHeadline(subject)).toEqual({ prompt: 100, generation: 50 })
   })
 
-  it('treats a changed context-depth workload as a workload difference', () => {
+  it('compares resolved depth and combined workload dimensions, not schema metadata', () => {
     const left = run()
     const right = structuredClone(left)
     left.workload_profile.context_depths = [0, 2048]
     right.workload_profile.context_depths = [0, 4096]
     expect(benchmarkComparisonDifferences(left, right)).toContain('Workload')
+
+    const combinedA = run()
+    const combinedB = structuredClone(combinedA)
+    combinedA.workload_profile.combined_cases = [{ prompt_tokens: 256, generation_tokens: 64 }]
+    combinedB.workload_profile.combined_cases = [{ prompt_tokens: 256, generation_tokens: 128 }]
+    expect(benchmarkComparisonDifferences(combinedA, combinedB)).toContain('Workload')
+
+    const legacy = run()
+    const current = structuredClone(legacy)
+    legacy.workload_profile.version = 1
+    current.workload_profile.version = 2
+    expect(benchmarkComparisonDifferences(legacy, current)).not.toContain('Workload')
   })
 })
 
-describe('benchmark context depth custom workload', () => {
-  it('exposes context depth only when the backend advertises it', async () => {
+describe('benchmark optional custom workload dimensions', () => {
+  it('exposes context depth and combined turns when the backend advertises them', async () => {
     const capabilities = {
       available: true,
       version: 'b9999',
       fingerprint: 'bench',
       output_format: 'json',
-      supported_options: ['model', 'output', 'n-prompt', 'n-gen', 'n-depth', 'repetitions'],
+      supported_options: ['model', 'output', 'n-prompt', 'n-gen', 'n-depth', 'pg', 'repetitions'],
       workload: {
         version: 2,
         default: balanced,
@@ -98,6 +110,7 @@ describe('benchmark context depth custom workload', () => {
         fields: [
           { key: 'prompt_tokens', label: 'Prompt processing', kind: 'integer-list', minimum: 1, maximum: 1000000 },
           { key: 'generation_tokens', label: 'Generation', kind: 'integer-list', minimum: 1, maximum: 1000000 },
+          { key: 'combined_cases', label: 'Combined prompt + generation', kind: 'token-pair-list', minimum: 1, maximum: 1000000, advanced: true },
           { key: 'context_depths', label: 'Context depths', kind: 'integer-list', minimum: 0, maximum: 1000000, advanced: true },
           { key: 'repetitions', label: 'Repetitions', kind: 'integer', minimum: 1, maximum: 100 },
           { key: 'warmup', label: 'Warm up', kind: 'boolean' }
@@ -118,11 +131,23 @@ describe('benchmark context depth custom workload', () => {
     vm.selectedProfileID = 'custom-v1'
     await flushPromises()
     expect(document.body.textContent).toContain('Context depths')
+    expect(document.body.textContent).toContain('Combined prompt + generation')
     vm.listValues.prompt_tokens = ''
     vm.listValues.generation_tokens = '128'
+    vm.listValues.combined_cases = '256:64, 1024:128'
     vm.listValues.context_depths = '0, 2048, 4096'
     vm.scalarValues.repetitions = 3
     vm.booleanValues.warmup = true
-    expect(vm.resolvedWorkload()).toEqual(expect.objectContaining({ version: 2, generation_tokens: [128], context_depths: [0, 2048, 4096] }))
+    expect(vm.resolvedWorkload()).toEqual(expect.objectContaining({
+      version: 2,
+      generation_tokens: [128],
+      combined_cases: [{ prompt_tokens: 256, generation_tokens: 64 }, { prompt_tokens: 1024, generation_tokens: 128 }],
+      context_depths: [0, 2048, 4096]
+    }))
+
+    vm.listValues.combined_cases = '256'
+    expect(() => vm.resolvedWorkload()).toThrow('Combined prompt + generation must use prompt:generation pairs separated by commas.')
+    vm.listValues.combined_cases = '256:nope'
+    expect(() => vm.resolvedWorkload()).toThrow('Combined prompt + generation must use positive whole-number prompt:generation pairs.')
   })
 })
