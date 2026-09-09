@@ -54,6 +54,8 @@ function configSummary(run: BenchmarkRun) {
 async function load() {
   loading.value = true
   error.value = ''
+  left.value = null
+  right.value = null
   try {
     const page = await benchmarks.list({ status: 'COMPLETED', limit: 100 })
     candidates.value = page.items || []
@@ -63,12 +65,14 @@ async function load() {
       right.value = null
       return
     }
-    left.value = await benchmarks.get(ids[0]!)
-    if (left.value.status !== 'COMPLETED') throw new Error('Only completed benchmark runs can be compared.')
+    const first = await benchmarks.get(ids[0]!)
+    if (first.status !== 'COMPLETED') throw new Error('Only completed benchmark runs can be compared.')
+    left.value = first
     if (ids[1]) {
-      right.value = await benchmarks.get(ids[1])
-      if (right.value.status !== 'COMPLETED') throw new Error('Only completed benchmark runs can be compared.')
-      rightID.value = right.value.id
+      const second = await benchmarks.get(ids[1])
+      if (second.status !== 'COMPLETED') throw new Error('Only completed benchmark runs can be compared.')
+      right.value = second
+      rightID.value = second.id
     } else {
       right.value = null
       rightID.value = ''
@@ -81,8 +85,15 @@ async function load() {
 }
 async function chooseRight() {
   if (!left.value || !rightID.value) return
-  await navigateTo(`/benchmarks/compare?ids=${encodeURIComponent(left.value.id)},${encodeURIComponent(rightID.value)}`)
-  right.value = await benchmarks.get(rightID.value)
+  error.value = ''
+  try {
+    const candidate = await benchmarks.get(rightID.value)
+    if (candidate.status !== 'COMPLETED') throw new Error('Only completed benchmark runs can be compared.')
+    await navigateTo(`/benchmarks/compare?ids=${encodeURIComponent(left.value.id)},${encodeURIComponent(candidate.id)}`)
+    right.value = candidate
+  } catch (value: any) {
+    error.value = value?.data?.error || value?.message || 'Unable to load benchmark comparison.'
+  }
 }
 
 watch(() => route.query.ids, () => { void load() })

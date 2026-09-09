@@ -243,3 +243,25 @@ it('compares disjoint, mixed, zero and missing measurements with explicit fallba
   await flushPromises()
   expect(wrapper.text()).toContain('do not share any benchmark case identities')
 })
+
+it.each([undefined, { message: 'offline' }, { data: { error: 'deleted' } }])('keeps candidate selection usable after a comparison request fails (%j)', async failure => {
+  serveRuns([benchmark(), benchmark('run-2')])
+  const wrapper = await mountSuspended(BenchmarkComparePage, { route: '/benchmarks/compare?ids=run-1' })
+  await flushPromises()
+  const vm = wrapper.vm as any
+  vm.rightID = 'run-2'
+  mocks.request.mockRejectedValue(failure)
+  await vm.chooseRight()
+  expect(wrapper.text()).toContain(failure?.data?.error || failure?.message || 'Unable to load benchmark comparison.')
+  expect(vm.right).toBeNull()
+  expect(mocks.navigateTo).not.toHaveBeenCalled()
+  mocks.request.mockResolvedValue(benchmark('run-2', { status: 'RUNNING' }))
+  await vm.chooseRight()
+  expect(vm.right).toBeNull()
+  expect(wrapper.find('[data-testid="benchmark-comparison-differences"]').exists()).toBe(false)
+  expect(wrapper.text()).toContain('Only completed benchmark runs can be compared.')
+  serveRuns([benchmark(), benchmark('run-2')])
+  await vm.chooseRight()
+  expect(vm.error).toBe('')
+  expect(vm.right.id).toBe('run-2')
+})
