@@ -19,7 +19,6 @@ const candidateItems = computed(() => candidates.value.filter(run => run.id !== 
 const differences = computed(() => left.value && right.value ? benchmarkComparisonDifferences(left.value, right.value) : [])
 const configChanges = computed(() => left.value && right.value ? benchmarkConfigChanges(left.value, right.value) : [])
 const controlledChange = computed(() => left.value && right.value ? benchmarkControlledConfigChange(left.value, right.value) : undefined)
-const onlyConfigurationDiffers = computed(() => differences.value.length === 1 && differences.value[0] === 'Instance configuration')
 const cases = computed(() => {
   if (!left.value || !right.value) return []
   const rightByCase = new Map((right.value.results || []).map(result => [result.case_id, result]))
@@ -128,7 +127,7 @@ onMounted(() => { void load() })
           <div v-if="controlledChange" class="mt-4 border-t border-[var(--color-divider)] pt-4" data-testid="benchmark-controlled-change">
             <div class="flex items-start gap-2"><StatusTag variant="ready">Controlled setting test</StatusTag><p class="text-sm leading-6">Only <code class="font-mono">{{ controlledChange.label }}</code> changed among captured benchmark inputs: <code class="font-mono">{{ controlledChange.before }}</code> → <code class="font-mono">{{ controlledChange.after }}</code>. Matching case deltas are evidence for this setting on this model, hardware and build.</p></div>
           </div>
-          <div v-else-if="onlyConfigurationDiffers && configChanges.length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-4">
+          <div v-else-if="configChanges.length > 1" class="mt-4 border-t border-[var(--color-divider)] pt-4">
             <div class="flex items-start gap-2"><StatusTag variant="neutral">Multiple settings changed</StatusTag><p class="text-sm leading-6">Performance changed with {{ configChanges.length }} captured configuration differences. Change one setting at a time before attributing an improvement to a specific parameter.</p></div>
           </div>
           <div v-if="configChanges.length" class="mt-4 overflow-x-auto border-t border-[var(--color-divider)] pt-4">
