@@ -129,6 +129,17 @@ func (s *SQLStore) ListRuns(ctx context.Context, filter Filter) (Page, error) {
 	if err := rows.Err(); err != nil {
 		return Page{}, err
 	}
+	// Release the list cursor before querying results: SQLite may use one
+	// connection, and nested queries while holding rows would then deadlock.
+	if err := rows.Close(); err != nil {
+		return Page{}, err
+	}
+	for index := range items {
+		items[index].Results, err = loadResults(ctx, s.db, items[index].ID)
+		if err != nil {
+			return Page{}, err
+		}
+	}
 	return Page{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 

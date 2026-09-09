@@ -57,6 +57,16 @@ func TestSQLStoreLifecycleAndImmutableCompletion(t *testing.T) {
 	if got.Status != StatusCompleted || got.CompletedAt == nil || len(got.Results) != 2 || string(got.Results[0].RawFields) != `{"future_field":"kept"}` {
 		t.Fatalf("completed run=%+v", got)
 	}
+	db.SetMaxOpenConns(1)
+	listCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	page, err = store.ListRuns(listCtx, Filter{Status: StatusCompleted})
+	if err != nil || len(page.Items) != 1 || len(page.Items[0].Results) != 2 {
+		t.Fatalf("history measurements missing: page=%+v err=%v", page, err)
+	}
+	if page.Items[0].Results[0].AverageTokensPS != 123.4 || page.Items[0].Results[1].AverageTokensPS != 45.6 || page.Items[0].Results[1].GenerationTokens != 128 {
+		t.Fatalf("history prompt/generation measurements changed: %+v", page.Items[0].Results)
+	}
 	if _, err := store.TransitionRun(ctx, run.ID, StatusCompleted, StatusFailed, TransitionUpdate{Failure: "must not mutate"}); !errors.Is(err, ErrTransitionConflict) {
 		t.Fatalf("completed run mutated, err=%v", err)
 	}
