@@ -157,7 +157,7 @@ onMounted(() => { void load() })
 
     <UModal v-model:open="deleteOpen" title="Delete benchmark result">
       <template #body><p class="text-sm leading-6 text-muted">Delete this historical benchmark run and its measurements? This cannot be undone.</p></template>
-      <template #footer><div class="flex w-full justify-end gap-2"><UButton color="neutral" variant="outline" @click="deleting = null">Cancel</UButton><UButton color="error" :loading="!!deleting && mutating === deleting.id" data-testid="confirm-delete-benchmark" @click="confirmDelete">Delete benchmark</UButton></div></template>
+      <template #footer><div class="flex w-full justify-end gap-2"><UButton color="neutral" variant="outline" @click="deleting = null">Cancel</UButton><AppButton intent="primary" tone="destructive" :loading="!!deleting && mutating === deleting.id" data-testid="confirm-delete-benchmark" @click="confirmDelete">Delete benchmark</AppButton></div></template>
     </UModal>
   </div>
 </template>

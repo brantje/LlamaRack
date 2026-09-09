@@ -54,6 +54,35 @@ beforeEach(() => {
 })
 
 describe('benchmark pages', () => {
+  it.each([
+    { component: BenchmarksPage, route: '/benchmarks' },
+    { component: BenchmarkDetailPage, route: '/benchmarks/run-1' }
+  ])('confirms deletion with the shared destructive treatment on $route', async ({ component, route }) => {
+    mocks.request.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (options?.method === 'DELETE') return {}
+      if (path.startsWith('/api/v1/benchmarks?')) return { items: [benchmark()], total: 1 }
+      if (path === '/api/v1/benchmarks/run-1') return benchmark()
+      throw new Error(path)
+    })
+    const wrapper = await mountSuspended(component, { route, attachTo: document.body })
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+      await vi.waitFor(() => expect(document.body.querySelector('[role="dialog"]')).not.toBeNull())
+      const dialog = document.body.querySelector('[role="dialog"]')!
+      expect(dialog.textContent).toContain('This cannot be undone.')
+      expect(mocks.request.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false)
+      const confirm = [...dialog.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Delete benchmark')!
+      expect(confirm.className).toContain('bg-[var(--color-danger)]')
+      expect(confirm.className).toContain('text-[var(--color-on-danger)]')
+      confirm.click()
+      await flushPromises()
+      expect(mocks.request).toHaveBeenCalledWith('/api/v1/benchmarks/run-1', { method: 'DELETE' })
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it('renders global persistent history and navigation', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path.startsWith('/api/v1/benchmarks?')) return { items: [benchmark()], total: 1, limit: 25, offset: 0 }

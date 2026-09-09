@@ -113,6 +113,6 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
       </section>
     </template>
 
-    <UModal v-model:open="deleteOpen" title="Delete benchmark result"><template #body><p class="text-sm leading-6 text-muted">Delete this historical benchmark and its measurements? This cannot be undone.</p></template><template #footer><div class="flex w-full justify-end gap-2"><UButton color="neutral" variant="outline" @click="deleteOpen = false">Cancel</UButton><UButton color="error" :loading="mutating" @click="remove">Delete benchmark</UButton></div></template></UModal>
+    <UModal v-model:open="deleteOpen" title="Delete benchmark result"><template #body><p class="text-sm leading-6 text-muted">Delete this historical benchmark and its measurements? This cannot be undone.</p></template><template #footer><div class="flex w-full justify-end gap-2"><UButton color="neutral" variant="outline" @click="deleteOpen = false">Cancel</UButton><AppButton intent="primary" tone="destructive" :loading="mutating" @click="remove">Delete benchmark</AppButton></div></template></UModal>
   </div>
 </template>
