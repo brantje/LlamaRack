@@ -16,7 +16,7 @@ type MappedConfig struct {
 }
 
 var workloadOwnedOptions = map[string]bool{
-	"model": true, "output": true, "repetitions": true, "n-prompt": true, "n-gen": true, "no-warmup": true,
+	"model": true, "output": true, "repetitions": true, "n-prompt": true, "n-gen": true, "n-depth": true, "no-warmup": true,
 }
 
 var placementOwnedOptions = map[string]bool{
@@ -124,6 +124,12 @@ func BuildArgv(binaryPath, modelPath string, mapped MappedConfig, workload Workl
 		generation = "0"
 	}
 	args = append(args, "--n-prompt", prompt, "--n-gen", generation)
+	if len(workload.ContextDepths) > 0 {
+		if !capabilities.profileForMapping().Has("n-depth") {
+			return nil, fmt.Errorf("%w: this llama-bench build does not support context-depth workloads", ErrInvalidWorkload)
+		}
+		args = append(args, "--n-depth", joinInts(workload.ContextDepths))
+	}
 	args = append(args, "--repetitions", strconv.Itoa(workload.Repetitions), "--output", "json")
 	if !workload.Warmup {
 		if !capabilities.profileForMapping().Has("no-warmup") {
