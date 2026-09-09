@@ -286,3 +286,32 @@ func TestWorkloadValidationRejectsInvalidCases(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestContextDepthWorkloadRules(t *testing.T) {
+	if _, err := NormalizeWorkload(&WorkloadProfile{Version: LegacyWorkloadSchemaVersion, Repetitions: 1, PromptTokens: []int{1}, ContextDepths: []int{512}}); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("legacy depths err=%v", err)
+	}
+	if _, err := NormalizeWorkload(&WorkloadProfile{Version: WorkloadSchemaVersion, Repetitions: 1, PromptTokens: []int{1}, ContextDepths: []int{-1}}); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("negative depth err=%v", err)
+	}
+	if _, err := NormalizeWorkload(&WorkloadProfile{Version: WorkloadSchemaVersion, Repetitions: 1, PromptTokens: []int{1}, ContextDepths: []int{maxWorkloadTokens + 1}}); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("oversized depth err=%v", err)
+	}
+	got, err := NormalizeWorkload(&WorkloadProfile{Version: WorkloadSchemaVersion, Repetitions: 1, PromptTokens: []int{512}, ContextDepths: []int{0, 2048, 2048}})
+	if err != nil || !reflect.DeepEqual(got.ContextDepths, []int{0, 2048}) {
+		t.Fatalf("normalized depths=%+v err=%v", got, err)
+	}
+	config := InstanceConfigSnapshot{Options: map[string]string{"ctx-size": "1024"}}
+	if err := ValidateWorkloadContext(WorkloadProfile{PromptTokens: []int{512}, ContextDepths: []int{2048}}, config); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("depth overflow err=%v", err)
+	}
+	if err := ValidateWorkloadContext(WorkloadProfile{PromptTokens: []int{768}, ContextDepths: []int{512}}, config); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("prompt+depth overflow err=%v", err)
+	}
+	if err := ValidateWorkloadContext(WorkloadProfile{GenerationTokens: []int{768}, ContextDepths: []int{512}}, config); !errors.Is(err, ErrInvalidWorkload) {
+		t.Fatalf("generation+depth overflow err=%v", err)
+	}
+	if err := ValidateWorkloadContext(WorkloadProfile{PromptTokens: []int{512}}, config); err != nil {
+		t.Fatal(err)
+	}
+}
