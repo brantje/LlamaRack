@@ -208,12 +208,17 @@ export function benchmarkHeadline(run: BenchmarkRun) {
   return { prompt, generation }
 }
 
-function benchmarkGPUs(run: BenchmarkRun) {
+export function benchmarkGPUs(run: BenchmarkRun) {
   const gpus = run.hardware_snapshot?.observed?.gpus || []
   if (run.instance_config_snapshot?.options?.['n-gpu-layers'] === '0') return []
+  const ordered = (ids: string[]) => ids.flatMap((id) => {
+    const gpu = gpus.find(candidate => candidate.id === id)
+    return gpu ? [gpu] : []
+  })
   const admitted = run.hardware_snapshot?.selected_devices
-  const selected = new Set(admitted || run.instance_config_snapshot?.gpu_devices || [])
-  return admitted || selected.size ? gpus.filter(gpu => selected.has(gpu.id)) : gpus
+  if (admitted !== undefined) return ordered(admitted)
+  const configured = run.instance_config_snapshot?.gpu_devices || []
+  return configured.length ? ordered(configured) : gpus
 }
 
 export function benchmarkGPULabel(run: BenchmarkRun) {
@@ -240,6 +245,13 @@ function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
   }
 }
 
+function benchmarkAcceleratorRuntime(run: BenchmarkRun) {
+  return benchmarkGPUs(run).map((gpu) => {
+    const identity = gpu as typeof gpu & { driver_version?: string; runtime_version?: string }
+    return { id: gpu.id, backend: gpu.backend, driver_version: identity.driver_version, runtime_version: identity.runtime_version }
+  })
+}
+
 export function benchmarkComparisonDifferences(left: BenchmarkRun, right: BenchmarkRun) {
   const differences: string[] = []
   if (left.artifact_snapshot.fingerprint !== right.artifact_snapshot.fingerprint) differences.push('Model artifact')
@@ -248,6 +260,7 @@ export function benchmarkComparisonDifferences(left: BenchmarkRun, right: Benchm
   if (canonicalBenchmarkValue(config(left)) !== canonicalBenchmarkValue(config(right))) differences.push('Instance configuration')
   const gpus = (run: BenchmarkRun) => benchmarkGPUs(run).map(({ id, name, backend, total_bytes }) => ({ id, name, backend, total_bytes }))
   if (canonicalBenchmarkValue(gpus(left)) !== canonicalBenchmarkValue(gpus(right))) differences.push('GPU hardware')
+  if (canonicalBenchmarkValue(benchmarkAcceleratorRuntime(left)) !== canonicalBenchmarkValue(benchmarkAcceleratorRuntime(right))) differences.push('Accelerator runtime')
   if (canonicalBenchmarkValue(left.hardware_snapshot?.cpu) !== canonicalBenchmarkValue(right.hardware_snapshot?.cpu)) differences.push('CPU hardware')
   if (left.hardware_snapshot?.observed?.ram_total_bytes !== right.hardware_snapshot?.observed?.ram_total_bytes) differences.push('Host memory')
   if (left.build.runtime_variant !== right.build.runtime_variant) differences.push('Runtime backend')
