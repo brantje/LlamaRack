@@ -54,11 +54,12 @@ type ResourceLease struct {
 //
 // GPUs is the per-device vector that may be added to free VRAM. Scalar Bytes is
 // retained for callers that only identify a victim; it is never applied to an
-// arbitrary GPU.
+// arbitrary GPU. HostRAM is the host-memory capacity released by that victim.
 type Credit struct {
 	InstanceID string
 	Bytes      int64
 	GPUs       []GPUReservation
+	HostRAM    int64
 }
 
 type AcquireRequest struct {
@@ -139,9 +140,9 @@ func (l *Ledger) Acquire(req AcquireRequest) (ResourceLease, error) {
 		// starts. Background jobs are deliberately non-preemptive by default.
 		credits = nil
 	}
-	usableCredits, creditBytes := l.usableCreditsLocked(requesterInstance, credits)
+	usableCredits, creditBytes, hostCredit := l.usableCreditsLocked(requesterInstance, credits)
 	gpuOccupancy, hostOccupancy := l.occupancyLocked(ownerKey, usableCredits)
-	adjusted := adjustSnapshot(req.Snapshot, gpuOccupancy, hostOccupancy, creditBytes)
+	adjusted := adjustSnapshot(req.Snapshot, gpuOccupancy, hostOccupancy, creditBytes, hostCredit)
 	placement, err := PlanPlacement(adjusted, req.Placement)
 	if err != nil {
 		return ResourceLease{}, err
@@ -341,9 +342,10 @@ func (l *Ledger) releaseLocked(id string) {
 	}
 }
 
-func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[string]bool, map[string]int64) {
+func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[string]bool, map[string]int64, int64) {
 	usable := map[string]bool{}
 	bytesByDevice := map[string]int64{}
+	hostBytes := int64(0)
 	for _, credit := range credits {
 		victim := credit.InstanceID
 		if victim == "" || victim == requester {
@@ -353,6 +355,12 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 			continue
 		}
 		usable[victim] = true
+		existing, hasExisting := l.leaseByInstanceLocked(victim)
+		if credit.HostRAM > 0 {
+			hostBytes += credit.HostRAM
+		} else if hasExisting && existing.HostRAM > 0 {
+			hostBytes += existing.HostRAM
+		}
 		if len(credit.GPUs) > 0 {
 			for _, gpu := range credit.GPUs {
 				id := strings.TrimSpace(gpu.DeviceID)
@@ -363,7 +371,7 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 			}
 			continue
 		}
-		if existing, ok := l.leaseByInstanceLocked(victim); ok {
+		if hasExisting {
 			for _, gpu := range existing.GPUs {
 				id := strings.TrimSpace(gpu.DeviceID)
 				if id == "" || gpu.Bytes <= 0 {
@@ -373,7 +381,7 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 			}
 		}
 	}
-	return usable, bytesByDevice
+	return usable, bytesByDevice, hostBytes
 }
 
 func (l *Ledger) leaseByInstanceLocked(instanceID string) (*ResourceLease, bool) {
@@ -423,14 +431,14 @@ func (l *Ledger) occupancyLocked(ignoreOwner string, credit map[string]bool) (ma
 	return out, host
 }
 
-func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccupancy, host hostOccupancy, creditBytes map[string]int64) hardware.Snapshot {
+func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccupancy, host hostOccupancy, creditBytes map[string]int64, hostCredit int64) hardware.Snapshot {
 	adjusted := snapshot
 	if adjusted.RAMTotalBytes > 0 {
 		used := adjusted.RAMTotalBytes - adjusted.RAMAvailableBytes
 		if used < 0 {
 			used = 0
 		}
-		unmanaged := used - host.committed
+		unmanaged := used - host.committed - hostCredit
 		if unmanaged < 0 {
 			unmanaged = 0
 		}
@@ -440,7 +448,7 @@ func adjustSnapshot(snapshot hardware.Snapshot, occupancy map[string]deviceOccup
 		}
 		adjusted.RAMAvailableBytes = available
 	} else if adjusted.RAMAvailableBytes > 0 {
-		available := adjusted.RAMAvailableBytes - host.pending - host.committed
+		available := adjusted.RAMAvailableBytes - host.pending - host.committed + hostCredit
 		if available < 0 {
 			available = 0
 		}
