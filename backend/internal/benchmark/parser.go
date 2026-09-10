@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -23,9 +24,32 @@ func ParseMachineOutput(data []byte, workload WorkloadProfile) ([]Result, error)
 	}
 	results := make([]Result, 0, len(rows))
 	for index, row := range rows {
-		prompt := jsonInt64(row, "n_prompt")
-		generation := jsonInt64(row, "n_gen")
-		depth := jsonInt64(row, "n_depth")
+		prompt, promptPresent, err := benchmarkIdentityInt64(row, "n_prompt")
+		if err != nil {
+			return nil, errorsForParser(fmt.Sprintf("row %d has invalid n_prompt: %v", index, err))
+		}
+		generation, generationPresent, err := benchmarkIdentityInt64(row, "n_gen")
+		if err != nil {
+			return nil, errorsForParser(fmt.Sprintf("row %d has invalid n_gen: %v", index, err))
+		}
+		depth, depthPresent, err := benchmarkIdentityInt64(row, "n_depth")
+		if err != nil {
+			return nil, errorsForParser(fmt.Sprintf("row %d has invalid n_depth: %v", index, err))
+		}
+		if !promptPresent && !generationPresent && !depthPresent || prompt == 0 && generation == 0 && depth == 0 {
+			return nil, errorsForParser(fmt.Sprintf("row %d is missing a valid benchmark case identity", index))
+		}
+		averageTokensPS, present, err := benchmarkFloat64(row, "avg_ts")
+		if err != nil {
+			return nil, errorsForParser(fmt.Sprintf("row %d has invalid avg_ts: %v", index, err))
+		}
+		if !present {
+			return nil, errorsForParser(fmt.Sprintf("row %d is missing avg_ts benchmark measurement", index))
+		}
+		if averageTokensPS < 0 {
+			return nil, errorsForParser(fmt.Sprintf("row %d has invalid avg_ts: value must be zero or greater", index))
+		}
+
 		repetitions := int(jsonInt64(row, "repetitions"))
 		if repetitions <= 0 {
 			repetitions = int(jsonInt64(row, "n_repetitions"))
@@ -54,7 +78,7 @@ func ParseMachineOutput(data []byte, workload WorkloadProfile) ([]Result, error)
 			Repetitions:      repetitions,
 			AverageNS:        jsonInt64(row, "avg_ns"),
 			StdDevNS:         jsonInt64(row, "stddev_ns"),
-			AverageTokensPS:  jsonFloat64(row, "avg_ts"),
+			AverageTokensPS:  averageTokensPS,
 			StdDevTokensPS:   jsonFloat64(row, "stddev_ts"),
 			RawFields:        raw,
 		})
@@ -96,6 +120,59 @@ func decodeMachineRows(data []byte) ([]map[string]json.RawMessage, error) {
 		return nil, errorsForParser("read llama-bench JSONL: " + err.Error())
 	}
 	return rows, nil
+}
+
+func benchmarkIdentityInt64(row map[string]json.RawMessage, key string) (int64, bool, error) {
+	raw, ok := row[key]
+	if !ok {
+		return 0, false, nil
+	}
+	text, err := benchmarkNumericText(raw)
+	if err != nil {
+		return 0, true, err
+	}
+	if value, err := strconv.ParseInt(text, 10, 64); err == nil {
+		if value < 0 {
+			return 0, true, fmt.Errorf("value must be zero or greater")
+		}
+		return value, true, nil
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value < 0 || value > math.MaxInt64 {
+		return 0, true, fmt.Errorf("expected a non-negative integer")
+	}
+	return int64(value), true, nil
+}
+
+func benchmarkFloat64(row map[string]json.RawMessage, key string) (float64, bool, error) {
+	raw, ok := row[key]
+	if !ok {
+		return 0, false, nil
+	}
+	text, err := benchmarkNumericText(raw)
+	if err != nil {
+		return 0, true, err
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, true, fmt.Errorf("expected a finite number")
+	}
+	return value, true, nil
+}
+
+func benchmarkNumericText(raw json.RawMessage) (string, error) {
+	var number json.Number
+	if err := json.Unmarshal(raw, &number); err == nil && number.String() != "" {
+		return number.String(), nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		text = strings.TrimSpace(text)
+		if text != "" {
+			return text, nil
+		}
+	}
+	return "", fmt.Errorf("expected a number")
 }
 
 func jsonInt64(row map[string]json.RawMessage, key string) int64 {
