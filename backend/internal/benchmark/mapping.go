@@ -60,6 +60,14 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "info", Reason: "llama-bench workload cases are bounded by the saved context size rather than overriding it"})
 			continue
 		}
+		if key == "kv-offload" && !profile.Has(key) && profile.Has("no-kv-offload") {
+			args, err := mappedKVOffloadArgs(profile, value)
+			if err != nil {
+				return mapped, fmt.Errorf("%w: %v", ErrUnsupportedConfig, err)
+			}
+			mapped.Args = append(mapped.Args, args...)
+			continue
+		}
 		if profile.Has(key) {
 			args, err := mappedOptionArgs(profile, key, value)
 			if err != nil {
@@ -148,6 +156,21 @@ func BuildArgv(binaryPath, modelPath string, mapped MappedConfig, workload Workl
 	return args, nil
 }
 
+func mappedKVOffloadArgs(profile llamacpp.Profile, value string) ([]string, error) {
+	option, ok := profileOption(profile, "no-kv-offload")
+	if !ok || !isBinaryChoiceOption(option) {
+		return nil, fmt.Errorf("--kv-offload cannot be represented by this llama-bench build")
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "true", "1", "yes", "on":
+		return []string{"--no-kv-offload", "0"}, nil
+	case "false", "0", "no", "off":
+		return []string{"--no-kv-offload", "1"}, nil
+	default:
+		return nil, fmt.Errorf("--kv-offload expects a boolean value")
+	}
+}
+
 func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, error) {
 	option, ok := profileOption(profile, key)
 	if !ok {
@@ -155,7 +178,7 @@ func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, er
 	}
 	trimmed := strings.TrimSpace(value)
 	// Server switches become explicit values for llama-bench's <0|1> options.
-	if len(option.Choices) == 2 && containsChoice(option.Choices, "0") && containsChoice(option.Choices, "1") {
+	if isBinaryChoiceOption(option) {
 		switch strings.ToLower(trimmed) {
 		case "", "true", "1", "yes", "on":
 			return []string{"--" + key, "1"}, nil
@@ -181,6 +204,10 @@ func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, er
 		}
 	}
 	return []string{"--" + key, value}, nil
+}
+
+func isBinaryChoiceOption(option llamacpp.Option) bool {
+	return len(option.Choices) == 2 && containsChoice(option.Choices, "0") && containsChoice(option.Choices, "1")
 }
 
 func containsChoice(choices []string, value string) bool {
