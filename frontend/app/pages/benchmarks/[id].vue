@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { BenchmarkResult, BenchmarkRun } from '~/composables/useBenchmarks'
-import { benchmarkDuration, benchmarkGPULabel, benchmarkHeadline, benchmarkResultDepth, benchmarkStatusVariant, benchmarkTuningHints } from '~/composables/useBenchmarks'
+import { benchmarkDuration, benchmarkGPULabel, benchmarkGPUs, benchmarkHeadline, benchmarkResultDepth, benchmarkStatusVariant, benchmarkTuningHints } from '~/composables/useBenchmarks'
 
 const route = useRoute()
 const benchmarks = useBenchmarks()
@@ -16,7 +16,7 @@ const headline = computed(() => run.value ? benchmarkHeadline(run.value) : {})
 const duration = computed(() => run.value ? benchmarkDuration(run.value) : undefined)
 const tuningHints = computed(() => run.value ? benchmarkTuningHints(run.value) : [])
 const configOptions = computed(() => Object.entries(run.value?.instance_config_snapshot.options || {}).sort(([left], [right]) => left.localeCompare(right)))
-const gpus = computed(() => run.value?.hardware_snapshot?.observed?.gpus || [])
+const gpus = computed(() => run.value ? benchmarkGPUs(run.value) : [])
 const active = computed(() => run.value?.status === 'QUEUED' || run.value?.status === 'RUNNING')
 
 function formatDate(value?: string) {
@@ -42,6 +42,10 @@ function bytes(value?: number) {
   let index = 0
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++ }
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
+}
+function acceleratorRuntime(gpu: unknown) {
+  const identity = gpu as { driver_version?: string; runtime_version?: string }
+  return [identity.driver_version && `driver ${identity.driver_version}`, identity.runtime_version && `runtime ${identity.runtime_version}`].filter(Boolean).join(' · ')
 }
 
 async function load(silent = false) {
@@ -125,9 +129,9 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
         <Frame class="overflow-hidden"><div class="overflow-x-auto"><table class="w-full min-w-[980px] text-left text-xs"><thead class="border-b border-[var(--color-divider)] text-muted"><tr><th class="px-4 py-3 font-medium">Case</th><th class="px-4 py-3 font-medium">Type</th><th class="px-4 py-3 font-medium">Prompt tokens</th><th class="px-4 py-3 font-medium">Generation tokens</th><th class="px-4 py-3 font-medium">Context depth</th><th class="px-4 py-3 font-medium">Repetitions</th><th class="px-4 py-3 font-medium">Average</th><th class="px-4 py-3 font-medium">Stddev</th></tr></thead><tbody class="divide-y divide-[var(--color-divider)]"><tr v-for="result in run.results || []" :key="`${result.case_index}:${result.case_id}`"><td class="px-4 py-3 font-mono">{{ result.case_id }}</td><td class="px-4 py-3">{{ caseKind(result) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ result.prompt_tokens }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ result.generation_tokens }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ benchmarkResultDepth(result) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ result.repetitions }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ formatRate(result.average_tokens_per_second) }}</td><td class="px-4 py-3 font-mono tabular-nums">{{ formatRate(result.stddev_tokens_per_second) }}</td></tr><tr v-if="!run.results?.length"><td colspan="8" class="px-4 py-8 text-center text-muted">No successful measurements were stored for this run.</td></tr></tbody></table></div></Frame>
       </section>
 
-      <section class="space-y-3">
+      <section class="space-y-3" data-testid="benchmark-hardware">
         <div><h2 class="text-base font-semibold">Hardware and build identity</h2><p class="mt-1 text-xs text-muted">Captured at benchmark admission/start for historical reproducibility.</p></div>
-        <Frame class="p-4 space-y-4"><div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><div v-for="gpu in gpus" :key="gpu.id"><p class="font-medium">{{ gpu.name || gpu.id }}</p><p class="mt-1 font-mono text-xs text-muted">{{ gpu.backend }} · {{ gpu.id }}</p><p class="mt-1 font-mono text-xs">{{ bytes(gpu.free_bytes) }} free / {{ bytes(gpu.total_bytes) }}</p></div><div><p class="font-medium">{{ run.hardware_snapshot.cpu?.model || 'CPU' }}</p><p class="mt-1 font-mono text-xs text-muted">{{ run.hardware_snapshot.cpu?.architecture || '—' }} · {{ run.hardware_snapshot.cpu?.os || '—' }} · {{ run.hardware_snapshot.cpu?.logical_threads || '—' }} logical threads · {{ run.hardware_snapshot.cpu?.effective_threads || '—' }} effective threads</p></div></div><dl class="grid gap-x-8 gap-y-3 border-t border-[var(--color-divider)] pt-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt class="text-xs text-muted">LlamaRack</dt><dd class="mt-1 font-mono">{{ run.build.llamarack_version || '—' }}</dd></div><div><dt class="text-xs text-muted">Commit</dt><dd class="mt-1 truncate font-mono">{{ run.build.llamarack_commit || '—' }}</dd></div><div><dt class="text-xs text-muted">llama.cpp</dt><dd class="mt-1 font-mono">{{ run.build.llama_cpp_release || run.build.llama_cpp_build || '—' }}</dd></div><div><dt class="text-xs text-muted">llama-bench</dt><dd class="mt-1 font-mono">{{ run.build.llama_bench_version || '—' }}</dd></div></dl></Frame>
+        <Frame class="p-4 space-y-4"><div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><div v-for="gpu in gpus" :key="gpu.id"><p class="font-medium">{{ gpu.name || gpu.id }}</p><p class="mt-1 font-mono text-xs text-muted">{{ gpu.backend }} · {{ gpu.id }}</p><p v-if="acceleratorRuntime(gpu)" class="mt-1 font-mono text-xs text-muted">{{ acceleratorRuntime(gpu) }}</p><p class="mt-1 font-mono text-xs">{{ bytes(gpu.free_bytes) }} free / {{ bytes(gpu.total_bytes) }}</p></div><div><p class="font-medium">{{ run.hardware_snapshot.cpu?.model || 'CPU' }}</p><p class="mt-1 font-mono text-xs text-muted">{{ run.hardware_snapshot.cpu?.architecture || '—' }} · {{ run.hardware_snapshot.cpu?.os || '—' }} · {{ run.hardware_snapshot.cpu?.logical_threads || '—' }} logical threads · {{ run.hardware_snapshot.cpu?.effective_threads || '—' }} effective threads</p></div></div><dl class="grid gap-x-8 gap-y-3 border-t border-[var(--color-divider)] pt-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><dt class="text-xs text-muted">LlamaRack</dt><dd class="mt-1 font-mono">{{ run.build.llamarack_version || '—' }}</dd></div><div><dt class="text-xs text-muted">Commit</dt><dd class="mt-1 truncate font-mono">{{ run.build.llamarack_commit || '—' }}</dd></div><div><dt class="text-xs text-muted">llama.cpp</dt><dd class="mt-1 font-mono">{{ run.build.llama_cpp_release || run.build.llama_cpp_build || '—' }}</dd></div><div><dt class="text-xs text-muted">llama-bench</dt><dd class="mt-1 font-mono">{{ run.build.llama_bench_version || '—' }}</dd></div></dl></Frame>
       </section>
     </template>
 
