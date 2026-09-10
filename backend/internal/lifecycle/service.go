@@ -1161,7 +1161,7 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 	if len(snapshot.GPUs) == 0 {
 		return scheduler.Placement{}, nil
 	}
-	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
+	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, HostRAMBytes: demand.HostRAMBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
 	lease, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, HostRAM: demand.HostRAMBytes})
 	if err != nil {
 		return scheduler.Placement{}, err
