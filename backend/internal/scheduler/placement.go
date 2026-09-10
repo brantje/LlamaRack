@@ -12,6 +12,7 @@ const defaultVRAMReserveBytes int64 = 512 * 1024 * 1024
 
 type PlacementRequest struct {
 	RequiredBytes int64
+	HostRAMBytes  int64
 	Mode          string
 	Devices       []string
 	TensorSplit   string
