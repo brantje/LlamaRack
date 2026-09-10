@@ -12,6 +12,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/instances"
 )
 
+var errAmbiguousBenchmarkInstance = errors.New("ambiguous instance identifier")
+
 type benchmarkManagementService interface {
 	Capabilities(context.Context) (benchmark.Capabilities, error)
 	Create(context.Context, string, *benchmark.WorkloadProfile) (benchmark.Run, error)
@@ -166,18 +168,31 @@ func benchmarkCreateWorkload(input *benchmarkWorkloadInput) (*benchmark.Workload
 }
 
 func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) (string, error) {
-	item, err := h.instances.GetBySlug(ctx, value)
-	if err == nil {
-		return item.ID, nil
+	value = strings.TrimSpace(value)
+	bySlug, slugErr := h.instances.GetBySlug(ctx, value)
+	if slugErr != nil && !errors.Is(slugErr, sql.ErrNoRows) {
+		return "", slugErr
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+	byID, idErr := h.instances.GetByID(ctx, value)
+	if idErr != nil && !errors.Is(idErr, sql.ErrNoRows) {
+		return "", idErr
 	}
-	item, err = h.instances.GetByID(ctx, strings.TrimSpace(value))
-	if err != nil {
-		return "", err
+
+	slugFound := slugErr == nil
+	idFound := idErr == nil
+	if slugFound && idFound {
+		if bySlug.ID != byID.ID {
+			return "", errAmbiguousBenchmarkInstance
+		}
+		return byID.ID, nil
 	}
-	return item.ID, nil
+	if slugFound {
+		return bySlug.ID, nil
+	}
+	if idFound {
+		return byID.ID, nil
+	}
+	return "", sql.ErrNoRows
 }
 
 func (h *benchmarkHandler) get(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +225,7 @@ func writeBenchmarkError(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, benchmark.ErrInvalidWorkload), errors.Is(err, benchmark.ErrUnsupportedConfig):
 		writeErr(w, http.StatusBadRequest, err)
-	case errors.Is(err, benchmark.ErrInsufficientResources), errors.Is(err, benchmark.ErrTransitionConflict):
+	case errors.Is(err, benchmark.ErrInsufficientResources), errors.Is(err, benchmark.ErrTransitionConflict), errors.Is(err, errAmbiguousBenchmarkInstance):
 		writeErr(w, http.StatusConflict, err)
 	case errors.Is(err, benchmark.ErrUnavailable):
 		writeErr(w, http.StatusServiceUnavailable, err)
