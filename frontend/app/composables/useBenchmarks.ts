@@ -245,10 +245,10 @@ function workloadComparisonValue(workload: BenchmarkWorkloadProfile) {
   }
 }
 
-function benchmarkAcceleratorRuntime(run: BenchmarkRun) {
+function benchmarkAcceleratorDriverIdentity(run: BenchmarkRun) {
   return benchmarkGPUs(run).map((gpu) => {
-    const identity = gpu as typeof gpu & { driver_version?: string; runtime_version?: string }
-    return { id: gpu.id, backend: gpu.backend, driver_version: identity.driver_version, runtime_version: identity.runtime_version }
+    const identity = gpu as typeof gpu & { driver_version?: string; max_cuda_version?: string }
+    return { id: gpu.id, backend: gpu.backend, driver_version: identity.driver_version, max_cuda_version: identity.max_cuda_version }
   })
 }
 
@@ -260,7 +260,7 @@ export function benchmarkComparisonDifferences(left: BenchmarkRun, right: Benchm
   if (canonicalBenchmarkValue(config(left)) !== canonicalBenchmarkValue(config(right))) differences.push('Instance configuration')
   const gpus = (run: BenchmarkRun) => benchmarkGPUs(run).map(({ id, name, backend, total_bytes }) => ({ id, name, backend, total_bytes }))
   if (canonicalBenchmarkValue(gpus(left)) !== canonicalBenchmarkValue(gpus(right))) differences.push('GPU hardware')
-  if (canonicalBenchmarkValue(benchmarkAcceleratorRuntime(left)) !== canonicalBenchmarkValue(benchmarkAcceleratorRuntime(right))) differences.push('Accelerator runtime')
+  if (canonicalBenchmarkValue(benchmarkAcceleratorDriverIdentity(left)) !== canonicalBenchmarkValue(benchmarkAcceleratorDriverIdentity(right))) differences.push('CUDA driver compatibility')
   if (canonicalBenchmarkValue(left.hardware_snapshot?.cpu) !== canonicalBenchmarkValue(right.hardware_snapshot?.cpu)) differences.push('CPU hardware')
   if (left.hardware_snapshot?.observed?.ram_total_bytes !== right.hardware_snapshot?.observed?.ram_total_bytes) differences.push('Host memory')
   if (left.build.runtime_variant !== right.build.runtime_variant) differences.push('Runtime backend')

@@ -44,8 +44,8 @@ function bytes(value?: number) {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`
 }
 function acceleratorRuntime(gpu: unknown) {
-  const identity = gpu as { driver_version?: string; runtime_version?: string }
-  return [identity.driver_version && `driver ${identity.driver_version}`, identity.runtime_version && `runtime ${identity.runtime_version}`].filter(Boolean).join(' · ')
+  const identity = gpu as { driver_version?: string; max_cuda_version?: string }
+  return [identity.driver_version && `driver ${identity.driver_version}`, identity.max_cuda_version && `max CUDA ${identity.max_cuda_version}`].filter(Boolean).join(' · ')
 }
 
 async function load(silent = false) {

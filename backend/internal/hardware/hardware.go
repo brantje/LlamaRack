@@ -21,7 +21,7 @@ type GPU struct {
 	UUID                          string  `json:"uuid,omitempty"`
 	Name                          string  `json:"name"`
 	DriverVersion                 string  `json:"driver_version,omitempty"`
-	RuntimeVersion                string  `json:"runtime_version,omitempty"`
+	MaxCUDAVersion                string  `json:"max_cuda_version,omitempty"`
 	TotalBytes                    int64   `json:"total_bytes"`
 	UsedBytes                     int64   `json:"used_bytes"`
 	FreeBytes                     int64   `json:"free_bytes"`
@@ -169,10 +169,10 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 	// error if a driver omits the field.
 	if len(gpus) > 0 {
 		if query, queryErr := d.run(ctx, "nvidia-smi", "-q"); queryErr == nil {
-			driverVersion, runtimeVersion := parseNVIDIAIdentity(string(query))
+			driverVersion, maxCUDAVersion := parseNVIDIAIdentity(string(query))
 			for i := range gpus {
 				gpus[i].DriverVersion = driverVersion
-				gpus[i].RuntimeVersion = runtimeVersion
+				gpus[i].MaxCUDAVersion = maxCUDAVersion
 			}
 			widths := parseNVIDIAMemoryBusWidths(string(query))
 			if len(widths) == len(gpus) && len(memoryClocksMHz) == len(gpus) {
@@ -186,7 +186,7 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 	return gpus, nil
 }
 
-func parseNVIDIAIdentity(text string) (driverVersion, runtimeVersion string) {
+func parseNVIDIAIdentity(text string) (driverVersion, maxCUDAVersion string) {
 	for _, line := range strings.Split(text, "\n") {
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) != 2 {
@@ -201,13 +201,13 @@ func parseNVIDIAIdentity(text string) (driverVersion, runtimeVersion string) {
 		case "Driver Version":
 			driverVersion = value
 		case "CUDA Version":
-			runtimeVersion = value
+			maxCUDAVersion = value
 		}
-		if driverVersion != "" && runtimeVersion != "" {
-			return driverVersion, runtimeVersion
+		if driverVersion != "" && maxCUDAVersion != "" {
+			return driverVersion, maxCUDAVersion
 		}
 	}
-	return driverVersion, runtimeVersion
+	return driverVersion, maxCUDAVersion
 }
 
 func parseNVIDIAMemoryBusWidths(text string) []float64 {

@@ -316,8 +316,14 @@ func TestLedgerSkipsSelfAndClaimedCredits(t *testing.T) {
 }
 
 func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
-	if got := adjustSnapshot(hardware.Snapshot{}, nil, hostOccupancy{}, nil); len(got.GPUs) != 0 {
+	if got := adjustSnapshot(hardware.Snapshot{}, nil, hostOccupancy{}, nil, 0); len(got.GPUs) != 0 {
 		t.Fatalf("empty snapshot=%+v", got)
+	}
+	gib := int64(1024 * 1024 * 1024)
+	hostSnapshot := hardware.Snapshot{RAMTotalBytes: 16 * gib, RAMAvailableBytes: 10 * gib}
+	hostAdjusted := adjustSnapshot(hostSnapshot, nil, hostOccupancy{committed: 2 * gib}, nil, 3*gib)
+	if hostAdjusted.RAMAvailableBytes != 13*gib {
+		t.Fatalf("host credit snapshot=%+v", hostAdjusted)
 	}
 	if got := reservationsFor(Placement{}, hardware.Snapshot{}, PlacementRequest{RequiredBytes: 1}); got != nil {
 		t.Fatalf("empty placement reservations=%v", got)
@@ -325,7 +331,6 @@ func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
 	if got := reservationsFor(Placement{Devices: []string{"CUDA0"}}, hardware.Snapshot{}, PlacementRequest{RequiredBytes: -1}); len(got) != 1 || got[0].Bytes != 0 {
 		t.Fatalf("negative required: %+v", got)
 	}
-	gib := int64(1024 * 1024 * 1024)
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
 		{ID: "CUDA0", FreeBytes: 10 * gib},
 		{ID: "CUDA1", FreeBytes: 9 * gib},

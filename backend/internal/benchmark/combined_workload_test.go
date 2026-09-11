@@ -23,6 +23,21 @@ func writeBenchScript(t *testing.T, name, optional string) string {
 	return path
 }
 
+func TestSameWorkloadShapeComparesDimensions(t *testing.T) {
+	preset, ok := workloadPreset(DefaultWorkloadID)
+	if !ok {
+		t.Fatal("missing default preset")
+	}
+	if !sameWorkloadShape(preset, preset) || sameWorkloadShape(preset, WorkloadProfile{Repetitions: preset.Repetitions, Warmup: preset.Warmup}) {
+		t.Fatal("preset shape comparison")
+	}
+	changed := preset
+	changed.CombinedCases = []WorkloadCombinedCase{{PromptTokens: 1, GenerationTokens: 1}}
+	if sameWorkloadShape(preset, changed) {
+		t.Fatal("combined case mismatch should fail")
+	}
+}
+
 func TestCombinedWorkloadNormalizationAndContextBounds(t *testing.T) {
 	workload, err := NormalizeWorkload(&WorkloadProfile{
 		Version: WorkloadSchemaVersion,

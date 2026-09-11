@@ -204,6 +204,18 @@ func TestWorkloadArgvDisablesUnselectedCases(t *testing.T) {
 	}
 }
 
+func TestMapKVOffloadUsesNoKVOffloadBenchFlag(t *testing.T) {
+	caps := testCapabilities(llamacpp.Option{Key: "no-kv-offload", Kind: "enum", Choices: []string{"0", "1"}})
+	mapped, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"kv-offload": "true"}}, scheduler.Placement{}, caps)
+	if err != nil || !reflect.DeepEqual(mapped.Args, []string{"--no-kv-offload", "0"}) {
+		t.Fatalf("mapped=%+v err=%v", mapped, err)
+	}
+	mapped, err = MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"kv-offload": "false"}}, scheduler.Placement{}, caps)
+	if err != nil || !reflect.DeepEqual(mapped.Args, []string{"--no-kv-offload", "1"}) {
+		t.Fatalf("mapped=%+v err=%v", mapped, err)
+	}
+}
+
 func TestMapBenchNumericBooleans(t *testing.T) {
 	caps := testCapabilities(llamacpp.Option{Key: "no-kv-offload", Kind: "enum", Choices: []string{"0", "1"}})
 	for _, value := range []string{"", "true", "1", "yes", "on", "false", "0", "no", "off", "invalid"} {

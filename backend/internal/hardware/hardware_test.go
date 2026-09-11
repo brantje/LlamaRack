@@ -30,6 +30,9 @@ func TestSnapshotParsesNVIDIAAndRAM(t *testing.T) {
 		if strings.Contains(joined, "query-compute-apps") {
 			return []byte("1234, GPU-aaa, 512, llama-server\n"), nil
 		}
+		if joined == "-q" {
+			return []byte("Driver Version : 550.54.15\nCUDA Version : 12.4\n"), nil
+		}
 		return nil, errors.New("unexpected command")
 	}
 	snapshot, err := d.Snapshot(context.Background())
@@ -44,6 +47,9 @@ func TestSnapshotParsesNVIDIAAndRAM(t *testing.T) {
 	}
 	if len(snapshot.Processes) != 1 || snapshot.Processes[0].DeviceID != "CUDA0" || snapshot.Processes[0].PID != 1234 {
 		t.Fatalf("unexpected NVIDIA process list: %+v", snapshot.Processes)
+	}
+	if snapshot.GPUs[0].DriverVersion != "550.54.15" || snapshot.GPUs[0].MaxCUDAVersion != "12.4" {
+		t.Fatalf("unexpected NVIDIA identity: %+v", snapshot.GPUs[0])
 	}
 }
 
@@ -162,5 +168,13 @@ func TestNVIDIAProcessParserAndHelperFallbacks(t *testing.T) {
 	}
 	if int64Value(nil) != 0 || float64Value(nil) != 0 || stringValue(42) != "" || stringValue(nil) != "" {
 		t.Fatal("unexpected scalar fallback conversion")
+	}
+}
+
+func TestParseNVIDIAIdentityMapsDriverAndMaxCUDAVersion(t *testing.T) {
+	driver, maxCUDA := parseNVIDIAIdentity(`Driver Version : 550.54.15
+CUDA Version : 12.4`)
+	if driver != "550.54.15" || maxCUDA != "12.4" {
+		t.Fatalf("unexpected identity: driver=%q max_cuda=%q", driver, maxCUDA)
 	}
 }

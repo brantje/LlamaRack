@@ -143,6 +143,24 @@ func TestBenchmarkCreatePreservesPresetWarmupPresence(t *testing.T) {
 	}
 }
 
+func TestBenchmarkCreateRejectsAmbiguousInstanceIdentifier(t *testing.T) {
+	service := &fakeBenchmarkManagementService{run: benchmark.Run{ID: "run-1", Status: benchmark.StatusQueued}}
+	resolver := fakeBenchmarkInstanceResolver{
+		bySlug: map[string]instances.Instance{"shared": {ID: "slug-id", Slug: "shared"}},
+		byID:   map[string]instances.Instance{"shared": {ID: "uuid-id", Slug: "other"}},
+	}
+	mux := benchmarkTestMux(service, resolver)
+	w := benchmarkRequest(t, mux, http.MethodPost, "/api/v1/instances/shared/benchmarks", map[string]any{
+		"workload": map[string]any{"prompt_tokens": []int{256}, "generation_tokens": []int{32}, "repetitions": 3, "warmup": true},
+	}, true)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if service.createdID != "" || service.createdWork != nil {
+		t.Fatalf("ambiguous identifier reached service: id=%q workload=%+v", service.createdID, service.createdWork)
+	}
+}
+
 func TestBenchmarkCreateRejectsRuntimeAndFilesystemOverrides(t *testing.T) {
 	service := &fakeBenchmarkManagementService{run: benchmark.Run{ID: "run-1", Status: benchmark.StatusQueued}}
 	resolver := fakeBenchmarkInstanceResolver{bySlug: map[string]instances.Instance{"coder": {ID: "instance-uuid", Slug: "coder"}}}

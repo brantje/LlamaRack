@@ -236,6 +236,7 @@ func planFromSelection(selected []Candidate, placement Placement, fits bool) Pla
 				if strings.TrimSpace(gpu.DeviceID) != "" {
 					target[gpu.DeviceID] = true
 				}
+			}
 		}
 	}
 	freedByDevice := map[string]int64{}
