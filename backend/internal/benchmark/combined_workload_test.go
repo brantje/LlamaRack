@@ -36,6 +36,11 @@ func TestSameWorkloadShapeComparesDimensions(t *testing.T) {
 	if sameWorkloadShape(preset, changed) {
 		t.Fatal("combined case mismatch should fail")
 	}
+	shorter := preset
+	shorter.PromptTokens = shorter.PromptTokens[:1]
+	if sameWorkloadShape(preset, shorter) {
+		t.Fatal("prompt token length mismatch should fail")
+	}
 }
 
 func TestCombinedWorkloadNormalizationAndContextBounds(t *testing.T) {

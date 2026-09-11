@@ -214,6 +214,12 @@ func TestMapKVOffloadUsesNoKVOffloadBenchFlag(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(mapped.Args, []string{"--no-kv-offload", "1"}) {
 		t.Fatalf("mapped=%+v err=%v", mapped, err)
 	}
+	if _, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"kv-offload": "maybe"}}, scheduler.Placement{}, caps); !errors.Is(err, ErrUnsupportedConfig) {
+		t.Fatalf("invalid kv-offload err=%v", err)
+	}
+	if _, err := MapInstanceConfig(InstanceConfigSnapshot{Options: map[string]string{"kv-offload": "true"}}, scheduler.Placement{}, testCapabilities()); !errors.Is(err, ErrUnsupportedConfig) {
+		t.Fatalf("missing no-kv-offload err=%v", err)
+	}
 }
 
 func TestMapBenchNumericBooleans(t *testing.T) {

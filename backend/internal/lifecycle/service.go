@@ -1158,7 +1158,7 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 		slog.Warn("hardware snapshot unavailable; preserving compatibility placement", "instance_id", i.ID, "error", err)
 		return scheduler.Placement{}, nil
 	}
-	if len(snapshot.GPUs) == 0 {
+	if len(snapshot.GPUs) == 0 && demand.HostRAMBytes <= 0 {
 		return scheduler.Placement{}, nil
 	}
 	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, HostRAMBytes: demand.HostRAMBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
