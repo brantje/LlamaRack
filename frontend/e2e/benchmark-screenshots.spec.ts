@@ -67,7 +67,13 @@ const capabilities = {
   version: 'b6124',
   fingerprint: 'fixture-llama-bench-b6124',
   output_format: 'json',
-  supported_options: ['model', 'output', 'repetitions', 'n-prompt', 'n-gen'],
+  supported_options: ['model', 'output', 'repetitions', 'n-prompt', 'n-gen', 'ctx-size', 'batch-size', 'threads', 'flash-attn'],
+  runtime_options: [
+    { key: 'context_size', label: 'Context size', kind: 'integer', option: 'ctx-size', instance_option: 'ctx-size', instance_editable: true, minimum: 1, maximum: 1_000_000 },
+    { key: 'batch_size', label: 'Batch size', kind: 'integer', option: 'batch-size', instance_option: 'batch-size', instance_editable: true, minimum: 1, maximum: 4_194_304 },
+    { key: 'threads', label: 'Threads', kind: 'integer', option: 'threads', instance_option: 'threads', instance_editable: true, minimum: 1, maximum: 65_536 },
+    { key: 'flash_attention', label: 'Flash attention', kind: 'boolean', option: 'flash-attn', instance_option: 'flash-attn', instance_editable: true }
+  ],
   workload: {
     version: 1,
     default: defaultWorkload,
@@ -332,7 +338,12 @@ test('benchmark Instance modal ready screenshot', async ({ page }, testInfo) => 
   await page.locator('[data-testid="instance-benchmark-action"]').click()
   const dialog = page.getByRole('dialog', { name: `Benchmark ${instance.name}` })
   await expect(dialog).toBeVisible()
-  await expect(dialog).toContainText('Instance configuration · read only')
+  await expect(dialog).toContainText('Runtime configuration')
+  await expect(dialog).toContainText('Context size')
+  await expect(dialog).toContainText('Batch size')
+  await expect(dialog).toContainText('Threads')
+  await expect(dialog).toContainText('Flash attention')
+  await expect(dialog).not.toContainText('Instance configuration · read only')
   await expect(dialog).toContainText('Benchmark workload')
   await expect(dialog).toContainText('Hardware / admission')
   await expect(dialog).toContainText('NVIDIA GeForce RTX 4060 Ti')
