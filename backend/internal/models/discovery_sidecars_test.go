@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestLooksLikeNativeMTPFilename(t *testing.T) {
+	for _, item := range []struct {
+		name string
+		want bool
+	}{
+		{name: "Qwen3.8-27B-MAX-MTP-Q5_K_S.gguf", want: true},
+		{name: "Qwen3.8-27B-MAX-Q5_K_S.gguf", want: false},
+		{name: "mtp-gemma-4-12b-it.gguf", want: false},
+		{name: "model-MTP-Q4_K_M.gguf", want: true},
+	} {
+		if got := looksLikeNativeMTPFilename(item.name); got != item.want {
+			t.Fatalf("looksLikeNativeMTPFilename(%q) = %v want %v", item.name, got, item.want)
+		}
+	}
+}
+
 func TestAvailableGGUFsHidesMetadataClassifiedHelpersButKeepsNativeMTP(t *testing.T) {
 	s, dir := testModelService(t)
 	writeClassifiedGGUF(t, dir, "arbitrary-vision.gguf", "clip", 0, false)
