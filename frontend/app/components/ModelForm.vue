@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { companionOptionKeys, type ModelInspection } from '~/utils/modelCompanions'
+import {
+  companionOptionKeys,
+  hasEmbeddedMTP,
+  isMixedMTPRepositoryLabel,
+  looksLikeNativeMTPFilename,
+  nativeMTPParams,
+  suggestedNativeMTPFilename,
+  type ModelInspection
+} from '~/utils/modelCompanions'
 
 type AvailableGGUF = {
   path: string
@@ -141,11 +149,30 @@ const submitHint = computed(() => {
   }
   return 'Required: a GGUF artifact and Model name. When First Instance is enabled, its name and slug are also required.'
 })
+const selectedArtifactLabel = computed(() => {
+  if (props.remote) return remoteArtifact.value?.name || ''
+  return selectedGGUF.value?.name || selectedGGUF.value?.path || props.form.gguf_path || ''
+})
+const selectedArtifactScope = computed(() => {
+  if (props.remote) return props.remoteRepo
+  return selectedGGUF.value?.path || props.form.gguf_path || ''
+})
+const mtpRepoMismatchWarning = computed(() => {
+  const label = selectedArtifactLabel.value
+  if (!label || inspectingCompanions.value) return ''
+  if (!isMixedMTPRepositoryLabel(selectedArtifactScope.value)) return ''
+  if (hasEmbeddedMTP(props.form.options, resolvedInspection.value, selectedGGUF.value?.suggested_options || {}, label)) return ''
+  const suggested = suggestedNativeMTPFilename(label)
+  if (!suggested) {
+    return 'This repository publishes separate regular and embedded-MTP GGUFs. The selected filename is not an MTP quant, so no built-in MTP companion will be configured.'
+  }
+  return `This repository publishes separate regular and embedded-MTP GGUFs. The selected file is the regular quant. For built-in MTP, choose the matching ${suggested} file instead.`
+})
 
 function ggufCapabilities(file: AvailableGGUF) {
   const options = file.suggested_options || {}
   const capabilities: string[] = []
-  if (options['spec-draft-model'] || options['spec-type'] === 'draft-mtp') capabilities.push('MTP')
+  if (options['spec-draft-model'] || options['spec-type'] === 'draft-mtp' || looksLikeNativeMTPFilename(file.name)) capabilities.push('MTP')
   if (options.mmproj) capabilities.push('Vision')
   return capabilities
 }
@@ -291,6 +318,9 @@ async function loadRemoteArtifact() {
     if (!remoteArtifact.value.complete) throw new Error('Selected Hugging Face split GGUF is incomplete')
     createFirstInstance.value = true
     if (!props.form.name) props.form.name = remoteDefaultName()
+    if (looksLikeNativeMTPFilename(remoteArtifact.value.name)) {
+      applyAutoSuggestedOptions(nativeMTPParams())
+    }
   } catch (e: any) {
     remoteArtifact.value = null
     localError.value = messageFor(e, 'Unable to load Hugging Face artifact')
@@ -398,6 +428,15 @@ onMounted(() => {
         </div>
         <p v-if="!remote" class="mt-2 text-xs text-[var(--neutral-700)]">Already-registered GGUF files and detected helper GGUFs are hidden.</p>
       </Frame>
+
+      <UAlert
+        v-if="mtpRepoMismatchWarning"
+        color="warning"
+        variant="subtle"
+        title="Regular quant selected from an MTP repository"
+        :description="mtpRepoMismatchWarning"
+        data-testid="mtp-repo-mismatch-warning"
+      />
 
       <ModelCompanionFiles
         v-model="form.options"

@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import type { HardwareGPU, Model } from '~/composables/useManager'
+import {
+  isNativeMTP,
+  isNativeMTPFromEffective,
+  modelOrDetectedSource,
+  nativeMTPOptionKeys,
+  nativeMTPParamSummary,
+  nativeMTPParams,
+  type ModelInspection
+} from '~/utils/modelCompanions'
 
 type InstanceFormState = {
   model_id: string
@@ -22,9 +31,12 @@ type SettingValue<T> = { value?: T }
 type GeneralSettings = { idle_unload_seconds?: SettingValue<number>; max_pending_requests_per_instance?: SettingValue<number> }
 type EffectiveConfig = { effective?: { values?: Record<string, string>; sources?: Record<string, string> } }
 type InspectionDependency = { kind: string; total_bytes?: number }
-type ModelInspection = { dependencies?: InspectionDependency[] }
 type CompanionDefinition = { key: 'mmproj' | 'spec-draft-model'; label: string; flag: string; dependencyKind: string }
 type DetectedCompanion = { path: string; size?: number }
+type NativeMTPDetection = {
+  params: Record<(typeof nativeMTPOptionKeys)[number], string>
+  nextn_predict_layers?: number
+}
 
 const props = withDefaults(defineProps<{
   form: InstanceFormState
@@ -60,6 +72,7 @@ const globalIdleSeconds = ref(300)
 const globalPendingPerInstance = ref(32)
 const hardwareGPUs = ref<HardwareGPU[]>([])
 const companions = ref<Partial<Record<CompanionDefinition['key'], DetectedCompanion>>>({})
+const nativeMTPDetected = ref<NativeMTPDetection | null>(null)
 const companionLoading = ref(false)
 let slugEdited = false
 let companionSequence = 0
@@ -69,7 +82,11 @@ const companionDefinitions: CompanionDefinition[] = [
   { key: 'spec-draft-model', label: 'MTP draft model', flag: '--spec-draft-model', dependencyKind: 'mtp' }
 ]
 const selectedModel = computed(() => manager.models.value.find(model => model.id === props.form.model_id))
-const detectedCompanionKeys = computed(() => companionDefinitions.filter(item => companions.value[item.key]).map(item => item.key))
+const detectedCompanionKeys = computed(() => {
+  const keys = companionDefinitions.filter(item => companions.value[item.key]).map(item => item.key)
+  if (nativeMTPDetected.value) return [...keys.filter(key => key !== 'spec-draft-model'), ...nativeMTPOptionKeys]
+  return keys
+})
 const canSubmit = computed(() => Boolean(props.form.model_id && props.form.name.trim() && props.form.slug.trim()))
 const overrides = computed(() => props.form.options['llama.cpp'] || {})
 const overrideCount = computed(() =>
@@ -98,6 +115,7 @@ function selectModel(model: Model) {
   const nextOptions = { ...props.form.options }
   delete nextOptions.mmproj
   delete nextOptions['spec-draft-model']
+  for (const key of nativeMTPOptionKeys) delete nextOptions[key]
   props.form.options = nextOptions
   props.form.model_id = model.id
   props.form.name = model.name
@@ -115,11 +133,36 @@ function updateSlug(value: unknown) {
   props.form.slug = String(value || '')
 }
 
+function isNativeMTPCompanion(definition: CompanionDefinition) {
+  return definition.key === 'spec-draft-model' && Boolean(nativeMTPDetected.value)
+}
+
+function nativeMTPState(): 'detected' | 'disabled' | 'none' {
+  if (!nativeMTPDetected.value) return 'none'
+  if (Object.prototype.hasOwnProperty.call(props.form.options, 'spec-type') && props.form.options['spec-type'] === '') return 'disabled'
+  return 'detected'
+}
+
 function companionState(definition: CompanionDefinition) {
+  if (isNativeMTPCompanion(definition)) return nativeMTPState()
   const detected = companions.value[definition.key]
   if (!detected) return 'none'
   if (Object.prototype.hasOwnProperty.call(props.form.options, definition.key) && props.form.options[definition.key] === '') return 'disabled'
   return 'detected'
+}
+
+function companionTitle(definition: CompanionDefinition) {
+  return isNativeMTPCompanion(definition) ? 'Built-in MTP' : definition.label
+}
+
+function companionFlag(definition: CompanionDefinition) {
+  return isNativeMTPCompanion(definition) ? '--spec-type' : definition.flag
+}
+
+function companionStatusLabel(definition: CompanionDefinition, state: 'detected' | 'disabled' | 'none') {
+  if (state === 'detected') return isNativeMTPCompanion(definition) ? 'Built-in' : 'Auto-detected'
+  if (state === 'disabled') return 'Ignored'
+  return 'None found'
 }
 
 function companionValue(definition: CompanionDefinition) {
@@ -131,10 +174,21 @@ function setCompanionValue(definition: CompanionDefinition, value: unknown) {
 }
 
 function disableCompanion(definition: CompanionDefinition) {
+  if (isNativeMTPCompanion(definition)) {
+    const next = { ...props.form.options }
+    for (const key of nativeMTPOptionKeys) next[key] = ''
+    props.form.options = next
+    return
+  }
   props.form.options = { ...props.form.options, [definition.key]: '' }
 }
 
 function enableCompanion(definition: CompanionDefinition) {
+  if (isNativeMTPCompanion(definition)) {
+    if (!nativeMTPDetected.value) return
+    props.form.options = { ...props.form.options, ...nativeMTPDetected.value.params }
+    return
+  }
   const detected = companions.value[definition.key]
   if (!detected) return
   props.form.options = { ...props.form.options, [definition.key]: detected.path }
@@ -144,10 +198,13 @@ async function loadCompanions() {
   const model = selectedModel.value
   const sequence = ++companionSequence
   companions.value = {}
+  nativeMTPDetected.value = null
   if (!model) return
   companionLoading.value = true
   try {
-    const config = await manager.request<EffectiveConfig>(`/api/v1/llamacpp/config?model_id=${encodeURIComponent(model.id)}`)
+    const configQuery = new URLSearchParams({ model_id: model.id })
+    if (props.instanceId) configQuery.set('instance_id', props.instanceId)
+    const config = await manager.request<EffectiveConfig>(`/api/v1/llamacpp/config?${configQuery.toString()}`)
     if (sequence !== companionSequence || model.id !== props.form.model_id) return
     const values = config?.effective?.values || {}
     const sources = config?.effective?.sources || {}
@@ -155,11 +212,13 @@ async function loadCompanions() {
     for (const definition of companionDefinitions) {
       const source = sources[definition.key]
       const path = values[definition.key]
-      if (path && (source === 'model' || source === 'detected')) detected[definition.key] = { path }
+      if (path && modelOrDetectedSource(source)) detected[definition.key] = { path }
     }
-    if (Object.keys(detected).length) {
+    let inspection: ModelInspection | undefined
+    const needsInspection = Object.keys(detected).length > 0 || isNativeMTPFromEffective(values, sources, props.form.options)
+    if (needsInspection) {
       try {
-        const inspection = await manager.request<ModelInspection>('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: model.gguf_path } })
+        inspection = await manager.request<ModelInspection>('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: model.gguf_path } })
         for (const definition of companionDefinitions) {
           if (!detected[definition.key]) continue
           detected[definition.key]!.size = inspection?.dependencies?.find(item => item.kind === definition.dependencyKind)?.total_bytes
@@ -168,9 +227,21 @@ async function loadCompanions() {
         // Paths remain actionable if optional GGUF inspection cannot provide sizes.
       }
     }
-    if (sequence === companionSequence && model.id === props.form.model_id) companions.value = detected
+    if (isNativeMTPFromEffective(values, sources, props.form.options) || isNativeMTP(props.form.options, inspection)) {
+      nativeMTPDetected.value = {
+        params: nativeMTPParams(values),
+        nextn_predict_layers: inspection?.features?.nextn_predict_layers
+      }
+      delete detected['spec-draft-model']
+    }
+    if (sequence === companionSequence && model.id === props.form.model_id) {
+      companions.value = detected
+    }
   } catch {
-    if (sequence === companionSequence) companions.value = {}
+    if (sequence === companionSequence) {
+      companions.value = {}
+      nativeMTPDetected.value = null
+    }
   } finally {
     if (sequence === companionSequence) companionLoading.value = false
   }
@@ -294,18 +365,23 @@ onMounted(() => {
             :data-testid="`companion-${definition.key}`"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
-              <div><p class="text-sm font-semibold">{{ definition.label }}</p><p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ definition.flag }}</p></div>
+              <div><p class="text-sm font-semibold">{{ companionTitle(definition) }}</p><p class="mt-1 font-mono text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">{{ companionFlag(definition) }}</p></div>
               <div class="flex items-center gap-2">
-                <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">Auto-detected</StatusTag>
-                <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">Ignored</StatusTag>
-                <StatusTag v-else variant="neutral">None found</StatusTag>
+                <StatusTag v-if="companionState(definition) === 'detected'" variant="ready">{{ companionStatusLabel(definition, 'detected') }}</StatusTag>
+                <StatusTag v-else-if="companionState(definition) === 'disabled'" variant="neutral">{{ companionStatusLabel(definition, 'disabled') }}</StatusTag>
+                <StatusTag v-else variant="neutral">{{ companionStatusLabel(definition, 'none') }}</StatusTag>
                 <AppButton v-if="companionState(definition) === 'detected'" type="button" intent="ghost" size="xs" @click="disableCompanion(definition)">Disable</AppButton>
                 <AppButton v-else-if="companionState(definition) === 'disabled'" type="button" intent="ghost" size="xs" @click="enableCompanion(definition)">Enable</AppButton>
               </div>
             </div>
-            <template v-if="companionState(definition) !== 'none'">
+            <template v-if="companionState(definition) === 'detected' && isNativeMTPCompanion(definition)">
+              <p class="mt-4 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]" data-testid="companion-native-mtp">Packed into this GGUF · speculative decoding defaults inherited from the Model<span v-if="nativeMTPDetected?.nextn_predict_layers"> · nextn_predict_layers {{ nativeMTPDetected.nextn_predict_layers }}</span>.</p>
+              <p class="mt-2 font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]" data-testid="companion-native-mtp-params">{{ nativeMTPParamSummary(nativeMTPDetected?.params || {}) }}</p>
+            </template>
+            <template v-else-if="companionState(definition) !== 'none'">
               <UFormField :label="definition.flag" class="mt-4"><UInput :model-value="companionValue(definition)" class="w-full font-mono" placeholder="not set" @update:model-value="setCompanionValue(definition, $event)" /></UFormField>
               <p v-if="companionState(definition) === 'detected'" class="mt-2 font-mono text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ formatBytes(companions[definition.key]?.size) }} · inherited from the Model defaults</p>
+              <p v-else-if="isNativeMTPCompanion(definition)" class="mt-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-800)]" data-testid="companion-disabled-mtp">MTP defaults cleared — spec-type, spec-draft-n-max and spec-draft-p-min are not passed</p>
               <p v-else class="mt-2 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">value cleared — the flag is not passed</p>
             </template>
             <p v-else class="mt-4 text-xs text-[var(--neutral-700)]">No matching file was detected alongside this Model's GGUF.</p>

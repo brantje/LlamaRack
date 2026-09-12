@@ -117,6 +117,11 @@ func (s *Service) InspectGGUFArtifact(ctx context.Context, path string) (GGUFIns
 	summary, summaryErr := s.GGUFSummary(ctx, mainRel)
 	if summaryErr != nil {
 		inspection.Warning = summaryErr.Error()
+		if looksLikeNativeMTPFilename(mainGroup.name) {
+			options := map[string]string{}
+			applyMTPDefaults(options)
+			inspection.SuggestedOptions = options
+		}
 		return inspection, nil
 	}
 	inspection.Architecture = summary.Derived.Architecture
@@ -133,6 +138,8 @@ func (s *Service) InspectGGUFArtifact(ctx context.Context, path string) (GGUFIns
 
 	options := map[string]string{}
 	if summary.Features.HasMTP && !summary.Features.MTPOnly {
+		applyMTPDefaults(options)
+	} else if looksLikeNativeMTPFilename(mainGroup.name) {
 		applyMTPDefaults(options)
 	}
 	if !inspection.Complete {

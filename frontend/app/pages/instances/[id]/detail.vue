@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import type { Instance, RuntimeTelemetry } from '~/composables/useManager'
 import { startupBackoffMessage } from '~/utils/startupBackoff'
+import {
+  isNativeMTPFromEffective,
+  modelOrDetectedSource,
+  nativeMTPParamSummary,
+  type ModelInspection
+} from '~/utils/modelCompanions'
 
 type LlamaMetrics = {
   prompt_tokens_total?: number
@@ -27,10 +33,15 @@ type SettingValue<T> = { value: T; source?: string; editable?: boolean }
 type GeneralSettings = { observability_retention_days?: SettingValue<number> }
 type RangeOption = { label: string; value: number; disabled?: boolean }
 type ChartPoint = { timestamp: number; value: number | null }
-type Companion = { kind: 'Vision projector' | 'MTP draft model'; path: string; flag: string; size?: number }
+type Companion = {
+  kind: 'Vision projector' | 'MTP draft model' | 'Built-in MTP'
+  path?: string
+  flag: string
+  size?: number
+  summary?: string
+  nextn_predict_layers?: number
+}
 type EffectiveConfig = { effective?: { values?: Record<string, string>; sources?: Record<string, string> } }
-type InspectionDependency = { kind: string; total_bytes?: number }
-type ModelInspection = { dependencies?: InspectionDependency[] }
 type VRAMSegment = { label: string; bytes: number; percent: number; token: string }
 type RuntimeWithTime = ReturnType<ReturnType<typeof useManager>['runtimeForInstance']> & { started_at?: string; ready_at?: string }
 
@@ -292,15 +303,34 @@ async function loadHistory() {
 }
 async function loadCompanions() {
   companions.value = []
-  if (!model.value) return
+  if (!model.value || !instance.value) return
   try {
-    const config = await manager.request<EffectiveConfig>(`/api/v1/llamacpp/config?model_id=${encodeURIComponent(model.value.id)}`)
+    const configQuery = new URLSearchParams({
+      model_id: model.value.id,
+      instance_id: instance.value.id
+    })
+    const config = await manager.request<EffectiveConfig>(`/api/v1/llamacpp/config?${configQuery.toString()}`)
     const values = config?.effective?.values || {}
     const sources = config?.effective?.sources || {}
-    const helpers: Array<Companion & { dependencyKind: string }> = []
-    const modelOwned = (key: string) => sources[key] === 'model' || sources[key] === 'detected'
-    if (values.mmproj && modelOwned('mmproj')) helpers.push({ kind: 'Vision projector', path: values.mmproj, flag: '--mmproj', dependencyKind: 'mmproj' })
-    if (values['spec-draft-model'] && modelOwned('spec-draft-model')) helpers.push({ kind: 'MTP draft model', path: values['spec-draft-model'], flag: '--spec-draft-model', dependencyKind: 'mtp' })
+    const helpers: Array<Companion & { dependencyKind?: string }> = []
+    if (values.mmproj && modelOrDetectedSource(sources.mmproj)) {
+      helpers.push({ kind: 'Vision projector', path: values.mmproj, flag: '--mmproj', dependencyKind: 'mmproj' })
+    }
+    const native = isNativeMTPFromEffective(values, sources)
+    if (native) {
+      helpers.push({
+        kind: 'Built-in MTP',
+        flag: '--spec-type',
+        summary: nativeMTPParamSummary(values)
+      })
+    } else if (values['spec-draft-model'] && modelOrDetectedSource(sources['spec-draft-model'])) {
+      helpers.push({
+        kind: 'MTP draft model',
+        path: values['spec-draft-model'],
+        flag: '--spec-draft-model',
+        dependencyKind: 'mtp'
+      })
+    }
     if (!helpers.length) return
     let inspection: ModelInspection | undefined
     try {
@@ -312,7 +342,11 @@ async function loadCompanions() {
       kind: helper.kind,
       path: helper.path,
       flag: helper.flag,
-      size: inspection?.dependencies?.find(dependency => dependency.kind === helper.dependencyKind)?.total_bytes
+      summary: helper.summary,
+      nextn_predict_layers: helper.kind === 'Built-in MTP' ? inspection?.features?.nextn_predict_layers : undefined,
+      size: helper.dependencyKind
+        ? inspection?.dependencies?.find(dependency => dependency.kind === helper.dependencyKind)?.total_bytes
+        : undefined
     }))
   } catch {
     companions.value = []
@@ -506,7 +540,15 @@ defineExpose({ setSelectedWindow })
       <Frame v-if="companions.length" class="p-4" data-testid="instance-detail-companions">
         <h2 class="text-sm font-semibold">Companion files</h2>
         <div class="mt-3 divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
-          <div v-for="helper in companions" :key="`${helper.kind}-${helper.path}`" class="flex flex-wrap items-center justify-between gap-3 py-3"><div class="min-w-0"><p class="text-xs font-semibold">{{ helper.kind }}</p><p class="mt-1 break-all font-mono text-[length:var(--font-size-table-header)]">{{ helper.path }}</p><p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ helper.flag }} · {{ formatBytes(helper.size) }}</p></div><StatusTag variant="ready">Enabled</StatusTag></div>
+          <div v-for="helper in companions" :key="`${helper.kind}-${helper.path || helper.summary || 'native'}`" class="flex flex-wrap items-center justify-between gap-3 py-3">
+            <div class="min-w-0">
+              <p class="text-xs font-semibold">{{ helper.kind }}</p>
+              <p v-if="helper.path" class="mt-1 break-all font-mono text-[length:var(--font-size-table-header)]">{{ helper.path }}</p>
+              <p v-else class="mt-1 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">Packed into this GGUF<span v-if="helper.nextn_predict_layers"> · nextn_predict_layers {{ helper.nextn_predict_layers }}</span></p>
+              <p class="mt-1 text-[length:var(--font-size-kicker)] text-[var(--neutral-700)]">{{ helper.flag }}<span v-if="helper.summary"> · {{ helper.summary }}</span><span v-else-if="helper.size"> · {{ formatBytes(helper.size) }}</span></p>
+            </div>
+            <StatusTag variant="ready">Enabled</StatusTag>
+          </div>
         </div>
       </Frame>
 

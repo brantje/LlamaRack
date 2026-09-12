@@ -155,6 +155,50 @@ describe('shared Instance form redesign', () => {
     expect(Object.values(state.options)).toContain('/custom/projector.gguf')
   })
 
+  it('surfaces built-in MTP from detected llama.cpp defaults on the instance companion panel', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
+      if (path === '/api/v1/hardware') return { gpus: [] }
+      if (path.startsWith('/api/v1/llamacpp/config')) return {
+        effective: {
+          values: {
+            'spec-type': 'draft-mtp',
+            'spec-draft-n-max': '16',
+            'spec-draft-p-min': '0.8'
+          },
+          sources: {
+            'spec-type': 'detected',
+            'spec-draft-n-max': 'detected',
+            'spec-draft-p-min': 'detected'
+          }
+        }
+      }
+      if (path === '/api/v1/models/inspect') return { features: { has_mtp: true, mtp_only: false, nextn_predict_layers: 1 } }
+      return {}
+    })
+    const state = reactive(form({ model_id: 'm1', name: 'Native MTP Model', slug: 'native-mtp-model' }))
+    const wrapper = await mountSuspended(InstanceForm, {
+      props: { form: state, title: 'Edit Instance', submitLabel: 'Save', instanceId: 'inst-1' }
+    })
+    await flushPromises()
+    await expandOverrides(wrapper)
+
+    const mtp = wrapper.get('[data-testid="companion-spec-draft-model"]')
+    expect(mtp.text()).toContain('Built-in MTP')
+    expect(mtp.text()).toContain('Built-in')
+    expect(mtp.text()).not.toContain('None found')
+    expect(wrapper.get('[data-testid="companion-native-mtp"]').text()).toContain('Packed into this GGUF')
+    expect(wrapper.get('[data-testid="companion-native-mtp-params"]').text()).toContain('spec-type=draft-mtp')
+    expect(wrapper.findComponent(LlamaCppOptionsEditor).props('excludeKeys')).toEqual([
+      'spec-type', 'spec-draft-n-max', 'spec-draft-p-min'
+    ])
+
+    await mtp.findAll('button').find(button => button.text() === 'Disable')!.trigger('click')
+    await flushPromises()
+    expect(state.options).toMatchObject({ 'spec-type': '', 'spec-draft-n-max': '', 'spec-draft-p-min': '' })
+    expect(mtp.text()).toContain('Ignored')
+  })
+
   it('keeps unavailable or non-model companion sources neutral, isolates probe failures and tolerates inspection errors', async () => {
     let detected = false
     mocks.request.mockImplementation(async (path: string) => {

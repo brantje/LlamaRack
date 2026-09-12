@@ -4,6 +4,7 @@ import {
   nativeMTPDefaults,
   nativeMTPOptionKeys,
   isNativeMTP,
+  looksLikeNativeMTPFilename,
   type CompanionDefinition,
   type CompanionDependency,
   type ModelInspection
@@ -74,7 +75,11 @@ function detectedCompanionPath(definition: CompanionDefinition) {
 }
 
 function nativeMTP() {
-  if (props.remote) return false
+  if (props.remote) {
+    const artifactName = props.remoteArtifact?.name || ''
+    return looksLikeNativeMTPFilename(artifactName)
+      || isNativeMTP(props.modelValue, props.inspection, props.fallbackSuggestedOptions)
+  }
   return isNativeMTP(props.modelValue, props.inspection, props.fallbackSuggestedOptions)
 }
 

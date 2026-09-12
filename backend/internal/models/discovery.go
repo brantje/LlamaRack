@@ -280,6 +280,8 @@ func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath st
 	options := map[string]string{}
 	if mainSummary.Features.HasMTP && !mainSummary.Features.MTPOnly {
 		applyMTPDefaults(options)
+	} else if looksLikeNativeMTPFilename(mainPath) {
+		applyMTPDefaults(options)
 	}
 
 	// Match InspectGGUFArtifact scope: prefer completed download-job paths when
@@ -350,6 +352,20 @@ func directorySiblingGGUFs(root, mainRel string) ([]string, error) {
 		paths = append(paths, filepath.ToSlash(filepath.Join(dir, entry.Name())))
 	}
 	return paths, nil
+}
+
+// looksLikeNativeMTPFilename identifies main-model GGUFs whose basename marks
+// embedded MTP (for example DavidAU's "-MTP-Q4_K_M" quants). Sidecar drafts
+// use an mtp basename prefix and must not match here.
+func looksLikeNativeMTPFilename(name string) bool {
+	stem := strings.TrimSuffix(strings.ToLower(filepath.Base(name)), ".gguf")
+	if stem == "" {
+		return false
+	}
+	if stem == "mtp" || strings.HasPrefix(stem, "mtp-") || strings.HasPrefix(stem, "mtp_") || strings.HasPrefix(stem, "mtp.") {
+		return false
+	}
+	return strings.Contains(stem, "-mtp-") || strings.Contains(stem, "_mtp_") || strings.HasSuffix(stem, "-mtp") || strings.HasSuffix(stem, "_mtp")
 }
 
 func applyMTPDefaults(options map[string]string) {
