@@ -77,11 +77,15 @@ func TestBenchmarkServiceBaselinePersistsInstanceOverridesAndEffectiveConfigSepa
 
 func TestBenchmarkServiceOverrideDrivesResourceAdmission(t *testing.T) {
 	s, _, _, _, cfg := testBenchmarkService(t, benchmarkTestExecutor{})
+	modelSource := s.models.(*benchmarkTestModelSource)
+	modelSource.inspection.ModelBytes = 1 << 30
+	modelSource.item.TotalBytes = 1 << 30
 	cfg.effective.Values["n-gpu-layers"] = "0"
 	caps := runtimeTestCapabilities(llamacpp.Option{Key: "n-gpu-layers", Kind: "integer"})
 	s.discoverCapabilities = func(context.Context, string) (Capabilities, error) { return caps, nil }
-	// The baseline is CPU-only and can be admitted on a host without GPUs. The
-	// override moves model demand to GPU and must therefore fail admission.
+	// The saved Instance is CPU-only, but the override moves a deliberately
+	// non-trivial model demand to GPU. This fixture has no GPUs, so admission
+	// must be decided from the effective benchmark config and reject the run.
 	if _, err := s.CreateWithOverrides(context.Background(), "instance-1", nil, RuntimeOverrides{GPULayers: intp(-1)}); !errors.Is(err, ErrInsufficientResources) {
 		t.Fatalf("override admission err=%v", err)
 	}

@@ -99,7 +99,7 @@ describe('benchmark runtime overrides', () => {
     await flushPromises()
     const vm = wrapper.vm as any
 
-    expect(wrapper.get('[data-testid="benchmark-runtime-controls"]').text()).toContain('Runtime configuration')
+    expect(document.body.querySelector('[data-testid="benchmark-runtime-controls"]')?.textContent).toContain('Runtime configuration')
     expect(vm.runtimeDraft.batch_size).toBe(512)
     expect(vm.runtimeDraft.threads).toBe(4)
     expect(vm.runtimeDraft.flash_attention).toBe(false)
