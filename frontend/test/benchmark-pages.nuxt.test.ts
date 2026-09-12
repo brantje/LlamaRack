@@ -140,18 +140,17 @@ describe('benchmark pages', () => {
     wrapper.unmount()
   })
 
-  it('adds Benchmark action and benchmark history to Instance detail without changing runtime controls', async () => {
+  it('adds only the Benchmark action to Instance detail', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') return { observability_retention_days: { value: 30 } }
       if (path.startsWith('/api/v1/observability/timeseries?')) return { metric: 'test', bucket_seconds: 60, items: [] }
       if (path.startsWith('/api/v1/llamacpp/config?')) return { effective: { values: { 'ctx-size': '4096' }, sources: { 'ctx-size': 'instance' } }, unsupported: [] }
-      if (path.startsWith('/api/v1/benchmarks?')) return { items: [], total: 0, limit: 10, offset: 0 }
       throw new Error(path)
     })
     const wrapper = await mountSuspended(InstanceDetailPage, { route: '/instances/coder/detail' })
     await flushPromises()
     expect(wrapper.get('[data-testid="instance-benchmark-action"]').text()).toContain('Benchmark')
-    expect(wrapper.get('[data-testid="instance-benchmark-history"]').text()).toContain('Benchmark history')
+    expect(wrapper.find('[data-testid="instance-benchmark-history"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Launch')
     expect(wrapper.text()).toContain('Performance history')
     wrapper.unmount()
