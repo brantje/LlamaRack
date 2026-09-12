@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	BenchmarkSchemaVersion      = 1
+	BenchmarkSchemaVersion      = 2
 	ParserSchemaVersion         = 1
 	ConfigSchemaVersion         = 1
 	LegacyWorkloadSchemaVersion = 1
@@ -102,14 +102,12 @@ type ArtifactFileSnapshot struct {
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
 }
-
 type ArtifactDependencySnapshot struct {
 	Kind         string                 `json:"kind"`
 	Name         string                 `json:"name"`
 	Quantization string                 `json:"quantization,omitempty"`
 	Files        []ArtifactFileSnapshot `json:"files"`
 }
-
 type ArtifactSnapshot struct {
 	Path           string                       `json:"path"`
 	Fingerprint    string                       `json:"fingerprint"`
@@ -129,13 +127,11 @@ type CPUSnapshot struct {
 	Architecture     string `json:"architecture"`
 	OS               string `json:"os"`
 }
-
 type HardwareSnapshot struct {
 	Observed        hardware.Snapshot `json:"observed"`
 	CPU             CPUSnapshot       `json:"cpu"`
 	SelectedDevices []string          `json:"selected_devices,omitempty"`
 }
-
 type BuildSnapshot struct {
 	LlamaRackVersion      string `json:"llamarack_version"`
 	LlamaRackCommit       string `json:"llamarack_commit,omitempty"`
@@ -145,14 +141,12 @@ type BuildSnapshot struct {
 	LlamaBenchVersion     string `json:"llama_bench_version,omitempty"`
 	LlamaBenchFingerprint string `json:"llama_bench_fingerprint,omitempty"`
 }
-
 type MappingDifference struct {
 	Key      string `json:"key"`
 	Value    string `json:"value,omitempty"`
 	Severity string `json:"severity"`
 	Reason   string `json:"reason"`
 }
-
 type Result struct {
 	CaseIndex        int             `json:"case_index"`
 	CaseID           string          `json:"case_id"`
@@ -168,35 +162,31 @@ type Result struct {
 }
 
 type Run struct {
-	ID string `json:"id"`
-
-	InstanceID           string                 `json:"instance_id"`
-	InstanceSlugSnapshot string                 `json:"instance_slug_snapshot"`
-	InstanceNameSnapshot string                 `json:"instance_name_snapshot"`
-	InstanceConfig       InstanceConfigSnapshot `json:"instance_config_snapshot"`
-
-	ModelID           string           `json:"model_id"`
-	ModelSlugSnapshot string           `json:"model_slug_snapshot"`
-	ModelNameSnapshot string           `json:"model_name_snapshot"`
-	Artifact          ArtifactSnapshot `json:"artifact_snapshot"`
-
-	Workload           WorkloadProfile     `json:"workload_profile"`
-	ResolvedArgv       []string            `json:"resolved_argv"`
-	MappingDifferences []MappingDifference `json:"mapping_differences,omitempty"`
-	Status             Status              `json:"status"`
-
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-
-	Build    BuildSnapshot    `json:"build"`
-	Hardware HardwareSnapshot `json:"hardware_snapshot"`
-
-	BenchmarkSchemaVersion int      `json:"benchmark_schema_version"`
-	ParserSchemaVersion    int      `json:"parser_schema_version"`
-	Failure                string   `json:"failure,omitempty"`
-	DiagnosticOutput       string   `json:"diagnostic_output,omitempty"`
-	Results                []Result `json:"results,omitempty"`
+	ID                     string                 `json:"id"`
+	InstanceID             string                 `json:"instance_id"`
+	InstanceSlugSnapshot   string                 `json:"instance_slug_snapshot"`
+	InstanceNameSnapshot   string                 `json:"instance_name_snapshot"`
+	InstanceConfig         InstanceConfigSnapshot `json:"instance_config_snapshot"`
+	BenchmarkOverrides     RuntimeOverrides       `json:"benchmark_overrides"`
+	EffectiveConfig        InstanceConfigSnapshot `json:"effective_benchmark_config"`
+	ModelID                string                 `json:"model_id"`
+	ModelSlugSnapshot      string                 `json:"model_slug_snapshot"`
+	ModelNameSnapshot      string                 `json:"model_name_snapshot"`
+	Artifact               ArtifactSnapshot       `json:"artifact_snapshot"`
+	Workload               WorkloadProfile        `json:"workload_profile"`
+	ResolvedArgv           []string               `json:"resolved_argv"`
+	MappingDifferences     []MappingDifference    `json:"mapping_differences,omitempty"`
+	Status                 Status                 `json:"status"`
+	CreatedAt              time.Time              `json:"created_at"`
+	StartedAt              *time.Time             `json:"started_at,omitempty"`
+	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
+	Build                  BuildSnapshot          `json:"build"`
+	Hardware               HardwareSnapshot       `json:"hardware_snapshot"`
+	BenchmarkSchemaVersion int                    `json:"benchmark_schema_version"`
+	ParserSchemaVersion    int                    `json:"parser_schema_version"`
+	Failure                string                 `json:"failure,omitempty"`
+	DiagnosticOutput       string                 `json:"diagnostic_output,omitempty"`
+	Results                []Result               `json:"results,omitempty"`
 }
 
 type Filter struct {
@@ -206,31 +196,27 @@ type Filter struct {
 	Limit      int
 	Offset     int
 }
-
 type Page struct {
 	Items  []Run `json:"items"`
 	Total  int   `json:"total"`
 	Limit  int   `json:"limit"`
 	Offset int   `json:"offset"`
 }
-
 type TransitionUpdate struct {
 	StartedAt        *time.Time
 	CompletedAt      *time.Time
 	Failure          string
 	DiagnosticOutput string
 }
-
 type Completion struct {
 	CompletedAt      time.Time
 	DiagnosticOutput string
 }
-
 type Store interface {
-	CreateRun(ctx context.Context, run Run) error
-	GetRun(ctx context.Context, id string) (Run, error)
-	ListRuns(ctx context.Context, filter Filter) (Page, error)
-	TransitionRun(ctx context.Context, id string, from, to Status, update TransitionUpdate) (Run, error)
-	CompleteRun(ctx context.Context, id string, completion Completion, results []Result) (Run, error)
-	DeleteRun(ctx context.Context, id string) error
+	CreateRun(context.Context, Run) error
+	GetRun(context.Context, string) (Run, error)
+	ListRuns(context.Context, Filter) (Page, error)
+	TransitionRun(context.Context, string, Status, Status, TransitionUpdate) (Run, error)
+	CompleteRun(context.Context, string, Completion, []Result) (Run, error)
+	DeleteRun(context.Context, string) error
 }

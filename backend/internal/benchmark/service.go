@@ -92,6 +92,10 @@ func (s *Service) Capabilities(ctx context.Context) (Capabilities, error) {
 }
 
 func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *WorkloadProfile) (Run, error) {
+	return s.CreateWithOverrides(ctx, instanceID, workloadInput, RuntimeOverrides{})
+}
+
+func (s *Service) CreateWithOverrides(ctx context.Context, instanceID string, workloadInput *WorkloadProfile, requestedOverrides RuntimeOverrides) (Run, error) {
 	if s == nil || s.store == nil || s.instances == nil || s.models == nil || s.config == nil || s.hardware == nil || s.reservations == nil || s.executor == nil {
 		return Run{}, errors.New("benchmark service is not fully configured")
 	}
@@ -103,9 +107,6 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	if err != nil {
 		return Run{}, err
 	}
-	if err := ValidateWorkloadContext(workload, target.Config); err != nil {
-		return Run{}, err
-	}
 	caps, err := s.Capabilities(ctx)
 	if err != nil {
 		return Run{}, err
@@ -113,9 +114,22 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	if !caps.Available {
 		return Run{}, fmt.Errorf("%w: %s", ErrUnavailable, caps.Reason)
 	}
-	cpu, err := captureCPU(target.Config, caps)
+	benchmarkOverrides, effectiveConfig, err := ResolveRuntimeConfig(target.Config, requestedOverrides, caps)
 	if err != nil {
 		return Run{}, err
+	}
+	if err := ValidateWorkloadContext(workload, effectiveConfig); err != nil {
+		return Run{}, err
+	}
+	cpu, err := captureCPU(effectiveConfig, caps)
+	if err != nil {
+		return Run{}, err
+	}
+	// Pin the executable's reported default in the effective snapshot as well as
+	// argv. This is not a user override; it records the actual execution value.
+	if strings.TrimSpace(effectiveConfig.Options["threads"]) == "" {
+		effectiveConfig.Options["threads"] = strconv.Itoa(cpu.EffectiveThreads)
+		effectiveConfig.Sources["threads"] = "benchmark-default"
 	}
 	snapshot, err := s.hardware.Snapshot(ctx)
 	if err != nil {
@@ -125,29 +139,34 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	if err != nil {
 		return Run{}, err
 	}
-	demand := s.estimateDemand(target)
+	demand := s.estimateDemandForConfig(target, effectiveConfig)
 	owner := scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerBenchmark, ID: runID}
 	lease, err := s.reservations.Acquire(scheduler.AcquireRequest{
 		Owner: owner, Snapshot: snapshot,
-		Placement: scheduler.PlacementRequest{RequiredBytes: demand.VRAMBytes(), Mode: target.Config.GPUMode, Devices: target.Config.GPUDevices, TensorSplit: target.Config.TensorSplit},
+		Placement: scheduler.PlacementRequest{RequiredBytes: demand.VRAMBytes(), Mode: effectiveConfig.GPUMode, Devices: effectiveConfig.GPUDevices, TensorSplit: effectiveConfig.TensorSplit},
 		HostRAM:   demand.HostRAMBytes,
 	})
 	if err != nil {
 		return Run{}, err
 	}
 	if !lease.Placement.Fits {
-		return Run{}, fmt.Errorf("%w: saved Instance configuration does not fit currently available resources", ErrInsufficientResources)
+		return Run{}, fmt.Errorf("%w: effective benchmark configuration does not fit currently available resources", ErrInsufficientResources)
 	}
 	defer func() {
 		if err != nil {
 			s.reservations.ReleaseOwner(owner)
 		}
 	}()
-	// Pin the executable's reported default in argv so the captured thread
-	// count is also the one used, without changing the saved Instance snapshot.
-	executionConfig := target.Config
-	executionConfig.Options = cloneStringMap(target.Config.Options)
-	executionConfig.Options["threads"] = strconv.Itoa(cpu.EffectiveThreads)
+
+	// Capture auto placement in the immutable effective config. The Instance
+	// snapshot remains untouched and records that placement was originally auto.
+	executionConfig := cloneConfigSnapshot(effectiveConfig)
+	if len(lease.Placement.Devices) > 0 {
+		executionConfig.GPUDevices = append([]string(nil), lease.Placement.Devices...)
+	}
+	if strings.TrimSpace(executionConfig.TensorSplit) == "" && strings.TrimSpace(lease.Placement.TensorSplit) != "" {
+		executionConfig.TensorSplit = lease.Placement.TensorSplit
+	}
 	mapped, err := MapInstanceConfig(executionConfig, lease.Placement, caps)
 	if err != nil {
 		return Run{}, err
@@ -163,7 +182,8 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 	now := s.now().UTC()
 	run := Run{
 		ID:         runID,
-		InstanceID: target.Instance.ID, InstanceSlugSnapshot: target.Instance.Slug, InstanceNameSnapshot: target.Instance.Name, InstanceConfig: target.Config,
+		InstanceID: target.Instance.ID, InstanceSlugSnapshot: target.Instance.Slug, InstanceNameSnapshot: target.Instance.Name,
+		InstanceConfig: target.Config, BenchmarkOverrides: benchmarkOverrides, EffectiveConfig: executionConfig,
 		ModelID: target.Model.ID, ModelSlugSnapshot: target.Model.Slug, ModelNameSnapshot: target.Model.Name, Artifact: target.Artifact,
 		Workload: workload, ResolvedArgv: append([]string(nil), argv...), MappingDifferences: append([]MappingDifference(nil), mapped.Differences...), Status: StatusQueued,
 		CreatedAt: now,
@@ -188,6 +208,10 @@ func (s *Service) Create(ctx context.Context, instanceID string, workloadInput *
 }
 
 func (s *Service) estimateDemand(target capturedTarget) scheduler.ResourceDemand {
+	return s.estimateDemandForConfig(target, target.Config)
+}
+
+func (s *Service) estimateDemandForConfig(target capturedTarget, config InstanceConfigSnapshot) scheduler.ResourceDemand {
 	metadata, metadataErr := s.readMetadata(target.ModelPath)
 	weights := target.Artifact.Size
 	for _, dependency := range target.Artifact.Dependencies {
@@ -206,7 +230,7 @@ func (s *Service) estimateDemand(target capturedTarget) scheduler.ResourceDemand
 			KeyLength: metadata.KeyLength, ValueLength: metadata.ValueLength, ExpertCount: metadata.ExpertCount,
 		},
 		MetadataErr: metadataErr,
-		Options:     target.Config.Options,
+		Options:     config.Options,
 	})
 }
 

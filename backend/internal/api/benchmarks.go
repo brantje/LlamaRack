@@ -23,6 +23,10 @@ type benchmarkManagementService interface {
 	Delete(context.Context, string) error
 }
 
+type benchmarkRuntimeOverrideService interface {
+	CreateWithOverrides(context.Context, string, *benchmark.WorkloadProfile, benchmark.RuntimeOverrides) (benchmark.Run, error)
+}
+
 type benchmarkInstanceResolver interface {
 	GetBySlug(context.Context, string) (instances.Instance, error)
 	GetByID(context.Context, string) (instances.Instance, error)
@@ -32,7 +36,6 @@ type benchmarkHandler struct {
 	service   benchmarkManagementService
 	instances benchmarkInstanceResolver
 }
-
 type benchmarkWorkloadInput struct {
 	benchmark.WorkloadProfile
 	Warmup *bool `json:"warmup"`
@@ -41,7 +44,6 @@ type benchmarkWorkloadInput struct {
 func NewBenchmarkHandler(service benchmarkManagementService, instanceResolver benchmarkInstanceResolver) http.Handler {
 	return &benchmarkHandler{service: service, instances: instanceResolver}
 }
-
 func RegisterBenchmarkRoutes(mux *http.ServeMux, handler http.Handler) {
 	mux.Handle("GET /api/v1/benchmarks", handler)
 	mux.Handle("GET /api/v1/benchmarks/capabilities", handler)
@@ -50,7 +52,6 @@ func RegisterBenchmarkRoutes(mux *http.ServeMux, handler http.Handler) {
 	mux.Handle("POST /api/v1/benchmarks/{id}/cancel", handler)
 	mux.Handle("DELETE /api/v1/benchmarks/{id}", handler)
 }
-
 func (h *benchmarkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := managementAuthFromRequest(r); !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
@@ -78,7 +79,6 @@ func (h *benchmarkHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
-
 func (h *benchmarkHandler) capabilities(w http.ResponseWriter, r *http.Request) {
 	caps, err := h.service.Capabilities(r.Context())
 	if err != nil {
@@ -87,7 +87,6 @@ func (h *benchmarkHandler) capabilities(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, caps)
 }
-
 func (h *benchmarkHandler) list(w http.ResponseWriter, r *http.Request) {
 	filter := benchmark.Filter{InstanceID: strings.TrimSpace(r.URL.Query().Get("instance_id")), ModelID: strings.TrimSpace(r.URL.Query().Get("model_id"))}
 	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
@@ -113,7 +112,6 @@ func (h *benchmarkHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, page)
 }
-
 func benchmarkQueryInt(r *http.Request, key string, fallback int) (int, error) {
 	raw := strings.TrimSpace(r.URL.Query().Get(key))
 	if raw == "" {
@@ -121,7 +119,6 @@ func benchmarkQueryInt(r *http.Request, key string, fallback int) (int, error) {
 	}
 	return strconv.Atoi(raw)
 }
-
 func (h *benchmarkHandler) create(w http.ResponseWriter, r *http.Request) {
 	instanceID, err := h.resolveInstanceID(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -129,7 +126,8 @@ func (h *benchmarkHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Workload *benchmarkWorkloadInput `json:"workload"`
+		Workload         *benchmarkWorkloadInput    `json:"workload"`
+		RuntimeOverrides benchmark.RuntimeOverrides `json:"runtime_overrides"`
 	}
 	if !decode(w, r, &input) {
 		return
@@ -139,14 +137,20 @@ func (h *benchmarkHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeBenchmarkError(w, err)
 		return
 	}
-	run, err := h.service.Create(r.Context(), instanceID, workload)
+	var run benchmark.Run
+	if overrideService, ok := h.service.(benchmarkRuntimeOverrideService); ok {
+		run, err = overrideService.CreateWithOverrides(r.Context(), instanceID, workload, input.RuntimeOverrides)
+	} else if len(benchmarkOverrideKeys(input.RuntimeOverrides)) != 0 {
+		err = benchmark.ErrUnsupportedConfig
+	} else {
+		run, err = h.service.Create(r.Context(), instanceID, workload)
+	}
 	if err != nil {
 		writeBenchmarkError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, run)
 }
-
 func benchmarkCreateWorkload(input *benchmarkWorkloadInput) (*benchmark.WorkloadProfile, error) {
 	if input == nil {
 		return nil, nil
@@ -166,7 +170,6 @@ func benchmarkCreateWorkload(input *benchmarkWorkloadInput) (*benchmark.Workload
 	resolved.Warmup = false
 	return &resolved, nil
 }
-
 func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	bySlug, slugErr := h.instances.GetBySlug(ctx, value)
@@ -177,7 +180,6 @@ func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) 
 	if idErr != nil && !errors.Is(idErr, sql.ErrNoRows) {
 		return "", idErr
 	}
-
 	slugFound := slugErr == nil
 	idFound := idErr == nil
 	if slugFound && idFound {
@@ -194,7 +196,6 @@ func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) 
 	}
 	return "", sql.ErrNoRows
 }
-
 func (h *benchmarkHandler) get(w http.ResponseWriter, r *http.Request) {
 	run, err := h.service.Get(r.Context(), strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
@@ -218,7 +219,6 @@ func (h *benchmarkHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
 func writeBenchmarkError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, benchmark.ErrNotFound), errors.Is(err, sql.ErrNoRows):
@@ -232,4 +232,8 @@ func writeBenchmarkError(w http.ResponseWriter, err error) {
 	default:
 		writeErr(w, http.StatusInternalServerError, err)
 	}
+}
+
+func benchmarkOverrideKeys(overrides benchmark.RuntimeOverrides) []string {
+	return benchmark.RuntimeOverrideKeys(overrides)
 }

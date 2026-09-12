@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-const runColumns = `id,instance_id,instance_slug_snapshot,instance_name_snapshot,instance_config_snapshot,model_id,model_slug_snapshot,model_name_snapshot,artifact_snapshot,workload_profile,resolved_argv,mapping_differences,status,created_at,started_at,completed_at,llamarack_version,llamarack_commit,llama_cpp_release,llama_cpp_build,llama_bench_version,llama_bench_fingerprint,runtime_variant,benchmark_schema_version,parser_schema_version,hardware_snapshot,failure,diagnostic_output`
+const runColumns = `id,instance_id,instance_slug_snapshot,instance_name_snapshot,instance_config_snapshot,benchmark_overrides,effective_benchmark_config,model_id,model_slug_snapshot,model_name_snapshot,artifact_snapshot,workload_profile,resolved_argv,mapping_differences,status,created_at,started_at,completed_at,llamarack_version,llamarack_commit,llama_cpp_release,llama_cpp_build,llama_bench_version,llama_bench_fingerprint,runtime_variant,benchmark_schema_version,parser_schema_version,hardware_snapshot,failure,diagnostic_output`
 
-type SQLStore struct {
-	db *sql.DB
-}
+type SQLStore struct{ db *sql.DB }
 
 func NewSQLStore(db *sql.DB) *SQLStore { return &SQLStore{db: db} }
 
@@ -32,6 +30,18 @@ func (s *SQLStore) CreateRun(ctx context.Context, run Run) error {
 		run.CreatedAt = time.Now().UTC()
 	}
 	instanceConfig, err := marshalJSON(run.InstanceConfig)
+	if err != nil {
+		return err
+	}
+	overrides, err := marshalJSON(run.BenchmarkOverrides)
+	if err != nil {
+		return err
+	}
+	effective := run.EffectiveConfig
+	if effective.SchemaVersion == 0 {
+		effective = run.InstanceConfig
+	}
+	effectiveConfig, err := marshalJSON(effective)
 	if err != nil {
 		return err
 	}
@@ -56,23 +66,13 @@ func (s *SQLStore) CreateRun(ctx context.Context, run Run) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO benchmark_runs(
-		id,instance_id,instance_slug_snapshot,instance_name_snapshot,instance_config_snapshot,
-		model_id,model_slug_snapshot,model_name_snapshot,artifact_snapshot,workload_profile,
-		resolved_argv,mapping_differences,status,created_at,started_at,completed_at,
-		llamarack_version,llamarack_commit,llama_cpp_release,llama_cpp_build,llama_bench_version,
-		llama_bench_fingerprint,runtime_variant,benchmark_schema_version,parser_schema_version,
+		id,instance_id,instance_slug_snapshot,instance_name_snapshot,instance_config_snapshot,benchmark_overrides,effective_benchmark_config,
+		model_id,model_slug_snapshot,model_name_snapshot,artifact_snapshot,workload_profile,resolved_argv,mapping_differences,status,created_at,started_at,completed_at,
+		llamarack_version,llamarack_commit,llama_cpp_release,llama_cpp_build,llama_bench_version,llama_bench_fingerprint,runtime_variant,benchmark_schema_version,parser_schema_version,
 		hardware_snapshot,failure,diagnostic_output
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		run.ID, run.InstanceID, run.InstanceSlugSnapshot, run.InstanceNameSnapshot, instanceConfig,
-		run.ModelID, run.ModelSlugSnapshot, run.ModelNameSnapshot, artifact, workload,
-		argv, differences, string(run.Status), run.CreatedAt.Unix(), nullableTime(run.StartedAt), nullableTime(run.CompletedAt),
-		run.Build.LlamaRackVersion, nullIfEmpty(run.Build.LlamaRackCommit), nullIfEmpty(run.Build.LlamaCppRelease), nullIfEmpty(run.Build.LlamaCppBuild), nullIfEmpty(run.Build.LlamaBenchVersion),
-		nullIfEmpty(run.Build.LlamaBenchFingerprint), nullIfEmpty(run.Build.RuntimeVariant), run.BenchmarkSchemaVersion, run.ParserSchemaVersion,
-		hardwareSnapshot, nullIfEmpty(run.Failure), run.DiagnosticOutput,
-	)
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, run.ID, run.InstanceID, run.InstanceSlugSnapshot, run.InstanceNameSnapshot, instanceConfig, overrides, effectiveConfig, run.ModelID, run.ModelSlugSnapshot, run.ModelNameSnapshot, artifact, workload, argv, differences, string(run.Status), run.CreatedAt.Unix(), nullableTime(run.StartedAt), nullableTime(run.CompletedAt), run.Build.LlamaRackVersion, nullIfEmpty(run.Build.LlamaRackCommit), nullIfEmpty(run.Build.LlamaCppRelease), nullIfEmpty(run.Build.LlamaCppBuild), nullIfEmpty(run.Build.LlamaBenchVersion), nullIfEmpty(run.Build.LlamaBenchFingerprint), nullIfEmpty(run.Build.RuntimeVariant), run.BenchmarkSchemaVersion, run.ParserSchemaVersion, hardwareSnapshot, nullIfEmpty(run.Failure), run.DiagnosticOutput)
 	return err
 }
-
 func (s *SQLStore) GetRun(ctx context.Context, id string) (Run, error) {
 	if s == nil || s.db == nil {
 		return Run{}, errors.New("benchmark store is not configured")
@@ -91,7 +91,6 @@ func (s *SQLStore) GetRun(ctx context.Context, id string) (Run, error) {
 	run.Results = grouped[run.ID]
 	return run, nil
 }
-
 func (s *SQLStore) ListRuns(ctx context.Context, filter Filter) (Page, error) {
 	if s == nil || s.db == nil {
 		return Page{}, errors.New("benchmark store is not configured")
@@ -129,25 +128,22 @@ func (s *SQLStore) ListRuns(ctx context.Context, filter Filter) (Page, error) {
 	if err := rows.Err(); err != nil {
 		return Page{}, err
 	}
-	// Release the list cursor before querying results: SQLite may use one
-	// connection, and nested queries while holding rows would then deadlock.
 	if err := rows.Close(); err != nil {
 		return Page{}, err
 	}
 	ids := make([]string, len(items))
-	for index := range items {
-		ids[index] = items[index].ID
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 	grouped, err := loadResultsByRunIDs(ctx, s.db, ids)
 	if err != nil {
 		return Page{}, err
 	}
-	for index := range items {
-		items[index].Results = grouped[items[index].ID]
+	for i := range items {
+		items[i].Results = grouped[items[i].ID]
 	}
 	return Page{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
-
 func (s *SQLStore) TransitionRun(ctx context.Context, id string, from, to Status, update TransitionUpdate) (Run, error) {
 	if s == nil || s.db == nil {
 		return Run{}, errors.New("benchmark store is not configured")
@@ -158,9 +154,7 @@ func (s *SQLStore) TransitionRun(ctx context.Context, id string, from, to Status
 	if !CanTransition(from, to) {
 		return Run{}, ErrTransitionConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE benchmark_runs
-		SET status=?,started_at=COALESCE(?,started_at),completed_at=COALESCE(?,completed_at),failure=?,diagnostic_output=?
-		WHERE id=? AND status=?`, string(to), nullableTime(update.StartedAt), nullableTime(update.CompletedAt), nullIfEmpty(update.Failure), update.DiagnosticOutput, strings.TrimSpace(id), string(from))
+	result, err := s.db.ExecContext(ctx, `UPDATE benchmark_runs SET status=?,started_at=COALESCE(?,started_at),completed_at=COALESCE(?,completed_at),failure=?,diagnostic_output=? WHERE id=? AND status=?`, string(to), nullableTime(update.StartedAt), nullableTime(update.CompletedAt), nullIfEmpty(update.Failure), update.DiagnosticOutput, strings.TrimSpace(id), string(from))
 	if err != nil {
 		return Run{}, err
 	}
@@ -169,7 +163,6 @@ func (s *SQLStore) TransitionRun(ctx context.Context, id string, from, to Status
 	}
 	return s.GetRun(ctx, id)
 }
-
 func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Completion, results []Result) (Run, error) {
 	if s == nil || s.db == nil {
 		return Run{}, errors.New("benchmark store is not configured")
@@ -182,8 +175,7 @@ func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Comple
 		return Run{}, err
 	}
 	defer tx.Rollback()
-	updated, err := tx.ExecContext(ctx, `UPDATE benchmark_runs SET status=?,completed_at=?,failure=NULL,diagnostic_output=? WHERE id=? AND status=?`,
-		string(StatusCompleted), completion.CompletedAt.Unix(), completion.DiagnosticOutput, strings.TrimSpace(id), string(StatusRunning))
+	updated, err := tx.ExecContext(ctx, `UPDATE benchmark_runs SET status=?,completed_at=?,failure=NULL,diagnostic_output=? WHERE id=? AND status=?`, string(StatusCompleted), completion.CompletedAt.Unix(), completion.DiagnosticOutput, strings.TrimSpace(id), string(StatusRunning))
 	if err != nil {
 		return Run{}, err
 	}
@@ -199,10 +191,7 @@ func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Comple
 		if !json.Valid(raw) {
 			return Run{}, fmt.Errorf("benchmark result %d has invalid raw JSON", index)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO benchmark_results(
-			run_id,case_index,case_id,prompt_tokens,generation_tokens,repetitions,avg_ns,stddev_ns,avg_ts,stddev_ts,raw_fields
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, strings.TrimSpace(id), index, result.CaseID, result.PromptTokens, result.GenerationTokens, result.Repetitions,
-			nullInt64(result.AverageNS), nullInt64(result.StdDevNS), nullFloat64(result.AverageTokensPS), nullFloat64(result.StdDevTokensPS), string(raw)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO benchmark_results(run_id,case_index,case_id,prompt_tokens,generation_tokens,repetitions,avg_ns,stddev_ns,avg_ts,stddev_ts,raw_fields) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, strings.TrimSpace(id), index, result.CaseID, result.PromptTokens, result.GenerationTokens, result.Repetitions, nullInt64(result.AverageNS), nullInt64(result.StdDevNS), nullFloat64(result.AverageTokensPS), nullFloat64(result.StdDevTokensPS), string(raw)); err != nil {
 			return Run{}, err
 		}
 	}
@@ -211,7 +200,6 @@ func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Comple
 	}
 	return s.GetRun(ctx, id)
 }
-
 func (s *SQLStore) DeleteRun(ctx context.Context, id string) error {
 	if s == nil || s.db == nil {
 		return errors.New("benchmark store is not configured")
@@ -229,7 +217,6 @@ func (s *SQLStore) DeleteRun(ctx context.Context, id string) error {
 	}
 	return nil
 }
-
 func benchmarkWhere(filter Filter) (string, []any) {
 	clauses := make([]string, 0, 3)
 	args := make([]any, 0, 3)
@@ -251,26 +238,17 @@ func benchmarkWhere(filter Filter) (string, []any) {
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
+type rowScanner interface{ Scan(...any) error }
 
 func scanRun(row rowScanner) (Run, error) {
 	var run Run
-	var instanceConfig, artifact, workload, argv, differences, hardwareSnapshot string
+	var instanceConfig, overrides, effectiveConfig, artifact, workload, argv, differences, hardwareSnapshot string
 	var status string
 	var created int64
 	var started, completed sql.NullInt64
 	var commit, llamaRelease, llamaBuild, benchVersion, benchFingerprint, variant sql.NullString
 	var failure, diagnostics sql.NullString
-	if err := row.Scan(
-		&run.ID, &run.InstanceID, &run.InstanceSlugSnapshot, &run.InstanceNameSnapshot, &instanceConfig,
-		&run.ModelID, &run.ModelSlugSnapshot, &run.ModelNameSnapshot, &artifact, &workload,
-		&argv, &differences, &status, &created, &started, &completed,
-		&run.Build.LlamaRackVersion, &commit, &llamaRelease, &llamaBuild, &benchVersion,
-		&benchFingerprint, &variant, &run.BenchmarkSchemaVersion, &run.ParserSchemaVersion,
-		&hardwareSnapshot, &failure, &diagnostics,
-	); err != nil {
+	if err := row.Scan(&run.ID, &run.InstanceID, &run.InstanceSlugSnapshot, &run.InstanceNameSnapshot, &instanceConfig, &overrides, &effectiveConfig, &run.ModelID, &run.ModelSlugSnapshot, &run.ModelNameSnapshot, &artifact, &workload, &argv, &differences, &status, &created, &started, &completed, &run.Build.LlamaRackVersion, &commit, &llamaRelease, &llamaBuild, &benchVersion, &benchFingerprint, &variant, &run.BenchmarkSchemaVersion, &run.ParserSchemaVersion, &hardwareSnapshot, &failure, &diagnostics); err != nil {
 		return Run{}, err
 	}
 	run.Status = Status(status)
@@ -289,24 +267,18 @@ func scanRun(row rowScanner) (Run, error) {
 	run.Failure = failure.String
 	run.DiagnosticOutput = diagnostics.String
 	for _, item := range []struct {
-		name string
-		data string
-		out  any
-	}{
-		{"instance_config_snapshot", instanceConfig, &run.InstanceConfig},
-		{"artifact_snapshot", artifact, &run.Artifact},
-		{"workload_profile", workload, &run.Workload},
-		{"resolved_argv", argv, &run.ResolvedArgv},
-		{"mapping_differences", differences, &run.MappingDifferences},
-		{"hardware_snapshot", hardwareSnapshot, &run.Hardware},
-	} {
+		name, data string
+		out        any
+	}{{"instance_config_snapshot", instanceConfig, &run.InstanceConfig}, {"benchmark_overrides", overrides, &run.BenchmarkOverrides}, {"effective_benchmark_config", effectiveConfig, &run.EffectiveConfig}, {"artifact_snapshot", artifact, &run.Artifact}, {"workload_profile", workload, &run.Workload}, {"resolved_argv", argv, &run.ResolvedArgv}, {"mapping_differences", differences, &run.MappingDifferences}, {"hardware_snapshot", hardwareSnapshot, &run.Hardware}} {
 		if err := json.Unmarshal([]byte(item.data), item.out); err != nil {
 			return Run{}, fmt.Errorf("decode %s: %w", item.name, err)
 		}
 	}
+	if run.EffectiveConfig.SchemaVersion == 0 {
+		run.EffectiveConfig = cloneConfigSnapshot(run.InstanceConfig)
+	}
 	return run, nil
 }
-
 func loadResultsByRunIDs(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, ids []string) (map[string][]Result, error) {
@@ -316,9 +288,9 @@ func loadResultsByRunIDs(ctx context.Context, q interface {
 	}
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids))
-	for index, id := range ids {
-		placeholders[index] = "?"
-		args[index] = id
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
 	}
 	rows, err := q.QueryContext(ctx, `SELECT run_id,case_index,case_id,prompt_tokens,generation_tokens,repetitions,avg_ns,stddev_ns,avg_ts,stddev_ts,raw_fields FROM benchmark_results WHERE run_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY run_id, case_index`, args...)
 	if err != nil {
@@ -355,7 +327,6 @@ func loadResultsByRunIDs(ctx context.Context, q interface {
 	}
 	return out, rows.Err()
 }
-
 func transitionResult(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, id string, result sql.Result) error {
@@ -376,7 +347,6 @@ func transitionResult(ctx context.Context, q interface {
 	}
 	return ErrTransitionConflict
 }
-
 func marshalJSON(value any) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -384,14 +354,12 @@ func marshalJSON(value any) (string, error) {
 	}
 	return string(data), nil
 }
-
 func nullableTime(value *time.Time) any {
 	if value == nil || value.IsZero() {
 		return nil
 	}
 	return value.UTC().Unix()
 }
-
 func timeFromNull(value sql.NullInt64) *time.Time {
 	if !value.Valid {
 		return nil
@@ -399,21 +367,18 @@ func timeFromNull(value sql.NullInt64) *time.Time {
 	resolved := time.Unix(value.Int64, 0).UTC()
 	return &resolved
 }
-
 func nullIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
 	return value
 }
-
 func nullInt64(value int64) any {
 	if value == 0 {
 		return nil
 	}
 	return value
 }
-
 func nullFloat64(value float64) any {
 	if value == 0 {
 		return nil

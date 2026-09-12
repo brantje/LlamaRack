@@ -3,6 +3,7 @@ import {
   benchmarkComparisonDifferences,
   benchmarkConfigChanges,
   benchmarkControlledConfigChange,
+  benchmarkEffectiveConfig,
   benchmarkTuningHints,
   type BenchmarkRun
 } from '~/composables/useBenchmarks'
@@ -71,18 +72,38 @@ describe('benchmark tuning guidance', () => {
     expect(benchmarkComparisonDifferences(left, right)).toEqual([])
   })
 
-  it('identifies a single changed benchmark setting as a controlled comparison', () => {
+  it('keeps legacy benchmark history readable and identifies old controlled settings', () => {
     const left = runFixture()
     const right = structuredClone(left)
     right.id = 'run-b'
     right.instance_config_snapshot.options!['batch-size'] = '1024'
 
+    expect(benchmarkEffectiveConfig(left)).toBe(left.instance_config_snapshot)
     expect(benchmarkConfigChanges(left, right)).toEqual([
       { key: 'batch-size', label: '--batch-size', before: '512', after: '1024', tunable: true }
     ])
     expect(benchmarkControlledConfigChange(left, right)).toEqual({
       key: 'batch-size', label: '--batch-size', before: '512', after: '1024', tunable: true
     })
+  })
+
+  it('uses immutable effective runtime snapshots for new run-scoped overrides', () => {
+    const left = runFixture()
+    left.effective_benchmark_config = structuredClone(left.instance_config_snapshot)
+    left.effective_benchmark_config.options!['ctx-size'] = '2048'
+    left.effective_benchmark_config.sources!['ctx-size'] = 'instance'
+    const right = structuredClone(left)
+    right.id = 'run-b'
+    right.benchmark_overrides = { context_size: 4096 }
+    right.effective_benchmark_config!.options!['ctx-size'] = '4096'
+    right.effective_benchmark_config!.sources!['ctx-size'] = 'benchmark'
+
+    expect(right.instance_config_snapshot.options?.['ctx-size']).toBeUndefined()
+    expect(benchmarkComparisonDifferences(left, right)).toEqual(['Runtime configuration'])
+    expect(benchmarkConfigChanges(left, right)).toContainEqual({
+      key: 'ctx-size', label: '--ctx-size', before: '2048', after: '4096', tunable: true
+    })
+    expect(benchmarkControlledConfigChange(left, right)?.key).toBe('ctx-size')
   })
 
   it('refuses attribution when multiple settings changed', () => {
@@ -95,16 +116,16 @@ describe('benchmark tuning guidance', () => {
     expect(benchmarkControlledConfigChange(left, right)).toBeUndefined()
   })
 
-  it('allows thread tuning to change effective threads without pretending the CPU model changed', () => {
+  it('treats effective thread count as runtime configuration, not changed CPU hardware', () => {
     const left = runFixture()
     const right = structuredClone(left)
     right.instance_config_snapshot.options!.threads = '8'
     right.hardware_snapshot.cpu!.effective_threads = 8
-    expect(benchmarkComparisonDifferences(left, right)).toEqual(['Instance configuration', 'CPU hardware'])
+    expect(benchmarkComparisonDifferences(left, right)).toEqual(['Instance configuration'])
     expect(benchmarkControlledConfigChange(left, right)?.key).toBe('threads')
   })
 
-  it('does not attribute ctx-size because llama-bench does not execute it as a runtime tuning flag', () => {
+  it('does not attribute legacy ctx-size changes without persisted benchmark override evidence', () => {
     const left = runFixture()
     const right = structuredClone(left)
     left.instance_config_snapshot.options!['ctx-size'] = '2048'

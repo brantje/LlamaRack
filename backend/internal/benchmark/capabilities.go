@@ -18,22 +18,21 @@ type WorkloadField struct {
 	Advanced    bool   `json:"advanced,omitempty"`
 	Description string `json:"description,omitempty"`
 }
-
 type WorkloadSchema struct {
 	Version int               `json:"version"`
 	Default WorkloadProfile   `json:"default"`
 	Presets []WorkloadProfile `json:"presets"`
 	Fields  []WorkloadField   `json:"fields"`
 }
-
 type Capabilities struct {
-	Available        bool           `json:"available"`
-	Reason           string         `json:"reason,omitempty"`
-	Version          string         `json:"version,omitempty"`
-	Fingerprint      string         `json:"fingerprint,omitempty"`
-	OutputFormat     string         `json:"output_format,omitempty"`
-	SupportedOptions []string       `json:"supported_options,omitempty"`
-	Workload         WorkloadSchema `json:"workload"`
+	Available        bool                 `json:"available"`
+	Reason           string               `json:"reason,omitempty"`
+	Version          string               `json:"version,omitempty"`
+	Fingerprint      string               `json:"fingerprint,omitempty"`
+	OutputFormat     string               `json:"output_format,omitempty"`
+	SupportedOptions []string             `json:"supported_options,omitempty"`
+	RuntimeOptions   []RuntimeOptionField `json:"runtime_options,omitempty"`
+	Workload         WorkloadSchema       `json:"workload"`
 	profile          llamacpp.Profile
 }
 
@@ -51,6 +50,7 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 	base.Version = profile.Version
 	base.Fingerprint = profile.Fingerprint
 	base.profile = profile
+	base.RuntimeOptions = runtimeFieldsForProfile(profile)
 	base.SupportedOptions = make([]string, 0, len(profile.Options)+len(profile.ShortOptions))
 	for _, option := range profile.Options {
 		base.SupportedOptions = append(base.SupportedOptions, option.Key)
@@ -61,10 +61,8 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 		}
 	}
 	sort.Strings(base.SupportedOptions)
-
-	required := []string{"model", "output", "repetitions", "n-prompt", "n-gen"}
 	var missing []string
-	for _, key := range required {
+	for _, key := range []string{"model", "output", "repetitions", "n-prompt", "n-gen"} {
 		if !profile.Has(key) {
 			missing = append(missing, "--"+key)
 		}
@@ -95,7 +93,6 @@ func DiscoverCapabilities(ctx context.Context, path string) (Capabilities, error
 func workloadSchemaForProfile(schema WorkloadSchema, profile llamacpp.Profile) WorkloadSchema {
 	supportsDepth := profile.Has("n-depth")
 	supportsCombined := profile.HasShort("pg")
-
 	fields := make([]WorkloadField, 0, len(schema.Fields))
 	for _, field := range schema.Fields {
 		if field.Key == "context_depths" && !supportsDepth {
@@ -107,7 +104,6 @@ func workloadSchemaForProfile(schema WorkloadSchema, profile llamacpp.Profile) W
 		fields = append(fields, field)
 	}
 	schema.Fields = fields
-
 	presets := make([]WorkloadProfile, 0, len(schema.Presets))
 	for _, preset := range schema.Presets {
 		if len(preset.ContextDepths) > 0 && !supportsDepth {
@@ -121,5 +117,4 @@ func workloadSchemaForProfile(schema WorkloadSchema, profile llamacpp.Profile) W
 	schema.Presets = presets
 	return schema
 }
-
 func (c Capabilities) profileForMapping() llamacpp.Profile { return c.profile }

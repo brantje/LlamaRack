@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import type { Instance, Model, HardwareSnapshot } from '~/composables/useManager'
-import type { BenchmarkCapabilities, BenchmarkRun, BenchmarkWorkloadProfile, EffectiveLlamaConfig } from '~/composables/useBenchmarks'
+import type {
+  BenchmarkCapabilities,
+  BenchmarkRuntimeOption,
+  BenchmarkRuntimeOverrides,
+  BenchmarkRun,
+  BenchmarkWorkloadProfile,
+  EffectiveLlamaConfig
+} from '~/composables/useBenchmarks'
 
-const props = defineProps<{ instance: Instance; model?: Model }>()
+const props = defineProps<{
+  instance: Instance
+  model?: Model
+  referenceRun?: BenchmarkRun
+  triggerLabel?: string
+}>()
 const emit = defineEmits<{ created: [run: BenchmarkRun] }>()
 
 const benchmarks = useBenchmarks()
@@ -17,8 +29,10 @@ const selectedProfileID = ref('')
 const listValues = reactive<Record<string, string>>({})
 const scalarValues = reactive<Record<string, number>>({})
 const booleanValues = reactive<Record<string, boolean>>({})
+const runtimeDraft = reactive<Record<string, string | number | boolean | string[]>>({})
 
 const effectiveValues = computed(() => effective.value?.effective?.values || {})
+const runtimeOptions = computed(() => capabilities.value?.runtime_options || [])
 const importantOptions = computed(() => {
   const priority = ['ctx-size', 'n-gpu-layers', 'batch-size', 'ubatch-size', 'threads', 'cache-type-k', 'cache-type-v', 'flash-attn', 'kv-offload', 'n-cpu-moe', 'spec-draft-model', 'mmproj']
   return priority
@@ -61,9 +75,22 @@ function applyWorkload(caps: BenchmarkCapabilities, workload: BenchmarkWorkloadP
   }
 }
 
+function comparableWorkload(workload: BenchmarkWorkloadProfile) {
+  return JSON.stringify({
+    prompt_tokens: workload.prompt_tokens || [],
+    generation_tokens: workload.generation_tokens || [],
+    combined_cases: workload.combined_cases || [],
+    context_depths: workload.context_depths || [],
+    repetitions: workload.repetitions,
+    warmup: workload.warmup
+  })
+}
+
 function resetDraft(caps: BenchmarkCapabilities) {
-  selectedProfileID.value = caps.workload.default.id || ''
-  applyWorkload(caps, caps.workload.default)
+  const target = props.referenceRun?.workload_profile || caps.workload.default
+  const matching = presetProfiles.value.find(profile => comparableWorkload(profile) === comparableWorkload(target))
+  selectedProfileID.value = matching?.id || (props.referenceRun ? 'custom-v1' : target.id || 'custom-v1')
+  applyWorkload(caps, target)
 }
 
 function parseIntegerList(value: string, label: string) {
@@ -120,6 +147,74 @@ function resolvedWorkload(): BenchmarkWorkloadProfile {
   return workload
 }
 
+function parseBoolean(value: unknown) {
+  return ['true', '1', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase())
+}
+
+function instanceRuntimeValue(field: BenchmarkRuntimeOption): string | number | boolean | string[] {
+  if (field.instance_field === 'gpu_devices') return [...(props.instance.gpu_devices || [])]
+  if (field.instance_field === 'tensor_split') return props.instance.tensor_split || ''
+  const raw = field.instance_option ? effectiveValues.value[field.instance_option] : undefined
+  if (field.kind === 'boolean') return raw === undefined ? parseBoolean(field.default_value) : parseBoolean(raw)
+  if (field.kind === 'integer') {
+    const value = Number(raw ?? field.default_value)
+    return Number.isFinite(value) ? value : ''
+  }
+  return raw ?? field.default_value ?? ''
+}
+
+function comparableRuntimeValue(field: BenchmarkRuntimeOption, value: unknown) {
+  if (field.kind === 'integer') {
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? JSON.stringify(numeric) : JSON.stringify('')
+  }
+  if (field.kind === 'boolean') return JSON.stringify(Boolean(value))
+  if (field.kind === 'device-list') return JSON.stringify(Array.isArray(value) ? value : [])
+  return JSON.stringify(String(value ?? '').trim())
+}
+
+function runtimeOverridden(field: BenchmarkRuntimeOption) {
+  return comparableRuntimeValue(field, runtimeDraft[field.key]) !== comparableRuntimeValue(field, instanceRuntimeValue(field))
+}
+
+function resetRuntime(field: BenchmarkRuntimeOption) {
+  runtimeDraft[field.key] = structuredClone(instanceRuntimeValue(field)) as string | number | boolean | string[]
+}
+
+function initializeRuntime() {
+  for (const key of Object.keys(runtimeDraft)) delete runtimeDraft[key]
+  for (const field of runtimeOptions.value) resetRuntime(field)
+}
+
+function runtimeOverrides(): BenchmarkRuntimeOverrides {
+  const result: Record<string, unknown> = {}
+  for (const field of runtimeOptions.value) {
+    if (!runtimeOverridden(field)) continue
+    const value = runtimeDraft[field.key]
+    if (field.kind === 'integer') {
+      const parsed = Number(value)
+      if (!Number.isInteger(parsed)) throw new Error(`${field.label} must be a whole number.`)
+      if (field.minimum !== undefined && parsed < field.minimum) throw new Error(`${field.label} must be at least ${field.minimum}.`)
+      if (field.maximum !== undefined && parsed > field.maximum) throw new Error(`${field.label} must be at most ${field.maximum}.`)
+      result[field.key] = parsed
+    } else if (field.kind === 'device-list') {
+      result[field.key] = Array.isArray(value) ? [...value] : []
+    } else if (field.kind === 'boolean') {
+      result[field.key] = Boolean(value)
+    } else {
+      result[field.key] = String(value ?? '').trim()
+    }
+  }
+  return result as BenchmarkRuntimeOverrides
+}
+
+function runtimeDisplay(value: unknown) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : 'Automatic'
+  if (value === undefined || value === null || value === '') return 'Automatic'
+  if (typeof value === 'boolean') return value ? 'On' : 'Off'
+  return String(value)
+}
+
 function bytes(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return '—'
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
@@ -142,6 +237,7 @@ async function load() {
     effective.value = config
     hardware.value = snapshot
     resetDraft(caps)
+    initializeRuntime()
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to prepare this benchmark.'
   } finally {
@@ -153,10 +249,11 @@ async function runBenchmark() {
   submitting.value = true
   error.value = ''
   try {
-    const run = await benchmarks.create(props.instance, resolvedWorkload())
+    const run = await benchmarks.create(props.instance, resolvedWorkload(), runtimeOverrides())
     emit('created', run)
     open.value = false
-    await navigateTo(`/benchmarks/${encodeURIComponent(run.id)}`)
+    const suffix = props.referenceRun ? `?baseline=${encodeURIComponent(props.referenceRun.id)}` : ''
+    await navigateTo(`/benchmarks/${encodeURIComponent(run.id)}${suffix}`)
   } catch (value: any) {
     error.value = value?.data?.error || value?.message || 'Unable to start benchmark.'
   } finally {
@@ -174,12 +271,12 @@ watch(open, value => { if (value) void load() })
 </script>
 
 <template>
-  <AppButton intent="secondary" data-testid="instance-benchmark-action" @click="open = true">Benchmark</AppButton>
+  <AppButton intent="secondary" data-testid="instance-benchmark-action" @click="open = true">{{ triggerLabel || (referenceRun ? 'Run another benchmark' : 'Benchmark') }}</AppButton>
 
-  <UModal v-model:open="open" :title="`Benchmark ${instance.name}`" :dismissible="!submitting" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-3xl' }">
+  <UModal v-model:open="open" :title="referenceRun ? 'Run another benchmark' : `Benchmark ${instance.name}`" :dismissible="!submitting" :ui="{ content: 'w-[calc(100vw-2rem)] max-w-none sm:max-w-4xl' }">
     <template #body>
       <div class="space-y-6" data-testid="benchmark-modal">
-        <p class="text-sm leading-6 text-muted">Run <code class="font-mono">llama-bench</code> directly from an immutable snapshot of this saved Instance. This is compute intensive and may affect other workloads sharing the hardware.</p>
+        <p class="text-sm leading-6 text-muted">Run <code class="font-mono">llama-bench</code> directly from an immutable snapshot of this saved Instance. Runtime changes are scoped to this benchmark and never modify the saved Instance. This is compute intensive and may affect other workloads sharing the hardware.</p>
 
         <Frame v-if="error" class="p-3">
           <div class="flex items-start gap-2">
@@ -190,31 +287,57 @@ watch(open, value => { if (value) void load() })
 
         <div v-if="loading" class="space-y-3"><USkeleton class="h-24 w-full" /><USkeleton class="h-36 w-full" /></div>
         <template v-else>
-          <section class="space-y-3">
+          <section class="space-y-3" data-testid="benchmark-runtime-controls">
             <div>
-              <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.14em] text-[var(--neutral-700)]">Instance configuration · read only</p>
-              <p class="mt-1 text-xs text-muted">Runtime settings are inherited from the saved Instance and cannot be overridden here.</p>
+              <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.14em] text-[var(--neutral-700)]">Runtime configuration</p>
+              <p class="mt-1 text-xs text-muted">Values start from the current effective Instance settings. Only options advertised by this <code class="font-mono">llama-bench</code> build and safely mapped by LlamaRack are editable.</p>
             </div>
             <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               <div><dt class="text-xs text-muted">Model</dt><dd class="mt-0.5 font-medium">{{ model?.name || instance.model_id }}</dd></div>
               <div><dt class="text-xs text-muted">GPU mode</dt><dd class="mt-0.5 font-mono">{{ instance.gpu_mode || 'auto' }}</dd></div>
-              <div><dt class="text-xs text-muted">Devices</dt><dd class="mt-0.5 font-mono">{{ instance.gpu_devices?.length ? instance.gpu_devices.join(', ') : 'Automatic' }}</dd></div>
-              <div><dt class="text-xs text-muted">Tensor split</dt><dd class="mt-0.5 font-mono">{{ instance.tensor_split || 'Automatic' }}</dd></div>
             </dl>
-            <div v-if="importantOptions.length" class="overflow-x-auto border-t border-[var(--color-divider)] pt-3">
-              <table class="w-full text-left text-xs">
-                <thead class="text-muted"><tr><th class="pb-2 pr-4 font-medium">llama.cpp option</th><th class="pb-2 pr-4 font-medium">Value</th><th class="pb-2 font-medium">Source</th></tr></thead>
-                <tbody class="divide-y divide-[var(--color-divider)]">
-                  <tr v-for="option in importantOptions" :key="option.key"><td class="py-2 pr-4 font-mono">--{{ option.key }}</td><td class="py-2 pr-4 font-mono">{{ option.value }}</td><td class="py-2 text-muted">{{ option.source || 'resolved' }}</td></tr>
-                </tbody>
-              </table>
+
+            <div v-if="runtimeOptions.length" class="divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
+              <div v-for="field in runtimeOptions" :key="field.key" class="grid gap-3 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,1fr)] lg:items-start">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-medium">{{ field.label }}</p>
+                    <StatusTag v-if="runtimeOverridden(field)" variant="pending">Override</StatusTag>
+                    <StatusTag variant="neutral">{{ field.instance_editable ? 'Instance setting' : 'Benchmark only' }}</StatusTag>
+                  </div>
+                  <p class="mt-1 text-xs text-muted">Instance: <span class="font-mono">{{ runtimeDisplay(instanceRuntimeValue(field)) }}</span></p>
+                  <p v-if="field.description" class="mt-1 text-xs leading-5 text-muted">{{ field.description }}</p>
+                </div>
+                <div class="space-y-2">
+                  <USelectMenu v-if="field.kind === 'device-list'" v-model="runtimeDraft[field.key]" :items="field.choices || []" multiple class="w-full" :aria-label="`${field.label} benchmark value`" />
+                  <USelect v-else-if="field.kind === 'enum'" v-model="runtimeDraft[field.key]" :items="field.choices || []" class="w-full" :aria-label="`${field.label} benchmark value`" />
+                  <UCheckbox v-else-if="field.kind === 'boolean'" v-model="runtimeDraft[field.key]" :label="`Benchmark value: ${runtimeDisplay(runtimeDraft[field.key])}`" :aria-label="`${field.label} benchmark value`" />
+                  <UInput v-else-if="field.kind === 'integer'" v-model.number="runtimeDraft[field.key]" type="number" class="w-full" :min="field.minimum" :max="field.maximum" :aria-label="`${field.label} benchmark value`" />
+                  <UInput v-else v-model="runtimeDraft[field.key]" class="w-full" :placeholder="field.kind === 'tensor-split' ? 'Example: 1,1' : undefined" :aria-label="`${field.label} benchmark value`" />
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs text-muted">Benchmark: <span class="font-mono">{{ runtimeDisplay(runtimeDraft[field.key]) }}</span></p>
+                    <UButton v-if="runtimeOverridden(field)" color="neutral" variant="ghost" size="xs" @click="resetRuntime(field)">Reset to Instance</UButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else>
+              <p class="text-xs text-muted">Instance configuration · read only for this run because this <code class="font-mono">llama-bench</code> capability response does not advertise any runtime setting that LlamaRack can safely override.</p>
+              <div v-if="importantOptions.length" class="mt-3 overflow-x-auto border-t border-[var(--color-divider)] pt-3">
+                <table class="w-full text-left text-xs">
+                  <thead class="text-muted"><tr><th class="pb-2 pr-4 font-medium">llama.cpp option</th><th class="pb-2 pr-4 font-medium">Value</th><th class="pb-2 font-medium">Source</th></tr></thead>
+                  <tbody class="divide-y divide-[var(--color-divider)]">
+                    <tr v-for="option in importantOptions" :key="option.key"><td class="py-2 pr-4 font-mono">--{{ option.key }}</td><td class="py-2 pr-4 font-mono">{{ option.value }}</td><td class="py-2 text-muted">{{ option.source || 'resolved' }}</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
 
-          <section class="space-y-4 border-t border-[var(--color-divider)] pt-5">
+          <section class="space-y-4 border-t border-[var(--color-divider)] pt-5" data-testid="benchmark-workload-controls">
             <div>
               <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.14em] text-[var(--neutral-700)]">Benchmark workload</p>
-              <p class="mt-1 text-xs text-muted">Choose what this Instance is meant to do. Runtime settings still come only from the saved Instance.</p>
+              <p class="mt-1 text-xs text-muted">Choose what this Instance is meant to do. Reruns keep the reference workload by default so runtime deltas stay comparable.</p>
             </div>
             <template v-if="capabilities?.available">
               <UFormField label="Workload profile" description="Profiles change only controlled llama-bench cases, context depths, repetitions and warm-up behavior.">
@@ -257,7 +380,7 @@ watch(open, value => { if (value) void load() })
           <section class="space-y-3 border-t border-[var(--color-divider)] pt-5">
             <div>
               <p class="text-[length:var(--font-size-kicker)] font-semibold uppercase tracking-[.14em] text-[var(--neutral-700)]">Hardware / admission</p>
-              <p class="mt-1 text-xs text-muted">LlamaRack takes a fresh snapshot and performs non-preemptive scheduler admission when you start the run. Existing Instances are not evicted for a benchmark.</p>
+              <p class="mt-1 text-xs text-muted">LlamaRack takes a fresh snapshot and performs non-preemptive scheduler admission from the effective benchmark configuration when you start the run. Existing Instances are not evicted for a benchmark.</p>
             </div>
             <div v-if="currentGPUs.length" class="space-y-2">
               <div v-for="gpu in currentGPUs" :key="gpu.id" class="flex flex-wrap justify-between gap-3 text-sm">

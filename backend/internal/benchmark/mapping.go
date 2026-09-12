@@ -15,27 +15,10 @@ type MappedConfig struct {
 	Differences []MappingDifference `json:"differences,omitempty"`
 }
 
-var workloadOwnedOptions = map[string]bool{
-	"model": true, "output": true, "repetitions": true, "n-prompt": true, "n-gen": true, "n-depth": true, "pg": true, "no-warmup": true,
-}
-
-var placementOwnedOptions = map[string]bool{
-	"device": true, "tensor-split": true,
-}
-
-var nonBenchmarkOptions = map[string]bool{
-	"host": true, "port": true, "metrics": true, "api-key": true, "api-key-file": true,
-	"ssl-key-file": true, "ssl-cert-file": true, "timeout": true, "threads-http": true,
-	"path": true, "public-path": true, "webui": true, "no-webui": true, "slots": true,
-}
-
-var materialRuntimeOptions = map[string]bool{
-	"n-gpu-layers": true, "batch-size": true, "ubatch-size": true, "threads": true,
-	"cache-type-k": true, "cache-type-v": true, "flash-attn": true, "kv-offload": true,
-	"no-kv-offload": true, "split-mode": true, "main-gpu": true, "n-cpu-moe": true,
-	"cpu-moe": true, "mmproj": true, "spec-draft-model": true, "mmap": true, "no-mmap": true,
-	"mlock": true, "override-tensor": true,
-}
+var workloadOwnedOptions = map[string]bool{"model": true, "output": true, "repetitions": true, "n-prompt": true, "n-gen": true, "n-depth": true, "pg": true, "no-warmup": true}
+var placementOwnedOptions = map[string]bool{"device": true, "tensor-split": true}
+var nonBenchmarkOptions = map[string]bool{"host": true, "port": true, "metrics": true, "api-key": true, "api-key-file": true, "ssl-key-file": true, "ssl-cert-file": true, "timeout": true, "threads-http": true, "path": true, "public-path": true, "webui": true, "no-webui": true, "slots": true}
+var materialRuntimeOptions = map[string]bool{"ctx-size": true, "n-gpu-layers": true, "batch-size": true, "ubatch-size": true, "threads": true, "cache-type-k": true, "cache-type-v": true, "flash-attn": true, "kv-offload": true, "no-kv-offload": true, "split-mode": true, "main-gpu": true, "n-cpu-moe": true, "cpu-moe": true, "mmproj": true, "spec-draft-model": true, "mmap": true, "no-mmap": true, "mlock": true, "override-tensor": true}
 
 func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placement, capabilities Capabilities) (MappedConfig, error) {
 	if !capabilities.Available {
@@ -56,8 +39,8 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 		}
 		seen[key] = true
 		value := config.Options[original]
-		if key == "ctx-size" {
-			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "info", Reason: "llama-bench workload cases are bounded by the saved context size rather than overriding it"})
+		if key == "ctx-size" && !profile.Has(key) {
+			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "info", Reason: "llama-bench workload cases are bounded by the saved context size because this build does not expose --ctx-size"})
 			continue
 		}
 		if key == "kv-offload" && !profile.Has(key) && profile.Has("no-kv-offload") {
@@ -90,13 +73,11 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 		}
 		mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "ignored", Reason: "manager/detected option is not applicable to the discovered llama-bench interface"})
 	}
-
 	if len(placement.Devices) > 0 {
 		if !profile.Has("device") {
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: "device", Value: strings.Join(placement.Devices, ","), Severity: "blocking", Reason: "selected benchmark devices cannot be expressed by this llama-bench build"})
 			return mapped, fmt.Errorf("%w: selected GPU devices cannot be expressed", ErrUnsupportedConfig)
 		}
-		// llama-bench uses '/' within one configuration; ',' requests a sweep.
 		mapped.Args = append(mapped.Args, "--device", strings.Join(placement.Devices, "/"))
 	}
 	tensorSplit := strings.TrimSpace(config.TensorSplit)
@@ -122,8 +103,6 @@ func BuildArgv(binaryPath, modelPath string, mapped MappedConfig, workload Workl
 	}
 	args := []string{binaryPath, "--model", modelPath}
 	args = append(args, mapped.Args...)
-	// An omitted flag enables llama-bench's default cases. Explicit zero is
-	// required to disable the unselected workload family.
 	prompt, generation := joinInts(workload.PromptTokens), joinInts(workload.GenerationTokens)
 	if prompt == "" {
 		prompt = "0"
@@ -170,14 +149,12 @@ func mappedKVOffloadArgs(profile llamacpp.Profile, value string) ([]string, erro
 		return nil, fmt.Errorf("--kv-offload expects a boolean value")
 	}
 }
-
 func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, error) {
 	option, ok := profileOption(profile, key)
 	if !ok {
 		return nil, fmt.Errorf("unknown llama-bench option --%s", key)
 	}
 	trimmed := strings.TrimSpace(value)
-	// Server switches become explicit values for llama-bench's <0|1> options.
 	if isBinaryChoiceOption(option) {
 		switch strings.ToLower(trimmed) {
 		case "", "true", "1", "yes", "on":
@@ -205,11 +182,9 @@ func mappedOptionArgs(profile llamacpp.Profile, key, value string) ([]string, er
 	}
 	return []string{"--" + key, value}, nil
 }
-
 func isBinaryChoiceOption(option llamacpp.Option) bool {
 	return len(option.Choices) == 2 && containsChoice(option.Choices, "0") && containsChoice(option.Choices, "1")
 }
-
 func containsChoice(choices []string, value string) bool {
 	for _, choice := range choices {
 		if choice == value {
@@ -218,7 +193,6 @@ func containsChoice(choices []string, value string) bool {
 	}
 	return false
 }
-
 func profileOption(profile llamacpp.Profile, key string) (llamacpp.Option, bool) {
 	for _, option := range profile.Options {
 		if strings.TrimPrefix(strings.TrimSpace(option.Key), "--") == key {
@@ -227,21 +201,18 @@ func profileOption(profile llamacpp.Profile, key string) (llamacpp.Option, bool)
 	}
 	return llamacpp.Option{}, false
 }
-
 func isBooleanBenchmarkOption(option llamacpp.Option) bool {
 	if option.Kind != "" {
 		return option.Kind == "boolean"
 	}
 	return strings.TrimSpace(option.ValueHint) == ""
 }
-
 func inverseBenchmarkBoolean(key string) string {
 	if strings.HasPrefix(key, "no-") {
 		return strings.TrimPrefix(key, "no-")
 	}
 	return "no-" + key
 }
-
 func joinInts(values []int) string {
 	parts := make([]string, len(values))
 	for i, value := range values {
