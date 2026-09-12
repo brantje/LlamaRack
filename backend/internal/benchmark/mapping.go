@@ -18,7 +18,7 @@ type MappedConfig struct {
 var workloadOwnedOptions = map[string]bool{"model": true, "output": true, "repetitions": true, "n-prompt": true, "n-gen": true, "n-depth": true, "pg": true, "no-warmup": true}
 var placementOwnedOptions = map[string]bool{"device": true, "tensor-split": true}
 var nonBenchmarkOptions = map[string]bool{"host": true, "port": true, "metrics": true, "api-key": true, "api-key-file": true, "ssl-key-file": true, "ssl-cert-file": true, "timeout": true, "threads-http": true, "path": true, "public-path": true, "webui": true, "no-webui": true, "slots": true}
-var materialRuntimeOptions = map[string]bool{"ctx-size": true, "n-gpu-layers": true, "batch-size": true, "ubatch-size": true, "threads": true, "cache-type-k": true, "cache-type-v": true, "flash-attn": true, "kv-offload": true, "no-kv-offload": true, "split-mode": true, "main-gpu": true, "n-cpu-moe": true, "cpu-moe": true, "mmproj": true, "spec-draft-model": true, "mmap": true, "no-mmap": true, "mlock": true, "override-tensor": true}
+var materialRuntimeOptions = map[string]bool{"ctx-size": true, "n-gpu-layers": true, "batch-size": true, "ubatch-size": true, "threads": true, "cache-type-k": true, "cache-type-v": true, "flash-attn": true, "kv-offload": true, "no-kv-offload": true, "split-mode": true, "main-gpu": true, "n-cpu-moe": true, "cpu-moe": true, "spec-draft-model": true, "mmap": true, "no-mmap": true, "mlock": true, "override-tensor": true}
 
 func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placement, capabilities Capabilities) (MappedConfig, error) {
 	if !capabilities.Available {
@@ -41,6 +41,10 @@ func MapInstanceConfig(config InstanceConfigSnapshot, placement scheduler.Placem
 		value := config.Options[original]
 		if key == "ctx-size" && !profile.Has(key) {
 			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "info", Reason: "llama-bench workload cases are bounded by the saved context size because this build does not expose --ctx-size"})
+			continue
+		}
+		if key == "mmproj" {
+			mapped.Differences = append(mapped.Differences, MappingDifference{Key: key, Value: value, Severity: "ignored", Reason: "multimodal projector is not exercised by llama-bench benchmark workloads"})
 			continue
 		}
 		if key == "kv-offload" && !profile.Has(key) && profile.Has("no-kv-offload") {
