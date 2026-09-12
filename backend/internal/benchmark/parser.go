@@ -161,18 +161,15 @@ func benchmarkFloat64(row map[string]json.RawMessage, key string) (float64, bool
 }
 
 func benchmarkNumericText(raw json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !((trimmed[0] >= '0' && trimmed[0] <= '9') || trimmed[0] == '-') {
+		return "", fmt.Errorf("expected a JSON number")
+	}
 	var number json.Number
-	if err := json.Unmarshal(raw, &number); err == nil && number.String() != "" {
-		return number.String(), nil
+	if err := json.Unmarshal(trimmed, &number); err != nil || number.String() == "" {
+		return "", fmt.Errorf("expected a JSON number")
 	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		text = strings.TrimSpace(text)
-		if text != "" {
-			return text, nil
-		}
-	}
-	return "", fmt.Errorf("expected a number")
+	return number.String(), nil
 }
 
 func jsonInt64(row map[string]json.RawMessage, key string) int64 {
