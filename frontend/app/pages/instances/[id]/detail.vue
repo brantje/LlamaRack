@@ -323,7 +323,7 @@ async function loadCompanions() {
         flag: '--spec-type',
         summary: nativeMTPParamSummary(values)
       })
-    } else if (values['spec-draft-model'] && modelOrDetectedSource(sources['spec-draft-model'])) {
+    } else if (values['spec-draft-model'] && (modelOrDetectedSource(sources['spec-draft-model']) || sources['spec-draft-model'] === 'instance')) {
       helpers.push({
         kind: 'MTP draft model',
         path: values['spec-draft-model'],

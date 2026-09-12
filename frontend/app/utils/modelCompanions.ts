@@ -121,7 +121,7 @@ export function isNativeMTPFromEffective(
   instanceOptions: Record<string, string> = {}
 ) {
   const draftPath = values['spec-draft-model']
-  if (draftPath && modelOrDetectedSource(sources['spec-draft-model'])) return false
+  if (draftPath) return false
   if (instanceOptions['spec-draft-model']) return false
   return values['spec-type'] === 'draft-mtp' && modelOrDetectedSource(sources['spec-type'])
 }

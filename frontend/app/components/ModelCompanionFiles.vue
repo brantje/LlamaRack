@@ -10,7 +10,10 @@ import {
   type ModelInspection
 } from '~/utils/modelCompanions'
 
-type RemoteArtifact = { dependencies?: CompanionDependency[] }
+type RemoteArtifact = {
+  name?: string
+  dependencies?: CompanionDependency[]
+}
 
 const props = withDefaults(defineProps<{
   modelValue: Record<string, string>

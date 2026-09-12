@@ -155,6 +155,39 @@ describe('shared Instance form redesign', () => {
     expect(Object.values(state.options)).toContain('/custom/projector.gguf')
   })
 
+  it('keeps disabled native MTP visible when instance options clear spec-type', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }
+      if (path === '/api/v1/hardware') return { gpus: [] }
+      if (path.startsWith('/api/v1/llamacpp/config')) return {
+        effective: {
+          values: { 'spec-type': '', 'spec-draft-n-max': '', 'spec-draft-p-min': '' },
+          sources: { 'spec-type': 'instance', 'spec-draft-n-max': 'instance', 'spec-draft-p-min': 'instance' }
+        }
+      }
+      if (path === '/api/v1/models/inspect') return {
+        features: { has_mtp: true, mtp_only: false, nextn_predict_layers: 1 },
+        suggested_options: { 'spec-type': 'draft-mtp', 'spec-draft-n-max': '16', 'spec-draft-p-min': '0.8' }
+      }
+      return {}
+    })
+    const state = reactive(form({
+      model_id: 'm1',
+      name: 'Native MTP Model',
+      slug: 'native-mtp-model',
+      options: { 'spec-type': '', 'spec-draft-n-max': '', 'spec-draft-p-min': '' }
+    }))
+    const wrapper = await mountSuspended(InstanceForm, {
+      props: { form: state, title: 'Edit Instance', submitLabel: 'Save', instanceId: 'inst-1' }
+    })
+    await flushPromises()
+
+    const mtp = wrapper.get('[data-testid="companion-spec-draft-model"]')
+    expect(mtp.text()).toContain('Built-in MTP')
+    expect(mtp.text()).toContain('Ignored')
+    expect(mtp.findAll('button').some(button => button.text() === 'Enable')).toBe(true)
+  })
+
   it('surfaces built-in MTP from detected llama.cpp defaults on the instance companion panel', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/settings/general') return { idle_unload_seconds: { value: 300 } }

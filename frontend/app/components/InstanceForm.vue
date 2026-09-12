@@ -215,7 +215,12 @@ async function loadCompanions() {
       if (path && modelOrDetectedSource(source)) detected[definition.key] = { path }
     }
     let inspection: ModelInspection | undefined
-    const needsInspection = Object.keys(detected).length > 0 || isNativeMTPFromEffective(values, sources, props.form.options)
+    const hasNativeMTPOverride = nativeMTPOptionKeys.some(key =>
+      Object.prototype.hasOwnProperty.call(props.form.options, key)
+    )
+    const needsInspection = Object.keys(detected).length > 0
+      || isNativeMTPFromEffective(values, sources, props.form.options)
+      || hasNativeMTPOverride
     if (needsInspection) {
       try {
         inspection = await manager.request<ModelInspection>('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: model.gguf_path } })
@@ -227,9 +232,13 @@ async function loadCompanions() {
         // Paths remain actionable if optional GGUF inspection cannot provide sizes.
       }
     }
-    if (isNativeMTPFromEffective(values, sources, props.form.options) || isNativeMTP(props.form.options, inspection)) {
+    if (sequence !== companionSequence || model.id !== props.form.model_id) return
+    const supportsNativeMTP = isNativeMTPFromEffective(values, sources, props.form.options)
+      || isNativeMTP(props.form.options, inspection)
+      || (hasNativeMTPOverride && isNativeMTP({}, inspection))
+    if (supportsNativeMTP) {
       nativeMTPDetected.value = {
-        params: nativeMTPParams(values),
+        params: nativeMTPParams(values, inspection?.suggested_options || {}),
         nextn_predict_layers: inspection?.features?.nextn_predict_layers
       }
       delete detected['spec-draft-model']

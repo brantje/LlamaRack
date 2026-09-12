@@ -41,6 +41,10 @@ describe('model companion helpers', () => {
     )).toBe(true)
     expect(isNativeMTPFromEffective(
       { 'spec-type': 'draft-mtp', 'spec-draft-model': '/models/draft.gguf' },
+      { 'spec-type': 'detected', 'spec-draft-model': 'instance' }
+    )).toBe(false)
+    expect(isNativeMTPFromEffective(
+      { 'spec-type': 'draft-mtp', 'spec-draft-model': '/models/draft.gguf' },
       { 'spec-type': 'detected', 'spec-draft-model': 'detected' }
     )).toBe(false)
     expect(isNativeMTPFromEffective(

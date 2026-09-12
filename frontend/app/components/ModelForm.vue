@@ -429,14 +429,10 @@ onMounted(() => {
         <p v-if="!remote" class="mt-2 text-xs text-[var(--neutral-700)]">Already-registered GGUF files and detected helper GGUFs are hidden.</p>
       </Frame>
 
-      <UAlert
-        v-if="mtpRepoMismatchWarning"
-        color="warning"
-        variant="subtle"
-        title="Regular quant selected from an MTP repository"
-        :description="mtpRepoMismatchWarning"
-        data-testid="mtp-repo-mismatch-warning"
-      />
+      <div v-if="mtpRepoMismatchWarning" class="flex flex-wrap items-start gap-3 border border-[var(--color-divider)] p-3" data-testid="mtp-repo-mismatch-warning">
+        <StatusTag variant="pending">MTP repository</StatusTag>
+        <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--neutral-800)]">{{ mtpRepoMismatchWarning }}</p>
+      </div>
 
       <ModelCompanionFiles
         v-model="form.options"
