@@ -25,6 +25,7 @@ type Profile struct {
 	Version                  string   `json:"version,omitempty"`
 	Fingerprint              string   `json:"fingerprint"`
 	Options                  []Option `json:"options"`
+	ShortOptions             []string `json:"-"`
 	Devices                  []string `json:"devices,omitempty"`
 	DeviceDiscoveryAvailable bool     `json:"device_discovery_available"`
 	DeviceDiscoveryError     string   `json:"-"`
@@ -43,13 +44,26 @@ func (p Profile) Has(key string) bool {
 	return false
 }
 
+func (p Profile) HasShort(key string) bool {
+	key = strings.TrimPrefix(strings.TrimSpace(key), "-")
+	if key == "" {
+		return false
+	}
+	for _, option := range p.ShortOptions {
+		if strings.TrimPrefix(strings.TrimSpace(option), "-") == key {
+			return true
+		}
+	}
+	return false
+}
+
 func Discover(ctx context.Context, path string) (Profile, error) {
 	versionOut, _ := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	help, err := exec.CommandContext(ctx, path, "--help").CombinedOutput()
 	if err != nil {
 		return Profile{}, err
 	}
-	profile := Profile{Path: path, Version: firstLine(string(versionOut)), Options: parseHelp(string(help))}
+	profile := Profile{Path: path, Version: firstLine(string(versionOut)), Options: parseHelp(string(help)), ShortOptions: parseShortOptions(string(help))}
 	deviceOut, deviceErr := exec.CommandContext(ctx, path, "--list-devices").CombinedOutput()
 	if deviceErr == nil {
 		profile.Devices, deviceErr = parseListDevices(string(deviceOut))
@@ -114,7 +128,30 @@ func firstLine(s string) string {
 }
 
 var longFlagRE = regexp.MustCompile(`--([a-zA-Z0-9][a-zA-Z0-9_-]*)`)
+var shortFlagRE = regexp.MustCompile(`(?:^|[\s,])-([a-zA-Z0-9][a-zA-Z0-9_-]*)`)
 var columnsRE = regexp.MustCompile(`\s{2,}`)
+
+func parseShortOptions(text string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || !strings.HasPrefix(line, "-") {
+			continue
+		}
+		parts := columnsRE.Split(line, 2)
+		spec := strings.TrimSpace(parts[0])
+		for _, match := range shortFlagRE.FindAllStringSubmatch(spec, -1) {
+			if len(match) != 2 || seen[match[1]] {
+				continue
+			}
+			seen[match[1]] = true
+			out = append(out, match[1])
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 func parseHelp(text string) []Option {
 	var out []Option

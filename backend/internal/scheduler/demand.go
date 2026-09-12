@@ -277,7 +277,10 @@ func gpuOffloadFraction(options map[string]string, blockCount int64) (float64, b
 	if err != nil {
 		return 1, false
 	}
-	if layers <= 0 {
+	if layers < 0 {
+		return 1, false
+	}
+	if layers == 0 {
 		return 0, true
 	}
 	if blockCount <= 0 || layers >= blockCount {

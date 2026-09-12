@@ -403,6 +403,7 @@ defineExpose({ setSelectedWindow })
       </div>
       <div v-if="instance" class="flex flex-wrap items-center justify-end gap-2">
         <AppButton to="/instances" intent="secondary">Back to Instances</AppButton>
+        <BenchmarkInstanceAction :instance="instance" :model="model" />
         <AppButton :to="`/instances/${encodeURIComponent(instance.slug)}/edit`" intent="secondary">Edit</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'kill'" @click="runtimeAction('kill')">Kill</AppButton>
         <AppButton intent="secondary" tone="destructive" :loading="pending === 'delete'" @click="removeInstance">Delete</AppButton>
@@ -474,7 +475,6 @@ defineExpose({ setSelectedWindow })
           <InstanceHistoryChart :series="[{ label: 'Context', points: contextChart, token: 'accent' }]" value-format="percent" :min="0" :max="100" />
         </Frame>
       </section>
-
       <section data-testid="instance-detail-vram-allocation" class="space-y-3">
         <div><h2 class="text-base font-semibold">VRAM allocation</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Current device allocation, including attributed and unattributed process memory.</p></div>
         <div v-if="allocationGPUs.length" class="grid gap-4 lg:grid-cols-2">

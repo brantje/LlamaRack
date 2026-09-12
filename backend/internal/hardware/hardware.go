@@ -20,6 +20,8 @@ type GPU struct {
 	Index                         int     `json:"index"`
 	UUID                          string  `json:"uuid,omitempty"`
 	Name                          string  `json:"name"`
+	DriverVersion                 string  `json:"driver_version,omitempty"`
+	MaxCUDAVersion                string  `json:"max_cuda_version,omitempty"`
 	TotalBytes                    int64   `json:"total_bytes"`
 	UsedBytes                     int64   `json:"used_bytes"`
 	FreeBytes                     int64   `json:"free_bytes"`
@@ -167,6 +169,11 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 	// error if a driver omits the field.
 	if len(gpus) > 0 {
 		if query, queryErr := d.run(ctx, "nvidia-smi", "-q"); queryErr == nil {
+			driverVersion, maxCUDAVersion := parseNVIDIAIdentity(string(query))
+			for i := range gpus {
+				gpus[i].DriverVersion = driverVersion
+				gpus[i].MaxCUDAVersion = maxCUDAVersion
+			}
 			widths := parseNVIDIAMemoryBusWidths(string(query))
 			if len(widths) == len(gpus) && len(memoryClocksMHz) == len(gpus) {
 				for i := range gpus {
@@ -177,6 +184,30 @@ func (d *Detector) nvidiaGPUs(ctx context.Context) ([]GPU, error) {
 		d.enrichNVIDIAPCIe(ctx, gpus)
 	}
 	return gpus, nil
+}
+
+func parseNVIDIAIdentity(text string) (driverVersion, maxCUDAVersion string) {
+	for _, line := range strings.Split(text, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if value == "" || strings.EqualFold(value, "N/A") {
+			continue
+		}
+		switch key {
+		case "Driver Version":
+			driverVersion = value
+		case "CUDA Version":
+			maxCUDAVersion = value
+		}
+		if driverVersion != "" && maxCUDAVersion != "" {
+			return driverVersion, maxCUDAVersion
+		}
+	}
+	return driverVersion, maxCUDAVersion
 }
 
 func parseNVIDIAMemoryBusWidths(text string) []float64 {

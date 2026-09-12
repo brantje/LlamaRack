@@ -15,6 +15,7 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/api"
 	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/benchmark"
 	"github.com/brantje/llamarack/backend/internal/config"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
@@ -104,6 +105,19 @@ func run(ctx context.Context, cfg config.Config) error {
 	}()
 	lifecycleService := lifecycle.New(modelService, sup)
 	lifecycleService.SetDataDir(cfg.DataDir)
+	hardwareDetector := hardware.New()
+	llamaConfigStore := llamaconfig.New(db)
+	benchmarkService := benchmark.NewService(ctx, benchmark.NewSQLStore(db), lifecycleService.Instances(), modelService, llamaConfigStore, hardwareDetector, lifecycleService.Reservations(), cfg.LlamaBenchPath)
+	if err := benchmarkService.ReconcileInterrupted(ctx); err != nil {
+		return fmt.Errorf("reconcile interrupted benchmarks: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := benchmarkService.Shutdown(shutdownCtx); err != nil {
+			slog.Error("benchmark shutdown failed", "error", err)
+		}
+	}()
 	observabilityService := observability.New(db)
 	writebackCtx, stopWriteback := context.WithCancel(ctx)
 	observabilityService.StartWriteback(writebackCtx)
@@ -179,7 +193,6 @@ func run(ctx context.Context, cfg config.Config) error {
 
 	apiServer := api.New(modelService, lifecycleService, profileGetter)
 	managementAPI := http.NewServeMux()
-	hardwareDetector := hardware.New()
 	allowedOrigins, _ := managerSettings.String(ctx, settings.AllowedOrigins)
 	managementAPI.Handle("/api/v1/ws", api.NewRuntimeWebSocketHandler(authService, lifecycleService, allowedOrigins, observabilitySampler))
 	managementAPI.Handle("/api/v1/hardware", api.NewHardwareHandler(authService, hardwareDetector))
@@ -193,7 +206,9 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("GET /api/v1/models/{id}/details/value", api.NewModelMetadataValueHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/details", api.NewModelDetailsHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewRecommendationHandler(authService, modelService, hardwareDetector, profileGetter))
-	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaconfig.New(db), profileGetter))
+	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaConfigStore, profileGetter))
+	benchmarkHandler := api.NewBenchmarkHandler(benchmarkService, lifecycleService.Instances())
+	api.RegisterBenchmarkRoutes(managementAPI, benchmarkHandler)
 	managementAPI.Handle("GET /api/v1/observability/requests", observability.NewRequestLogsHandler(observabilityService))
 	managementAPI.Handle("GET /api/v1/observability/requests/{request_id}", observability.NewRequestLogDetailHandler(observabilityService))
 	managementAPI.Handle("GET /api/v1/observability/playground/{request_id}", observability.NewPlaygroundDiagnosticsHandler(observabilityService))
@@ -306,6 +321,7 @@ func run(ctx context.Context, cfg config.Config) error {
 func newMux(apiServer, openAI, frontendHandler http.Handler, metrics ...http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	openAPIDoc := newOpenAPIDocument()
+	registerBenchmarkOpenAPIOperations(openAPIDoc)
 	mux.Handle("GET /openapi.json", openAPIDoc.JSONHandler())
 	mux.Handle("GET /docs", openAPIDoc.DocsHandler("/openapi.json"))
 	mux.Handle("/api/v1/", apiServer)
