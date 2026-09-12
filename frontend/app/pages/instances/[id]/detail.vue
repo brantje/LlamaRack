@@ -444,8 +444,6 @@ defineExpose({ setSelectedWindow })
         </Frame>
       </section>
 
-      <BenchmarkHistory :instance="instance" />
-
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div><h2 class="text-base font-semibold">Performance history</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Server-bucketed history for this Instance only.</p></div>
         <div class="flex items-center gap-2"><span v-if="historyLoading" class="text-[length:var(--font-size-kicker)] uppercase tracking-[.12em] text-[var(--neutral-700)]">Refreshing</span><USelect v-model="selectedWindow" data-testid="instance-detail-history-range" aria-label="Instance history range" :items="selectableRanges" value-key="value" label-key="label" size="sm" class="min-w-28" /></div>
@@ -477,7 +475,6 @@ defineExpose({ setSelectedWindow })
           <InstanceHistoryChart :series="[{ label: 'Context', points: contextChart, token: 'accent' }]" value-format="percent" :min="0" :max="100" />
         </Frame>
       </section>
-
       <section data-testid="instance-detail-vram-allocation" class="space-y-3">
         <div><h2 class="text-base font-semibold">VRAM allocation</h2><p class="mt-1 text-xs text-[var(--neutral-700)]">Current device allocation, including attributed and unattributed process memory.</p></div>
         <div v-if="allocationGPUs.length" class="grid gap-4 lg:grid-cols-2">
