@@ -356,9 +356,11 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 		}
 		usable[victim] = true
 		existing, hasExisting := l.leaseByInstanceLocked(victim)
-		if credit.HostRAM > 0 {
-			hostBytes += credit.HostRAM
-		} else if hasExisting && existing.HostRAM > 0 {
+		if hasExisting && existing.HostRAM > 0 {
+			// Host memory has no per-process attribution in the hardware snapshot.
+			// Only credit RAM that the ledger currently owns for this managed
+			// victim. Once eviction releases the lease, a fresh /proc/meminfo
+			// snapshot is authoritative and must not receive the same RAM again.
 			hostBytes += existing.HostRAM
 		}
 		if len(credit.GPUs) > 0 {
