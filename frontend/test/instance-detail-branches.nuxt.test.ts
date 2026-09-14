@@ -81,7 +81,7 @@ function installHappyRequests(manager = useManager()) {
       const metric = new URL(`http://x${path}`).searchParams.get('metric') || ''
       return history(metric)
     }
-    if (path === '/api/v1/llamacpp/config?model_id=m1') return {
+    if (path.startsWith('/api/v1/llamacpp/config?')) return {
       effective: {
         values: { mmproj: '/models/helpers/mmproj.gguf', 'spec-draft-model': '/models/helpers/draft.gguf' },
         sources: { mmproj: 'model', 'spec-draft-model': 'detected' }
@@ -143,7 +143,7 @@ describe('Instance detail edge branches', () => {
     expect(text).toContain('CUDA1 · Other')
     expect(text).toContain('Free')
     expect(text).toContain('0 B')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/llamacpp/config?model_id=m1')
+    expect(mocks.request).toHaveBeenCalledWith(`/api/v1/llamacpp/config?model_id=m1&instance_id=${instanceID}`)
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/inspect', { method: 'POST', body: { gguf_path: 'detail.gguf' } })
   })
 

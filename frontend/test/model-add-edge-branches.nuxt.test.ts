@@ -123,4 +123,41 @@ describe('Add model edge branches', () => {
     expect(wrapper.get('[data-testid="companion-mmproj"]').text()).toContain('None found')
     expect(wrapper.get('[data-testid="companion-mtp"]').text()).toContain('None found')
   })
+
+  it('warns when a regular quant is selected from a mixed MTP Hugging Face repository', async () => {
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/models/available') {
+        return [{
+          path: 'huggingface/DavidAU/Qwen3.8-27B-NEO-CODER-MAX-MTP-GGUF/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-Q5_K_S.gguf',
+          name: 'Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-Q5_K_S.gguf',
+          total_bytes: 10, suggested_options: {}
+        }]
+      }
+      if (path === '/api/v1/models/inspect') return { name: 'Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-Q5_K_S.gguf', features: { has_mtp: false } }
+      return {}
+    })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new' })
+    await flushPromises()
+    await chooseGGUF(wrapper, 'huggingface/DavidAU/Qwen3.8-27B-NEO-CODER-MAX-MTP-GGUF/Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-Q5_K_S.gguf')
+    expect(wrapper.get('[data-testid="mtp-repo-mismatch-warning"]').text())
+      .toContain('Qwen3.8-27B-TurboFCFusion-735-882-Here-Uncen-NEO-CODER-MAX-MTP-Q5_K_S.gguf')
+    expect(wrapper.get('[data-testid="companion-mtp"]').text()).toContain('None found')
+  })
+
+  it('surfaces built-in MTP for remote Hugging Face artifacts with -MTP- filenames', async () => {
+    mocks.request.mockResolvedValue({
+      id: 'DavidAU/demo', revision: 'rev', artifacts: [{
+        id: 'mtp-q5', name: 'Qwen3.8-27B-MAX-MTP-Q5_K_S.gguf', quantization: 'Q5_K_S',
+        model_bytes: 10, total_bytes: 10, shard_count: 1, expected_shards: 1, complete: true,
+        files: [{ path: 'Qwen3.8-27B-MAX-MTP-Q5_K_S.gguf', size: 10 }]
+      }]
+    })
+    const wrapper = await mountSuspended(NewModelPage, { route: '/models/new?repo=DavidAU%2Fdemo&artifact=mtp-q5' })
+    await flushPromises()
+    const mtp = wrapper.get('[data-testid="companion-mtp"]')
+    expect(mtp.text()).toContain('Built-in MTP')
+    expect(mtp.text()).toContain('Built-in')
+    expect(mtp.text()).not.toContain('None found')
+    expect(wrapper.get('[data-testid="companion-native-mtp-params"]').text()).toContain('spec-type=draft-mtp')
+  })
 })
