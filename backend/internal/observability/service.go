@@ -276,7 +276,7 @@ func addFinalCounters(ctx context.Context, tx database.Querier, record RequestRe
 func addCounter(ctx context.Context, tx database.Querier, counter Counter) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO observability_counters(metric,instance_id,endpoint,status_code,result,streaming,value)
 		VALUES(?,?,?,?,?,?,?) ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
-		DO UPDATE SET value=value+excluded.value`, counter.Metric, counter.InstanceID, counter.Endpoint, counter.StatusCode, counter.Result, boolInt(counter.Streaming), counter.Value)
+		DO UPDATE SET value=observability_counters.value+excluded.value`, counter.Metric, counter.InstanceID, counter.Endpoint, counter.StatusCode, counter.Result, boolInt(counter.Streaming), counter.Value)
 	return err
 }
 
