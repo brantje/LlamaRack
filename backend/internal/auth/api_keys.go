@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -128,20 +129,6 @@ func (s *Service) listAPIKeys(ctx context.Context, serviceAccountID string) ([]A
 }
 
 func (s *Service) SetAPIKeyEnabled(ctx context.Context, id string, enabled bool) error {
-	value := 0
-	if enabled {
-		value = 1
-	}
-	result, err := s.db.ExecContext(ctx, "UPDATE api_keys SET enabled=? WHERE id=?", value, id)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		retfunc (s *Service) SetAPIKeyEnabled(ctx context.Context, id string, enabled bool) error {
 	if err := s.apiKeys.SetEnabled(ctx, id, enabled); err != nil {
 		return err
 	}
