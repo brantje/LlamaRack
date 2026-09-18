@@ -24,6 +24,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/gateway"
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/llamaconfig"
@@ -91,10 +92,10 @@ func run(ctx context.Context, cfg config.Config) error {
 	network := managersecurity.NewNetwork(managerSettings)
 	loginProtector := managersecurity.NewLoginProtector(managerSettings)
 	modelService := models.New(db, cfg.ModelsDir)
-	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
-	defer unregisterDetectedDefaults()
 	instanceService := instances.New(db)
 	llamaConfigStore := llamaconfig.New(db)
+	unregisterDetectedDefaults := llamaConfigStore.RegisterDetectedDefaultsProvider(modelService.DetectedLlamaDefaults)
+	defer unregisterDetectedDefaults()
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, startupTimeout)
 	installID, err := supervisor.EnsureInstallationID(ctx, db)
 	if err != nil {

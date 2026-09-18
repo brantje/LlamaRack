@@ -29,3 +29,10 @@ func detectedDefaultsProvider(db database.Store) DetectedDefaultsProvider {
 	provider, _ := value.(DetectedDefaultsProvider)
 	return provider
 }
+
+// RegisterDetectedDefaultsProvider wires a detected-default provider to this
+// store's persistence identity. Register it during startup before any lifecycle
+// reconciliation that may resolve launch options.
+func (s *Store) RegisterDetectedDefaultsProvider(provider DetectedDefaultsProvider) func() {
+	return RegisterDetectedDefaultsProvider(s.db, provider)
+}

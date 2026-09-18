@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
-	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 )
 
 // InspectGGUF validates a path through the normal Model path rules and reads
@@ -68,13 +67,6 @@ func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (ma
 		"spec-draft-n-max": "16",
 		"spec-draft-p-min": "0.8",
 	}, nil
-}
-
-// RegisterDetectedLlamaDefaults makes GGUF-derived defaults available to the
-// llama config store. Call this synchronously during backend initialization so
-// even resumed provider imports that autostart immediately receive the flags.
-func (s *Service) RegisterDetectedLlamaDefaults() func() {
-	return llamaconfig.RegisterDetectedDefaultsProvider(s.db, s.DetectedLlamaDefaults)
 }
 
 // DetectContext returns the architecture-specific context capability when it is

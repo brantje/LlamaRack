@@ -218,7 +218,7 @@ func (s *Service) InspectGGUFArtifact(ctx context.Context, path string) (GGUFIns
 
 func (s *Service) localArtifactScopePaths(ctx context.Context, root, mainRel string) ([]string, error) {
 	mainKey := filepath.ToSlash(filepath.Clean(mainRel))
-	associated, err := s.downloadSidecarsByMain(ctx)
+	associated, err := s.store.DownloadSidecarsByMain(ctx)
 	if err != nil {
 		return nil, err
 	}
