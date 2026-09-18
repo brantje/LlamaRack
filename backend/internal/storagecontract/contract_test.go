@@ -96,6 +96,34 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 	if err != nil {
 		t.Fatalf("%s bootstrap: %v", backend.name, err)
 	}
+
+	sessionToken, csrfToken, loggedIn, err := authService.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "127.0.0.1", "storage-contract")
+	if err != nil || loggedIn.ID != admin.ID {
+		t.Fatalf("%s session login user=%+v err=%v", backend.name, loggedIn, err)
+	}
+	sessionUser, currentSession, err := authService.SessionUserWithSession(ctx, sessionToken)
+	if err != nil || sessionUser.ID != admin.ID || !currentSession.Current {
+		t.Fatalf("%s session resolve user=%+v session=%+v err=%v", backend.name, sessionUser, currentSession, err)
+	}
+	if err := authService.ValidateCSRF(ctx, sessionToken, csrfToken); err != nil {
+		t.Fatalf("%s csrf validation: %v", backend.name, err)
+	}
+	if sessions, err := authService.ListSessions(ctx, admin.ID, currentSession.ID); err != nil || len(sessions) != 1 || !sessions[0].Current {
+		t.Fatalf("%s session list=%+v err=%v", backend.name, sessions, err)
+	}
+	if err := authService.RevokeOwnSession(ctx, admin.ID, currentSession.ID); err != nil {
+		t.Fatalf("%s revoke own session: %v", backend.name, err)
+	}
+	if _, _, err := authService.SessionUserWithSession(ctx, sessionToken); !errors.Is(err, auth.ErrSessionInvalid) {
+		t.Fatalf("%s revoked session remained valid: %v", backend.name, err)
+	}
+	if err := authService.ValidateCSRF(ctx, sessionToken, csrfToken); !errors.Is(err, auth.ErrCSRFInvalid) {
+		t.Fatalf("%s revoked csrf remained valid: %v", backend.name, err)
+	}
+	persistedSessionToken, persistedCSRFToken, _, err := authService.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "127.0.0.2", "storage-contract-reopen")
+	if err != nil {
+		t.Fatalf("%s persisted session login: %v", backend.name, err)
+	}
 	key, secret, err := authService.CreateAPIKeyForUser(ctx, "contract", admin.ID)
 	if err != nil {
 		t.Fatalf("%s api key create: %v", backend.name, err)
@@ -280,6 +308,12 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 		t.Fatalf("%s reopened settings=%d err=%v", backend.name, got, err)
 	}
 	authService = auth.New(store, time.Hour)
+	if user, session, err := authService.SessionUserWithSession(ctx, persistedSessionToken); err != nil || user.ID != admin.ID || session.RemoteAddress != "127.0.0.2" {
+		t.Fatalf("%s reopened session user=%+v session=%+v err=%v", backend.name, user, session, err)
+	}
+	if err := authService.ValidateCSRF(ctx, persistedSessionToken, persistedCSRFToken); err != nil {
+		t.Fatalf("%s reopened csrf validation: %v", backend.name, err)
+	}
 	if err := authService.AuthenticateAPIKey(ctx, secret); err != nil {
 		t.Fatalf("%s reopened api key auth: %v", backend.name, err)
 	}
