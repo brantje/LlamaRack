@@ -7,7 +7,8 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/models"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, id string) {
 	deleteFiles := false
