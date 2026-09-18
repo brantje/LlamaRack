@@ -2,15 +2,19 @@ package huggingface
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	appcache "github.com/brantje/llamarack/backend/internal/cache"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
+	"github.com/redis/go-redis/v9"
 )
 
 const benchmarkOriginNetworkFloor = 5 * time.Millisecond
@@ -271,8 +275,202 @@ func BenchmarkDerivedMetadataWarmRedisParallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if _, err := client.DerivedMetadata(context.Background(), detail); err != nil {
-				b.Fatal(err)
+				b.Errorf("derive metadata: %v", err)
+				return
 			}
 		}
 	})
+}
+
+
+type invalidDeleteFailureCache struct{}
+
+func (invalidDeleteFailureCache) Get(_ context.Context, _ string, dst any) (bool, error) {
+	value, ok := dst.(*ggufmeta.Derived)
+	if !ok {
+		return false, errors.New("unexpected cache destination")
+	}
+	*value = ggufmeta.Derived{Architecture: "llama"}
+	return true, nil
+}
+func (invalidDeleteFailureCache) Set(context.Context, string, any, time.Duration) error { return nil }
+func (invalidDeleteFailureCache) Delete(context.Context, string) error {
+	return errors.New("delete unavailable")
+}
+
+func TestDerivedMetadataSemanticallyInvalidCacheFallsBackAndReplaces(t *testing.T) {
+	for name, cached := range map[string]ggufmeta.Derived{
+		"empty":   {},
+		"partial": {Architecture: "llama", BlockCount: 32},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := discoveryGGUF(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+			}))
+			defer server.Close()
+
+			client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			memory := appcache.NewMemory()
+			detail := ModelDetail{ID: "acme/invalid-cache", Revision: name, Artifacts: []Artifact{{
+				ID: "q4", Complete: true, Files: []File{{Path: "model-Q4_K_M.gguf", Size: int64(len(payload))}},
+			}}}
+			key := client.derivedMetadataCacheKey(detail, detail.Artifacts[0].Files[0].Path)
+			if err := memory.Set(context.Background(), key, cached, time.Hour); err != nil {
+				t.Fatal(err)
+			}
+			client.SetDerivedMetadataCache(memory)
+
+			got, err := client.DerivedMetadata(context.Background(), detail)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ggufmeta.DerivedCoreReady(got) || requests.Load() != 1 {
+				t.Fatalf("derived=%+v origin requests=%d", got, requests.Load())
+			}
+			var replacement ggufmeta.Derived
+			hit, err := memory.Get(context.Background(), key, &replacement)
+			if err != nil || !hit || !ggufmeta.DerivedCoreReady(replacement) {
+				t.Fatalf("replacement hit=%v value=%+v err=%v", hit, replacement, err)
+			}
+		})
+	}
+}
+
+func TestDerivedMetadataInvalidCacheDeleteFailureIsNonAuthoritative(t *testing.T) {
+	payload := discoveryGGUF(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetDerivedMetadataCache(invalidDeleteFailureCache{})
+	detail := ModelDetail{ID: "acme/delete-failure", Revision: "one", Artifacts: []Artifact{{
+		ID: "q4", Complete: true, Files: []File{{Path: "model-Q4_K_M.gguf", Size: int64(len(payload))}},
+	}}}
+	got, err := client.DerivedMetadata(context.Background(), detail)
+	if err != nil || !ggufmeta.DerivedCoreReady(got) || requests.Load() != 1 {
+		t.Fatalf("derived=%+v requests=%d err=%v", got, requests.Load(), err)
+	}
+}
+
+func TestDerivedMetadataConcurrentColdMissCoalescesOrigin(t *testing.T) {
+	payload := discoveryGGUF(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		time.Sleep(25 * time.Millisecond)
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetDerivedMetadataCache(appcache.NewMemory())
+	detail := ModelDetail{ID: "acme/cold-concurrent", Revision: "one", Artifacts: []Artifact{{
+		ID: "q4", Complete: true, Files: []File{{Path: "model-Q4_K_M.gguf", Size: int64(len(payload))}},
+	}}}
+
+	const callers = 16
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := client.DerivedMetadata(context.Background(), detail)
+			if err == nil && !ggufmeta.DerivedCoreReady(got) {
+				err = errors.New("derived metadata incomplete")
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("origin requests=%d want=1", got)
+	}
+}
+
+func TestDerivedMetadataRedisMalformedValuesFallBackAndReplace(t *testing.T) {
+	rawURL := os.Getenv("LLAMARACK_TEST_REDIS_URL")
+	if rawURL == "" {
+		t.Skip("LLAMARACK_TEST_REDIS_URL is not configured")
+	}
+	options, err := redis.ParseURL(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := redis.NewClient(options)
+	defer direct.Close()
+
+	for name, raw := range map[string]string{
+		"empty-object":   "{}",
+		"partial-object": `{"architecture":"llama","block_count":32}`,
+		"corrupt-json":   "{",
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := discoveryGGUF(t)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+			}))
+			defer server.Close()
+
+			client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			redisCache, err := appcache.NewRedis(rawURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer redisCache.Close()
+			client.SetDerivedMetadataCache(redisCache)
+			detail := ModelDetail{ID: "acme/redis-invalid", Revision: name, Artifacts: []Artifact{{
+				ID: "q4", Complete: true, Files: []File{{Path: "model-Q4_K_M.gguf", Size: int64(len(payload))}},
+			}}}
+			key := client.derivedMetadataCacheKey(detail, detail.Artifacts[0].Files[0].Path)
+			if err := direct.Set(context.Background(), key, raw, time.Hour).Err(); err != nil {
+				t.Fatal(err)
+			}
+			defer direct.Del(context.Background(), key)
+
+			got, err := client.DerivedMetadata(context.Background(), detail)
+			if err != nil || !ggufmeta.DerivedCoreReady(got) || requests.Load() != 1 {
+				t.Fatalf("derived=%+v requests=%d err=%v", got, requests.Load(), err)
+			}
+			var replacement ggufmeta.Derived
+			hit, err := redisCache.Get(context.Background(), key, &replacement)
+			if err != nil || !hit || !ggufmeta.DerivedCoreReady(replacement) {
+				t.Fatalf("replacement hit=%v value=%+v err=%v", hit, replacement, err)
+			}
+		})
+	}
 }
