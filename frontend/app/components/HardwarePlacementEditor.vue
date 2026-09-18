@@ -228,9 +228,12 @@ async function refreshRecommendation() {
     if (runtimeBound) {
       if (props.instanceId) query.set('instance_id', props.instanceId)
       query.set('gpu_mode', props.gpuMode)
-      if (props.gpuMode === 'manual' && props.gpuDevices.length) query.set('gpu_devices', props.gpuDevices.join(','))
-      if (props.gpuMode === 'manual' && props.tensorSplit.trim()) query.set('tensor_split', props.tensorSplit.trim())
+      if (props.gpuMode === 'manual') {
+        query.set('gpu_devices', props.gpuDevices.join(','))
+        query.set('tensor_split', props.tensorSplit.trim())
+      }
       query.set('system_spillover_enabled', String(Boolean(props.systemSpilloverEnabled)))
+      query.set('preview_options', JSON.stringify(props.llamaOptions || {}))
     }
     const result = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation?${query.toString()}`)
     if (!isRecommendation(result)) {
@@ -348,10 +351,8 @@ watch(() => props.modelId, async () => {
   await loadContext()
   await refreshRecommendation()
 })
-watch(() => props.llamaOptions?.['ctx-size'], async (value, oldValue) => {
+watch(() => JSON.stringify(props.llamaOptions || {}), async (value, oldValue) => {
   if (value === oldValue) return
-  const incoming = parseContext(value)
-  if (incoming && commitContext(incoming) === commitContext(contextSize.value)) return
   await loadContext()
   scheduleRecommendation()
 })

@@ -115,7 +115,7 @@ describe('GPU placement cards', () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware
       if (path === '/api/v1/llamacpp/config?model_id=model-1&instance_id=instance-1') return { effective: { values: { 'ctx-size': '32768' } } }
-      if (path === '/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true') return bounded
+      if (path === '/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true&preview_options=%7B%7D') return bounded
       throw new Error(`unexpected request ${path}`)
     })
 
@@ -562,4 +562,43 @@ describe('GPU placement cards', () => {
     await flushPromises()
     expect(wrapper.emitted('update:gpuMode') || []).toEqual([])
   })
+})
+
+
+it('previews explicit empty manual placement and all unsaved llama.cpp options', async () => {
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === '/api/v1/hardware') return hardware
+    if (isConfig(path)) return { effective: { values: {} } }
+    if (path.includes('/api/v1/models/model-preview/recommendation?')) return recommendation({ context_length: 4096 })
+    throw new Error(`unexpected request ${path}`)
+  })
+
+  const wrapper = await mountSuspended(HardwarePlacementEditor, {
+    route: false,
+    props: {
+      gpuMode: 'manual', gpuDevices: [], tensorSplit: '', modelId: 'model-preview',
+      instanceId: 'instance-preview', runtimePreview: true, systemSpilloverEnabled: true,
+      llamaOptions: { mmproj: '/models/projector.gguf', 'n-gpu-layers': '4', 'no-kv-offload': 'true' }
+    }
+  })
+  await flushPromises()
+
+  const recommendationCalls = () => mocks.request.mock.calls
+    .map(call => String(call[0]))
+    .filter(path => path.includes('/api/v1/models/model-preview/recommendation?'))
+  let latest = recommendationCalls().at(-1)!
+  let params = new URL(latest, 'http://manager.test').searchParams
+  expect(params.has('gpu_devices')).toBe(true)
+  expect(params.get('gpu_devices')).toBe('')
+  expect(params.has('tensor_split')).toBe(true)
+  expect(params.get('tensor_split')).toBe('')
+  expect(JSON.parse(params.get('preview_options') || '{}')).toEqual({
+    mmproj: '/models/projector.gguf', 'n-gpu-layers': '4', 'no-kv-offload': 'true'
+  })
+
+  await wrapper.setProps({ llamaOptions: { mmproj: '', 'cpu-moe': 'true' } })
+  await vi.waitFor(() => expect(recommendationCalls().length).toBeGreaterThan(1))
+  latest = recommendationCalls().at(-1)!
+  params = new URL(latest, 'http://manager.test').searchParams
+  expect(JSON.parse(params.get('preview_options') || '{}')).toEqual({ mmproj: '', 'cpu-moe': 'true' })
 })

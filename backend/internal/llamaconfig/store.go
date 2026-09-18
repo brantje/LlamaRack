@@ -118,6 +118,31 @@ func (s *Store) LaunchOptions(ctx context.Context, profile llamacpp.Profile, mod
 	if err != nil {
 		return nil, Effective{}, err
 	}
+	return launchOptionsForEffective(profile, effective)
+}
+
+func (s *Store) PreviewLaunchOptions(ctx context.Context, profile llamacpp.Profile, modelID, instanceID string, instanceOptions map[string]string) (map[string]string, Effective, error) {
+	current, err := s.Effective(ctx, modelID, instanceID)
+	if err != nil {
+		return nil, Effective{}, err
+	}
+	validated, err := llamacpp.ValidateOptionsRetaining(profile, instanceOptions, current.Instance)
+	if err != nil {
+		return nil, Effective{}, err
+	}
+	preview, err := s.Effective(ctx, modelID, "")
+	if err != nil {
+		return nil, Effective{}, err
+	}
+	preview.Instance = make(map[string]string, len(validated))
+	for key, value := range validated {
+		preview.Instance[key] = value
+	}
+	apply(preview.Values, preview.Sources, preview.Instance, "instance-preview")
+	return launchOptionsForEffective(profile, preview)
+}
+
+func launchOptionsForEffective(profile llamacpp.Profile, effective Effective) (map[string]string, Effective, error) {
 	if len(profile.Options) == 0 {
 		return map[string]string{}, effective, nil
 	}

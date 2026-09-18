@@ -324,3 +324,23 @@ func TestRecommendationExplicitEmptyManualOverridesClearPersistedValues(t *testi
 		t.Fatalf("persisted manual devices leaked into explicit empty preview: %s", w.Body.String())
 	}
 }
+
+
+func TestRecommendationPreviewOptionsAreValidated(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	model := createModel(t, f, cookie)
+	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}}, func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Version: "test", Options: []llamacpp.Option{{Key: "ctx-size", Kind: "integer"}, {Key: "n-gpu-layers", Kind: "integer"}, {Key: "mmproj", Kind: "string"}}}, nil
+	})
+	w := doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?preview_options=%7B%22made-up%22%3A%221%22%7D", nil, cookie)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unsupported") {
+		t.Fatalf("unsupported preview=%d body=%s", w.Code, w.Body.String())
+	}
+	w = doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?preview_options=%7B%22mmproj%22%3A%22%22%2C%22n-gpu-layers%22%3A%222%22%7D", nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("validated preview=%d body=%s", w.Code, w.Body.String())
+	}
+}

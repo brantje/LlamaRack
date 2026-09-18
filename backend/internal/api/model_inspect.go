@@ -2,6 +2,8 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -127,6 +129,12 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		runtime.AllowSystemSpillover = enabled
 	}
 
+	previewOptions, previewOptionsPresent, previewErr := recommendationPreviewOptions(r)
+	if previewErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": previewErr.Error()})
+		return
+	}
+
 	store := llamaconfig.New(h.models.DB())
 	effective, configErr := store.Effective(r.Context(), model.ID, instanceID)
 	if configErr != nil {
@@ -138,13 +146,25 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if h.profile != nil {
 		if profile, profileErr := h.profile(); profileErr == nil {
 			capabilities = recommendationCapabilitiesFromProfile(profile)
-			launchOptions, _, launchErr := store.LaunchOptions(r.Context(), profile, model.ID, instanceID)
+			var launchOptions map[string]string
+			var launchErr error
+			if previewOptionsPresent {
+				launchOptions, _, launchErr = store.PreviewLaunchOptions(r.Context(), profile, model.ID, instanceID, previewOptions)
+			} else {
+				launchOptions, _, launchErr = store.LaunchOptions(r.Context(), profile, model.ID, instanceID)
+			}
 			if launchErr != nil {
 				writeErr(w, http.StatusBadRequest, launchErr)
 				return
 			}
 			runtime.Options = launchOptions
+		} else if previewOptionsPresent {
+			writeErr(w, http.StatusBadRequest, profileErr)
+			return
 		}
+	} else if previewOptionsPresent {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llama-server option schema is unavailable"})
+		return
 	}
 	runtime.CompanionBytes = recommendations.CompanionBytes(runtime.Options)
 	result := recommendations.AnalyzeRuntime(model, path, snapshot, contextLength, hardwareErr, capabilities, runtime)
@@ -294,4 +314,21 @@ func splitRecommendationDevices(raw string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+
+func recommendationPreviewOptions(r *http.Request) (map[string]string, bool, error) {
+	values, ok := r.URL.Query()["preview_options"]
+	if !ok {
+		return nil, false, nil
+	}
+	raw := "{}"
+	if len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+		raw = values[0]
+	}
+	options := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &options); err != nil {
+		return nil, true, fmt.Errorf("preview_options must be a JSON object of llama.cpp option strings: %w", err)
+	}
+	return options, true, nil
 }
