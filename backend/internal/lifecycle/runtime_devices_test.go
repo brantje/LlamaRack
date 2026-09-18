@@ -131,7 +131,10 @@ func TestRuntimeDiscoveryFailureFailsClosed(t *testing.T) {
 func TestCPUOnlyStartDoesNotEmitPlacementDeviceFlags(t *testing.T) {
 	ctx := context.Background()
 	s, _, m, sup, _ := setupLifecycle(t, true, false)
-	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}}}}}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		RAMTotalBytes: 8 * testGiB, RAMAvailableBytes: 8 * testGiB,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}},
+	}}}
 	s.SetRuntimeDeviceProfile(func() (llamacpp.Profile, error) { return runtimeProfile(), nil })
 	i, err := s.instances.Get(ctx, m.PublicID)
 	if err != nil {
