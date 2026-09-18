@@ -160,24 +160,78 @@ func PlanRuntimeEvictions(candidates []Candidate, snapshot hardware.Snapshot, re
 	if err == nil && current.Fits {
 		return Plan{Fits: true, Devices: append([]string(nil), current.Placement.Devices...)}
 	}
+
+	currentSnapshot := snapshot
 	selected := make([]Candidate, 0, len(candidates))
 	for _, candidate := range RankEvictionCandidates(candidates) {
 		if candidateGPUBytes(candidate) <= 0 && candidate.Resources.HostRAMBytes <= 0 {
 			continue
 		}
 		trial := append(append([]Candidate(nil), selected...), candidate)
-		request.Snapshot = snapshotWithCandidateCredits(snapshot, trial)
+		trialSnapshot := snapshotWithCandidateCredits(snapshot, trial)
+		request.Snapshot = trialSnapshot
 		after, err := PlanRuntime(request)
 		if err != nil {
 			continue
 		}
-		selected = trial
+		if !runtimePlanProgress(current, after, currentSnapshot, trialSnapshot, request.Placement) {
+			continue
+		}
+		selected = append(selected, candidate)
 		current = after
+		currentSnapshot = trialSnapshot
 		if after.Fits {
 			return planFromSelection(selected, after.Placement, true)
 		}
 	}
 	return planFromSelection(selected, current.Placement, current.Fits)
+}
+
+func runtimePlanProgress(before, after RuntimePlan, beforeSnapshot, afterSnapshot hardware.Snapshot, placementRequest PlacementRequest) bool {
+	if after.Fits {
+		return true
+	}
+
+	beforeHostFits := runtimeHostRAMFits(beforeSnapshot, before.Demand.HostRAMBytes)
+	afterHostFits := runtimeHostRAMFits(afterSnapshot, after.Demand.HostRAMBytes)
+	if !beforeHostFits && (afterHostFits || afterSnapshot.RAMAvailableBytes > beforeSnapshot.RAMAvailableBytes) {
+		return true
+	}
+
+	beforeDeficit := runtimeGPUDeficit(before.Placement, beforeSnapshot, placementRequest)
+	if beforeDeficit <= 0 {
+		return false
+	}
+	afterDeficit := runtimeGPUDeficit(after.Placement, afterSnapshot, placementRequest)
+	return afterDeficit < beforeDeficit
+}
+
+func runtimeGPUDeficit(placement Placement, snapshot hardware.Snapshot, request PlacementRequest) int64 {
+	if placement.RequiredBytes <= 0 {
+		return 0
+	}
+	if len(placement.DeviceDemand) > 0 {
+		reserve := requestReserve(request)
+		byID := make(map[string]hardware.GPU, len(snapshot.GPUs))
+		for _, gpu := range snapshot.GPUs {
+			byID[gpu.ID] = gpu
+		}
+		deficit := int64(0)
+		for _, required := range placement.DeviceDemand {
+			available := int64(0)
+			if gpu, ok := byID[required.DeviceID]; ok {
+				available = usableVRAM(gpu, reserve)
+			}
+			if required.Bytes > available {
+				deficit += required.Bytes - available
+			}
+		}
+		return deficit
+	}
+	if placement.RequiredBytes > placement.AvailableBytes {
+		return placement.RequiredBytes - placement.AvailableBytes
+	}
+	return 0
 }
 
 // PlanEvictionsBytes covers a scalar byte shortfall. It is only used when no

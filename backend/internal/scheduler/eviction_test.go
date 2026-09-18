@@ -482,3 +482,56 @@ func TestPlanRuntimeEvictionsAccountsForHostRAM(t *testing.T) {
 		t.Fatalf("host-RAM eviction plan=%+v", plan)
 	}
 }
+
+
+func TestPlanRuntimeEvictionsDropsWrongGPUVictim(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 64 * gib, RAMAvailableBytes: 48 * gib,
+		GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: gib},
+			{ID: "CUDA1", FreeBytes: gib},
+		},
+	}
+	candidates := []Candidate{
+		gpuCandidate("a-wrong-gpu", "CUDA1", 8*gib),
+		gpuCandidate("z-target-gpu", "CUDA0", 7*gib),
+	}
+	req := RuntimePlanRequest{
+		Demand: DemandInput{WeightsBytes: 6 * gib},
+		Placement: PlacementRequest{Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+	}
+	plan := PlanRuntimeEvictions(candidates, snapshot, req)
+	if !plan.Fits || len(plan.Evict) != 1 || plan.Evict[0].InstanceID != "z-target-gpu" {
+		t.Fatalf("runtime eviction must drop non-contributing wrong-GPU victim: %+v", plan)
+	}
+}
+
+func TestPlanRuntimeEvictionsDropsGPUVictimForHostOnlyPressure(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 2 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}, {ID: "CUDA1", FreeBytes: 16 * gib}},
+	}
+	candidates := []Candidate{
+		gpuCandidate("a-gpu-only", "CUDA1", 8*gib),
+		{
+			ModelID: "z-host", InstanceID: "z-host", Priority: "low", Ready: true, EvictionEnabled: true,
+			Resources: CandidateResources{HostRAMBytes: 10 * gib},
+		},
+	}
+	req := RuntimePlanRequest{
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib,
+			Metadata: KVMetadata{BlockCount: 8},
+			Options: map[string]string{"n-gpu-layers": "0"},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true, GPULayersOption: "n-gpu-layers"},
+	}
+	plan := PlanRuntimeEvictions(candidates, snapshot, req)
+	if !plan.Fits || len(plan.Evict) != 1 || plan.Evict[0].InstanceID != "z-host" {
+		t.Fatalf("host-only pressure must not retain GPU-only victim: %+v", plan)
+	}
+}
