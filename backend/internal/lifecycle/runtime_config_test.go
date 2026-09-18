@@ -48,7 +48,7 @@ func TestResolvedRuntimeConfigReachesWorkerArgv(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, ms, m, _, exec := setupLifecycle(t, true, false)
+	base, ms, m, _, exec := setupLifecycle(t, true, false)
 	instances, err := ms.Instances(ctx, m.ID)
 	if err != nil || len(instances) != 1 {
 		t.Fatalf("instances=%+v err=%v", instances, err)
@@ -68,7 +68,7 @@ func TestResolvedRuntimeConfigReachesWorkerArgv(t *testing.T) {
 		sup.Shutdown(stopCtx)
 	})
 
-	s := New(ms, sup)
+	s := New(ms, base.instances, base.config, sup)
 	s.SetProfileGetter(func() (llamacpp.Profile, error) {
 		return llamacpp.Profile{Version: "test", Options: []llamacpp.Option{
 			{Key: "ctx-size", Kind: "integer"},
