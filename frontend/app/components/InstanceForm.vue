@@ -19,6 +19,7 @@ type InstanceFormState = {
   autoload_enabled: boolean
   priority: string
   eviction_enabled: boolean
+  system_spillover_enabled: boolean
   idle_unload_seconds: number
   max_pending_requests: number
   gpu_mode: string
@@ -436,7 +437,14 @@ onMounted(() => {
           <UButton type="button" size="sm" :color="form.gpu_mode === 'manual' ? 'primary' : 'neutral'" :variant="form.gpu_mode === 'manual' ? 'solid' : 'ghost'" :aria-pressed="form.gpu_mode === 'manual'" data-testid="placement-mode-manual" @click="setPlacementMode('manual')">Manual</UButton>
         </div>
         <p v-if="form.gpu_mode === 'auto'" class="mb-4 text-xs text-[var(--neutral-700)]">LlamaRack chooses the smallest GPU set that safely fits the model. It keeps the model on one GPU when possible and adds GPUs only when needed.</p>
-        <div v-else class="mb-5 space-y-4" data-testid="manual-placement-controls">
+        <UCheckbox
+          v-model="form.system_spillover_enabled"
+          class="mb-5"
+          data-testid="system-spillover-enabled"
+          label="Allow system RAM spillover"
+          description="If this Instance does not fit fully on GPU, run it with partial GPU offload or CPU-only using host RAM."
+        />
+        <div v-if="form.gpu_mode === 'manual'" class="mb-5 space-y-4" data-testid="manual-placement-controls">
           <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <label v-for="gpu in hardwareGPUs" :key="gpu.id" class="flex cursor-pointer items-center gap-3 border p-3" :class="gpuSelected(gpu.id) ? 'border-[var(--color-accent)]' : 'border-[var(--color-divider)]'">
               <input type="checkbox" :checked="gpuSelected(gpu.id)" @change="toggleGPU(gpu.id)">
@@ -449,6 +457,9 @@ onMounted(() => {
         <HardwarePlacementEditor
           hide-placement-controls
           :model-id="form.model_id"
+          :instance-id="instanceId"
+          :runtime-preview="true"
+          :system-spillover-enabled="form.system_spillover_enabled"
           :llama-options="form.options"
           v-model:gpu-mode="form.gpu_mode"
           v-model:gpu-devices="form.gpu_devices"

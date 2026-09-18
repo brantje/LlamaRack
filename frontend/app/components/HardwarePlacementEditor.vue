@@ -72,6 +72,9 @@ const props = defineProps<{
   gpuDevices: string[]
   tensorSplit: string
   modelId?: string
+  instanceId?: string
+  runtimePreview?: boolean
+  systemSpilloverEnabled?: boolean
   llamaOptions?: Record<string, string>
   hidePlacementControls?: boolean
 }>()
@@ -105,8 +108,10 @@ const placementRanges = computed(() => recommendation.value && isPlacementRanges
 const placementZones = computed(() => placementRanges.value?.available ? placementRanges.value.zones || [] : [])
 const mappingZones = computed(() => sliderZones(placementZones.value, placementRanges.value?.context_step || contextStep))
 const modelContextLimit = computed(() => {
-  const fromRanges = placementRanges.value?.maximum_context || 0
-  return Math.max(fromRanges, contextCapability.value, 0)
+  if (placementRanges.value?.available && placementRanges.value.maximum_context > 0) {
+    return placementRanges.value.maximum_context
+  }
+  return Math.max(contextCapability.value, 0)
 })
 const sliderContextMaximum = computed(() => {
   const capped = noFitSliderMaximum(placementZones.value, placementRanges.value?.context_step || contextStep)
@@ -198,6 +203,7 @@ async function loadContext() {
 
   try {
     const params = new URLSearchParams({ model_id: props.modelId })
+    if (props.instanceId) params.set('instance_id', props.instanceId)
     const result = await manager.request<ConfigResponse>(`/api/v1/llamacpp/config?${params.toString()}`)
     const inherited = parseContext(result?.effective?.values?.['ctx-size'])
     if (inherited) {
@@ -218,6 +224,17 @@ async function refreshRecommendation() {
   recommendationLoading.value = true
   try {
     const query = new URLSearchParams({ context_length: String(commitContext(contextSize.value)) })
+    const runtimeBound = Boolean(props.runtimePreview || props.instanceId)
+    if (runtimeBound) {
+      if (props.instanceId) query.set('instance_id', props.instanceId)
+      query.set('gpu_mode', props.gpuMode)
+      if (props.gpuMode === 'manual') {
+        query.set('gpu_devices', props.gpuDevices.join(','))
+        query.set('tensor_split', props.tensorSplit.trim())
+      }
+      query.set('system_spillover_enabled', String(Boolean(props.systemSpilloverEnabled)))
+      query.set('preview_options', JSON.stringify(props.llamaOptions || {}))
+    }
     const result = await manager.request<Recommendation>(`/api/v1/models/${encodeURIComponent(props.modelId)}/recommendation?${query.toString()}`)
     if (!isRecommendation(result)) {
       recommendation.value = null
@@ -323,6 +340,10 @@ watch(() => props.gpuMode, (mode) => {
     emit('update:gpuDevices', [])
     emit('update:tensorSplit', '')
   }
+  if (props.runtimePreview || props.instanceId) scheduleRecommendation()
+})
+watch(() => [props.instanceId, props.runtimePreview, props.systemSpilloverEnabled, props.tensorSplit, props.gpuDevices.join(',')], () => {
+  if (props.runtimePreview || props.instanceId) scheduleRecommendation()
 })
 watch(() => props.modelId, async () => {
   recommendation.value = null
@@ -330,10 +351,8 @@ watch(() => props.modelId, async () => {
   await loadContext()
   await refreshRecommendation()
 })
-watch(() => props.llamaOptions?.['ctx-size'], async (value, oldValue) => {
+watch(() => JSON.stringify(props.llamaOptions || {}), async (value, oldValue) => {
   if (value === oldValue) return
-  const incoming = parseContext(value)
-  if (incoming && commitContext(incoming) === commitContext(contextSize.value)) return
   await loadContext()
   scheduleRecommendation()
 })

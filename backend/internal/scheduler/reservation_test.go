@@ -348,6 +348,20 @@ func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
 func TestLedgerDeviceCreditDoesNotApplyToUnrelatedGPU(t *testing.T) {
 	gib := int64(1024 * 1024 * 1024)
 	ledger := NewLedger()
+	victim, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "victim",
+		Snapshot: hardware.Snapshot{GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: 12 * gib},
+			{ID: "CUDA1", FreeBytes: 12 * gib},
+		}},
+		Placement: PlacementRequest{RequiredBytes: 8 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+	})
+	if err != nil || !victim.Placement.Fits {
+		t.Fatalf("victim lease=%+v err=%v", victim, err)
+	}
+	if err := ledger.Commit(victim.ID); err != nil {
+		t.Fatal(err)
+	}
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
 		{ID: "CUDA0", FreeBytes: 2 * gib},
 		{ID: "CUDA1", FreeBytes: 12 * gib},
@@ -399,5 +413,191 @@ func TestNewLedgerWithTTLAndNilClock(t *testing.T) {
 	}
 	if newLeaseID() == "" {
 		t.Fatal("lease id")
+	}
+}
+
+
+func TestLedgerAcquireRuntimeReservesExactPlan(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{RAMTotalBytes: 64 * gib, RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}}}
+	lease, plan, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "spill", Snapshot: snapshot,
+		Plan: RuntimePlanRequest{
+			Demand: DemandInput{WeightsBytes: 10 * gib, Metadata: KVMetadata{BlockCount: 10}},
+			Placement: PlacementRequest{Mode: "auto"}, AllowSystemSpillover: true,
+			Capabilities: RuntimeCapabilities{GPULayers: true},
+		},
+	})
+	if err != nil || !plan.Fits || !plan.RequiresSpillover {
+		t.Fatalf("plan=%+v lease=%+v err=%v", plan, lease, err)
+	}
+	if lease.ID == "" || lease.HostRAM != plan.Demand.HostRAMBytes || len(lease.GPUs) != 1 {
+		t.Fatalf("runtime lease=%+v plan=%+v", lease, plan)
+	}
+}
+
+
+func TestPlanningSnapshotSubtractsReservationsWithoutMutatingLedger(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * gib, FreeBytes: 16 * gib}},
+	}
+	first, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "committed", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: 4 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		HostRAM: 6 * gib,
+	})
+	if err != nil || first.ID == "" {
+		t.Fatalf("first lease=%+v err=%v", first, err)
+	}
+	if err := ledger.Commit(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "pending", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: 3 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		HostRAM: 5 * gib,
+	})
+	if err != nil || second.ID == "" {
+		t.Fatalf("second lease=%+v err=%v", second, err)
+	}
+
+	adjusted := ledger.PlanningSnapshot(snapshot, ResourceOwner{})
+	if got := adjusted.GPUs[0].FreeBytes; got != 9*gib {
+		t.Fatalf("GPU free=%d want=%d", got, 9*gib)
+	}
+	if adjusted.RAMAvailableBytes != 21*gib {
+		t.Fatalf("RAM available=%d want=%d", adjusted.RAMAvailableBytes, 21*gib)
+	}
+	if len(ledger.All()) != 2 {
+		t.Fatalf("planning snapshot mutated leases: %+v", ledger.All())
+	}
+
+	forOwner := ledger.PlanningSnapshot(snapshot, ResourceOwner{Kind: ResourceOwnerInstance, ID: "committed"})
+	if forOwner.GPUs[0].FreeBytes != 13*gib || forOwner.RAMAvailableBytes != 27*gib {
+		t.Fatalf("requester lease must be excluded without release: %+v", forOwner)
+	}
+	if lease, ok := ledger.Get(first.ID); !ok || lease.State != LeaseCommitted {
+		t.Fatalf("requester lease was mutated: %+v ok=%v", lease, ok)
+	}
+}
+
+
+func TestManualTensorSplitLeaseMatchesAdmittedVectorAndProtectsConcurrentStarts(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
+		{ID: "CUDA0", TotalBytes: 10 * gib, FreeBytes: 10 * gib},
+		{ID: "CUDA1", TotalBytes: 10 * gib, FreeBytes: 10 * gib},
+	}}
+	req := func(id string) AcquireRequest {
+		return AcquireRequest{
+			InstanceID: id, Snapshot: snapshot,
+			Placement: PlacementRequest{
+				RequiredBytes: 12 * gib, SplittableBytes: 10 * gib, FixedBytes: 2 * gib,
+				Mode: "manual", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "1,1", ReserveBytes: 1,
+			},
+		}
+	}
+	first, err := ledger.Acquire(req("first"))
+	if err != nil || !first.Placement.Fits {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	if len(first.GPUs) != 2 || first.GPUs[0].DeviceID != "CUDA0" || first.GPUs[0].Bytes != 7*gib ||
+		first.GPUs[1].DeviceID != "CUDA1" || first.GPUs[1].Bytes != 5*gib {
+		t.Fatalf("lease must match admitted tensor split vector: %+v", first.GPUs)
+	}
+	second, err := ledger.Acquire(req("second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Placement.Fits || second.ID != "" {
+		t.Fatalf("pending vector must protect both assigned GPU amounts: %+v", second)
+	}
+}
+
+
+func TestLedgerAwareRuntimeEvictionPlanningUsesCommittedReservations(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	raw := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{
+			ID: "CUDA0", TotalBytes: 16 * gib, UsedBytes: 2 * gib, FreeBytes: 14 * gib,
+		}},
+	}
+	victim, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "victim",
+		Snapshot: raw,
+		Placement: PlacementRequest{
+			RequiredBytes: 10 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1,
+		},
+	})
+	if err != nil || victim.ID == "" || !victim.Placement.Fits {
+		t.Fatalf("victim lease=%+v err=%v", victim, err)
+	}
+	if err := ledger.Commit(victim.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	request := RuntimePlanRequest{
+		Demand: DemandInput{WeightsBytes: 8 * gib},
+		Placement: PlacementRequest{Mode: "auto"},
+	}
+	rawRequest := request
+	rawRequest.Snapshot = raw
+	rawPlan, err := PlanRuntime(rawRequest)
+	if err != nil || !rawPlan.Fits {
+		t.Fatalf("raw telemetry should look runnable before lease accounting: %+v err=%v", rawPlan, err)
+	}
+
+	owner := ResourceOwner{Kind: ResourceOwnerInstance, ID: "requester"}
+	snapshotFor := func(selected []Candidate) hardware.Snapshot {
+		return ledger.PlanningSnapshotWithCredits(raw, owner, CreditsFromCandidates(selected))
+	}
+	planning := snapshotFor(nil)
+	request.Snapshot = planning
+	blocked, err := PlanRuntime(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Fits {
+		t.Fatalf("committed lease must block the second runtime: %+v snapshot=%+v", blocked, planning)
+	}
+
+	candidate := Candidate{
+		ModelID: "victim-model", InstanceID: "victim", Ready: true, EvictionEnabled: true,
+		Resources: CandidateResources{GPU: []GPUResource{{DeviceID: "CUDA0", Bytes: 10 * gib}}},
+	}
+	evictionPlan := PlanRuntimeEvictionsWithSnapshots([]Candidate{candidate}, request, snapshotFor)
+	if !evictionPlan.Fits || len(evictionPlan.Evict) != 1 || evictionPlan.Evict[0].InstanceID != "victim" {
+		t.Fatalf("ledger-aware eviction plan=%+v", evictionPlan)
+	}
+
+	credits := CreditsFromCandidates(evictionPlan.Evict)
+	credited := ledger.PlanningSnapshotWithCredits(raw, owner, credits)
+	request.Snapshot = credited
+	creditedPlan, err := PlanRuntime(request)
+	if err != nil || !creditedPlan.Fits {
+		t.Fatalf("victim credit must reopen the reserved hole: %+v err=%v snapshot=%+v", creditedPlan, err, credited)
+	}
+	if len(ledger.All()) != 1 || len(ledger.claimed) != 0 {
+		t.Fatalf("read-only planning mutated ledger: leases=%+v claimed=%+v", ledger.All(), ledger.claimed)
+	}
+
+	lease, admitted, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "requester",
+		Snapshot: raw,
+		Plan: RuntimePlanRequest{
+			Demand: DemandInput{WeightsBytes: 8 * gib},
+			Placement: PlacementRequest{Mode: "auto"},
+		},
+		Credits: credits,
+	})
+	if err != nil || !admitted.Fits || lease.ID == "" {
+		t.Fatalf("second runtime reservation=%+v plan=%+v err=%v", lease, admitted, err)
 	}
 }

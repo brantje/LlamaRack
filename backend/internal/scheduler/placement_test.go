@@ -139,3 +139,49 @@ func TestPlacementFormattingHelpers(t *testing.T) {
 		t.Fatalf("negative formatting=%q", got)
 	}
 }
+
+
+func TestManualTensorSplitRejectsPerDeviceOvercommitDespiteAggregateCapacity(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
+		{ID: "CUDA0", FreeBytes: 4 * gib},
+		{ID: "CUDA1", FreeBytes: 12 * gib},
+	}}
+	request := PlacementRequest{
+		RequiredBytes: 12 * gib, SplittableBytes: 10 * gib, FixedBytes: 2 * gib,
+		Mode: "manual", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "9,1", ReserveBytes: 1,
+	}
+	placement, err := PlanPlacement(snapshot, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placement.AvailableBytes < request.RequiredBytes {
+		t.Fatalf("test requires aggregate capacity: %+v", placement)
+	}
+	if placement.Fits {
+		t.Fatalf("skewed split overloads CUDA0 and must be rejected: %+v", placement)
+	}
+	if len(placement.DeviceDemand) != 2 || placement.DeviceDemand[0].Bytes != 11*gib || placement.DeviceDemand[1].Bytes != gib {
+		t.Fatalf("device demand=%+v", placement.DeviceDemand)
+	}
+
+	request.TensorSplit = "1,9"
+	placement, err = PlanPlacement(snapshot, request)
+	if err != nil || !placement.Fits {
+		t.Fatalf("compatible split should fit: %+v err=%v", placement, err)
+	}
+	if placement.DeviceDemand[0].Bytes != 3*gib || placement.DeviceDemand[1].Bytes != 9*gib {
+		t.Fatalf("compatible device demand=%+v", placement.DeviceDemand)
+	}
+}
+
+func TestManualTensorSplitValidation(t *testing.T) {
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 10 << 30}, {ID: "CUDA1", FreeBytes: 10 << 30}}}
+	for _, split := range []string{"1", "1,nope", "-1,2", "0,0"} {
+		if _, err := PlanPlacement(snapshot, PlacementRequest{
+			RequiredBytes: 2 << 30, Mode: "manual", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: split,
+		}); err == nil {
+			t.Fatalf("split %q should be rejected", split)
+		}
+	}
+}

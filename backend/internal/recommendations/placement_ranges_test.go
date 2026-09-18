@@ -304,6 +304,13 @@ func assertRangeInvariants(t *testing.T, snapshot hardware.Snapshot, weights int
 		if startKind != zone.Kind || endKind != zone.Kind || startCount != zone.GPUCount || endCount != zone.GPUCount {
 			t.Fatalf("classify mismatch zone=%+v start=%s:%d end=%s:%d", zone, startKind, startCount, endKind, endCount)
 		}
+		assertZonePlanDetails(t, zone, start)
+		assertZonePlanDetails(t, zone, end)
+		startTotal := totalHardwareFitWithCapabilities(snapshot, weights, zone.StartContext, metadata, Capabilities{})
+		endTotal := totalHardwareFitWithCapabilities(snapshot, weights, zone.EndContext, metadata, Capabilities{})
+		if startTotal != zone.TotalHardwareFit || endTotal != zone.TotalHardwareFit {
+			t.Fatalf("total hardware fit changes within zone=%+v start=%v end=%v", zone, startTotal, endTotal)
+		}
 		if i+1 < len(ranges.Zones) {
 			next := ranges.Zones[i+1]
 			nextStart := classifyOffload(snapshot, weights, next.StartContext, metadata)
@@ -316,6 +323,19 @@ func assertRangeInvariants(t *testing.T, snapshot hardware.Snapshot, weights int
 			}
 		}
 		prevEnd = zone.EndContext
+	}
+}
+
+func assertZonePlanDetails(t *testing.T, zone PlacementZone, classified classifiedPlacement) {
+	t.Helper()
+	if zone.OffloadMode != classified.Offload.Mode ||
+		strings.Join(zone.Devices, ",") != strings.Join(classified.Offload.Devices, ",") ||
+		zone.KVOnGPU != classified.Offload.KVOnGPU ||
+		zone.GPULayers != classified.Offload.GPULayers ||
+		zone.NCPUMoe != classified.Offload.NCPUMoe ||
+		zone.TensorSplit != classified.Offload.TensorSplit ||
+		zone.CurrentFit != classified.Fit {
+		t.Fatalf("zone details=%+v classified=%+v", zone, classified)
 	}
 }
 

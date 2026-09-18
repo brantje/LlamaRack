@@ -237,3 +237,33 @@ func TestEstimateDemandMixedGpuLayersAndCpuMoeUsesUnion(t *testing.T) {
 		}
 	})
 }
+
+
+func TestEstimateDemandKeepsCompanionsOutOfLayerAndExpertSpillMath(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	meta := KVMetadata{BlockCount: 40, ExpertCount: 64}
+	for name, options := range map[string]map[string]string{
+		"partial": {"n-gpu-layers": "20"},
+		"moe": {"n-cpu-moe": "20"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := EstimateDemand(DemandInput{WeightsBytes: 20 * gib, Metadata: meta, Options: options})
+			with := EstimateDemand(DemandInput{WeightsBytes: 20 * gib, CompanionBytes: gib, Metadata: meta, Options: options})
+			if with.WeightsBytes != 21*gib {
+				t.Fatalf("weights=%d", with.WeightsBytes)
+			}
+			if with.HostRAMBytes != base.HostRAMBytes {
+				t.Fatalf("companion must stay fixed on GPU for %s spill: base host=%d with=%d", name, base.HostRAMBytes, with.HostRAMBytes)
+			}
+			if with.VRAMBytes() <= base.VRAMBytes()+gib {
+				t.Fatalf("companion plus its runtime overhead must remain in VRAM: base=%d with=%d", base.VRAMBytes(), with.VRAMBytes())
+			}
+		})
+	}
+
+	baseCPU := EstimateDemand(DemandInput{WeightsBytes: 20 * gib, Metadata: meta, Options: map[string]string{"n-gpu-layers": "0"}})
+	withCPU := EstimateDemand(DemandInput{WeightsBytes: 20 * gib, CompanionBytes: gib, Metadata: meta, Options: map[string]string{"n-gpu-layers": "0"}})
+	if withCPU.HostRAMBytes <= baseCPU.HostRAMBytes+gib {
+		t.Fatalf("CPU-only companion and its overhead must move to host RAM: base=%d with=%d", baseCPU.HostRAMBytes, withCPU.HostRAMBytes)
+	}
+}

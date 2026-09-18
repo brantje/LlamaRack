@@ -225,7 +225,7 @@ func TestFailedStartReadinessTimeoutAndCancelReleaseLease(t *testing.T) {
 	}
 }
 
-func TestEvictionRequesterKeepsReservationDuringStopStartGap(t *testing.T) {
+func TestEvictionFreshSnapshotMustRecoverCapacityBeforeRequesterStarts(t *testing.T) {
 	ctx := context.Background()
 	s, _, m, sup, exec := setupLifecycle(t, true, false)
 	items, err := s.instances.ListByModel(ctx, m.ID)
@@ -234,7 +234,9 @@ func TestEvictionRequesterKeepsReservationDuringStopStartGap(t *testing.T) {
 	}
 	victim := items[0]
 	exec("UPDATE models SET total_bytes=? WHERE id=?", 8*testGiB, m.ID)
-	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * testGiB}}}}}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{
+		ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 0, FreeBytes: 16 * testGiB,
+	}}}}}
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -246,21 +248,20 @@ func TestEvictionRequesterKeepsReservationDuringStopStartGap(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{
-		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * testGiB}}},
-		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * testGiB}}},
+		{GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 12 * testGiB, FreeBytes: 4 * testGiB}}},
+		{GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 12 * testGiB, FreeBytes: 4 * testGiB}}},
 	}}
-	if _, err := s.StartInstance(ctx, requester.ID); err != nil {
-		t.Fatal(err)
+	if _, err := s.StartInstance(ctx, requester.ID); !errors.Is(err, errResourcePressureBlocked) {
+		t.Fatalf("fresh snapshot without recovered capacity must block requester: %v", err)
 	}
 	if sup.Status(victim.ID).State != supervisor.Unloaded {
 		t.Fatalf("victim state=%s", sup.Status(victim.ID).State)
 	}
-	if sup.Status(requester.ID).State != supervisor.Ready {
-		t.Fatalf("requester state=%s", sup.Status(requester.ID).State)
+	if sup.Status(requester.ID).State == supervisor.Ready {
+		t.Fatalf("requester unexpectedly reached READY: %+v", sup.Status(requester.ID))
 	}
-	lease, ok := s.reservations.GetByInstance(requester.ID)
-	if !ok || lease.State != scheduler.LeaseCommitted {
-		t.Fatalf("requester lease=%+v ok=%v", lease, ok)
+	if _, ok := s.reservations.GetByInstance(requester.ID); ok {
+		t.Fatal("blocked requester leaked a reservation")
 	}
 	if _, ok := s.reservations.GetByInstance(victim.ID); ok {
 		t.Fatal("victim lease should be released after eviction")

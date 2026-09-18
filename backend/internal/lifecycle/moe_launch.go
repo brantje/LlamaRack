@@ -1,74 +1,11 @@
 package lifecycle
 
 import (
-	"context"
 	"strconv"
 	"strings"
 
-	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
-	"github.com/brantje/llamarack/backend/internal/models"
-	"github.com/brantje/llamarack/backend/internal/recommendations"
 )
-
-type moeLaunchPlan struct {
-	Options     map[string]string
-	Devices     []string
-	TensorSplit string
-	Applied     bool
-}
-
-func (s *Service) prepareAutoMoELaunch(ctx context.Context, i instances.Instance, m models.Model, path string, launchOptions, effectiveOptions map[string]string) moeLaunchPlan {
-	plan := moeLaunchPlan{Options: launchOptions}
-	if !strings.EqualFold(strings.TrimSpace(i.GPUMode), "auto") || s.profile == nil || s.hardware == nil {
-		return plan
-	}
-	profile, err := s.profile()
-	if err != nil || !profile.Has("n-cpu-moe") {
-		return plan
-	}
-	snapshot, hardwareErr := s.hardware.Snapshot(ctx)
-	if hardwareErr != nil || len(snapshot.GPUs) == 0 {
-		return plan
-	}
-	contextLength := optionInt64(effectiveOptions, "ctx-size")
-	// Plan expert spill against installed (idle) capacity so leftover VRAM on
-	// one occupied card cannot pin placement and skip eviction of an idle
-	// multi-GPU victim. If the empty machine already fits full/multi-GPU
-	// offload, leave gpu_mode=auto and let resource-pressure eviction run.
-	recommendation := recommendations.AnalyzeWithCapabilities(
-		m,
-		path,
-		recommendations.AssumeIdleSnapshot(snapshot),
-		contextLength,
-		hardwareErr,
-		recommendations.Capabilities{NCPUMoe: true},
-	)
-	if recommendation.Offload.Mode != "moe" || len(recommendation.Offload.Devices) == 0 {
-		return plan
-	}
-
-	options := cloneOptions(launchOptions)
-	if !hasAnyOption(effectiveOptions, "gpu-layers", "n-gpu-layers") && recommendation.Offload.GPULayers > 0 {
-		options["n-gpu-layers"] = strconv.FormatInt(recommendation.Offload.GPULayers, 10)
-	}
-	if !hasAnyOption(effectiveOptions, "cpu-moe", "n-cpu-moe") && recommendation.Offload.NCPUMoe > 0 {
-		if recommendation.Metadata.BlockCount > 0 && recommendation.Offload.NCPUMoe >= recommendation.Metadata.BlockCount && profile.Has("cpu-moe") {
-			options["cpu-moe"] = "true"
-		} else {
-			options["n-cpu-moe"] = strconv.FormatInt(recommendation.Offload.NCPUMoe, 10)
-		}
-	}
-	if !recommendation.Offload.KVOnGPU && !hasAnyOption(effectiveOptions, "no-kv-offload", "kv-offload") {
-		options["no-kv-offload"] = "true"
-	}
-	return moeLaunchPlan{
-		Options:     options,
-		Devices:     append([]string(nil), recommendation.Offload.Devices...),
-		TensorSplit: recommendation.Offload.TensorSplit,
-		Applied:     true,
-	}
-}
 
 // applyCPUMoeLoadMode injects llama.cpp --load-mode none (or --no-mmap on older
 // binaries) when CPU expert offload is active, unless the user already chose a

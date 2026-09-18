@@ -204,3 +204,53 @@ func TestReplaceGlobalReplacesPriorSet(t *testing.T) {
 		t.Fatalf("global replacement failed: %+v", global)
 	}
 }
+
+
+func TestPreviewLaunchOptionsUsesUnsavedInstanceLayerWithoutPersistence(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	if err := store.ReplaceGlobal(ctx, map[string]string{"threads": "4"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES('m1','ctx-size','8192'),('m1','mmproj','/model/mmproj.gguf')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('i1','threads','8'),('i1','n-gpu-layers','7')`); err != nil {
+		t.Fatal(err)
+	}
+	profile := llamacpp.Profile{Version: "test", Options: []llamacpp.Option{
+		{Key: "threads", Kind: "integer"}, {Key: "ctx-size", Kind: "integer"},
+		{Key: "n-gpu-layers", Kind: "integer"}, {Key: "cpu-moe", Kind: "boolean"},
+		{Key: "no-cpu-moe", Kind: "boolean"}, {Key: "mmproj", Kind: "string"},
+	}}
+	launch, effective, err := store.PreviewLaunchOptions(ctx, profile, "m1", "i1", map[string]string{
+		"cpu-moe": "true", "mmproj": "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch["threads"] != "4" || launch["ctx-size"] != "8192" || launch["cpu-moe"] != "true" {
+		t.Fatalf("preview launch=%+v", launch)
+	}
+	if _, ok := launch["n-gpu-layers"]; ok {
+		t.Fatalf("removed persisted override leaked into preview: %+v", launch)
+	}
+	if _, ok := effective.Values["mmproj"]; ok {
+		t.Fatalf("empty companion tombstone must clear inherited companion: %+v", effective)
+	}
+	saved, err := store.Effective(ctx, "m1", "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Instance["threads"] != "8" || saved.Instance["n-gpu-layers"] != "7" {
+		t.Fatalf("preview mutated persisted instance options: %+v", saved.Instance)
+	}
+}
+
+func TestPreviewLaunchOptionsRejectsUnsupportedUnsavedOption(t *testing.T) {
+	store := testStore(t)
+	profile := llamacpp.Profile{Version: "test", Options: []llamacpp.Option{{Key: "ctx-size", Kind: "integer"}}}
+	if _, _, err := store.PreviewLaunchOptions(context.Background(), profile, "m1", "i1", map[string]string{"made-up": "1"}); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("unsupported preview option error=%v", err)
+	}
+}

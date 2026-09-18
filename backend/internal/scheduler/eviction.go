@@ -154,6 +154,99 @@ func PlanEvictions(candidates []Candidate, snapshot hardware.Snapshot, request P
 	return coverPlacement(candidates, snapshot, request)
 }
 
+func PlanRuntimeEvictions(candidates []Candidate, snapshot hardware.Snapshot, request RuntimePlanRequest) Plan {
+	return PlanRuntimeEvictionsWithSnapshots(candidates, request, func(selected []Candidate) hardware.Snapshot {
+		return snapshotWithCandidateCredits(snapshot, selected)
+	})
+}
+
+// PlanRuntimeEvictionsWithSnapshots evaluates each proposed victim set against
+// a caller-provided capacity view. Lifecycle uses this to re-run the ledger's
+// reservation accounting from the original hardware snapshot for every set,
+// so eviction planning and AcquireRuntime see identical schedulable capacity.
+func PlanRuntimeEvictionsWithSnapshots(candidates []Candidate, request RuntimePlanRequest, snapshotFor func([]Candidate) hardware.Snapshot) Plan {
+	if snapshotFor == nil {
+		return Plan{}
+	}
+	currentSnapshot := snapshotFor(nil)
+	request.Snapshot = currentSnapshot
+	current, err := PlanRuntime(request)
+	if err == nil && current.Fits {
+		return Plan{Fits: true, Devices: append([]string(nil), current.Placement.Devices...)}
+	}
+
+	selected := make([]Candidate, 0, len(candidates))
+	for _, candidate := range RankEvictionCandidates(candidates) {
+		if candidateGPUBytes(candidate) <= 0 && candidate.Resources.HostRAMBytes <= 0 {
+			continue
+		}
+		trial := append(append([]Candidate(nil), selected...), candidate)
+		trialSnapshot := snapshotFor(trial)
+		request.Snapshot = trialSnapshot
+		after, err := PlanRuntime(request)
+		if err != nil {
+			continue
+		}
+		if !runtimePlanProgress(current, after, currentSnapshot, trialSnapshot, request.Placement) {
+			continue
+		}
+		selected = trial
+		current = after
+		currentSnapshot = trialSnapshot
+		if after.Fits {
+			return planFromSelection(selected, after.Placement, true)
+		}
+	}
+	return planFromSelection(selected, current.Placement, current.Fits)
+}
+
+func runtimePlanProgress(before, after RuntimePlan, beforeSnapshot, afterSnapshot hardware.Snapshot, placementRequest PlacementRequest) bool {
+	if after.Fits {
+		return true
+	}
+
+	beforeHostFits := runtimeHostRAMFits(beforeSnapshot, before.Demand.HostRAMBytes)
+	afterHostFits := runtimeHostRAMFits(afterSnapshot, after.Demand.HostRAMBytes)
+	if !beforeHostFits && (afterHostFits || afterSnapshot.RAMAvailableBytes > beforeSnapshot.RAMAvailableBytes) {
+		return true
+	}
+
+	beforeDeficit := runtimeGPUDeficit(before.Placement, beforeSnapshot, placementRequest)
+	if beforeDeficit <= 0 {
+		return false
+	}
+	afterDeficit := runtimeGPUDeficit(after.Placement, afterSnapshot, placementRequest)
+	return afterDeficit < beforeDeficit
+}
+
+func runtimeGPUDeficit(placement Placement, snapshot hardware.Snapshot, request PlacementRequest) int64 {
+	if placement.RequiredBytes <= 0 {
+		return 0
+	}
+	if len(placement.DeviceDemand) > 0 {
+		reserve := requestReserve(request)
+		byID := make(map[string]hardware.GPU, len(snapshot.GPUs))
+		for _, gpu := range snapshot.GPUs {
+			byID[gpu.ID] = gpu
+		}
+		deficit := int64(0)
+		for _, required := range placement.DeviceDemand {
+			available := int64(0)
+			if gpu, ok := byID[required.DeviceID]; ok {
+				available = usableVRAM(gpu, reserve)
+			}
+			if required.Bytes > available {
+				deficit += required.Bytes - available
+			}
+		}
+		return deficit
+	}
+	if placement.RequiredBytes > placement.AvailableBytes {
+		return placement.RequiredBytes - placement.AvailableBytes
+	}
+	return 0
+}
+
 // PlanEvictionsBytes covers a scalar byte shortfall. It is only used when no
 // GPU inventory is available (CPU/other-backend hosts and eligibility previews).
 func PlanEvictionsBytes(candidates []Candidate, requiredBytes int64) Plan {
@@ -345,8 +438,8 @@ func candidateGPUBytes(candidate Candidate) int64 {
 }
 
 // AttributeResources fills a per-device resource vector. Observed process VRAM
-// wins per device, then missing lease/configured devices are filled from the
-// lease or a split of the estimate. Tensor-split workers often report nvidia-smi
+// is floored by the committed lease per device, then missing lease/configured
+// devices are filled from the lease or a split of the estimate. Tensor-split workers often report nvidia-smi
 // used-memory on only one GPU; the lease still names every reserved device.
 // Unknown devices are not invented except when the snapshot contains exactly
 // one GPU, which is the only device the instance could be using.
@@ -401,13 +494,19 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		if id == "" || gpu.Bytes <= 0 {
 			continue
 		}
-		leaseByID[id] = gpu.Bytes
+		if gpu.Bytes > leaseByID[id] {
+			leaseByID[id] = gpu.Bytes
+		}
 		if !have[id] {
 			devices = append(devices, id)
 		}
 	}
+	for i := range out {
+		if bytes := leaseByID[out[i].DeviceID]; bytes > out[i].Bytes {
+			out[i].Bytes = bytes
+		}
+	}
 	devices = cleanDeviceIDs(devices)
-	leaseAllocated := int64(0)
 	missing := make([]string, 0, len(devices))
 	for _, id := range devices {
 		if have[id] {
@@ -415,7 +514,6 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		}
 		if bytes := leaseByID[id]; bytes > 0 {
 			out = append(out, GPUResource{DeviceID: id, Bytes: bytes})
-			leaseAllocated += bytes
 			have[id] = true
 			continue
 		}
@@ -424,13 +522,13 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 	if len(missing) == 0 || estimated <= 0 {
 		return out
 	}
-	observedTotal := int64(0)
-	for _, gpu := range observed {
+	allocated := int64(0)
+	for _, gpu := range out {
 		if gpu.Bytes > 0 {
-			observedTotal += gpu.Bytes
+			allocated += gpu.Bytes
 		}
 	}
-	remaining := estimated - observedTotal - leaseAllocated
+	remaining := estimated - allocated
 	if remaining < 1 {
 		return out
 	}

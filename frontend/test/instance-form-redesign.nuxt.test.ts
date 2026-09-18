@@ -12,7 +12,7 @@ mockNuxtImport('useManagerApi', () => () => ({ request: mocks.request, apiBase: 
 function form(overrides: Record<string, any> = {}) {
   return {
     model_id: '', name: '', slug: '', enabled: true, always_on: false,
-    autoload_enabled: true, priority: 'normal', eviction_enabled: true,
+    autoload_enabled: true, priority: 'normal', eviction_enabled: true, system_spillover_enabled: false,
     idle_unload_seconds: 0, max_pending_requests: 0, gpu_mode: 'auto', gpu_devices: [], tensor_split: '',
     request_log_mode: 'metadata', options: {}, ...overrides
   }
@@ -106,6 +106,13 @@ describe('shared Instance form redesign', () => {
     await wrapper.get('[data-testid="priority-high"]').trigger('click')
     expect(state.priority).toBe('high')
     expect(wrapper.text()).toContain('Max pending requests (0 inherits the per-Instance default 16)')
+    const spillover = controls(wrapper, 'Checkbox', 'UCheckbox').find((item: any) => item.props('label') === 'Allow system RAM spillover')!
+    expect(spillover).toBeTruthy()
+    expect(spillover.props('description')).toBe('If this Instance does not fit fully on GPU, run it with partial GPU offload or CPU-only using host RAM.')
+    expect(state.system_spillover_enabled).toBe(false)
+    spillover.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    expect(state.system_spillover_enabled).toBe(true)
 
     const launch = controls(wrapper, 'Checkbox', 'UCheckbox').find((item: any) => item.props('label') === 'Launch after creation')!
     launch.vm.$emit('update:modelValue', true)

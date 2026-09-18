@@ -115,3 +115,22 @@ func TestEstimateDemandNegativeWeightsAndUnknownCache(t *testing.T) {
 type errDemand string
 
 func (e errDemand) Error() string { return string(e) }
+
+
+func TestEstimateDemandSeparatesSplittableWeightsFromFixedGPUBytes(t *testing.T) {
+	meta := KVMetadata{BlockCount: 8, Embedding: 1024, HeadCount: 8, KVHeadCount: 8}
+	demand := EstimateDemand(DemandInput{WeightsBytes: 4 << 30, CompanionBytes: 1 << 30, Context: 4096, Metadata: meta})
+	if demand.GPUSplittableBytes != 4<<30 {
+		t.Fatalf("splittable weights=%d", demand.GPUSplittableBytes)
+	}
+	if demand.GPUFixedBytes != demand.VRAMBytes()-demand.GPUSplittableBytes || demand.GPUFixedBytes <= 1<<30 {
+		t.Fatalf("fixed GPU demand=%d total=%d", demand.GPUFixedBytes, demand.VRAMBytes())
+	}
+	partial := EstimateDemand(DemandInput{
+		WeightsBytes: 4 << 30, CompanionBytes: 1 << 30, Context: 4096, Metadata: meta,
+		Options: map[string]string{"n-gpu-layers": "4"},
+	})
+	if partial.GPUSplittableBytes >= demand.GPUSplittableBytes || partial.GPUFixedBytes != demand.GPUFixedBytes {
+		t.Fatalf("partial demand=%+v full=%+v", partial, demand)
+	}
+}

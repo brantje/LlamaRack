@@ -12,7 +12,7 @@ const baseline = ref('')
 const confirmation = ref<{ request: (options: Record<string, string>) => Promise<boolean> } | null>(null)
 const form = reactive({
   model_id: '', name: '', slug: '', enabled: true, always_on: false, autoload_enabled: true,
-  priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, max_pending_requests: 0,
+  priority: 'normal', eviction_enabled: true, system_spillover_enabled: false, idle_unload_seconds: 0, max_pending_requests: 0,
   gpu_mode: 'auto', gpu_devices: [] as string[], tensor_split: '', request_log_mode: 'metadata', options: {} as Record<string, string>
 })
 
@@ -25,7 +25,8 @@ function serializeForm() {
   return JSON.stringify({
     model_id: form.model_id, name: form.name, slug: form.slug, enabled: form.enabled,
     always_on: form.always_on, autoload_enabled: form.autoload_enabled, priority: form.priority,
-    eviction_enabled: form.eviction_enabled, idle_unload_seconds: form.idle_unload_seconds, max_pending_requests: form.max_pending_requests, gpu_mode: form.gpu_mode,
+    eviction_enabled: form.eviction_enabled, system_spillover_enabled: form.system_spillover_enabled,
+    idle_unload_seconds: form.idle_unload_seconds, max_pending_requests: form.max_pending_requests, gpu_mode: form.gpu_mode,
     gpu_devices: form.gpu_mode === 'manual' ? [...form.gpu_devices] : [],
     tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '',
     request_log_mode: form.request_log_mode, options
@@ -91,7 +92,7 @@ async function submit() {
       body: {
         model_id: form.model_id, name: form.name, slug: form.slug, enabled: form.enabled,
         always_on: form.always_on, autoload_enabled: form.autoload_enabled,
-        priority: form.priority, eviction_enabled: form.eviction_enabled,
+        priority: form.priority, eviction_enabled: form.eviction_enabled, system_spillover_enabled: form.system_spillover_enabled,
         idle_unload_seconds: form.idle_unload_seconds, max_pending_requests: form.max_pending_requests, gpu_mode: form.gpu_mode,
         gpu_devices: form.gpu_mode === 'manual' ? form.gpu_devices : [],
         tensor_split: form.gpu_mode === 'manual' ? form.tensor_split.trim() : '',

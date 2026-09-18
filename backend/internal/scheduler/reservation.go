@@ -62,6 +62,13 @@ type Credit struct {
 	HostRAM    int64
 }
 
+type RuntimeAcquireRequest struct {
+	InstanceID string
+	Snapshot   hardware.Snapshot
+	Plan       RuntimePlanRequest
+	Credits    []Credit
+}
+
 type AcquireRequest struct {
 	// Owner is the preferred scheduler identity. InstanceID remains the legacy
 	// spelling for Instance lifecycle callers; when Owner is empty it is treated
@@ -174,6 +181,45 @@ func (l *Ledger) Acquire(req AcquireRequest) (ResourceLease, error) {
 	return cloneLease(lease), nil
 }
 
+func (l *Ledger) AcquireRuntime(req RuntimeAcquireRequest) (ResourceLease, RuntimePlan, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sweepExpiredLocked()
+
+	instanceID := strings.TrimSpace(req.InstanceID)
+	if instanceID == "" {
+		return ResourceLease{}, RuntimePlan{}, errors.New("instance id is required")
+	}
+	owner := ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID}
+	ownerKey := resourceOwnerKey(owner)
+	l.releaseOwnerLocked(owner)
+	usableCredits, creditBytes, hostCredit := l.usableCreditsLocked(instanceID, req.Credits)
+	gpuOccupancy, hostOccupancy := l.occupancyLocked(ownerKey, usableCredits)
+	adjusted := adjustSnapshot(req.Snapshot, gpuOccupancy, hostOccupancy, creditBytes, hostCredit)
+	req.Plan.Snapshot = adjusted
+	plan, err := PlanRuntime(req.Plan)
+	if err != nil {
+		return ResourceLease{}, RuntimePlan{}, err
+	}
+	if !plan.Fits {
+		return ResourceLease{Owner: owner, InstanceID: instanceID, Placement: plan.Placement}, plan, nil
+	}
+	placementRequest := req.Plan.Placement
+	placementRequest.RequiredBytes = plan.Demand.VRAMBytes()
+	placementRequest.HostRAMBytes = plan.Demand.HostRAMBytes
+	lease := &ResourceLease{
+		ID: l.newID(), Owner: owner, InstanceID: instanceID, Placement: plan.Placement,
+		GPUs: reservationsFor(plan.Placement, adjusted, placementRequest), HostRAM: plan.Demand.HostRAMBytes,
+		State: LeasePending, ExpiresAt: l.now().Add(l.ttl),
+	}
+	l.leases[lease.ID] = lease
+	l.byOwner[ownerKey] = lease.ID
+	for victim := range usableCredits {
+		l.claimed[victim] = lease.ID
+	}
+	return cloneLease(lease), plan, nil
+}
+
 func (l *Ledger) Commit(id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -279,6 +325,32 @@ func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
 	return l.GetByOwner(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})
 }
 
+func (l *Ledger) PlanningSnapshot(snapshot hardware.Snapshot, owner ResourceOwner) hardware.Snapshot {
+	return l.PlanningSnapshotWithCredits(snapshot, owner, nil)
+}
+
+func (l *Ledger) PlanningSnapshotWithCredits(snapshot hardware.Snapshot, owner ResourceOwner, credits []Credit) hardware.Snapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sweepExpiredLocked()
+
+	ignoreOwner := ""
+	requesterInstance := ""
+	if normalized, err := normalizeOwner(owner, ""); err == nil {
+		ignoreOwner = resourceOwnerKey(normalized)
+		if normalized.Kind == ResourceOwnerInstance {
+			requesterInstance = normalized.ID
+		} else {
+			credits = nil
+		}
+	} else {
+		credits = nil
+	}
+	usableCredits, creditBytes, hostCredit := l.usableCreditsLocked(requesterInstance, credits)
+	occupancy, host := l.occupancyLocked(ignoreOwner, usableCredits)
+	return adjustSnapshot(snapshot, occupancy, host, creditBytes, hostCredit)
+}
+
 func (l *Ledger) Pending() []ResourceLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -354,13 +426,16 @@ func (l *Ledger) usableCreditsLocked(requester string, credits []Credit) (map[st
 		if owner := l.claimed[victim]; owner != "" {
 			continue
 		}
-		usable[victim] = true
 		existing, hasExisting := l.leaseByInstanceLocked(victim)
-		if hasExisting && existing.HostRAM > 0 {
+		if !hasExisting {
+			// A released victim has already been reflected by the next successful
+			// hardware snapshot. Do not re-add its old GPU/RAM estimate.
+			continue
+		}
+		usable[victim] = true
+		if existing.HostRAM > 0 {
 			// Host memory has no per-process attribution in the hardware snapshot.
-			// Only credit RAM that the ledger currently owns for this managed
-			// victim. Once eviction releases the lease, a fresh /proc/meminfo
-			// snapshot is authoritative and must not receive the same RAM again.
+			// Only credit RAM that the ledger currently owns for this managed victim.
 			hostBytes += existing.HostRAM
 		}
 		if len(credit.GPUs) > 0 {
@@ -492,6 +567,16 @@ func reservationsFor(placement Placement, snapshot hardware.Snapshot, request Pl
 	if len(placement.Devices) == 0 {
 		return nil
 	}
+	if len(placement.DeviceDemand) > 0 {
+		out := make([]GPUReservation, 0, len(placement.DeviceDemand))
+		for _, demand := range placement.DeviceDemand {
+			if strings.TrimSpace(demand.DeviceID) == "" || demand.Bytes < 0 {
+				continue
+			}
+			out = append(out, GPUReservation{DeviceID: demand.DeviceID, Bytes: demand.Bytes})
+		}
+		return out
+	}
 	required := request.RequiredBytes
 	if required < 0 {
 		required = 0
@@ -560,6 +645,9 @@ func cloneLease(lease *ResourceLease) ResourceLease {
 	}
 	if lease.Placement.Devices != nil {
 		out.Placement.Devices = append([]string(nil), lease.Placement.Devices...)
+	}
+	if lease.Placement.DeviceDemand != nil {
+		out.Placement.DeviceDemand = append([]GPUResourceDemand(nil), lease.Placement.DeviceDemand...)
 	}
 	return out
 }

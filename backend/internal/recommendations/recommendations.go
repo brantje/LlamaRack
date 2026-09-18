@@ -32,7 +32,11 @@ type Metadata struct {
 }
 
 type Capabilities struct {
-	NCPUMoe bool `json:"n_cpu_moe"`
+	NCPUMoe         bool   `json:"n_cpu_moe"`
+	CPUMoe          bool   `json:"cpu_moe"`
+	NoKVOffload     bool   `json:"no_kv_offload"`
+	GPULayers       bool   `json:"gpu_layers"`
+	GPULayersOption string `json:"gpu_layers_option,omitempty"`
 }
 
 type QuantizationInfo struct {

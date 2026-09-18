@@ -489,7 +489,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-[length:var(--font-size-table-header)] text-[var(--neutral-700)]">
-            <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span>
+            <span>Priority: {{ instance.priority }}</span><span>GPU: {{ instance.gpu_mode }}</span><span>{{ instance.always_on ? 'Always On' : 'Not Always On' }}</span><span>{{ instance.autoload_enabled ? 'Autoload' : 'Manual load' }}</span><span class="col-span-2">{{ instance.eviction_enabled ? 'Resource-pressure eviction allowed' : 'Protected from resource-pressure eviction' }}</span><span class="col-span-2">{{ instance.system_spillover_enabled ? 'System RAM spillover allowed' : 'System RAM spillover off' }}</span>
           </div>
 
           <div v-if="isRunning(instance)" class="grid grid-cols-2 gap-x-5 gap-y-4 border-t border-[var(--color-divider)] pt-4" data-testid="instance-telemetry">

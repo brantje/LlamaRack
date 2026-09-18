@@ -29,6 +29,7 @@ export type Instance = {
   always_on: boolean
   priority: 'low' | 'normal' | 'high' | string
   eviction_enabled: boolean
+  system_spillover_enabled?: boolean
   idle_unload_seconds: number
   max_pending_requests?: number
   gpu_mode: 'auto' | 'manual' | string

@@ -167,3 +167,44 @@ func TestGPUOnlyEvictionBehaviorRemainsUnchanged(t *testing.T) {
 		t.Fatalf("GPU-only eviction behavior changed: %+v", plan)
 	}
 }
+
+
+func TestReleasedVictimGPUIsNotCreditedOnFreshSnapshot(t *testing.T) {
+	ledger := NewLedger()
+	const gib = hostRAMTestGiB
+	initial := hardware.Snapshot{
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * gib, FreeBytes: 16 * gib}},
+	}
+	victim, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "victim", Snapshot: initial,
+		Placement: PlacementRequest{RequiredBytes: 6 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+	})
+	if err != nil || !victim.Placement.Fits {
+		t.Fatalf("victim lease=%+v err=%v", victim, err)
+	}
+	if err := ledger.Commit(victim.ID); err != nil {
+		t.Fatal(err)
+	}
+	ledger.ReleaseInstance("victim")
+
+	// The victim is already gone. The fresh snapshot has 8 GiB free and 8 GiB
+	// of unrelated observed usage. Re-applying the old 6 GiB victim allocation
+	// would invent 14 GiB free and incorrectly admit this 10 GiB request.
+	fresh := hardware.Snapshot{
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * gib, UsedBytes: 8 * gib, FreeBytes: 8 * gib}},
+	}
+	lease, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "requester", Snapshot: fresh,
+		Placement: PlacementRequest{RequiredBytes: 10 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		Credits: []Credit{{InstanceID: "victim", GPUs: []GPUReservation{{DeviceID: "CUDA0", Bytes: 6 * gib}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Placement.Fits {
+		t.Fatalf("released victim GPU was double-counted against a fresh snapshot: %+v", lease)
+	}
+	if lease.Placement.AvailableBytes != 8*gib-1 {
+		t.Fatalf("fresh snapshot usable VRAM=%d want=%d", lease.Placement.AvailableBytes, 8*gib-1)
+	}
+}

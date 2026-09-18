@@ -62,7 +62,7 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 			t.Fatalf("models.%s missing", column)
 		}
 	}
-	for _, column := range []string{"model_id", "name", "autoload_enabled", "always_on", "priority", "eviction_enabled", "idle_unload_seconds", "max_pending_requests", "gpu_mode", "gpu_devices", "tensor_split"} {
+	for _, column := range []string{"model_id", "name", "autoload_enabled", "always_on", "priority", "eviction_enabled", "system_spillover_enabled", "idle_unload_seconds", "max_pending_requests", "gpu_mode", "gpu_devices", "tensor_split"} {
 		if !hasColumn(t, ctx, db, "instances", column) {
 			t.Fatalf("instances.%s missing", column)
 		}
@@ -84,11 +84,11 @@ func TestOpenCreatesSchemaAndEnablesForeignKeys(t *testing.T) {
 	if _, err := db.ExecContext(ctx, "INSERT INTO instances(id,model_id,name) VALUES('one','m1','One')"); err != nil {
 		t.Fatal(err)
 	}
-	var evictionEnabled, idleUnloadSeconds int
-	if err := db.QueryRowContext(ctx, "SELECT eviction_enabled,idle_unload_seconds FROM instances WHERE id='one'").Scan(&evictionEnabled, &idleUnloadSeconds); err != nil {
+	var evictionEnabled, spilloverEnabled, idleUnloadSeconds int
+	if err := db.QueryRowContext(ctx, "SELECT eviction_enabled,system_spillover_enabled,idle_unload_seconds FROM instances WHERE id='one'").Scan(&evictionEnabled, &spilloverEnabled, &idleUnloadSeconds); err != nil {
 		t.Fatal(err)
 	}
-	if evictionEnabled != 1 || idleUnloadSeconds != 0 {
+	if evictionEnabled != 1 || spilloverEnabled != 0 || idleUnloadSeconds != 0 {
 		t.Fatalf("unexpected instance defaults enabled=%d idle=%d", evictionEnabled, idleUnloadSeconds)
 	}
 	if _, err := db.ExecContext(ctx, "UPDATE instances SET idle_unload_seconds=-1 WHERE id='one'"); err == nil {

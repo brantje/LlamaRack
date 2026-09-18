@@ -48,6 +48,11 @@ type Activity struct {
 	LastUsed        time.Time `json:"last_used,omitempty"`
 }
 
+type committedWorkerReservation struct {
+	PID     int
+	LeaseID string
+}
+
 type Service struct {
 	models                *models.Service
 	instances             *instances.Service
@@ -68,6 +73,7 @@ type Service struct {
 	drainWaits            map[string]chan struct{}
 	startupGen            map[string]uint64
 	startupCancel         map[string]context.CancelFunc
+	committedWorkers      map[string]committedWorkerReservation
 	startupReady          chan struct{}
 	orphanCleanupBlocked  map[string]string
 	pendingLimits         func(context.Context) (perInstance, global int)
@@ -87,15 +93,20 @@ type loadCall struct {
 }
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
-	return &Service{
+	service := &Service{
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
 		reservations: scheduler.NewLedger(),
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, startFailures: map[string]StartFailureState{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{},
 		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{},
+		committedWorkers: map[string]committedWorkerReservation{},
 		orphanCleanupBlocked: map[string]string{}, now: time.Now,
 	}
+	if sup != nil {
+		sup.SetWorkerExitHandler(service.handleWorkerExit)
+	}
+	return service
 }
 
 func (s *Service) Instances() *instances.Service                            { return s.instances }
@@ -1080,36 +1091,25 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 			}
 		}
 	}
-	moePlan := s.prepareAutoMoELaunch(ctx, i, m, path, launchOptions, effective.Values)
-	launchOptions = applyCPUMoeLoadMode(moePlan.Options, liveProfile)
+	runtimePlan, err := s.prepareRuntimeLaunch(ctx, i, m, path, launchOptions, liveProfile, allowEviction)
+	if err != nil {
+		return "", err
+	}
+	launchOptions = applyCPUMoeLoadMode(runtimePlan.Options, liveProfile)
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
-
-	// Demand must reflect the exact launch options, including any Auto-generated
-	// MoE expert spill and KV placement, before resources are reserved.
-	demand := s.estimateDemand(m, path, launchOptions)
-	placementInstance := i
-	if moePlan.Applied {
-		placementInstance.GPUMode = "manual"
-		placementInstance.GPUDevices = append([]string(nil), moePlan.Devices...)
-		placementInstance.TensorSplit = moePlan.TensorSplit
-		if hasTensorSplitOverride {
-			placementInstance.TensorSplit = launchOptions["tensor-split"]
-		}
-	}
-	placement, placementErr := s.preparePlacementWithDemand(ctx, placementInstance, demand, allowEviction)
-	if placementErr != nil {
-		return "", placementErr
-	}
+	placement := runtimePlan.Placement
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	var workerEnv []string
 	if len(placement.Devices) > 0 {
 		args, workerEnv = appendPlacementLaunchArgs(args, placement.Devices, placement.TensorSplit, hasTensorSplitOverride)
+	} else if runtimePlan.Mode == "cpu" {
+		workerEnv = append(workerEnv, "CUDA_VISIBLE_DEVICES=", "HIP_VISIBLE_DEVICES=", "ROCR_VISIBLE_DEVICES=")
 	} else if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
-		// Preserve explicitly configured non-NVIDIA/ROCm backends when this Phase 7
-		// detector cannot observe them.
+		// Preserve explicitly configured non-NVIDIA/ROCm backends when hardware
+		// telemetry is unavailable. CPU spill never reuses a manual device pin.
 		args, workerEnv = appendPlacementLaunchArgs(args, i.GPUDevices, i.TensorSplit, hasTensorSplitOverride)
 	}
 
@@ -1117,7 +1117,8 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	if err != nil {
 		return "", err
 	}
-	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
+	var workerRuntime supervisor.Runtime
+	workerRuntime, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
 	if err != nil {
 		if isStartupInterrupt(err) {
 			return "", fmt.Errorf("%w: %w", errStartupKilled, err)
@@ -1139,6 +1140,14 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	committed = true
+	s.logRuntimeSpill(i.ID, runtimePlan)
+	if lease, ok := s.reservations.GetByInstance(i.ID); ok {
+		s.trackCommittedWorker(i.ID, workerRuntime.PID, lease.ID)
+		current := s.sup.Status(i.ID)
+		if current.State != supervisor.Ready || current.PID != workerRuntime.PID {
+			s.handleWorkerExit(supervisor.WorkerExit{InstanceID: i.ID, ModelID: m.ID, PID: workerRuntime.PID, State: current.State})
+		}
+	}
 	s.touch(i.ID)
 	return endpoint, nil
 }
@@ -1241,12 +1250,13 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 			s.releaseReservation(i.ID)
 			return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
 		}
+		stopped = stopped[:0]
 		if err := placementDevicesPresent(snapshot, lease.Placement.Devices); err != nil {
 			s.releaseReservation(i.ID)
 			return scheduler.Placement{}, err
 		}
 
-		ghost, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, Credits: scheduler.CreditsFromCandidates(stopped), HostRAM: demand.HostRAMBytes})
+		ghost, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, HostRAM: demand.HostRAMBytes})
 		if err != nil {
 			return scheduler.Placement{}, err
 		}
@@ -1333,6 +1343,37 @@ func (s *Service) commitReservation(instanceID string) error {
 	return nil
 }
 
+func (s *Service) trackCommittedWorker(instanceID string, pid int, leaseID string) {
+	if s == nil || instanceID == "" || pid <= 0 || leaseID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.committedWorkers[instanceID] = committedWorkerReservation{PID: pid, LeaseID: leaseID}
+	s.mu.Unlock()
+}
+
+func (s *Service) handleWorkerExit(exit supervisor.WorkerExit) {
+	if s == nil || exit.InstanceID == "" || exit.PID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	tracked, ok := s.committedWorkers[exit.InstanceID]
+	if !ok || tracked.PID != exit.PID {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.committedWorkers, exit.InstanceID)
+	s.mu.Unlock()
+	if s.reservations == nil {
+		return
+	}
+	lease, exists := s.reservations.Get(tracked.LeaseID)
+	s.reservations.Release(tracked.LeaseID)
+	if exists {
+		s.logReservation("released", exit.InstanceID, lease)
+	}
+}
+
 func (s *Service) releaseReservation(instanceID string) {
 	if s == nil || s.reservations == nil {
 		return
@@ -1380,10 +1421,11 @@ func (s *Service) resolveLaunchOptions(ctx context.Context, modelID, instanceID 
 	return effective.Values, nil
 }
 
-func (s *Service) estimateDemand(m models.Model, path string, options map[string]string) scheduler.ResourceDemand {
+func (s *Service) demandInput(m models.Model, path string, options map[string]string) scheduler.DemandInput {
 	metadata, metaErr := recommendations.ReadMetadata(path)
-	return scheduler.EstimateDemand(scheduler.DemandInput{
-		WeightsBytes: m.TotalBytes + companionBytes(options),
+	return scheduler.DemandInput{
+		WeightsBytes:   m.TotalBytes,
+		CompanionBytes: companionBytes(options),
 		Metadata: scheduler.KVMetadata{
 			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
 			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
@@ -1391,7 +1433,11 @@ func (s *Service) estimateDemand(m models.Model, path string, options map[string
 		},
 		MetadataErr: metaErr,
 		Options:     options,
-	})
+	}
+}
+
+func (s *Service) estimateDemand(m models.Model, path string, options map[string]string) scheduler.ResourceDemand {
+	return scheduler.EstimateDemand(s.demandInput(m, path, options))
 }
 
 func companionBytes(options map[string]string) int64 {

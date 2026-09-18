@@ -20,8 +20,9 @@ type Instance struct {
 	Autoload           bool     `json:"autoload_enabled"`
 	AlwaysOn           bool     `json:"always_on"`
 	Priority           string   `json:"priority"`
-	EvictionEnabled    bool     `json:"eviction_enabled"`
-	IdleUnloadSeconds  int      `json:"idle_unload_seconds"`
+	EvictionEnabled        bool     `json:"eviction_enabled"`
+	SystemSpilloverEnabled bool     `json:"system_spillover_enabled"`
+	IdleUnloadSeconds      int      `json:"idle_unload_seconds"`
 	MaxPendingRequests int      `json:"max_pending_requests"`
 	GPUMode            string   `json:"gpu_mode"`
 	GPUDevices         []string `json:"gpu_devices,omitempty"`
@@ -37,8 +38,9 @@ type CreateInput struct {
 	Autoload           *bool             `json:"autoload_enabled,omitempty"`
 	AlwaysOn           bool              `json:"always_on"`
 	Priority           string            `json:"priority,omitempty"`
-	EvictionEnabled    *bool             `json:"eviction_enabled,omitempty"`
-	IdleUnloadSeconds  int               `json:"idle_unload_seconds,omitempty"`
+	EvictionEnabled        *bool             `json:"eviction_enabled,omitempty"`
+	SystemSpilloverEnabled *bool             `json:"system_spillover_enabled,omitempty"`
+	IdleUnloadSeconds      int               `json:"idle_unload_seconds,omitempty"`
 	MaxPendingRequests *int              `json:"max_pending_requests,omitempty"`
 	GPUMode            string            `json:"gpu_mode,omitempty"`
 	GPUDevices         []string          `json:"gpu_devices,omitempty"`
@@ -54,8 +56,9 @@ type UpdateInput struct {
 	Autoload           *bool             `json:"autoload_enabled,omitempty"`
 	AlwaysOn           bool              `json:"always_on"`
 	Priority           string            `json:"priority,omitempty"`
-	EvictionEnabled    *bool             `json:"eviction_enabled,omitempty"`
-	IdleUnloadSeconds  int               `json:"idle_unload_seconds,omitempty"`
+	EvictionEnabled        *bool             `json:"eviction_enabled,omitempty"`
+	SystemSpilloverEnabled *bool             `json:"system_spillover_enabled,omitempty"`
+	IdleUnloadSeconds      int               `json:"idle_unload_seconds,omitempty"`
 	MaxPendingRequests *int              `json:"max_pending_requests,omitempty"`
 	GPUMode            string            `json:"gpu_mode,omitempty"`
 	GPUDevices         []string          `json:"gpu_devices,omitempty"`
@@ -104,7 +107,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 		return Instance{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,system_spillover_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), boolInt(i.SystemSpilloverEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil {
 		return Instance{}, err
 	}
 	if err := replaceOptions(ctx, tx, i.ID, in.Options); err != nil {
@@ -133,7 +136,7 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 		return Instance{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE instances SET slug=?,model_id=?,name=?,enabled=?,autoload_enabled=?,always_on=?,priority=?,eviction_enabled=?,idle_unload_seconds=?,max_pending_requests=?,gpu_mode=?,gpu_devices=?,tensor_split=?,request_log_mode=?,updated_at=unixepoch() WHERE id=?`, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode, currentID)
+	result, err := tx.ExecContext(ctx, `UPDATE instances SET slug=?,model_id=?,name=?,enabled=?,autoload_enabled=?,always_on=?,priority=?,eviction_enabled=?,system_spillover_enabled=?,idle_unload_seconds=?,max_pending_requests=?,gpu_mode=?,gpu_devices=?,tensor_split=?,request_log_mode=?,updated_at=unixepoch() WHERE id=?`, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), boolInt(i.SystemSpilloverEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode, currentID)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -169,8 +172,8 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 		if n > 1 {
 			name += " " + itoa(n)
 		}
-		enabled, autoload, eviction := base.Enabled, base.Autoload, base.EvictionEnabled
-		copy, err := s.Create(ctx, CreateInput{ModelID: base.ModelID, Name: name, Enabled: &enabled, Autoload: &autoload, AlwaysOn: base.AlwaysOn, Priority: base.Priority, EvictionEnabled: &eviction, IdleUnloadSeconds: base.IdleUnloadSeconds, MaxPendingRequests: &base.MaxPendingRequests, GPUMode: base.GPUMode, GPUDevices: append([]string(nil), base.GPUDevices...), TensorSplit: base.TensorSplit, RequestLogMode: base.RequestLogMode, Options: opts})
+		enabled, autoload, eviction, spillover := base.Enabled, base.Autoload, base.EvictionEnabled, base.SystemSpilloverEnabled
+		copy, err := s.Create(ctx, CreateInput{ModelID: base.ModelID, Name: name, Enabled: &enabled, Autoload: &autoload, AlwaysOn: base.AlwaysOn, Priority: base.Priority, EvictionEnabled: &eviction, SystemSpilloverEnabled: &spillover, IdleUnloadSeconds: base.IdleUnloadSeconds, MaxPendingRequests: &base.MaxPendingRequests, GPUMode: base.GPUMode, GPUDevices: append([]string(nil), base.GPUDevices...), TensorSplit: base.TensorSplit, RequestLogMode: base.RequestLogMode, Options: opts})
 		if err == nil {
 			return copy, nil
 		}
@@ -181,7 +184,7 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 	return Instance{}, errors.New("unable to generate unique instance copy name")
 }
 
-const instanceColumns = `id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode`
+const instanceColumns = `id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,system_spillover_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode`
 
 func (s *Service) Get(ctx context.Context, id string) (Instance, error) { return s.GetByID(ctx, id) }
 func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) {
@@ -272,15 +275,16 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Instance, error) {
 	var i Instance
-	var enabled, autoload, alwaysOn, eviction int
+	var enabled, autoload, alwaysOn, eviction, spillover int
 	var devices, split sql.NullString
-	if err := row.Scan(&i.ID, &i.Slug, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &i.IdleUnloadSeconds, &i.MaxPendingRequests, &i.GPUMode, &devices, &split, &i.RequestLogMode); err != nil {
+	if err := row.Scan(&i.ID, &i.Slug, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &spillover, &i.IdleUnloadSeconds, &i.MaxPendingRequests, &i.GPUMode, &devices, &split, &i.RequestLogMode); err != nil {
 		return Instance{}, err
 	}
 	i.Enabled = enabled != 0
 	i.Autoload = autoload != 0
 	i.AlwaysOn = alwaysOn != 0
 	i.EvictionEnabled = eviction != 0
+	i.SystemSpilloverEnabled = spillover != 0
 	if devices.Valid {
 		for _, value := range strings.Split(devices.String, ",") {
 			if value = strings.TrimSpace(value); value != "" {
@@ -311,7 +315,7 @@ func normalizeCreate(in CreateInput) (Instance, error) {
 		}
 		return Instance{}, errors.New("name must contain at least one letter or number")
 	}
-	return normalizeValues(Instance{Slug: slug}, in.ModelID, name, in.Enabled, in.Autoload, in.AlwaysOn, in.Priority, in.EvictionEnabled, in.IdleUnloadSeconds, in.MaxPendingRequests, in.GPUMode, in.GPUDevices, in.TensorSplit, in.RequestLogMode)
+	return normalizeValues(Instance{Slug: slug}, in.ModelID, name, in.Enabled, in.Autoload, in.AlwaysOn, in.Priority, in.EvictionEnabled, in.SystemSpilloverEnabled, in.IdleUnloadSeconds, in.MaxPendingRequests, in.GPUMode, in.GPUDevices, in.TensorSplit, in.RequestLogMode)
 }
 func normalizeUpdate(current Instance, in UpdateInput) (Instance, error) {
 	name := strings.TrimSpace(in.Name)
@@ -338,7 +342,12 @@ func normalizeUpdate(current Instance, in UpdateInput) (Instance, error) {
 		value := current.MaxPendingRequests
 		maxPending = &value
 	}
-	item, err := normalizeValues(Instance{ID: current.ID, Slug: slug}, modelID, name, in.Enabled, in.Autoload, in.AlwaysOn, in.Priority, in.EvictionEnabled, in.IdleUnloadSeconds, maxPending, in.GPUMode, in.GPUDevices, in.TensorSplit, requestLogMode)
+	spillover := in.SystemSpilloverEnabled
+	if spillover == nil {
+		value := current.SystemSpilloverEnabled
+		spillover = &value
+	}
+	item, err := normalizeValues(Instance{ID: current.ID, Slug: slug}, modelID, name, in.Enabled, in.Autoload, in.AlwaysOn, in.Priority, in.EvictionEnabled, spillover, in.IdleUnloadSeconds, maxPending, in.GPUMode, in.GPUDevices, in.TensorSplit, requestLogMode)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -346,7 +355,7 @@ func normalizeUpdate(current Instance, in UpdateInput) (Instance, error) {
 	return item, nil
 }
 
-func normalizeValues(base Instance, modelID, name string, enabledInput, autoloadInput *bool, alwaysOn bool, priorityInput string, evictionInput *bool, idleUnloadSeconds int, maxPendingInput *int, gpuModeInput string, gpuDevices []string, tensorSplit, requestLogModeInput string) (Instance, error) {
+func normalizeValues(base Instance, modelID, name string, enabledInput, autoloadInput *bool, alwaysOn bool, priorityInput string, evictionInput, spilloverInput *bool, idleUnloadSeconds int, maxPendingInput *int, gpuModeInput string, gpuDevices []string, tensorSplit, requestLogModeInput string) (Instance, error) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
 		return Instance{}, errors.New("model_id is required")
@@ -372,6 +381,10 @@ func normalizeValues(base Instance, modelID, name string, enabledInput, autoload
 	eviction := true
 	if evictionInput != nil {
 		eviction = *evictionInput
+	}
+	spillover := false
+	if spilloverInput != nil {
+		spillover = *spilloverInput
 	}
 	priority := strings.ToLower(strings.TrimSpace(priorityInput))
 	if priority == "" {
@@ -410,6 +423,7 @@ func normalizeValues(base Instance, modelID, name string, enabledInput, autoload
 	base.AlwaysOn = alwaysOn
 	base.Priority = priority
 	base.EvictionEnabled = eviction
+	base.SystemSpilloverEnabled = spillover
 	base.IdleUnloadSeconds = idleUnloadSeconds
 	base.MaxPendingRequests = pending
 	base.GPUMode = gpuMode

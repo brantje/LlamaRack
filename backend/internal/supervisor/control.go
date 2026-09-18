@@ -134,6 +134,7 @@ func (s *Supervisor) wait(w *worker) {
 	wasStopping := w.runtime.State == Stopping
 	instanceID := w.runtime.InstanceID
 	modelID := w.runtime.ModelID
+	pid := w.runtime.PID
 	generation := w.generation
 	logSource := w.publicAlias; if logSource == "" { logSource = instanceID }
 	w.runtime.PID = 0
@@ -146,10 +147,14 @@ func (s *Supervisor) wait(w *worker) {
 	state := w.runtime.State
 	lastError := w.runtime.LastError
 	stderrTail := lastStoredLogText(w.logs.lines(), "stderr")
+	exitHandler := s.workerExit
 	s.emitRuntimeLocked(w.runtime)
 	close(w.done)
 	s.mu.Unlock()
 	s.clearRuntimeRecord(instanceID, generation)
+	if exitHandler != nil {
+		exitHandler(WorkerExit{InstanceID: instanceID, ModelID: modelID, PID: pid, State: state})
+	}
 	if wasStopping {
 		slog.Info("llama-server process exited", "instance_id", instanceID, "model_id", modelID, "state", state)
 	} else {

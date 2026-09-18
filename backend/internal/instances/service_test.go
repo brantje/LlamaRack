@@ -54,18 +54,18 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	s, _ := testService(t)
 	i, err := s.Create(ctx, CreateInput{
 		ModelID: "m1", Name: "Coder Primary", Slug: "Coding API", Enabled: boolp(false), Autoload: boolp(false), AlwaysOn: true,
-		Priority: "high", EvictionEnabled: boolp(false), IdleUnloadSeconds: 90, MaxPendingRequests: intp(8),
+		Priority: "high", EvictionEnabled: boolp(false), SystemSpilloverEnabled: boolp(true), IdleUnloadSeconds: 90, MaxPendingRequests: intp(8),
 		GPUMode: "manual", GPUDevices: []string{"0", " 1 ", "0", ""}, TensorSplit: "1,1",
 		Options: map[string]string{"ctx-size": "8192", " threads ": "8", "": "ignored"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if i.ID == "" || i.ID == i.Slug || i.Slug != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || i.MaxPendingRequests != 8 || len(i.GPUDevices) != 2 {
+	if i.ID == "" || i.ID == i.Slug || i.Slug != "coding-api" || i.Enabled || i.Autoload || !i.AlwaysOn || i.Priority != "high" || i.EvictionEnabled || !i.SystemSpilloverEnabled || i.MaxPendingRequests != 8 || len(i.GPUDevices) != 2 {
 		t.Fatalf("created=%+v", i)
 	}
 	got, err := s.GetByID(ctx, i.ID)
-	if err != nil || got.TensorSplit != "1,1" || len(got.GPUDevices) != 2 {
+	if err != nil || got.TensorSplit != "1,1" || !got.SystemSpilloverEnabled || len(got.GPUDevices) != 2 {
 		t.Fatalf("get by id=%+v err=%v", got, err)
 	}
 	bySlug, err := s.GetBySlug(ctx, i.Slug)
@@ -85,11 +85,11 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 		t.Fatalf("options=%+v err=%v", opts, err)
 	}
 
-	updated, err := s.Update(ctx, i.ID, UpdateInput{Name: "Coder Renamed", Slug: "Renamed API", Enabled: boolp(true), Autoload: boolp(true), Priority: "normal", EvictionEnabled: boolp(true), GPUMode: "auto", Options: map[string]string{"flash-attn": "true"}})
+	updated, err := s.Update(ctx, i.ID, UpdateInput{Name: "Coder Renamed", Slug: "Renamed API", Enabled: boolp(true), Autoload: boolp(true), Priority: "normal", EvictionEnabled: boolp(true), SystemSpilloverEnabled: boolp(false), GPUMode: "auto", Options: map[string]string{"flash-attn": "true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != i.ID || updated.Slug != "renamed-api" || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload {
+	if updated.ID != i.ID || updated.Slug != "renamed-api" || updated.SystemSpilloverEnabled || updated.ModelID != "m1" || !updated.Enabled || !updated.Autoload {
 		t.Fatalf("updated=%+v", updated)
 	}
 	if updated.MaxPendingRequests != 8 {
@@ -110,7 +110,7 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copy.ID == updated.ID || copy.Slug != "coder-renamed-copy" || copy.ModelID != updated.ModelID {
+	if copy.ID == updated.ID || copy.Slug != "coder-renamed-copy" || copy.ModelID != updated.ModelID || copy.SystemSpilloverEnabled != updated.SystemSpilloverEnabled {
 		t.Fatalf("copy=%+v", copy)
 	}
 	copy2, err := s.Duplicate(ctx, updated.ID)
@@ -123,6 +123,32 @@ func TestCreateListGetOptionsUpdateRenameDuplicateDelete(t *testing.T) {
 	}
 	if err := s.Delete(ctx, updated.ID); err == nil {
 		t.Fatal("second delete should fail")
+	}
+}
+
+func TestSystemSpilloverDefaultsOffAndUpdateOmissionPreservesValue(t *testing.T) {
+	ctx := context.Background()
+	s, _ := testService(t)
+	created, err := s.Create(ctx, CreateInput{ModelID: "m1", Name: "Spill default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SystemSpilloverEnabled {
+		t.Fatal("system spillover must default off")
+	}
+	enabled, err := s.Update(ctx, created.ID, UpdateInput{Name: created.Name, SystemSpilloverEnabled: boolp(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enabled.SystemSpilloverEnabled {
+		t.Fatal("system spillover update was not persisted")
+	}
+	unchanged, err := s.Update(ctx, created.ID, UpdateInput{Name: created.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unchanged.SystemSpilloverEnabled {
+		t.Fatal("omitted system_spillover_enabled must preserve the current value")
 	}
 }
 

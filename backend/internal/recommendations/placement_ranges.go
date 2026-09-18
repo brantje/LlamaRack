@@ -73,7 +73,7 @@ func ComputePlacementRangesWithCapabilities(snapshot hardware.Snapshot, weights 
 	start := placementMinContext
 	for start <= maximum {
 		current := classifyOffloadWithCapabilities(snapshot, weights, start, metadata, capabilities)
-		identity := placementIdentity(current)
+		identity := placementIdentity(current) + "|" + offloadBool(totalHardwareFitWithCapabilities(snapshot, weights, start, metadata, capabilities))
 		end := lastMatchingContext(snapshot, weights, metadata, start, maximum, identity, capabilities)
 		zone := placementZoneFrom(start, end, current)
 		zone.TotalHardwareFit = totalHardwareFitWithCapabilities(snapshot, weights, start, metadata, capabilities)
@@ -120,25 +120,14 @@ func totalHardwareFitWithCapabilities(snapshot hardware.Snapshot, weights, conte
 }
 
 func lastMatchingContext(snapshot hardware.Snapshot, weights int64, metadata Metadata, start, maximum int64, identity string, capabilities Capabilities) int64 {
-	low, high := start, maximum
 	last := start
-	for low <= high {
-		mid := alignContext((low+high)/2, placementContextStep)
-		if mid < low {
-			mid = low
+	for context := start + placementContextStep; context <= maximum; context += placementContextStep {
+		classified := classifyOffloadWithCapabilities(snapshot, weights, context, metadata, capabilities)
+		currentIdentity := placementIdentity(classified) + "|" + offloadBool(totalHardwareFitWithCapabilities(snapshot, weights, context, metadata, capabilities))
+		if currentIdentity != identity {
+			break
 		}
-		if mid > high {
-			mid = alignContext(high, placementContextStep)
-			if mid < low {
-				break
-			}
-		}
-		if placementIdentity(classifyOffloadWithCapabilities(snapshot, weights, mid, metadata, capabilities)) == identity {
-			last = mid
-			low = mid + placementContextStep
-			continue
-		}
-		high = mid - placementContextStep
+		last = context
 	}
 	return last
 }
@@ -187,9 +176,17 @@ func placementKind(current classifiedPlacement) (string, int) {
 
 func placementIdentity(current classifiedPlacement) string {
 	kind, gpuCount := placementKind(current)
-	// Deliberately omit n_cpu_moe: context growth can change the minimum expert
-	// spill count every step without changing the meaningful placement zone.
-	parts := []string{kind, itoa(int64(gpuCount)), strings.Join(current.Offload.Devices, ","), offloadBool(current.Offload.KVOnGPU), offloadBool(current.Fit)}
+	parts := []string{
+		kind,
+		current.Offload.Mode,
+		itoa(int64(gpuCount)),
+		strings.Join(current.Offload.Devices, ","),
+		offloadBool(current.Offload.KVOnGPU),
+		itoa(current.Offload.GPULayers),
+		itoa(current.Offload.NCPUMoe),
+		current.Offload.TensorSplit,
+		offloadBool(current.Fit),
+	}
 	return strings.Join(parts, "|")
 }
 

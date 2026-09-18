@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-const baselineVersion = 7
+const baselineVersion = 8
 
 func TestFreshDatabaseMigratesToLatestSchema(t *testing.T) {
 	ctx := context.Background()

@@ -74,14 +74,14 @@ func TestPreparePlacementRejectsCapacityThatDidNotRecover(t *testing.T) {
 		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: testGiB}}},
 	}}
 	placement, err := s.preparePlacement(ctx, instances.Instance{ID: "target", GPUMode: "auto"}, 2*testGiB)
-	if err != nil {
-		t.Fatalf("reservation should hold freed capacity across the eviction gap: %v", err)
+	if !errors.Is(err, errResourcePressureBlocked) {
+		t.Fatalf("fresh post-eviction snapshot must be authoritative: placement=%+v err=%v", placement, err)
 	}
-	if !placement.Fits || len(placement.Devices) != 1 || placement.Devices[0] != "CUDA0" {
-		t.Fatalf("gap reservation placement=%+v", placement)
+	if placement.Fits {
+		t.Fatalf("fresh snapshot did not recover capacity but placement fit: %+v", placement)
 	}
-	if _, ok := s.reservations.GetByInstance("target"); !ok {
-		t.Fatal("requester lease should remain pending until start commits")
+	if _, ok := s.reservations.GetByInstance("target"); ok {
+		t.Fatal("failed requester admission leaked a pending lease")
 	}
 }
 
