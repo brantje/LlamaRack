@@ -25,7 +25,7 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 		t.Fatalf("begin err=%v", err)
 	}
 
-	blocker, err := database.Begin(ctx, s.db)
+	blocker, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 	}
 
 	var instanceID string
-	if err := s.db.QueryRowContext(ctx, `SELECT r.instance_id
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT r.instance_id
 		FROM inference_requests r
 		JOIN inference_request_correlations c ON c.inference_request_id=r.id
 		WHERE c.request_id=?`, "req-begin-overflow").Scan(&instanceID); err != nil {
