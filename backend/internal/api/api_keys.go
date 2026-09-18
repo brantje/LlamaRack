@@ -9,7 +9,8 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/auth"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 type apiKeysHandler struct{ auth *auth.Service }
 
