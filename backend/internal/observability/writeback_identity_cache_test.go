@@ -12,15 +12,15 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
 	s.startWriteback(ctx, time.Hour)
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-id','model-slug','Original Model','model.gguf',1)`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-id','model-slug','Original Model','model.gguf',1)`); err != nil {
 		t.Fatal(err)
 	}
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,?)`, instanceID, "public-instance", "model-id", "Instance"); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES(?,?,?,?)`, instanceID, "public-instance", "model-id", "Instance"); err != nil {
 		t.Fatal(err)
 	}
 
-	tx, err := database.Begin(ctx, s.db)
+	tx, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,11 +35,11 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 	if modelID != "model-id" || modelName != "Original Model" {
 		t.Fatalf("identity=%q %q", modelID, modelName)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET name='Renamed Model' WHERE id='model-id'`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `UPDATE models SET name='Renamed Model' WHERE id='model-id'`); err != nil {
 		t.Fatal(err)
 	}
 
-	tx, err = database.Begin(ctx, s.db)
+	tx, err = database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
