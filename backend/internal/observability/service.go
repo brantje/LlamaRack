@@ -3,7 +3,6 @@ package observability
 import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
-	"database/sql"
 	"fmt"
 	"math"
 	"sort"
@@ -271,87 +270,6 @@ func (s *Service) ListRequests(ctx context.Context, filters RequestFilters) ([]R
 		return nil, err
 	}
 	return s.store.ListRequests(ctx, filters)
-}
-
-func scanEnrichedRequest(row interface{ Scan(...any) error }) (RequestRecord, error) {
-	var item RequestRecord
-	var keyID, keyName, keyPrefix, errText, requestBody, responseBody sql.NullString
-	var streaming, autoloaded int
-	var ttft, tps, promptTPS sql.NullFloat64
-	if err := row.Scan(
-		&item.RequestID, &item.ID, &item.TraceID, &item.CallType, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint,
-		&keyID, &keyName, &keyPrefix, &item.ClientIP, &item.UserAgent, &streaming, &item.StatusCode, &item.Result, &item.DurationMS,
-		&ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &promptTPS, &item.QueueDurationMS, &item.LoadDurationMS,
-		&autoloaded, &errText, &requestBody, &responseBody,
-	); err != nil {
-		return RequestRecord{}, err
-	}
-	item.Streaming = streaming != 0
-	item.Autoloaded = autoloaded != 0
-	if keyID.Valid || keyName.Valid || keyPrefix.Valid {
-		item.APIKey = &APIKeyRef{ID: keyID.String, Name: keyName.String, Prefix: keyPrefix.String}
-	}
-	if ttft.Valid {
-		value := ttft.Float64
-		item.TTFTMS = &value
-	}
-	if tps.Valid {
-		value := tps.Float64
-		item.TokensPerSecond = &value
-		generation := value
-		item.GenerationTokensPerSecond = &generation
-	}
-	if promptTPS.Valid {
-		value := promptTPS.Float64
-		item.PromptTokensPerSecond = &value
-	}
-	if errText.Valid {
-		item.Error = errText.String
-	}
-	if requestBody.Valid {
-		value := requestBody.String
-		item.RequestBody = &value
-	}
-	if responseBody.Valid {
-		value := responseBody.String
-		item.ResponseBody = &value
-	}
-	return item, nil
-}
-
-func scanRequest(row interface{ Scan(...any) error }) (RequestRecord, error) {
-	var item RequestRecord
-	var keyID, keyName, keyPrefix, errText, requestBody, responseBody sql.NullString
-	var streaming, autoloaded int
-	var ttft, tps sql.NullFloat64
-	if err := row.Scan(&item.ID, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint, &keyID, &keyName, &keyPrefix, &streaming, &item.StatusCode, &item.Result, &item.DurationMS, &ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &item.QueueDurationMS, &item.LoadDurationMS, &autoloaded, &errText, &requestBody, &responseBody); err != nil {
-		return RequestRecord{}, err
-	}
-	item.Streaming = streaming != 0
-	item.Autoloaded = autoloaded != 0
-	if keyID.Valid || keyName.Valid || keyPrefix.Valid {
-		item.APIKey = &APIKeyRef{ID: keyID.String, Name: keyName.String, Prefix: keyPrefix.String}
-	}
-	if ttft.Valid {
-		value := ttft.Float64
-		item.TTFTMS = &value
-	}
-	if tps.Valid {
-		value := tps.Float64
-		item.TokensPerSecond = &value
-	}
-	if errText.Valid {
-		item.Error = errText.String
-	}
-	if requestBody.Valid {
-		value := requestBody.String
-		item.RequestBody = &value
-	}
-	if responseBody.Valid {
-		value := responseBody.String
-		item.ResponseBody = &value
-	}
-	return item, nil
 }
 
 func (s *Service) Timeseries(ctx context.Context, metric string, sinceMS int64, bucketSeconds int) ([]SeriesPoint, error) {
