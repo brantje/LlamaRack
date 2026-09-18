@@ -168,6 +168,10 @@ func TestPostgresApplicationPersistenceQualification(t *testing.T) {
 	if err != nil || len(statuses) != 1 || statuses[0].State != modelimports.StateCompleted {
 		t.Fatalf("initial import statuses=%+v err=%v", statuses, err)
 	}
+	if !starter.called(prepared.Instance.ID) {
+		t.Fatalf("prepare did not perform initial start: %v", starter.calls)
+	}
+	initialStarts := len(starter.calls)
 	if _, err := store.ExecContext(ctx, `UPDATE provider_imports SET state=?,start_attempted=0 WHERE id=?`, modelimports.StateDownloading, statuses[0].ID); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +179,7 @@ func TestPostgresApplicationPersistenceQualification(t *testing.T) {
 		t.Fatal(err)
 	}
 	statuses, err = importService.List(ctx)
-	if err != nil || len(statuses) != 1 || statuses[0].State != modelimports.StateCompleted || !starter.called(prepared.Instance.ID) {
+	if err != nil || len(statuses) != 1 || statuses[0].State != modelimports.StateCompleted || len(starter.calls) != initialStarts+1 || starter.calls[len(starter.calls)-1] != prepared.Instance.ID {
 		t.Fatalf("reconciled import statuses=%+v starter=%v err=%v", statuses, starter.calls, err)
 	}
 

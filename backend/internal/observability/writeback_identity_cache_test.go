@@ -11,6 +11,10 @@ import (
 func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	store, ok := s.store.(*sqlObservabilityStore)
+	if !ok {
+		t.Fatalf("unexpected observability store %T", s.store)
+	}
 	s.startWriteback(ctx, time.Hour)
 	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-id','model-slug','Original Model','model.gguf',1)`); err != nil {
 		t.Fatal(err)
@@ -24,7 +28,7 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelID, modelName, err := s.resolveWritebackModelIdentity(ctx, tx, instanceID, "public-instance")
+	modelID, modelName, err := store.resolveWritebackModelIdentity(ctx, tx, instanceID, "public-instance")
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
@@ -44,7 +48,7 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	modelID, modelName, err = s.resolveWritebackModelIdentity(ctx, tx, instanceID, "public-instance")
+	modelID, modelName, err = store.resolveWritebackModelIdentity(ctx, tx, instanceID, "public-instance")
 	if err != nil {
 		t.Fatal(err)
 	}
