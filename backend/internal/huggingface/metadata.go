@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	derivedMetadataCacheNamespace = "hf_derived"
 	discoveryMetadataCacheVersion = "v1"
 	discoveryMetadataCacheTTL     = 7 * 24 * time.Hour
 	discoveryMetadataLimit          = int64(8 << 20)
@@ -110,6 +111,7 @@ func (c *Client) cachedDerivedMetadata(ctx context.Context, cacheKey string) (gg
 		_ = c.metadataCache.Delete(ctx, cacheKey)
 		return ggufmeta.Derived{}, false
 	}
+	appcache.RecordOriginFetchAvoided(derivedMetadataCacheNamespace)
 	return cached, true
 }
 

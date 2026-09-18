@@ -400,12 +400,15 @@ func writeCacheMetrics(w http.ResponseWriter) {
 		writeMetricSample(w, "cache_errors_total", labels, strconv.FormatUint(snapshot.Errors, 10))
 		writeMetricSample(w, "cache_writes_total", labels, strconv.FormatUint(snapshot.Writes, 10))
 		writeMetricSample(w, "cache_deletes_total", labels, strconv.FormatUint(snapshot.Deletes, 10))
-		writeMetricSample(w, "cache_origin_fetches_avoided_total", labels, strconv.FormatUint(snapshot.Hits, 10))
 		for operation, durationNS := range map[string]uint64{
 			"get": snapshot.GetDurationNS, "set": snapshot.SetDurationNS, "delete": snapshot.DeleteDurationNS,
 		} {
 			operationLabels := strings.TrimSuffix(labels, "}") + `,operation="` + operation + `"}`
 			writeMetricSample(w, "cache_operation_duration_seconds_total", operationLabels, strconv.FormatFloat(float64(durationNS)/float64(time.Second), 'f', 9, 64))
 		}
+	}
+	for _, snapshot := range appcache.OriginFetchesAvoidedMetrics() {
+		labels := `{namespace="` + promEscape(snapshot.Namespace) + `"}`
+		writeMetricSample(w, "cache_origin_fetches_avoided_total", labels, strconv.FormatUint(snapshot.Count, 10))
 	}
 }

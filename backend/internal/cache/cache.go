@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -186,6 +187,36 @@ type metricsCounters struct {
 }
 
 var metricsRegistry sync.Map
+var originAvoidedRegistry sync.Map
+
+type OriginFetchesAvoidedSnapshot struct {
+	Namespace string
+	Count     uint64
+}
+
+// RecordOriginFetchAvoided is called by cache consumers only after a cached
+// value has passed semantic validation and the authoritative fetch is skipped.
+func RecordOriginFetchAvoided(namespace string) {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return
+	}
+	value, _ := originAvoidedRegistry.LoadOrStore(namespace, &atomic.Uint64{})
+	value.(*atomic.Uint64).Add(1)
+}
+
+func OriginFetchesAvoidedMetrics() []OriginFetchesAvoidedSnapshot {
+	var out []OriginFetchesAvoidedSnapshot
+	originAvoidedRegistry.Range(func(rawKey, rawValue any) bool {
+		namespace, _ := rawKey.(string)
+		counter, _ := rawValue.(*atomic.Uint64)
+		if namespace != "" && counter != nil {
+			out = append(out, OriginFetchesAvoidedSnapshot{Namespace: namespace, Count: counter.Load()})
+		}
+		return true
+	})
+	return out
+}
 
 type Observed struct {
 	namespace string

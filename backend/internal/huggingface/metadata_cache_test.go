@@ -474,3 +474,84 @@ func TestDerivedMetadataRedisMalformedValuesFallBackAndReplace(t *testing.T) {
 		})
 	}
 }
+
+
+func cacheHitsFor(namespace, backend string) uint64 {
+	for _, snapshot := range appcache.Metrics() {
+		if snapshot.Namespace == namespace && snapshot.Backend == backend {
+			return snapshot.Hits
+		}
+	}
+	return 0
+}
+
+func originAvoidedFor(namespace string) uint64 {
+	for _, snapshot := range appcache.OriginFetchesAvoidedMetrics() {
+		if snapshot.Namespace == namespace {
+			return snapshot.Count
+		}
+	}
+	return 0
+}
+
+func TestDerivedMetadataOriginAvoidedMetricRequiresSemanticAcceptance(t *testing.T) {
+	payload := discoveryGGUF(t)
+	tests := []struct {
+		name             string
+		cached           ggufmeta.Derived
+		wantOriginCalls  int32
+		wantAvoidedDelta uint64
+	}{
+		{
+			name: "semantically_invalid",
+			cached: ggufmeta.Derived{Architecture: "gemma3"},
+			wantOriginCalls: 1,
+			wantAvoidedDelta: 0,
+		},
+		{
+			name: "valid",
+			cached: ggufmeta.Derived{Architecture: "gemma3", BlockCount: 32, Embedding: 4096, HeadCount: 32},
+			wantOriginCalls: 0,
+			wantAvoidedDelta: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(payload)
+			}))
+			defer server.Close()
+			client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail := ModelDetail{ID: "acme/metric-"+tt.name, Revision: "revision", Artifacts: []Artifact{{
+				ID: "q4", Complete: true, Files: []File{{Path: "metric-Q4_K_M.gguf", Size: int64(len(payload))}},
+			}}}
+			key := client.derivedMetadataCacheKey(detail, detail.Artifacts[0].Files[0].Path)
+			memory := appcache.NewMemory()
+			if err := memory.Set(context.Background(), key, tt.cached, discoveryMetadataCacheTTL); err != nil {
+				t.Fatal(err)
+			}
+			backend := "metric-" + tt.name
+			client.SetDerivedMetadataCache(appcache.NewObserved(derivedMetadataCacheNamespace, backend, memory))
+			beforeHits := cacheHitsFor(derivedMetadataCacheNamespace, backend)
+			beforeAvoided := originAvoidedFor(derivedMetadataCacheNamespace)
+			if _, err := client.DerivedMetadata(context.Background(), detail); err != nil {
+				t.Fatal(err)
+			}
+			if got := requests.Load(); got != tt.wantOriginCalls {
+				t.Fatalf("origin calls=%d want=%d", got, tt.wantOriginCalls)
+			}
+			if delta := cacheHitsFor(derivedMetadataCacheNamespace, backend) - beforeHits; delta != 1 {
+				t.Fatalf("backend cache hit delta=%d want=1", delta)
+			}
+			if delta := originAvoidedFor(derivedMetadataCacheNamespace) - beforeAvoided; delta != tt.wantAvoidedDelta {
+				t.Fatalf("origin avoided delta=%d want=%d", delta, tt.wantAvoidedDelta)
+			}
+		})
+	}
+}
