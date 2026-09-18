@@ -18,7 +18,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/recommendations"
 	"github.com/brantje/llamarack/backend/internal/scheduler"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 type recommendationHandler struct {
 	auth      *auth.Service
