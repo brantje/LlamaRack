@@ -48,6 +48,11 @@ type Activity struct {
 	LastUsed        time.Time `json:"last_used,omitempty"`
 }
 
+type committedWorkerReservation struct {
+	PID     int
+	LeaseID string
+}
+
 type Service struct {
 	models                *models.Service
 	instances             *instances.Service
@@ -68,6 +73,7 @@ type Service struct {
 	drainWaits            map[string]chan struct{}
 	startupGen            map[string]uint64
 	startupCancel         map[string]context.CancelFunc
+	committedWorkers      map[string]committedWorkerReservation
 	startupReady          chan struct{}
 	orphanCleanupBlocked  map[string]string
 	pendingLimits         func(context.Context) (perInstance, global int)
@@ -87,15 +93,20 @@ type loadCall struct {
 }
 
 func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
-	return &Service{
+	service := &Service{
 		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
 		reservations: scheduler.NewLedger(),
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, startFailures: map[string]StartFailureState{}, idleLocks: map[string]*sync.Mutex{},
 		operationGates: map[string]chan struct{}{}, drainWaits: map[string]chan struct{}{},
 		startupGen: map[string]uint64{}, startupCancel: map[string]context.CancelFunc{},
+		committedWorkers: map[string]committedWorkerReservation{},
 		orphanCleanupBlocked: map[string]string{}, now: time.Now,
 	}
+	if sup != nil {
+		sup.SetWorkerExitHandler(service.handleWorkerExit)
+	}
+	return service
 }
 
 func (s *Service) Instances() *instances.Service                            { return s.instances }
@@ -1106,7 +1117,8 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	if err != nil {
 		return "", err
 	}
-	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
+	var workerRuntime supervisor.Runtime
+	workerRuntime, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
 	s.logRuntimeSpill(i.ID, runtimePlan)
 	if err != nil {
 		if isStartupInterrupt(err) {
@@ -1129,6 +1141,13 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	committed = true
+	if lease, ok := s.reservations.GetByInstance(i.ID); ok {
+		s.trackCommittedWorker(i.ID, workerRuntime.PID, lease.ID)
+		current := s.sup.Status(i.ID)
+		if current.State != supervisor.Ready || current.PID != workerRuntime.PID {
+			s.handleWorkerExit(supervisor.WorkerExit{InstanceID: i.ID, ModelID: m.ID, PID: workerRuntime.PID, State: current.State})
+		}
+	}
 	s.touch(i.ID)
 	return endpoint, nil
 }
@@ -1321,6 +1340,37 @@ func (s *Service) commitReservation(instanceID string) error {
 		s.logReservation("committed", instanceID, lease)
 	}
 	return nil
+}
+
+func (s *Service) trackCommittedWorker(instanceID string, pid int, leaseID string) {
+	if s == nil || instanceID == "" || pid <= 0 || leaseID == "" {
+		return
+	}
+	s.mu.Lock()
+	s.committedWorkers[instanceID] = committedWorkerReservation{PID: pid, LeaseID: leaseID}
+	s.mu.Unlock()
+}
+
+func (s *Service) handleWorkerExit(exit supervisor.WorkerExit) {
+	if s == nil || exit.InstanceID == "" || exit.PID <= 0 {
+		return
+	}
+	s.mu.Lock()
+	tracked, ok := s.committedWorkers[exit.InstanceID]
+	if !ok || tracked.PID != exit.PID {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.committedWorkers, exit.InstanceID)
+	s.mu.Unlock()
+	if s.reservations == nil {
+		return
+	}
+	lease, exists := s.reservations.Get(tracked.LeaseID)
+	s.reservations.Release(tracked.LeaseID)
+	if exists {
+		s.logReservation("released", exit.InstanceID, lease)
+	}
 }
 
 func (s *Service) releaseReservation(instanceID string) {

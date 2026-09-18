@@ -250,8 +250,8 @@ func TestPlanRuntimeNoGPUEmitsCPUFlagWhenSupported(t *testing.T) {
 
 func TestRuntimeHostRAMHeadroomBoundaries(t *testing.T) {
 	const gib = int64(1024 * 1024 * 1024)
-	if !runtimeHostRAMFits(hardware.Snapshot{}, 8*gib) {
-		t.Fatal("unknown RAM telemetry must preserve compatibility")
+	if runtimeHostRAMFits(hardware.Snapshot{}, 8*gib) {
+		t.Fatal("unknown RAM telemetry cannot prove a positive host-RAM demand fits")
 	}
 	if !runtimeHostRAMFits(hardware.Snapshot{RAMAvailableBytes: gib}, 0) {
 		t.Fatal("zero host demand must fit")
@@ -292,5 +292,28 @@ func TestHasExplicitOffloadRecognizesCanonicalAndCLIKeys(t *testing.T) {
 	}
 	if hasExplicitOffload(map[string]string{"ctx-size": "4096"}) || hasExplicitOffload(nil) {
 		t.Fatal("ordinary launch options must not count as explicit offload")
+	}
+}
+
+
+func TestPlanRuntimeRejectsSpillWhenGPUKnownButHostRAMUnknown(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 4 * gib, FreeBytes: 4 * gib}},
+		},
+		Demand: DemandInput{
+			WeightsBytes: 6 * gib,
+			Metadata: KVMetadata{BlockCount: 12},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true, NoKVOffload: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Fits {
+		t.Fatalf("host-RAM spill must not fit with unknown RAM telemetry: %+v", plan)
 	}
 }

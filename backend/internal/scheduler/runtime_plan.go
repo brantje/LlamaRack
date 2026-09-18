@@ -241,8 +241,11 @@ func planDemandPlacement(base PlacementRequest, snapshot hardware.Snapshot, dema
 }
 
 func runtimeHostRAMFits(snapshot hardware.Snapshot, required int64) bool {
-	if required <= 0 || snapshot.RAMTotalBytes <= 0 && snapshot.RAMAvailableBytes <= 0 {
+	if required <= 0 {
 		return true
+	}
+	if snapshot.RAMTotalBytes <= 0 && snapshot.RAMAvailableBytes <= 0 {
+		return false
 	}
 	if snapshot.RAMAvailableBytes <= defaultRAMReserveBytes {
 		return false

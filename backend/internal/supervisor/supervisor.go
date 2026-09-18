@@ -22,6 +22,13 @@ const (
 
 func ShuttingDown(state State) bool { return state == Draining || state == Stopping }
 
+type WorkerExit struct {
+	InstanceID string
+	ModelID    string
+	PID        int
+	State      State
+}
+
 type Runtime struct {
 	InstanceID               string     `json:"instance_id"`
 	ModelID                  string     `json:"model_id"`
@@ -59,6 +66,7 @@ type Supervisor struct {
 	store           RuntimeStore
 	scanner         ProcScanner
 	deviceValidator func([]string) error
+	workerExit      func(WorkerExit)
 }
 
 func New(binary, host string, portStart int, startupTimeout time.Duration) *Supervisor {
@@ -82,4 +90,11 @@ func (s *Supervisor) SetDeviceValidator(validator func([]string) error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deviceValidator = validator
+}
+
+
+func (s *Supervisor) SetWorkerExitHandler(handler func(WorkerExit)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workerExit = handler
 }

@@ -84,3 +84,35 @@ func TestRuntimePressureErrorVariants(t *testing.T) {
 		t.Fatalf("host pressure=%v", withHost)
 	}
 }
+
+
+func TestPrepareRuntimeLaunchRejectsSpillWhenHostRAMUnknown(t *testing.T) {
+	ctx := context.Background()
+	s, ms, model, _, execDB := setupLifecycle(t, true, false)
+	path, err := ms.ModelAbsolutePath(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLifecycleMetadataGGUF(t, path, "qwen2", map[string]int64{
+		"qwen2.context_length": 32768, "qwen2.block_count": 12, "qwen2.embedding_length": 1024,
+		"qwen2.attention.head_count": 8, "qwen2.attention.head_count_kv": 8,
+	})
+	execDB("UPDATE models SET total_bytes=? WHERE id=?", 6*testGiB, model.ID)
+	model, err = ms.GetByID(ctx, model.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.instances.ListByModel(ctx, model.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("instances=%+v err=%v", items, err)
+	}
+	instance := items[0]
+	instance.SystemSpilloverEnabled = true
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 4 * testGiB, FreeBytes: 4 * testGiB}},
+	}}}
+	_, err = s.prepareRuntimeLaunch(ctx, instance, model, path, map[string]string{"ctx-size": "4096"}, spilloverProfile(), false)
+	if err == nil || !errors.Is(err, errResourcePressureBlocked) {
+		t.Fatalf("unknown host RAM must block spill admission, err=%v", err)
+	}
+}
