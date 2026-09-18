@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/models"
 )
 
@@ -152,5 +153,42 @@ func apiBinaryWrite(t *testing.T, b *bytes.Buffer, value any) {
 	t.Helper()
 	if err := binary.Write(b, binary.LittleEndian, value); err != nil {
 		t.Fatal(err)
+	}
+}
+
+
+func TestRecommendationInstanceRuntimeParameters(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	model := createModel(t, f, cookie)
+	enabled := true
+	spill := true
+	instance, err := f.server.lifecycle.Instances().Create(t.Context(), instances.CreateInput{
+		ModelID: model.ID, Name: "Recommendation instance", Enabled: &enabled, SystemSpilloverEnabled: &spill,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}})
+
+	w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&system_spillover_enabled=false&gpu_mode=auto", nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("instance recommendation=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?instance_id=missing", nil, cookie); w.Code != http.StatusNotFound {
+		t.Fatalf("missing instance=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&system_spillover_enabled=maybe", nil, cookie); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid spillover=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&gpu_mode=other", nil, cookie); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid gpu mode=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestSplitRecommendationDevices(t *testing.T) {
+	got := splitRecommendationDevices(" CUDA0,CUDA1,CUDA0, ")
+	if len(got) != 2 || got[0] != "CUDA0" || got[1] != "CUDA1" {
+		t.Fatalf("devices=%v", got)
 	}
 }

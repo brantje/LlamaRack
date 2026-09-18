@@ -13,5 +13,14 @@ func recommendationCapabilities(getter func() (llamacpp.Profile, error)) recomme
 	if err != nil {
 		return recommendations.Capabilities{}
 	}
-	return recommendations.Capabilities{NCPUMoe: profile.Has("n-cpu-moe")}
+	return recommendationCapabilitiesFromProfile(profile)
+}
+
+func recommendationCapabilitiesFromProfile(profile llamacpp.Profile) recommendations.Capabilities {
+	return recommendations.Capabilities{
+		NCPUMoe:     profile.Has("n-cpu-moe"),
+		CPUMoe:      profile.Has("cpu-moe"),
+		NoKVOffload: profile.Has("no-kv-offload"),
+		GPULayers:   profile.Has("n-gpu-layers") || profile.Has("gpu-layers"),
+	}
 }

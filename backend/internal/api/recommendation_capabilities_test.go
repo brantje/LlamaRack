@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
+	"github.com/brantje/llamarack/backend/internal/recommendations"
 )
 
 func TestRecommendationCapabilities(t *testing.T) {
@@ -22,8 +23,13 @@ func TestRecommendationCapabilities(t *testing.T) {
 		t.Fatal("profile without n-cpu-moe must not advertise it")
 	}
 	if got := recommendationCapabilities(func() (llamacpp.Profile, error) {
-		return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}}}, nil
-	}); !got.NCPUMoe {
-		t.Fatal("profile containing n-cpu-moe must advertise the capability")
+		return llamacpp.Profile{Options: []llamacpp.Option{
+			{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"},
+		}}, nil
+	}); !got.NCPUMoe || !got.CPUMoe || !got.GPULayers || !got.NoKVOffload {
+		t.Fatalf("runtime capabilities not advertised: %+v", got)
+	}
+	if got := recommendationCapabilitiesFromProfile(llamacpp.Profile{}); got != (recommendations.Capabilities{}) {
+		t.Fatalf("empty profile capabilities=%+v", got)
 	}
 }

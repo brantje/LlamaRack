@@ -9,6 +9,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
@@ -82,7 +84,70 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	snapshot, hardwareErr := h.hardware.Snapshot(r.Context())
-	result := recommendations.AnalyzeWithCapabilities(model, path, snapshot, contextLength, hardwareErr, recommendationCapabilities(h.profile))
+	runtime := recommendations.RuntimeConfig{GPUMode: "auto", AllowSystemSpillover: true}
+	instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
+	if instanceID != "" {
+		instance, instanceErr := instances.New(h.models.DB()).Get(r.Context(), instanceID)
+		if instanceErr != nil {
+			if instanceErr == sql.ErrNoRows {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "instance not found"})
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, instanceErr)
+			return
+		}
+		if instance.ModelID != model.ID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "instance does not belong to model"})
+			return
+		}
+		runtime.GPUMode = instance.GPUMode
+		runtime.GPUDevices = append([]string(nil), instance.GPUDevices...)
+		runtime.TensorSplit = instance.TensorSplit
+		runtime.AllowSystemSpillover = instance.SystemSpilloverEnabled
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("gpu_mode")); raw != "" {
+		if raw != "auto" && raw != "manual" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "gpu_mode must be auto or manual"})
+			return
+		}
+		runtime.GPUMode = raw
+	}
+	if raw, ok := r.URL.Query()["gpu_devices"]; ok {
+		runtime.GPUDevices = splitRecommendationDevices(strings.Join(raw, ","))
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("tensor_split")); raw != "" {
+		runtime.TensorSplit = raw
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("system_spillover_enabled")); raw != "" {
+		enabled, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "system_spillover_enabled must be true or false"})
+			return
+		}
+		runtime.AllowSystemSpillover = enabled
+	}
+
+	store := llamaconfig.New(h.models.DB())
+	effective, configErr := store.Effective(r.Context(), model.ID, instanceID)
+	if configErr != nil {
+		writeErr(w, http.StatusInternalServerError, configErr)
+		return
+	}
+	runtime.Options = effective.Values
+	capabilities := recommendations.Capabilities{}
+	if h.profile != nil {
+		if profile, profileErr := h.profile(); profileErr == nil {
+			capabilities = recommendationCapabilitiesFromProfile(profile)
+			launchOptions, _, launchErr := store.LaunchOptions(r.Context(), profile, model.ID, instanceID)
+			if launchErr != nil {
+				writeErr(w, http.StatusBadRequest, launchErr)
+				return
+			}
+			runtime.Options = launchOptions
+		}
+	}
+	runtime.CompanionBytes = recommendations.CompanionBytes(runtime.Options)
+	result := recommendations.AnalyzeRuntime(model, path, snapshot, contextLength, hardwareErr, capabilities, runtime)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -214,4 +279,19 @@ func metadataPage(r *http.Request) (int, int, bool) {
 		limit = 500
 	}
 	return offset, limit, true
+}
+
+func splitRecommendationDevices(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
 }
