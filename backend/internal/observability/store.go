@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/telemetry"
 )
 
 // ObservabilityStore owns durable request, counter, and analytics persistence.
@@ -27,6 +30,15 @@ type ObservabilityStore interface {
 	SetOpenAIResponseID(context.Context, string, string) error
 	GetStoredOpenAIResponse(context.Context, string) (StoredOpenAIResponse, error)
 	MarkOpenAIResponseDeleted(context.Context, string) error
+	RecordHardware(context.Context, hardware.Snapshot, []telemetry.Sample, int64) error
+	HardwareTimeseries(context.Context, string, int64, int, string, string) ([]HardwareSeriesPoint, error)
+	LifecycleSummary(context.Context, int64) (LifecycleSummary, error)
+	PruneHardware(context.Context, int64) error
+	RequestTimeseries(context.Context, string, int64, int, string) ([]SeriesPoint, error)
+	RecordContextMetrics(context.Context, int64, []RuntimeTelemetrySample) error
+	RecordLifecycleCounters(context.Context, string, string, float64) error
+	SetRequestModelSlug(context.Context, string, string) error
+	RequestModelIdentity(context.Context, string) (RequestModelIdentity, error)
 }
 
 type sqlObservabilityStore struct {
@@ -489,6 +501,349 @@ func (s *sqlObservabilityStore) MarkOpenAIResponseDeleted(ctx context.Context, o
 		return database.ClassifyError(sql.ErrNoRows)
 	}
 	return nil
+}
+
+
+func (s *sqlObservabilityStore) RecordHardware(ctx context.Context, snapshot hardware.Snapshot, samples []telemetry.Sample, timestamp int64) error {
+	tx, err := database.Begin(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	insert := func(metric, deviceID, instanceID string, value float64) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO hardware_metric_samples(collected_at,metric,device_id,instance_id,value) VALUES(?,?,?,?,?)`,
+			timestamp, metric, deviceID, instanceID, value)
+		return err
+	}
+	if snapshot.RAMTotalBytes > 0 {
+		if err := insert("ram_total_bytes", "", "", float64(snapshot.RAMTotalBytes)); err != nil {
+			return database.ClassifyError(err)
+		}
+		used := snapshot.RAMTotalBytes - snapshot.RAMAvailableBytes
+		if used < 0 {
+			used = 0
+		}
+		if err := insert("ram_used_bytes", "", "", float64(used)); err != nil {
+			return database.ClassifyError(err)
+		}
+	}
+	var totalVRAM, usedVRAM int64
+	var utilization float64
+	for _, gpu := range snapshot.GPUs {
+		totalVRAM += gpu.TotalBytes
+		usedVRAM += gpu.UsedBytes
+		utilization += gpu.UtilizationPct
+		if err := insert("vram_total_bytes", gpu.ID, "", float64(gpu.TotalBytes)); err != nil {
+			return database.ClassifyError(err)
+		}
+		if err := insert("vram_used_bytes", gpu.ID, "", float64(gpu.UsedBytes)); err != nil {
+			return database.ClassifyError(err)
+		}
+		if err := insert("gpu_utilization_pct", gpu.ID, "", gpu.UtilizationPct); err != nil {
+			return database.ClassifyError(err)
+		}
+	}
+	if len(snapshot.GPUs) > 0 {
+		if err := insert("vram_total_bytes", "", "", float64(totalVRAM)); err != nil {
+			return database.ClassifyError(err)
+		}
+		if err := insert("vram_used_bytes", "", "", float64(usedVRAM)); err != nil {
+			return database.ClassifyError(err)
+		}
+		if err := insert("gpu_utilization_pct", "", "", utilization/float64(len(snapshot.GPUs))); err != nil {
+			return database.ClassifyError(err)
+		}
+	}
+	for _, sample := range samples {
+		if sample.VRAMUsedBytes != nil {
+			if err := insert("instance_vram_used_bytes", "", sample.InstanceID, float64(*sample.VRAMUsedBytes)); err != nil {
+				return database.ClassifyError(err)
+			}
+		}
+		if sample.CPUPercent != nil {
+			if err := insert("instance_cpu_percent", "", sample.InstanceID, *sample.CPUPercent); err != nil {
+				return database.ClassifyError(err)
+			}
+		}
+		if sample.MemoryUsedBytes != nil {
+			if err := insert("instance_memory_used_bytes", "", sample.InstanceID, float64(*sample.MemoryUsedBytes)); err != nil {
+				return database.ClassifyError(err)
+			}
+		}
+		for _, gpu := range sample.GPUs {
+			if gpu.VRAMUsedBytes != nil {
+				if err := insert("instance_vram_used_bytes", gpu.DeviceID, sample.InstanceID, float64(*gpu.VRAMUsedBytes)); err != nil {
+					return database.ClassifyError(err)
+				}
+			}
+		}
+	}
+	return database.ClassifyError(tx.Commit())
+}
+
+func (s *sqlObservabilityStore) HardwareTimeseries(ctx context.Context, metric string, sinceMS int64, bucketSeconds int, deviceID, instanceID string) ([]HardwareSeriesPoint, error) {
+	bucketMS := int64(bucketSeconds) * 1000
+	query := `SELECT (collected_at / ?) * ? AS bucket,device_id,instance_id,AVG(value)
+		FROM hardware_metric_samples WHERE metric=? AND collected_at>=?`
+	args := []any{bucketMS, bucketMS, metric, sinceMS}
+	if deviceID != "" {
+		query += " AND device_id=?"
+		args = append(args, deviceID)
+	}
+	if instanceID != "" {
+		query += " AND instance_id=?"
+		args = append(args, instanceID)
+	}
+	if deviceID == "" && instanceID == "" {
+		query += " AND device_id='' AND instance_id=''"
+	}
+	query += " GROUP BY bucket,device_id,instance_id ORDER BY bucket,device_id,instance_id"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	out := make([]HardwareSeriesPoint, 0)
+	for rows.Next() {
+		var point HardwareSeriesPoint
+		var value sql.NullFloat64
+		if err := rows.Scan(&point.Timestamp, &point.DeviceID, &point.InstanceID, &value); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		if value.Valid {
+			point.Value = value.Float64
+		}
+		out = append(out, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func (s *sqlObservabilityStore) LifecycleSummary(ctx context.Context, sinceMS int64) (LifecycleSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT metric,COALESCE(SUM(value),0)
+		FROM observability_counters WHERE metric IN ('load_total','eviction_total','idle_unload_total') GROUP BY metric`)
+	if err != nil {
+		return LifecycleSummary{}, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	var summary LifecycleSummary
+	for rows.Next() {
+		var metric string
+		var value float64
+		if err := rows.Scan(&metric, &value); err != nil {
+			return LifecycleSummary{}, database.ClassifyError(err)
+		}
+		switch strings.TrimSpace(metric) {
+		case "load_total":
+			summary.Loads = int64(value)
+		case "eviction_total":
+			summary.Evictions = int64(value)
+		case "idle_unload_total":
+			summary.IdleUnloads = int64(value)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return LifecycleSummary{}, database.ClassifyError(err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN finished_at>0 AND result<>'success' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN finished_at>0 THEN load_duration_ms ELSE 0 END),0)
+		FROM inference_requests WHERE autoloaded=1 AND started_at>=?`, sinceMS).
+		Scan(&summary.Autoloads, &summary.FailedStarts, &summary.LoadMS); err != nil {
+		return LifecycleSummary{}, database.ClassifyError(err)
+	}
+	return summary, nil
+}
+
+func (s *sqlObservabilityStore) PruneHardware(ctx context.Context, cutoff int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM hardware_metric_samples WHERE collected_at<?`, cutoff)
+	return database.ClassifyError(err)
+}
+
+func (s *sqlObservabilityStore) RequestTimeseries(ctx context.Context, metric string, sinceMS int64, bucketSeconds int, instanceID string) ([]SeriesPoint, error) {
+	bucketMS := int64(bucketSeconds) * 1000
+	if metric == "latency_p50" || metric == "latency_p95" {
+		query := `SELECT started_at,duration_ms FROM inference_requests WHERE started_at>=? AND finished_at>0`
+		args := []any{sinceMS}
+		if instanceID != "" {
+			query += " AND instance_id=?"
+			args = append(args, instanceID)
+		}
+		query += " ORDER BY started_at"
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		defer rows.Close()
+		buckets := map[int64][]float64{}
+		for rows.Next() {
+			var startedAt int64
+			var duration float64
+			if err := rows.Scan(&startedAt, &duration); err != nil {
+				return nil, database.ClassifyError(err)
+			}
+			bucket := (startedAt / bucketMS) * bucketMS
+			buckets[bucket] = append(buckets[bucket], duration)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		keys := make([]int64, 0, len(buckets))
+		for bucket := range buckets {
+			keys = append(keys, bucket)
+		}
+		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+		out := make([]SeriesPoint, 0, len(keys))
+		for _, bucket := range keys {
+			values := percentiles(buckets[bucket])
+			selected := values.P50
+			if metric == "latency_p95" {
+				selected = values.P95
+			}
+			if selected != nil {
+				out = append(out, SeriesPoint{Timestamp: bucket, Value: *selected})
+			}
+		}
+		return out, nil
+	}
+	if metric == "instance_context_tokens_max" {
+		query := `SELECT (collected_at / ?) * ? AS bucket,MAX(value)
+			FROM hardware_metric_samples WHERE metric='instance_context_tokens_max' AND collected_at>=?`
+		args := []any{bucketMS, bucketMS, sinceMS}
+		if instanceID != "" {
+			query += " AND instance_id=?"
+			args = append(args, instanceID)
+		}
+		query += " GROUP BY bucket ORDER BY bucket"
+		return scanStoreSeriesRows(s.db.QueryContext(ctx, query, args...))
+	}
+	expression := ""
+	switch metric {
+	case "requests":
+		expression = "COUNT(*)"
+	case "latency":
+		expression = "AVG(duration_ms)"
+	case "ttft":
+		expression = "AVG(ttft_ms)"
+	case "tokens":
+		expression = "COALESCE(SUM(total_tokens),0)"
+	case "prompt_tokens":
+		expression = "COALESCE(SUM(prompt_tokens),0)"
+	case "generated_tokens":
+		expression = "COALESCE(SUM(generated_tokens),0)"
+	default:
+		return nil, fmt.Errorf("unsupported metric %q", metric)
+	}
+	query := fmt.Sprintf(`SELECT (started_at / ?) * ? AS bucket,%s
+		FROM inference_requests WHERE started_at>=? AND finished_at>0`, expression)
+	args := []any{bucketMS, bucketMS, sinceMS}
+	if instanceID != "" {
+		query += " AND instance_id=?"
+		args = append(args, instanceID)
+	}
+	query += " GROUP BY bucket ORDER BY bucket"
+	return scanStoreSeriesRows(s.db.QueryContext(ctx, query, args...))
+}
+
+func scanStoreSeriesRows(rows *sql.Rows, err error) ([]SeriesPoint, error) {
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	out := make([]SeriesPoint, 0)
+	for rows.Next() {
+		var point SeriesPoint
+		var value sql.NullFloat64
+		if err := rows.Scan(&point.Timestamp, &value); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		if value.Valid {
+			point.Value = value.Float64
+		}
+		out = append(out, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func (s *sqlObservabilityStore) RecordContextMetrics(ctx context.Context, timestamp int64, samples []RuntimeTelemetrySample) error {
+	tx, err := database.Begin(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, sample := range samples {
+		if sample.InstanceID == "" || sample.LlamaMetrics == nil || sample.LlamaMetrics.ContextTokensMax == nil {
+			continue
+		}
+		value := *sample.LlamaMetrics.ContextTokensMax
+		if value < 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO hardware_metric_samples(collected_at,metric,device_id,instance_id,value) VALUES(?,?,?,?,?)`,
+			timestamp, "instance_context_tokens_max", "", sample.InstanceID, value); err != nil {
+			return database.ClassifyError(err)
+		}
+	}
+	return database.ClassifyError(tx.Commit())
+}
+
+func (s *sqlObservabilityStore) RecordLifecycleCounters(ctx context.Context, event, instanceID string, durationMS float64) error {
+	metric := ""
+	switch event {
+	case LifecycleLoad:
+		metric = "load_total"
+	case LifecycleFailedStart:
+		metric = "failed_start_total"
+	case LifecycleEviction:
+		metric = "eviction_total"
+	case LifecycleIdleUnload:
+		metric = "idle_unload_total"
+	default:
+		return fmt.Errorf("unsupported lifecycle event %q", event)
+	}
+	tx, err := database.Begin(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := addCounter(ctx, tx, Counter{Metric: metric, InstanceID: instanceID, Value: 1}); err != nil {
+		return database.ClassifyError(err)
+	}
+	if event == LifecycleLoad && durationMS > 0 {
+		if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: instanceID, Value: durationMS}); err != nil {
+			return database.ClassifyError(err)
+		}
+	}
+	return database.ClassifyError(tx.Commit())
+}
+
+func (s *sqlObservabilityStore) SetRequestModelSlug(ctx context.Context, requestID, modelSlug string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET model_slug=?
+		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?)`, modelSlug, requestID)
+	if err != nil {
+		return database.ClassifyError(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return database.ClassifyError(err)
+	}
+	if affected == 0 {
+		return database.ClassifyError(sql.ErrNoRows)
+	}
+	return nil
+}
+
+func (s *sqlObservabilityStore) RequestModelIdentity(ctx context.Context, requestID string) (RequestModelIdentity, error) {
+	var identity RequestModelIdentity
+	err := s.db.QueryRowContext(ctx, `SELECT r.instance_id,r.model_slug
+		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id
+		WHERE c.request_id=?`, requestID).Scan(&identity.InstanceID, &identity.ModelSlug)
+	return identity, database.ClassifyError(err)
 }
 
 var _ ObservabilityStore = (*sqlObservabilityStore)(nil)
