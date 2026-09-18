@@ -2,7 +2,6 @@ package litellm
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -19,7 +18,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
-func newLiteLLMTestEnv(t *testing.T) (*Service, *fakeLiteLLMServer, *auth.Service, *sql.DB) {
+func newLiteLLMTestEnv(t *testing.T) (*Service, *fakeLiteLLMServer, *auth.Service, database.Store) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -52,7 +51,7 @@ func newLiteLLMTestEnv(t *testing.T) (*Service, *fakeLiteLLMServer, *auth.Servic
 	return service, fake, authService, db
 }
 
-func insertEnabledInstance(t *testing.T, db *sql.DB, id string) string {
+func insertEnabledInstance(t *testing.T, db database.Store, id string) string {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO models(id,name,gguf_path,total_bytes) VALUES(?,?,?,?)`, "model-1", "Model", "/tmp/model.gguf", 1); err != nil {
 		t.Fatal(err)
