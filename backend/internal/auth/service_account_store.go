@@ -43,7 +43,7 @@ func (s *sqlServiceAccountStore) ListVisible(ctx context.Context) ([]ServiceAcco
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var items []ServiceAccount
+	items := make([]ServiceAccount, 0)
 	for rows.Next() {
 		item, err := scanStoredServiceAccount(rows)
 		if err != nil {
