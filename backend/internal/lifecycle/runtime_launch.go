@@ -22,6 +22,11 @@ func (s *Service) prepareRuntimeLaunch(
 	profile llamacpp.Profile,
 	allowEviction bool,
 ) (scheduler.RuntimePlan, error) {
+	if strings.EqualFold(strings.TrimSpace(instance.GPUMode), "manual") {
+		if err := runtimeDevicesFromProfile(profile).validateManual(instance.GPUDevices); err != nil {
+			return scheduler.RuntimePlan{}, err
+		}
+	}
 	demandInput := s.demandInput(model, path, launchOptions)
 	request := scheduler.RuntimePlanRequest{
 		Demand: demandInput,

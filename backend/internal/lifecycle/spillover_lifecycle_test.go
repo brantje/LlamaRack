@@ -42,7 +42,15 @@ func TestSystemSpilloverOffPreservesGPUOrFail(t *testing.T) {
 
 func TestSystemSpilloverStartsWithEphemeralPartialPlan(t *testing.T) {
 	ctx := context.Background()
-	s, _, model, sup, execDB := setupLifecycle(t, true, false)
+	s, ms, model, sup, execDB := setupLifecycle(t, true, false)
+	path, err := ms.ModelAbsolutePath(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLifecycleMetadataGGUF(t, path, "qwen2", map[string]int64{
+		"qwen2.context_length": 32768, "qwen2.block_count": 10, "qwen2.embedding_length": 1024,
+		"qwen2.attention.head_count": 8, "qwen2.attention.head_count_kv": 8,
+	})
 	items, err := s.instances.ListByModel(ctx, model.ID)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("instances=%+v err=%v", items, err)
@@ -137,7 +145,15 @@ func TestSystemSpilloverCanFallBackCPUOnlyWithoutGPUReservation(t *testing.T) {
 
 func TestManualSystemSpilloverStaysOnConfiguredDevice(t *testing.T) {
 	ctx := context.Background()
-	s, _, model, sup, execDB := setupLifecycle(t, true, false)
+	s, ms, model, sup, execDB := setupLifecycle(t, true, false)
+	path, err := ms.ModelAbsolutePath(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLifecycleMetadataGGUF(t, path, "qwen2", map[string]int64{
+		"qwen2.context_length": 32768, "qwen2.block_count": 10, "qwen2.embedding_length": 1024,
+		"qwen2.attention.head_count": 8, "qwen2.attention.head_count_kv": 8,
+	})
 	items, _ := s.instances.ListByModel(ctx, model.ID)
 	instance := items[0]
 	execDB("UPDATE models SET total_bytes=? WHERE id=?", 6*testGiB, model.ID)

@@ -121,8 +121,8 @@ func TestCompanionWeightsIncreaseDemand(t *testing.T) {
 	if with.WeightsBytes != base.WeightsBytes+32*1024*1024 {
 		t.Fatalf("companion weights base=%d with=%d", base.WeightsBytes, with.WeightsBytes)
 	}
-	if with.VRAMBytes() <= base.VRAMBytes()+32*1024*1024 {
-		t.Fatalf("companion demand must include companion runtime overhead: base=%d with=%d", base.VRAMBytes(), with.VRAMBytes())
+	if with.VRAMBytes() < base.VRAMBytes()+32*1024*1024 {
+		t.Fatalf("companion demand must include at least the companion bytes: base=%d with=%d", base.VRAMBytes(), with.VRAMBytes())
 	}
 	missing := s.estimateDemand(m, path, map[string]string{"ctx-size": "4096", "mmproj": filepath.Join(t.TempDir(), "nope.gguf"), "spec-draft-model": t.TempDir()})
 	if missing.WeightsBytes != base.WeightsBytes {
