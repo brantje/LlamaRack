@@ -99,10 +99,17 @@ jobs:
         with:
           go-version: '1.27.x'
           cache-dependency-path: backend/go.sum
-      - name: PostgreSQL storage contracts
+      - name: PostgreSQL storage and model-import qualification
         run: |
           go test ./internal/database ./internal/storagecontract -count=1
-          go test ./internal/modelimports -run '^TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency
+          go test ./internal/modelimports -count=10
+          go test ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
+      - name: PostgreSQL storage and model-import qualification with race detector
+        run: |
+          go test -race ./internal/database ./internal/storagecontract -count=1
+          go test -race ./internal/modelimports -count=10
+          go test -race ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
+
   cache-redis:
     runs-on: ubuntu-latest
     services:
