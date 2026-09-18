@@ -339,7 +339,7 @@ func TestCreditsFromCandidatesOmitsUnassignedBytes(t *testing.T) {
 		{InstanceID: "a", Resources: CandidateResources{GPU: []GPUResource{{DeviceID: "CUDA0", Bytes: 4}}}},
 		{InstanceID: ""},
 	})
-	if len(credits) != 1 || credits[0].Bytes != 0 || len(credits[0].GPUs) != 1 || credits[0].GPUs[0].DeviceID != "CUDA0" {
+	if len(credits) != 1 || credits[0].Bytes != 0 || credits[0].HostRAM != 0 || len(credits[0].GPUs) != 1 || credits[0].GPUs[0].DeviceID != "CUDA0" {
 		t.Fatalf("credits=%+v", credits)
 	}
 }
@@ -428,5 +428,53 @@ func gpuCandidateAt(id, device string, bytes int64, lastUsed time.Time) Candidat
 		ModelID: id, InstanceID: id, Priority: "low", Ready: true, EvictionEnabled: true,
 		LastUsed: lastUsed, EstimatedBytes: bytes,
 		Resources: CandidateResources{GPU: []GPUResource{{DeviceID: device, Bytes: bytes}}},
+	}
+}
+
+
+func TestPlanRuntimeEvictionsAccountsForHostRAM(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 16 * gib,
+		RAMAvailableBytes: 2 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
+	}
+	candidates := []Candidate{{
+		ModelID: "ram-heavy", InstanceID: "ram-heavy", Priority: "low",
+		Ready: true, EvictionEnabled: true,
+		Resources: CandidateResources{HostRAMBytes: 10 * gib},
+	}}
+	req := RuntimePlanRequest{
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib,
+			Metadata: KVMetadata{BlockCount: 8},
+			Options: map[string]string{"n-gpu-layers": "0"},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true},
+	}
+	plan := PlanRuntimeEvictions(candidates, snapshot, req)
+	if !plan.Fits || len(plan.Evict) != 1 || plan.FreedHostRAM != 10*gib {
+		t.Fatalf("host-RAM eviction plan=%+v", plan)
+	}
+}
+
+func TestApplyCandidateCreditsAddsHostRAM(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{RAMTotalBytes: 16 * gib, RAMAvailableBytes: 4 * gib}
+	adjusted := ApplyCandidateCredits(snapshot, []Candidate{{
+		InstanceID: "v",
+		Resources: CandidateResources{HostRAMBytes: 6 * gib},
+	}})
+	if adjusted.RAMAvailableBytes != 10*gib {
+		t.Fatalf("credited host RAM=%d want %d", adjusted.RAMAvailableBytes, 10*gib)
+	}
+	credits := CreditsFromCandidates([]Candidate{{
+		InstanceID: "v",
+		Resources: CandidateResources{HostRAMBytes: 6 * gib},
+	}})
+	if len(credits) != 1 || credits[0].HostRAM != 6*gib {
+		t.Fatalf("host credits=%+v", credits)
 	}
 }

@@ -19,6 +19,7 @@ func TestPlanRuntimeSystemSpilloverPolicy(t *testing.T) {
 			Options: map[string]string{"ctx-size": "4096"},
 		},
 		Placement: PlacementRequest{Mode: "auto"},
+		Capabilities: RuntimeCapabilities{GPULayers: true},
 	}
 	without, err := PlanRuntime(req)
 	if err != nil {
@@ -55,7 +56,7 @@ func TestPlanRuntimeMovesKVToRAMWhenKVAloneExceedsVRAM(t *testing.T) {
 		},
 		Placement: PlacementRequest{Mode: "auto"},
 		AllowSystemSpillover: true,
-		Capabilities: RuntimeCapabilities{NoKVOffload: true},
+		Capabilities: RuntimeCapabilities{NoKVOffload: true, GPULayers: true},
 	}
 	plan, err := PlanRuntime(req)
 	if err != nil {
@@ -81,7 +82,7 @@ func TestPlanRuntimeMoEUsesExactDemandAndCompanions(t *testing.T) {
 			Metadata: KVMetadata{BlockCount: 40, Embedding: 4096, HeadCount: 32, KVHeadCount: 8, ExpertCount: 64},
 		},
 		Placement: PlacementRequest{Mode: "auto"},
-		Capabilities: RuntimeCapabilities{NCPUMoe: true, CPUMoe: true, NoKVOffload: true},
+		Capabilities: RuntimeCapabilities{NCPUMoe: true, CPUMoe: true, NoKVOffload: true, GPULayers: true},
 	}
 	plan, err := PlanRuntime(req)
 	if err != nil {
@@ -108,7 +109,7 @@ func TestPlanRuntimeManualSpillNeverSubstitutesAnotherGPU(t *testing.T) {
 		Demand: DemandInput{WeightsBytes: 6 * gib, Metadata: KVMetadata{BlockCount: 12}},
 		Placement: PlacementRequest{Mode: "manual", Devices: []string{"CUDA0"}},
 		AllowSystemSpillover: true,
-		Capabilities: RuntimeCapabilities{NoKVOffload: true},
+		Capabilities: RuntimeCapabilities{NoKVOffload: true, GPULayers: true},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,5 +149,20 @@ func TestPlanRuntimeCPUFallbackNeedsRAMHeadroom(t *testing.T) {
 	}
 	if plan.Fits {
 		t.Fatalf("1 GiB RAM reserve must make this no-fit: %+v", plan)
+	}
+}
+
+
+func TestPlanRuntimeNoGPUUsesCPUWithoutRequiringSpillPolicy(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{RAMAvailableBytes: 16 * gib},
+		Demand: DemandInput{WeightsBytes: 4 * gib},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || plan.Mode != "cpu" || plan.RequiresSpillover || len(plan.Placement.Devices) != 0 {
+		t.Fatalf("no-GPU plan=%+v", plan)
 	}
 }

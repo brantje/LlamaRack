@@ -13,6 +13,7 @@ type RuntimeCapabilities struct {
 	NCPUMoe     bool
 	CPUMoe      bool
 	NoKVOffload bool
+	GPULayers   bool
 }
 
 type RuntimePlanRequest struct {
@@ -34,6 +35,20 @@ type RuntimePlan struct {
 
 func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 	base := cloneStringMap(req.Demand.Options)
+	if len(req.Snapshot.GPUs) == 0 {
+		cpuDemandOptions := cloneStringMap(base)
+		cpuDemandOptions["n-gpu-layers"] = "0"
+		demand := demandFor(req.Demand, cpuDemandOptions)
+		options := cloneStringMap(base)
+		if req.Capabilities.GPULayers {
+			options["n-gpu-layers"] = "0"
+		}
+		return RuntimePlan{
+			Fits: hostRAMFits(req.Snapshot.RAMAvailableBytes, demand.HostRAMBytes),
+			Mode: "cpu", Demand: demand, Placement: Placement{RequiredBytes: 0, Fits: true},
+			Options: options,
+		}, nil
+	}
 	if hasExplicitOffload(base) {
 		return evaluateRuntimeCandidate(req, base, false)
 	}
@@ -48,7 +63,7 @@ func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 			return moe, nil
 		}
 	}
-	if !req.AllowSystemSpillover {
+	if !req.AllowSystemSpillover || !req.Capabilities.GPULayers {
 		return full, nil
 	}
 	if partial, ok, err := planDensePartial(req, base, false); err != nil {
@@ -83,7 +98,6 @@ func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePl
 		return RuntimePlan{}, false, nil
 	}
 	options := cloneStringMap(base)
-	options["n-gpu-layers"] = strconv.FormatInt(blocks, 10)
 	lo, hi := int64(1), blocks
 	firstGPUFit := int64(0)
 	for lo <= hi {
@@ -121,7 +135,6 @@ func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePl
 		return RuntimePlan{}, false, nil
 	}
 	options = cloneStringMap(base)
-	options["n-gpu-layers"] = strconv.FormatInt(blocks, 10)
 	if req.Capabilities.CPUMoe {
 		options["cpu-moe"] = "true"
 	} else {
