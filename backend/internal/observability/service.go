@@ -109,7 +109,6 @@ type Counter struct {
 }
 
 type Service struct {
-	db    database.Store
 	store ObservabilityStore
 
 	mu     sync.RWMutex
@@ -124,7 +123,7 @@ type Service struct {
 }
 
 func New(db database.Store) *Service {
-	return &Service{db: db, store: NewObservabilityStore(db), active: map[string]int{}, queued: map[string]int{}, now: time.Now}
+	return &Service{store: NewObservabilityStore(db), active: map[string]int{}, queued: map[string]int{}, now: time.Now}
 }
 
 func (s *Service) Queue(instanceID string) {
