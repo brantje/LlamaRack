@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -72,7 +73,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}
@@ -101,7 +102,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if instanceID != "" {
 		instance, instanceErr := instances.New(h.models.DB()).Get(r.Context(), instanceID)
 		if instanceErr != nil {
-			if instanceErr == sql.ErrNoRows {
+			if errors.Is(instanceErr, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "instance not found"})
 				return
 			}
@@ -231,7 +232,7 @@ func (h *modelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}

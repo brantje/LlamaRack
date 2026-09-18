@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	s := testService(t)

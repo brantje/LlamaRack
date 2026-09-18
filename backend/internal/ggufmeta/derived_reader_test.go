@@ -156,7 +156,7 @@ func TestInspectDerivedReaderCompletesWithoutTokenizer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !derivedCoreReady(derived) {
+	if !DerivedCoreReady(derived) {
 		t.Fatalf("derived=%+v", derived)
 	}
 }
