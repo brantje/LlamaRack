@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/benchmark"
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/instances"
 )
 
@@ -58,13 +58,13 @@ func (r fakeBenchmarkInstanceResolver) GetBySlug(_ context.Context, slug string)
 	if item, ok := r.bySlug[slug]; ok {
 		return item, nil
 	}
-	return instances.Instance{}, sql.ErrNoRows
+	return instances.Instance{}, database.ErrNotFound
 }
 func (r fakeBenchmarkInstanceResolver) GetByID(_ context.Context, id string) (instances.Instance, error) {
 	if item, ok := r.byID[id]; ok {
 		return item, nil
 	}
-	return instances.Instance{}, sql.ErrNoRows
+	return instances.Instance{}, database.ErrNotFound
 }
 
 func benchmarkTestMux(service benchmarkManagementService, resolver benchmarkInstanceResolver) *http.ServeMux {
