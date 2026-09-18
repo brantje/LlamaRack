@@ -61,25 +61,13 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		return nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, "SELECT gguf_path FROM models")
+	registered, err := s.store.RegisteredGGUFPaths(ctx)
 	if err != nil {
 		return nil, err
 	}
-	used := map[string]bool{}
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
+	used := make(map[string]bool, len(registered))
+	for _, path := range registered {
 		used[filepath.Clean(filepath.FromSlash(path))] = true
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	index, err := s.loadGGUFIndex(ctx)
@@ -141,7 +129,7 @@ func (s *Service) AvailableGGUFs(ctx context.Context) ([]GGUFFile, error) {
 		return nil, err
 	}
 
-	sidecarsByMain, err := s.downloadSidecarsByMain(ctx)
+	sidecarsByMain, err := s.store.DownloadSidecarsByMain(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -227,52 +215,6 @@ func discoveredGGUFFile(file discoveredGGUF, total int64, summary ggufmeta.Summa
 		Warning:          warning,
 		SuggestedOptions: suggested,
 	}
-}
-
-func (s *Service) downloadSidecarsByMain(ctx context.Context) (map[string][]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT j.id, df.local_path
-FROM download_jobs j
-JOIN download_files df ON df.job_id=j.id
-WHERE j.state='COMPLETED' AND df.local_path<>''
-ORDER BY j.updated_at DESC, j.id DESC, df.ordinal, df.path`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := map[string][]string{}
-	var currentJob string
-	var currentPaths []string
-	flush := func() {
-		if currentJob == "" || len(currentPaths) == 0 {
-			return
-		}
-		jobPaths := append([]string(nil), currentPaths...)
-		for _, localPath := range currentPaths {
-			key := filepath.ToSlash(filepath.Clean(localPath))
-			if _, exists := out[key]; !exists {
-				out[key] = jobPaths
-			}
-		}
-	}
-	for rows.Next() {
-		var jobID, localPath string
-		if err := rows.Scan(&jobID, &localPath); err != nil {
-			return nil, err
-		}
-		if currentJob != "" && jobID != currentJob {
-			flush()
-			currentPaths = currentPaths[:0]
-		}
-		currentJob = jobID
-		currentPaths = append(currentPaths, localPath)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	flush()
-	return out, nil
 }
 
 func (s *Service) suggestedSidecarOptions(ctx context.Context, root, mainPath string, mainSummary ggufmeta.Summary, index map[string]ggufIndexEntry, sidecarsByMain map[string][]string) (map[string]string, error) {

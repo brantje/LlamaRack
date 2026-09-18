@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sort"
+	"path/filepath"
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/database"
@@ -40,6 +41,8 @@ type ModelStore interface {
 	OwnedArtifactReferences(context.Context, string) ([]artifactReference, error)
 	CompanionOptionReferences(context.Context, string) ([]artifactReference, error)
 	InstanceCompanionReferencesExcluding(context.Context, string) ([]namedArtifactReference, error)
+	RegisteredGGUFPaths(context.Context) ([]string, error)
+	DownloadSidecarsByMain(context.Context) (map[string][]string, error)
 	UpdateTotalBytes(context.Context, string, int64) error
 	UpdateContextIfZero(context.Context, string, int) error
 }
@@ -326,6 +329,72 @@ func ggufSummaryFromStored(version, tensorCount, metadataCount int64, architectu
 		summary.Features.MTPOnly = true
 	}
 	return summary
+}
+
+
+
+func (s *sqlModelStore) RegisteredGGUFPaths(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT gguf_path FROM models")
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		out = append(out, path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func (s *sqlModelStore) DownloadSidecarsByMain(ctx context.Context) (map[string][]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT j.id,df.local_path
+FROM download_jobs j JOIN download_files df ON df.job_id=j.id
+WHERE j.state='COMPLETED' AND df.local_path<>''
+ORDER BY j.updated_at DESC,j.id DESC,df.ordinal,df.path`)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	var currentJob string
+	var currentPaths []string
+	flush := func() {
+		if currentJob == "" || len(currentPaths) == 0 {
+			return
+		}
+		jobPaths := append([]string(nil), currentPaths...)
+		for _, localPath := range currentPaths {
+			key := filepath.ToSlash(filepath.Clean(localPath))
+			if _, exists := out[key]; !exists {
+				out[key] = jobPaths
+			}
+		}
+	}
+	for rows.Next() {
+		var jobID, localPath string
+		if err := rows.Scan(&jobID, &localPath); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		if currentJob != "" && jobID != currentJob {
+			flush()
+			currentPaths = currentPaths[:0]
+		}
+		currentJob = jobID
+		currentPaths = append(currentPaths, localPath)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	flush()
+	return out, nil
 }
 
 var _ ModelStore = (*sqlModelStore)(nil)
