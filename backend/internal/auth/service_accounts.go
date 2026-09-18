@@ -23,7 +23,7 @@ func (s *Service) EnsureHiddenServiceAccount(ctx context.Context, name string) (
 	if err == nil {
 		return existing, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return ServiceAccount{}, err
 	}
 	return s.createServiceAccount(ctx, name, 0, true)
@@ -54,13 +54,6 @@ func (s *Service) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, er
 }
 
 func (s *Service) GetServiceAccount(ctx context.Context, id string) (ServiceAccount, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ServiceAccount{}, sql.ErrNoRows
-	}
-	item, err := scanServiceAccount(s.db.QueryRowContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE id=?", id))
-	if err != nil {
-		return ServiceAcfunc (s *Service) GetServiceAccount(ctx context.Context, id string) (ServiceAccount, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ServiceAccount{}, database.ClassifyError(sql.ErrNoRows)
@@ -94,7 +87,7 @@ func (s *Service) findServiceAccountByName(ctx context.Context, name string, hid
 
 func (s *Service) DeleteHiddenServiceAccountByName(ctx context.Context, name string) error {
 	account, err := s.findServiceAccountByName(ctx, name, true)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -106,11 +99,14 @@ func (s *Service) DeleteHiddenServiceAccountByName(ctx context.Context, name str
 func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *string, enabled *bool) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return sql.ErrNoRows
+		return database.ClassifyError(sql.ErrNoRows)
 	}
-		existing, err := s.serviceAccounts.Get(ctx, id)
+	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
+	}
+	if existing.Hidden {
+		return database.ClassifyError(sql.ErrNoRows)
 	}
 	nextName := existing.Name
 	if name != nil {
@@ -119,17 +115,11 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 			return ErrServiceAccountNameRequired
 		}
 	}
-	nextEnabled := 0
-	if existing.Enabled {
-		nextEnabled = 1
-	}
+	nextEnabled := existing.Enabled
 	if enabled != nil {
-		nextEnabled = 0
-		if *enabled {
-			nextEnabled = 1
-		}
+		nextEnabled = *enabled
 	}
-	if err := s.serviceAccounts.Update(ctx, id, nextName, nextEnabled != 0); err != nil {
+	if err := s.serviceAccounts.Update(ctx, id, nextName, nextEnabled); err != nil {
 		return err
 	}
 	s.clearAPIKeyCache()
@@ -139,14 +129,14 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 func (s *Service) DeleteServiceAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return sql.ErrNoRows
+		return database.ClassifyError(sql.ErrNoRows)
 	}
-		existing, err := s.serviceAccounts.Get(ctx, id)
+	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if existing.Hidden {
-		return sql.ErrNoRows
+		return database.ClassifyError(sql.ErrNoRows)
 	}
 	return s.deleteServiceAccount(ctx, id)
 }
@@ -158,4 +148,3 @@ func (s *Service) deleteServiceAccount(ctx context.Context, id string) error {
 	s.clearAPIKeyCache()
 	return nil
 }
-
