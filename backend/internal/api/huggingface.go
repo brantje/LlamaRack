@@ -14,7 +14,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/settings"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 type huggingFaceHandler struct {
 	auth      *auth.Service
