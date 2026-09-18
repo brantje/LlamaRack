@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/argon2"
 )
@@ -92,16 +91,8 @@ func TestPersistPasswordRehashRejectsStaleHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := persistPasswordRehash(ctx, tx, user.ID, original, rehashed); !errors.Is(err, ErrInvalidCredentials) {
+	if err := s.sessions.CommitLogin(ctx, user.ID, original, rehashed, 456, nil); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("stale rehash err=%v, want %v", err, ErrInvalidCredentials)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
 	}
 
 	var current string
