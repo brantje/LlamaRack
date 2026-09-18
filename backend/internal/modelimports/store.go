@@ -41,7 +41,8 @@ type Store interface {
 	Prepared(context.Context) ([]pendingImport, error)
 	SetState(context.Context, string, string, string) error
 	CompletePrepared(context.Context, string, string) (bool, error)
-	MarkStartAttempted(context.Context, string, string) error
+	ClaimStartAttempt(context.Context, string) (bool, error)
+	RecordStartAttemptResult(context.Context, string, string) error
 	UnclaimedCompleted(context.Context) ([]completedDownload, error)
 	CompletedMainPath(context.Context, string) (string, bool, error)
 	CreatePendingModel(context.Context, models.Model, map[string]string) error
@@ -201,8 +202,26 @@ func (s *sqlStore) CompletePrepared(ctx context.Context, id, instanceID string) 
 	return n > 0, nil
 }
 
-func (s *sqlStore) MarkStartAttempted(ctx context.Context, id, message string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET start_attempted=1,error=?,updated_at=unixepoch() WHERE id=?`, message, id)
+func (s *sqlStore) ClaimStartAttempt(ctx context.Context, id string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE provider_imports
+SET start_attempted=1,updated_at=unixepoch()
+WHERE id=? AND start_when_ready=1 AND start_attempted=0 AND state=?`, id, StateCompleted)
+	if err != nil {
+		return false, database.ClassifyError(err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, database.ClassifyError(err)
+	}
+	return n > 0, nil
+}
+
+func (s *sqlStore) RecordStartAttemptResult(ctx context.Context, id, message string) error {
+	_, err := s.db.ExecContext(ctx, `
+UPDATE provider_imports
+SET error=?,updated_at=unixepoch()
+WHERE id=? AND start_attempted=1`, message, id)
 	return database.ClassifyError(err)
 }
 
