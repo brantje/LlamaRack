@@ -9,6 +9,7 @@ import (
 func TestAPIKeyLastUsedWriteIsCoalescedAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	user, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -22,19 +23,19 @@ func TestAPIKeyLastUsedWriteIsCoalescedAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var first int64
-	if err := s.db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&first); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&first); err != nil {
 		t.Fatal(err)
 	}
 	if first == 0 {
 		t.Fatal("expected first authentication to persist last_used_at")
 	}
 
-	restarted := New(s.db, time.Hour)
+	restarted := New(db, time.Hour)
 	if err := restarted.AuthenticateAPIKey(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 	var second int64
-	if err := s.db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&second); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&second); err != nil {
 		t.Fatal(err)
 	}
 	if second != first {
