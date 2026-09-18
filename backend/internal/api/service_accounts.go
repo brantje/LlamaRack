@@ -1,14 +1,14 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type serviceAccountsHandler struct{ auth *auth.Service }
 
@@ -117,7 +117,7 @@ func (h *serviceAccountsHandler) item(w http.ResponseWriter, r *http.Request, pr
 }
 
 func writeServiceAccountError(w http.ResponseWriter, err error) {
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "service account not found"})
 		return
 	}
@@ -126,7 +126,7 @@ func writeServiceAccountError(w http.ResponseWriter, err error) {
 
 func writeServiceAccountMutationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, database.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "service account not found"})
 	case errors.Is(err, auth.ErrServiceAccountNameRequired):
 		writeErr(w, http.StatusBadRequest, err)

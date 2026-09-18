@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type apiKeysHandler struct{ auth *auth.Service }
 
@@ -168,7 +168,7 @@ func (h *apiKeysHandler) patch(w http.ResponseWriter, r *http.Request, principal
 }
 
 func writeAPIKeyError(w http.ResponseWriter, err error) {
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "api key not found"})
 		return
 	}
@@ -177,7 +177,7 @@ func writeAPIKeyError(w http.ResponseWriter, err error) {
 
 func writeAPIKeyMutationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, database.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "api key not found"})
 	case errors.Is(err, auth.ErrAPIKeyNameRequired),
 		errors.Is(err, auth.ErrAPIKeyTypeInvalid),

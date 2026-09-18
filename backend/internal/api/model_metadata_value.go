@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,7 +9,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 	"github.com/brantje/llamarack/backend/internal/models"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type modelMetadataValueHandler struct {
 	auth   *auth.Service
@@ -31,7 +31,7 @@ func (h *modelMetadataValueHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 	model, err := h.models.GetByID(r.Context(), modelIDFromRequest(r))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}

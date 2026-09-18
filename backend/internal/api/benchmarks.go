@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,7 +9,8 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/benchmark"
 	"github.com/brantje/llamarack/backend/internal/instances"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 var errAmbiguousBenchmarkInstance = errors.New("ambiguous instance identifier")
 
@@ -173,11 +173,11 @@ func benchmarkCreateWorkload(input *benchmarkWorkloadInput) (*benchmark.Workload
 func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	bySlug, slugErr := h.instances.GetBySlug(ctx, value)
-	if slugErr != nil && !errors.Is(slugErr, sql.ErrNoRows) {
+	if slugErr != nil && !errors.Is(slugErr, database.ErrNotFound) {
 		return "", slugErr
 	}
 	byID, idErr := h.instances.GetByID(ctx, value)
-	if idErr != nil && !errors.Is(idErr, sql.ErrNoRows) {
+	if idErr != nil && !errors.Is(idErr, database.ErrNotFound) {
 		return "", idErr
 	}
 	slugFound := slugErr == nil
@@ -194,7 +194,7 @@ func (h *benchmarkHandler) resolveInstanceID(ctx context.Context, value string) 
 	if idFound {
 		return byID.ID, nil
 	}
-	return "", sql.ErrNoRows
+	return "", database.ErrNotFound
 }
 func (h *benchmarkHandler) get(w http.ResponseWriter, r *http.Request) {
 	run, err := h.service.Get(r.Context(), strings.TrimSpace(r.PathValue("id")))
@@ -221,7 +221,7 @@ func (h *benchmarkHandler) delete(w http.ResponseWriter, r *http.Request) {
 }
 func writeBenchmarkError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, benchmark.ErrNotFound), errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, benchmark.ErrNotFound), errors.Is(err, database.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err)
 	case errors.Is(err, benchmark.ErrInvalidWorkload), errors.Is(err, benchmark.ErrUnsupportedConfig):
 		writeErr(w, http.StatusBadRequest, err)
