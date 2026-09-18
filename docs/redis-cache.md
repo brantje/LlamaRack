@@ -113,3 +113,36 @@ CI also runs this as non-threshold evidence with its Redis service. An external
 provider outage must not make ordinary correctness CI fail; the deterministic
 cache contracts remain mandatory. Record the successful qualification run and
 its measurements here when release evidence is collected.
+
+
+### Recorded CI evidence
+
+GitHub Actions CI run `35384253391` on source commit
+`f25db474647acce846d0537f07eebb35a7edc09e` completed the deterministic Redis
+benchmarks and the live Hugging Face qualification successfully.
+
+Deterministic benchmark medians from three samples were:
+
+| Mode | Median latency |
+| --- | ---: |
+| Warm in-process L1 | 2,025 ns/op |
+| Synthetic authoritative origin | 5,399,665 ns/op |
+| Warm Redis from an empty L1 | 125,379 ns/op |
+| Warm Redis parallel | 48,301 ns/op |
+
+The live provider qualification resolved
+`Qwen/Qwen2.5-0.5B-Instruct-GGUF` at immutable revision
+`9217f5db79a29953eb74d5343926648285ec7e67` and measured:
+
+- cold authoritative lookup: **553.017 ms**, **2** range requests,
+  **5,937,634 bytes** transferred;
+- warm L1 lookup: **43.115 µs**, **0** origin range requests;
+- fresh-client warm Redis lookup: **264.445 µs**, **0** origin range requests;
+- 16 concurrent warm-Redis requests: **17.791 ms total**, **0** origin range
+  requests.
+
+This demonstrates the intended benefit: Redis is slower than the process-local
+L1 and therefore remains an L2 only, but after a process-local cache reset it
+avoids the real provider range reads entirely and reduces the measured lookup
+from hundreds of milliseconds to hundreds of microseconds. Redis remains
+non-authoritative and is not involved in correctness or distributed locking.
