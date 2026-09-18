@@ -2,13 +2,14 @@ package downloads
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestSubscribeEmitsChangesAndDeletion(t *testing.T) {
@@ -116,10 +117,10 @@ VALUES('remove','huggingface','acme/demo','rev','artifact','demo.gguf','',?,6,3,
 	if data, err := os.ReadFile(finalPath); err != nil || string(data) != "final" {
 		t.Fatalf("promoted file was removed: %q err=%v", data, err)
 	}
-	if _, err := manager.Get(ctx, "remove"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := manager.Get(ctx, "remove"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("removed job lookup error = %v", err)
 	}
-	if err := manager.Remove(ctx, "remove"); !errors.Is(err, sql.ErrNoRows) {
+	if err := manager.Remove(ctx, "remove"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("second remove error = %v", err)
 	}
 }
