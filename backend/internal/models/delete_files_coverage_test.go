@@ -10,6 +10,7 @@ import (
 
 func TestResolveArtifactFileSafetyBranches(t *testing.T) {
 	s, dir := testModelService(t)
+	db := testModelDB(t, s)
 
 	for name, ref := range map[string]artifactReference{
 		"empty":    {},
@@ -40,7 +41,7 @@ func TestResolveArtifactFileSafetyBranches(t *testing.T) {
 		t.Fatalf("expected parent symlink escape rejection, got %v", err)
 	}
 
-	missingRoot := New(s.db, filepath.Join(dir, "missing-model-root"))
+	missingRoot := New(db, filepath.Join(dir, "missing-model-root"))
 	if _, err := missingRoot.resolveArtifactFile(artifactReference{path: "model.gguf"}); err == nil {
 		t.Fatal("expected missing models directory resolution to fail")
 	}
@@ -76,6 +77,7 @@ func TestExistingAncestorClimbsMissingDirectories(t *testing.T) {
 func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
+	db := testModelDB(t, s)
 	main := writeGGUF(t, dir, "edge.gguf")
 	model, err := s.Create(ctx, CreateModelInput{Name: "Edge", GGUFPath: main})
 	if err != nil {
@@ -89,7 +91,7 @@ func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
 		t.Fatalf("empty target set should not report sharing: %v", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES(?, 'mmproj', '')`, model.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES(?, 'mmproj', '')`, model.ID); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := s.artifactReferences(ctx, model)
@@ -105,7 +107,7 @@ func TestDeleteFilesPlanAndReferenceEdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET gguf_path='../bad.gguf' WHERE id=?`, otherModel.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE models SET gguf_path='../bad.gguf' WHERE id=?`, otherModel.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PrepareFileDeletion(ctx, model.ID); err != nil {

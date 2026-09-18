@@ -5,10 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/database"
 )
+
+var modelTestStores sync.Map
 
 func testModelService(t *testing.T) (*Service, string) {
 	t.Helper()
@@ -21,8 +24,22 @@ func testModelService(t *testing.T) (*Service, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return New(db, modelsDir), modelsDir
+	s := New(db, modelsDir)
+	modelTestStores.Store(s, db)
+	t.Cleanup(func() {
+		modelTestStores.Delete(s)
+		_ = db.Close()
+	})
+	return s, modelsDir
+}
+
+func testModelDB(t *testing.T, s *Service) database.Store {
+	t.Helper()
+	value, ok := modelTestStores.Load(s)
+	if !ok {
+		t.Fatal("model test database is unavailable")
+	}
+	return value.(database.Store)
 }
 
 func writeGGUF(t *testing.T, dir, name string) string {
@@ -37,7 +54,7 @@ func writeGGUF(t *testing.T, dir, name string) string {
 func linkDownloadArtifacts(t *testing.T, s *Service, modelID, jobID string, localPaths ...string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes) VALUES(?,'huggingface','owner/repo','main',?,'artifact','COMPLETED',?)`, jobID, jobID, len(localPaths)); err != nil {
+	if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes) VALUES(?,'huggingface','owner/repo','main',?,'artifact','COMPLETED',?)`, jobID, jobID, len(localPaths)); err != nil {
 		t.Fatal(err)
 	}
 	for ordinal, path := range localPaths {
@@ -45,11 +62,11 @@ func linkDownloadArtifacts(t *testing.T, s *Service, modelID, jobID string, loca
 		if rel, err := filepath.Rel(s.modelsDir, path); err == nil && !strings.HasPrefix(rel, "..") {
 			stored = filepath.ToSlash(rel)
 		}
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES(?,?,1,'COMPLETED',?,?)`, jobID, filepath.Base(path), ordinal, stored); err != nil {
+		if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,ordinal,local_path) VALUES(?,?,1,'COMPLETED',?,?)`, jobID, filepath.Base(path), ordinal, stored); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,owns_model,start_when_ready,state) VALUES(?,?,?,1,0,'COMPLETED')`, "import-"+jobID, jobID, modelID); err != nil {
+	if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,owns_model,start_when_ready,state) VALUES(?,?,?,1,0,'COMPLETED')`, "import-"+jobID, jobID, modelID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -205,7 +222,7 @@ func TestLegacyPublicIDCompatibilityCreatesAddressableInstance(t *testing.T) {
 
 	// List historically projects policy from the earliest Instance ordered by
 	// created_at then id. Keep that exact compatibility behavior while batching.
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		"00000000-0000-4000-8000-000000000001", "legacy-first", m.ID, "Legacy First", 0, 1, 0, "low", 1, 17, 1); err != nil {
 		t.Fatal(err)
 	}
