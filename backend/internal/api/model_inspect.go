@@ -84,7 +84,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	snapshot, hardwareErr := h.hardware.Snapshot(r.Context())
-	runtime := recommendations.RuntimeConfig{GPUMode: "auto", AllowSystemSpillover: true}
+	runtime := recommendations.RuntimeConfig{GPUMode: "auto"}
 	instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
 	if instanceID != "" {
 		instance, instanceErr := instances.New(h.models.DB()).Get(r.Context(), instanceID)
@@ -115,8 +115,8 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if raw, ok := r.URL.Query()["gpu_devices"]; ok {
 		runtime.GPUDevices = splitRecommendationDevices(strings.Join(raw, ","))
 	}
-	if raw := strings.TrimSpace(r.URL.Query().Get("tensor_split")); raw != "" {
-		runtime.TensorSplit = raw
+	if raw, ok := r.URL.Query()["tensor_split"]; ok {
+		runtime.TensorSplit = strings.TrimSpace(strings.Join(raw, ","))
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("system_spillover_enabled")); raw != "" {
 		enabled, parseErr := strconv.ParseBool(raw)

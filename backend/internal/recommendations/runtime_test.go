@@ -212,3 +212,17 @@ func TestOffloadFromRuntimePlanOptionModes(t *testing.T) {
 		t.Fatalf("full option offload=%+v", got)
 	}
 }
+
+
+func TestOffloadFromRuntimePlanCPUIsSemanticallyCPUOnly(t *testing.T) {
+	meta := Metadata{BlockCount: 24}
+	got := offloadFromRuntimePlan(scheduler.RuntimePlan{
+		Fits: true,
+		Mode: "cpu",
+		Placement: scheduler.Placement{Devices: []string{"CUDA0"}, TensorSplit: "1"},
+		Options: map[string]string{},
+	}, meta)
+	if got.GPULayers != 0 || len(got.Devices) != 0 || got.TensorSplit != "" || got.KVOnGPU {
+		t.Fatalf("cpu offload metadata=%+v", got)
+	}
+}

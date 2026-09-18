@@ -229,10 +229,19 @@ func offloadFromRuntimePlan(plan scheduler.RuntimePlan, metadata Metadata) Offlo
 	} else if raw := runtimeOption(plan.Options, "n-cpu-moe"); raw != "" {
 		nCPUMoe, _ = strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	}
+	devices := append([]string(nil), plan.Placement.Devices...)
+	tensorSplit := plan.Placement.TensorSplit
+	kvOnGPU := !runtimeOptionEnabled(plan.Options, "no-kv-offload")
+	if plan.Mode == "cpu" {
+		layers = 0
+		devices = nil
+		tensorSplit = ""
+		kvOnGPU = false
+	}
 	return Offload{
 		Mode: plan.Mode, GPULayers: layers, NCPUMoe: nCPUMoe,
-		Devices: append([]string(nil), plan.Placement.Devices...), TensorSplit: plan.Placement.TensorSplit,
-		KVOnGPU: !runtimeOptionEnabled(plan.Options, "no-kv-offload"),
+		Devices: devices, TensorSplit: tensorSplit,
+		KVOnGPU: kvOnGPU,
 		Reason: runtimePlanReason(plan),
 	}
 }

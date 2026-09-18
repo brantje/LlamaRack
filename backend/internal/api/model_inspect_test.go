@@ -255,3 +255,72 @@ func TestRecommendationRuntimePreviewOverridesAndModelBinding(t *testing.T) {
 		t.Fatalf("profile fallback=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+
+func TestRecommendationUnboundSpilloverDefaultsDisabled(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	const gib int64 = 1024 * 1024 * 1024
+	path := filepath.Join(f.dir, "spill-default.gguf")
+	writeAPIMetadataGGUF(t, path, "qwen2", 32768)
+	if err := os.Truncate(path, 8*gib); err != nil {
+		t.Fatal(err)
+	}
+	model, err := f.models.Create(t.Context(), models.CreateModelInput{Name: "Spill default", GGUFPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 4 * gib, FreeBytes: 4 * gib}},
+	}}, func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-gpu-layers"}}}, nil
+	})
+
+	w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":false`) {
+		t.Fatalf("default spillover must remain disabled: %d %s", w.Code, w.Body.String())
+	}
+	w = doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?context_length=4096&system_spillover_enabled=true", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":true`) {
+		t.Fatalf("explicit spillover preview should be runnable: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRecommendationExplicitEmptyManualOverridesClearPersistedValues(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	model := createModel(t, f, cookie)
+	enabled := true
+	instance, err := f.server.lifecycle.Instances().Create(t.Context(), instances.CreateInput{
+		ModelID: model.ID, Name: "Manual clear preview", Enabled: &enabled,
+		GPUMode: "manual", GPUDevices: []string{"CUDA0", "CUDA1"}, TensorSplit: "9,1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+		RAMTotalBytes: 16 << 30, RAMAvailableBytes: 12 << 30,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 << 30}, {ID: "CUDA1", FreeBytes: 8 << 30}},
+	}})
+
+	w := doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&gpu_mode=manual&gpu_devices=CUDA0,CUDA1&tensor_split=",
+		nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear tensor split=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"tensor_split":"9,1"`) {
+		t.Fatalf("persisted tensor split leaked into explicit empty preview: %s", w.Body.String())
+	}
+
+	w = doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&gpu_mode=manual&gpu_devices=&tensor_split=",
+		nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear manual devices=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "CUDA0") || strings.Contains(w.Body.String(), "CUDA1") {
+		t.Fatalf("persisted manual devices leaked into explicit empty preview: %s", w.Body.String())
+	}
+}
