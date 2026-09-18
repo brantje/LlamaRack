@@ -47,7 +47,11 @@ type KVMetadata struct {
 }
 
 type DemandInput struct {
-	WeightsBytes int64
+	// WeightsBytes is the primary model GGUF weight size. CompanionBytes holds
+	// auxiliary GGUFs such as mmproj/spec-draft-model so layer/expert spill
+	// calculations never treat companion tensors as transformer weights.
+	WeightsBytes   int64
+	CompanionBytes int64
 	Context      int64
 	Metadata     KVMetadata
 	MetadataErr  error
@@ -59,6 +63,11 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 	if weights < 0 {
 		weights = 0
 	}
+	companion := in.CompanionBytes
+	if companion < 0 {
+		companion = 0
+	}
+	totalWeights := weights + companion
 	context := in.Context
 	if context <= 0 {
 		context = parseContextOption(in.Options)
@@ -66,7 +75,7 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 	if context <= 0 {
 		context = defaultDemandContext
 	}
-	overhead := int64(math.Ceil(float64(weights) * 0.05))
+	overhead := int64(math.Ceil(float64(totalWeights) * 0.05))
 	if overhead < minRuntimeOverheadMiB {
 		overhead = minRuntimeOverheadMiB
 	}
@@ -97,14 +106,18 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 		overheadGPU, overheadRAM = 0, overhead
 	}
 
+	companionGPU, companionRAM := companion, int64(0)
+	if cpuOnly {
+		companionGPU, companionRAM = 0, companion
+	}
 	demand := ResourceDemand{
-		WeightsBytes:         weights,
+		WeightsBytes:         totalWeights,
 		KVCacheBytes:         kv,
 		RuntimeOverheadBytes: overhead,
-		HostRAMBytes:         (weights - weightsGPU) + kvRAMBytes + overheadRAM,
+		HostRAMBytes:         (weights - weightsGPU) + companionRAM + kvRAMBytes + overheadRAM,
 		Confidence:           demandConfidence(in.Metadata, in.MetadataErr),
 	}
-	vram := weightsGPU + kvGPUBytes + overheadGPU
+	vram := weightsGPU + companionGPU + kvGPUBytes + overheadGPU
 	if vram > 0 {
 		demand.GPU = []GPUResourceDemand{{Bytes: vram}}
 	}

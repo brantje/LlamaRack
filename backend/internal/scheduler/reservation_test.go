@@ -396,3 +396,64 @@ func TestNewLedgerWithTTLAndNilClock(t *testing.T) {
 		t.Fatal("lease id")
 	}
 }
+
+
+func TestLedgerPreventsHostRAMOvercommit(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 16 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
+	}
+	first, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "a", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: gib},
+		HostRAM: 8 * gib,
+	})
+	if err != nil || !first.Placement.Fits {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "b", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: gib},
+		HostRAM: 8 * gib,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Placement.Fits || second.ID != "" {
+		t.Fatalf("second host allocation must be rejected: %+v", second)
+	}
+}
+
+func TestLedgerHostRAMAccountingDoesNotDoubleCountCommittedUsage(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	ledger := NewLedger()
+	empty := hardware.Snapshot{
+		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 16 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
+	}
+	lease, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "running", Snapshot: empty,
+		Placement: PlacementRequest{RequiredBytes: gib},
+		HostRAM: 8 * gib,
+	})
+	if err != nil || !lease.Placement.Fits {
+		t.Fatalf("lease=%+v err=%v", lease, err)
+	}
+	if err := ledger.Commit(lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	observed := hardware.Snapshot{
+		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 8 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 15 * gib}},
+	}
+	other, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "other", Snapshot: observed,
+		Placement: PlacementRequest{RequiredBytes: gib},
+		HostRAM: 6 * gib,
+	})
+	if err != nil || !other.Placement.Fits {
+		t.Fatalf("committed RAM reflected by the OS must not be double-counted: %+v err=%v", other, err)
+	}
+}
