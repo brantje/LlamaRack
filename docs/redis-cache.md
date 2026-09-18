@@ -175,5 +175,5 @@ successful manual `.github/workflows/redis-release-qualification.yml` run
 against the commit intended for release, with its uploaded
 `redis-live-qualification-<sha>` artifact.
 
-The commit after the deterministic measurement only refreshes these
-documentation records; it does not change the measured cache implementation.
+Subsequent commits only add qualification-test coverage and refresh these
+documentation records; they do not change the measured cache implementation.
