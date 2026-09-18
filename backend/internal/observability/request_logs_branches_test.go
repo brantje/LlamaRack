@@ -117,7 +117,7 @@ func TestRequestLogSchemaExistingColumnsAndFailure(t *testing.T) {
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		t.Fatalf("idempotent schema: %v", err)
 	}
-	fresh := New(s.db)
+	fresh := New(observabilityTestDB(t, s))
 	if err := fresh.EnsureCorrelationSchema(ctx); err != nil {
 		t.Fatalf("existing schema: %v", err)
 	}
