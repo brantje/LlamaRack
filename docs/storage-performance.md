@@ -75,5 +75,5 @@ adapter regression or allocation explosion. Continue using multiple samples and
 avoid treating small `ns/op` differences as a release threshold.
 
 The same CI run reported total backend coverage of exactly `90.0%`, satisfying
-the repository threshold. The commit after this measurement only refreshes
-these documentation records; it does not change the measured persistence code.
+the repository threshold. Subsequent commits only add qualification-test coverage and refresh these
+documentation records; they do not change the measured persistence code.
