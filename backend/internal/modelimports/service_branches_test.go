@@ -167,6 +167,14 @@ func TestReconcileRecordsStartFailureOnlyOnce(t *testing.T) {
 	if starter.count() != 1 {
 		t.Fatalf("starter calls=%d", starter.count())
 	}
+	var attempted int
+	var storedError string
+	if err := db.QueryRowContext(ctx, `SELECT start_attempted,error FROM provider_imports WHERE id='ready-import'`).Scan(&attempted, &storedError); err != nil {
+		t.Fatal(err)
+	}
+	if attempted != 1 || !strings.Contains(storedError, "no capacity") {
+		t.Fatalf("persisted start result attempted=%d error=%q", attempted, storedError)
+	}
 	if err := service.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
