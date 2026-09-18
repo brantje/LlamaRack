@@ -237,6 +237,8 @@ func planDemandPlacement(base PlacementRequest, snapshot hardware.Snapshot, dema
 	request := base
 	request.RequiredBytes = required
 	request.HostRAMBytes = demand.HostRAMBytes
+	request.SplittableBytes = demand.GPUSplittableBytes
+	request.FixedBytes = demand.GPUFixedBytes
 	return PlanPlacement(snapshot, request)
 }
 

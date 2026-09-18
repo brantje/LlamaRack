@@ -554,6 +554,16 @@ func reservationsFor(placement Placement, snapshot hardware.Snapshot, request Pl
 	if len(placement.Devices) == 0 {
 		return nil
 	}
+	if len(placement.DeviceDemand) > 0 {
+		out := make([]GPUReservation, 0, len(placement.DeviceDemand))
+		for _, demand := range placement.DeviceDemand {
+			if strings.TrimSpace(demand.DeviceID) == "" || demand.Bytes < 0 {
+				continue
+			}
+			out = append(out, GPUReservation{DeviceID: demand.DeviceID, Bytes: demand.Bytes})
+		}
+		return out
+	}
 	required := request.RequiredBytes
 	if required < 0 {
 		required = 0
@@ -622,6 +632,9 @@ func cloneLease(lease *ResourceLease) ResourceLease {
 	}
 	if lease.Placement.Devices != nil {
 		out.Placement.Devices = append([]string(nil), lease.Placement.Devices...)
+	}
+	if lease.Placement.DeviceDemand != nil {
+		out.Placement.DeviceDemand = append([]GPUResourceDemand(nil), lease.Placement.DeviceDemand...)
 	}
 	return out
 }

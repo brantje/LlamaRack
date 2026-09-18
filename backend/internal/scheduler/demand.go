@@ -22,6 +22,8 @@ type ResourceDemand struct {
 	WeightsBytes         int64
 	KVCacheBytes         int64
 	RuntimeOverheadBytes int64
+	GPUSplittableBytes   int64
+	GPUFixedBytes        int64
 	GPU                  []GPUResourceDemand
 	Confidence           string
 }
@@ -114,6 +116,8 @@ func EstimateDemand(in DemandInput) ResourceDemand {
 		KVCacheBytes:         kv,
 		RuntimeOverheadBytes: overhead,
 		HostRAMBytes:         (weights - weightsGPU) + companionRAM + kvRAMBytes + overheadRAM,
+		GPUSplittableBytes:   weightsGPU,
+		GPUFixedBytes:        companionGPU + kvGPUBytes + overheadGPU,
 		Confidence:           demandConfidence(in.Metadata, in.MetadataErr),
 	}
 	vram := weightsGPU + companionGPU + kvGPUBytes + overheadGPU

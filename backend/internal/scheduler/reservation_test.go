@@ -470,3 +470,37 @@ func TestPlanningSnapshotSubtractsReservationsWithoutMutatingLedger(t *testing.T
 		t.Fatalf("requester lease was mutated: %+v ok=%v", lease, ok)
 	}
 }
+
+
+func TestManualTensorSplitLeaseMatchesAdmittedVectorAndProtectsConcurrentStarts(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
+		{ID: "CUDA0", TotalBytes: 10 * gib, FreeBytes: 10 * gib},
+		{ID: "CUDA1", TotalBytes: 10 * gib, FreeBytes: 10 * gib},
+	}}
+	req := func(id string) AcquireRequest {
+		return AcquireRequest{
+			InstanceID: id, Snapshot: snapshot,
+			Placement: PlacementRequest{
+				RequiredBytes: 12 * gib, SplittableBytes: 10 * gib, FixedBytes: 2 * gib,
+				Mode: "manual", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "1,1", ReserveBytes: 1,
+			},
+		}
+	}
+	first, err := ledger.Acquire(req("first"))
+	if err != nil || !first.Placement.Fits {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	if len(first.GPUs) != 2 || first.GPUs[0].DeviceID != "CUDA0" || first.GPUs[0].Bytes != 7*gib ||
+		first.GPUs[1].DeviceID != "CUDA1" || first.GPUs[1].Bytes != 5*gib {
+		t.Fatalf("lease must match admitted tensor split vector: %+v", first.GPUs)
+	}
+	second, err := ledger.Acquire(req("second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Placement.Fits || second.ID != "" {
+		t.Fatalf("pending vector must protect both assigned GPU amounts: %+v", second)
+	}
+}
