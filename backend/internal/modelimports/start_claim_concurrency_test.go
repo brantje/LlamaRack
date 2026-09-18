@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +19,52 @@ import (
 	"github.com/brantje/llamarack/backend/internal/models"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+
+type claimErrorStore struct {
+	result sql.Result
+	err    error
+}
+
+func (s claimErrorStore) ExecContext(context.Context, string, ...any) (sql.Result, error) {
+	return s.result, s.err
+}
+
+func (claimErrorStore) QueryContext(context.Context, string, ...any) (*sql.Rows, error) {
+	panic("unexpected QueryContext")
+}
+
+func (claimErrorStore) QueryRowContext(context.Context, string, ...any) *sql.Row {
+	panic("unexpected QueryRowContext")
+}
+
+func (claimErrorStore) Close() error { return nil }
+
+type rowsAffectedErrorResult struct{}
+
+func (rowsAffectedErrorResult) LastInsertId() (int64, error) { return 0, nil }
+
+func (rowsAffectedErrorResult) RowsAffected() (int64, error) {
+	return 0, errors.New("rows affected unavailable")
+}
+
+func TestStartClaimStoreErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	claimed, err := NewStore(claimErrorStore{err: errors.New("exec failed")}).ClaimStartAttempt(ctx, "import")
+	if err == nil || claimed {
+		t.Fatalf("exec failure claimed=%v err=%v", claimed, err)
+	}
+
+	claimed, err = NewStore(claimErrorStore{result: rowsAffectedErrorResult{}}).ClaimStartAttempt(ctx, "import")
+	if err == nil || claimed {
+		t.Fatalf("rows-affected failure claimed=%v err=%v", claimed, err)
+	}
+
+	claimed, err = NewStore(claimErrorStore{}).CompletePrepared(ctx, "import", "instance")
+	if err == nil || claimed {
+		t.Fatalf("begin failure claimed=%v err=%v", claimed, err)
+	}
+}
 
 type preparedBarrierGate struct {
 	mu        sync.Mutex
