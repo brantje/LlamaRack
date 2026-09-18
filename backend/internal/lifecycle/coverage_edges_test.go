@@ -95,7 +95,7 @@ func TestStartOneWithEvictionPropagatesMissingModel(t *testing.T) {
 
 func TestEvictionPlanPropagatesDatabaseFailure(t *testing.T) {
 	s, _, _, _, _ := setupLifecycle(t, true, false)
-	if err := s.models.DB().Close(); err != nil {
+	if err := lifecycleTestDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.EvictionPlan(context.Background(), testGiB); err == nil {
