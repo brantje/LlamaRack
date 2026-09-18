@@ -136,6 +136,7 @@ func (s *Service) prepareRuntimeLaunch(
 			s.releaseReservation(instance.ID)
 			return scheduler.RuntimePlan{}, fmt.Errorf("refresh hardware after eviction: %w", err)
 		}
+		stopped = stopped[:0]
 	}
 	return scheduler.RuntimePlan{}, fmt.Errorf("%w: eviction attempts exhausted", errResourcePressureBlocked)
 }

@@ -1250,12 +1250,13 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 			s.releaseReservation(i.ID)
 			return scheduler.Placement{}, fmt.Errorf("refresh hardware after eviction: %w", err)
 		}
+		stopped = stopped[:0]
 		if err := placementDevicesPresent(snapshot, lease.Placement.Devices); err != nil {
 			s.releaseReservation(i.ID)
 			return scheduler.Placement{}, err
 		}
 
-		ghost, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, Credits: scheduler.CreditsFromCandidates(stopped), HostRAM: demand.HostRAMBytes})
+		ghost, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, HostRAM: demand.HostRAMBytes})
 		if err != nil {
 			return scheduler.Placement{}, err
 		}
