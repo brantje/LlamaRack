@@ -18,6 +18,7 @@ import (
 	"time"
 
 	appcache "github.com/brantje/llamarack/backend/internal/cache"
+	"golang.org/x/sync/singleflight"
 )
 
 type TokenProvider func(context.Context) (string, error)
@@ -26,7 +27,8 @@ type Client struct {
 	baseURL       *url.URL
 	http          *http.Client
 	token         TokenProvider
-	metadataCache appcache.Cache
+	metadataCache  appcache.Cache
+	metadataFlight singleflight.Group
 }
 
 type SearchOptions struct {

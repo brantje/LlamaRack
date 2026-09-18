@@ -23,6 +23,7 @@ const (
 	discoveryMetadataLimit          = int64(8 << 20)
 	discoveryMetadataMaxLimit       = int64(50_000_000)
 	discoveryMetadataCandidateLimit = 3
+	metadataOriginTimeout            = 30 * time.Second
 )
 
 var defaultDerivedMetadataCache appcache.Cache = appcache.NewObserved("hf_derived", "memory", appcache.NewMemory())
@@ -56,39 +57,78 @@ func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufm
 			return providerDerived(lastDerived, detail.GGUF), err
 		}
 		cacheKey := c.derivedMetadataCacheKey(detail, modelFile)
-		if c.metadataCache != nil {
-			var cached ggufmeta.Derived
-			if hit, _ := c.metadataCache.Get(ctx, cacheKey, &cached); hit {
-				return providerDerived(cached, detail.GGUF), nil
+		if cached, ok := c.cachedDerivedMetadata(ctx, cacheKey); ok {
+			return providerDerived(cached, detail.GGUF), nil
+		}
+
+		resultCh := c.metadataFlight.DoChan(cacheKey, func() (any, error) {
+			originCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), metadataOriginTimeout)
+			defer cancel()
+			if cached, ok := c.cachedDerivedMetadata(originCtx, cacheKey); ok {
+				return cached, nil
 			}
-		}
+			rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
+			if err != nil {
+				return ggufmeta.Derived{}, err
+			}
+			derived, err := c.fetchDerivedMetadataCandidate(originCtx, rawURL, modelFile)
+			if err == nil && c.metadataCache != nil {
+				_ = c.metadataCache.Set(originCtx, cacheKey, derived, discoveryMetadataCacheTTL)
+			}
+			return derived, err
+		})
 
-		rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		for attempt, limit := range []int64{discoveryMetadataLimit, discoveryMetadataMaxLimit} {
-			derived, inspectErr := c.readDerivedMetadataRange(ctx, rawURL, limit)
-			lastDerived = derived
-			if inspectErr == nil {
-				if c.metadataCache != nil {
-					_ = c.metadataCache.Set(ctx, cacheKey, derived, discoveryMetadataCacheTTL)
+		select {
+		case <-ctx.Done():
+			return providerDerived(lastDerived, detail.GGUF), ctx.Err()
+		case result := <-resultCh:
+			if derived, ok := result.Val.(ggufmeta.Derived); ok {
+				lastDerived = derived
+				if result.Err == nil {
+					return providerDerived(derived, detail.GGUF), nil
 				}
-				return providerDerived(derived, detail.GGUF), nil
 			}
-			lastErr = fmt.Errorf("%s: %w", modelFile, inspectErr)
-			if attempt == 0 && metadataRangeExhausted(inspectErr) {
-				continue
-			}
-			break
+			lastErr = result.Err
 		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no metadata candidate succeeded")
 	}
 	return providerDerived(lastDerived, detail.GGUF), fmt.Errorf("GGUF metadata unavailable after %d candidate artifacts: %w", len(candidates), lastErr)
+}
+
+func (c *Client) cachedDerivedMetadata(ctx context.Context, cacheKey string) (ggufmeta.Derived, bool) {
+	if c.metadataCache == nil {
+		return ggufmeta.Derived{}, false
+	}
+	var cached ggufmeta.Derived
+	hit, _ := c.metadataCache.Get(ctx, cacheKey, &cached)
+	if !hit {
+		return ggufmeta.Derived{}, false
+	}
+	if !ggufmeta.DerivedCoreReady(cached) {
+		_ = c.metadataCache.Delete(ctx, cacheKey)
+		return ggufmeta.Derived{}, false
+	}
+	return cached, true
+}
+
+func (c *Client) fetchDerivedMetadataCandidate(ctx context.Context, rawURL, modelFile string) (ggufmeta.Derived, error) {
+	var lastDerived ggufmeta.Derived
+	var lastErr error
+	for attempt, limit := range []int64{discoveryMetadataLimit, discoveryMetadataMaxLimit} {
+		derived, inspectErr := c.readDerivedMetadataRange(ctx, rawURL, limit)
+		lastDerived = derived
+		if inspectErr == nil {
+			return derived, nil
+		}
+		lastErr = fmt.Errorf("%s: %w", modelFile, inspectErr)
+		if attempt == 0 && metadataRangeExhausted(inspectErr) {
+			continue
+		}
+		break
+	}
+	return lastDerived, lastErr
 }
 
 type discoveryMetadataCandidate struct {
