@@ -15,10 +15,10 @@ func seedSessionRequestLogs(t *testing.T) (*Service, context.Context) {
 	t.Helper()
 	s := testService(t)
 	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`, "m1", "Qwen Coder 7B", "/models/coder.gguf", 1, "Q4_K_M", 4096); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`, "m1", "Qwen Coder 7B", "/models/coder.gguf", 1, "Q4_K_M", 4096); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`, "coder", "m1", "Coder", 1, 1, 0, "normal", 1, 0); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`, "coder", "m1", "Coder", 1, 1, 0, "normal", 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	promptTPS := 42.5
