@@ -136,7 +136,7 @@ describe('GPU placement cards', () => {
     expect(slider).toBeTruthy()
     expect(slider!.props('max')).toBe(1)
     expect(wrapper.text()).toContain('64K')
-    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true&preview_options=%7B%7D')
   })
 
   it('uses inherited context and shows a GPU-only fit with memory guidance', async () => {
@@ -504,7 +504,7 @@ describe('GPU placement cards', () => {
 
     await wrapper.setProps({ llamaOptions: { 'ctx-size': '65024' } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Selected: 65,000 tokens')
+    expect(wrapper.text()).toContain('Selected: 65,024 tokens')
 
     await vi.waitFor(() => {
       expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=65024')
