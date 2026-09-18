@@ -151,3 +151,111 @@ func TestObservedMetrics(t *testing.T) {
 		t.Fatalf("metrics=%+v", found)
 	}
 }
+
+func TestMemoryRejectsInvalidDestinationAndCorruptEntry(t *testing.T) {
+	ctx := context.Background()
+	var nilMemory *Memory
+	var dst map[string]string
+	if hit, err := nilMemory.Get(ctx, "key", &dst); hit || err == nil {
+		t.Fatalf("nil memory Get hit=%v err=%v", hit, err)
+	}
+	if err := nilMemory.Set(ctx, "key", dst, time.Minute); err == nil {
+		t.Fatal("nil memory Set succeeded")
+	}
+	if err := nilMemory.Delete(ctx, "key"); err != nil {
+		t.Fatalf("nil memory Delete err=%v", err)
+	}
+
+	memory := NewMemory()
+	if hit, err := memory.Get(ctx, "key", nil); hit || err == nil {
+		t.Fatalf("nil destination hit=%v err=%v", hit, err)
+	}
+	memory.entries["corrupt"] = memoryEntry{payload: []byte("{not-json")}
+	if hit, err := memory.Get(ctx, "corrupt", &dst); hit || err == nil {
+		t.Fatalf("corrupt entry hit=%v err=%v", hit, err)
+	}
+	if _, ok := memory.entries["corrupt"]; ok {
+		t.Fatal("corrupt cache entry was not removed")
+	}
+}
+
+func TestLayeredSetDeleteAndL1Hit(t *testing.T) {
+	ctx := context.Background()
+	l1 := NewMemory()
+	l2 := NewMemory()
+	layered := NewLayered(l1, l2, time.Minute)
+
+	if err := layered.Set(ctx, "key", map[string]string{"value": "both"}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if hit, err := l1.Get(ctx, "key", &got); err != nil || !hit || got["value"] != "both" {
+		t.Fatalf("l1 hit=%v got=%v err=%v", hit, got, err)
+	}
+	got = nil
+	if hit, err := l2.Get(ctx, "key", &got); err != nil || !hit || got["value"] != "both" {
+		t.Fatalf("l2 hit=%v got=%v err=%v", hit, got, err)
+	}
+
+	// A populated L1 must satisfy the lookup without consulting a failing L2.
+	layered.l2 = failingCache{}
+	got = nil
+	if hit, err := layered.Get(ctx, "key", &got); err != nil || !hit || got["value"] != "both" {
+		t.Fatalf("layered l1 hit=%v got=%v err=%v", hit, got, err)
+	}
+	layered.l2 = l2
+
+	if err := layered.Delete(ctx, "key"); err != nil {
+		t.Fatal(err)
+	}
+	for name, backend := range map[string]Cache{"l1": l1, "l2": l2} {
+		got = nil
+		if hit, err := backend.Get(ctx, "key", &got); err != nil || hit {
+			t.Fatalf("%s delete hit=%v err=%v", name, hit, err)
+		}
+	}
+}
+
+func TestLayeredAndObservedPropagateBackendErrors(t *testing.T) {
+	ctx := context.Background()
+	layered := NewLayered(failingCache{}, failingCache{})
+	if err := layered.Set(ctx, "key", "value", time.Minute); err == nil {
+		t.Fatal("layered Set did not report backend errors")
+	}
+	if err := layered.Delete(ctx, "key"); err == nil {
+		t.Fatal("layered Delete did not report backend errors")
+	}
+
+	observed := NewObserved("error-test-"+time.Now().Format("150405.000000000"), "failing", failingCache{})
+	var dst string
+	if hit, err := observed.Get(ctx, "key", &dst); hit || err == nil {
+		t.Fatalf("observed Get hit=%v err=%v", hit, err)
+	}
+	if err := observed.Set(ctx, "key", "value", time.Minute); err == nil {
+		t.Fatal("observed Set did not report error")
+	}
+	if err := observed.Delete(ctx, "key"); err == nil {
+		t.Fatal("observed Delete did not report error")
+	}
+}
+
+func TestNilRedisReceiverIsSafe(t *testing.T) {
+	ctx := context.Background()
+	var cache *Redis
+	var dst map[string]string
+	if hit, err := cache.Get(ctx, "key", &dst); hit || err == nil {
+		t.Fatalf("nil Redis Get hit=%v err=%v", hit, err)
+	}
+	if err := cache.Set(ctx, "key", dst, time.Minute); err == nil {
+		t.Fatal("nil Redis Set succeeded")
+	}
+	if err := cache.Delete(ctx, "key"); err != nil {
+		t.Fatalf("nil Redis Delete err=%v", err)
+	}
+	if err := cache.Ping(ctx); err == nil {
+		t.Fatal("nil Redis Ping succeeded")
+	}
+	if err := cache.Close(); err != nil {
+		t.Fatalf("nil Redis Close err=%v", err)
+	}
+}
