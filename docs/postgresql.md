@@ -24,14 +24,21 @@ If a PostgreSQL URL is configured and the database is invalid, unreachable, or i
 
 The repository includes `docker-compose.postgres.yml` as an optional override. It is not part of the default stack.
 
-Set a password and start LlamaRack with the override:
+Set the raw PostgreSQL service password and the complete LlamaRack connection URL separately, then start the override:
 
 ```bash
 export LLAMARACK_POSTGRES_PASSWORD='choose-a-strong-password'
+export LLAMARACK_DATABASE_URL='postgres://llamarack:choose-a-strong-password@postgres:5432/llamarack?sslmode=disable'
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 ```
 
-If the password contains URL-reserved characters, provide an explicitly URL-encoded `LLAMARACK_DATABASE_URL` instead of relying on the example URL.
+`LLAMARACK_POSTGRES_PASSWORD` is always the raw password consumed by PostgreSQL. The Compose override never interpolates it into a URI. When the password contains URL-reserved characters, URL-encode only the password component of `LLAMARACK_DATABASE_URL`; keep `LLAMARACK_POSTGRES_PASSWORD` unchanged. For example:
+
+```bash
+export LLAMARACK_POSTGRES_PASSWORD='p@ss:/?#word'
+export LLAMARACK_DATABASE_URL="$(python3 -c 'import os, urllib.parse; print("postgres://llamarack:"+urllib.parse.quote(os.environ["LLAMARACK_POSTGRES_PASSWORD"], safe="")+"@postgres:5432/llamarack?sslmode=disable")')"
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+```
 
 The PostgreSQL service uses a named volume, `llamarack-postgres`, for database persistence. The normal `/config` volume remains in use for non-database manager state such as locally stored encryption/signing material.
 

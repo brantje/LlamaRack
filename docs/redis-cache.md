@@ -58,9 +58,9 @@ Malformed cached values are ignored and removed best-effort; the authoritative H
 
 ## Performance qualification
 
-CI benchmarks the first production namespace in four modes: process-local warm L1, uncached origin fetch, warm Redis after a fresh client, and concurrent warm Redis reads. The controlled origin benchmark includes a conservative 5 ms network floor so it represents the remote range request Redis replaces rather than a same-process HTTP round trip.
+CI collects benchmark evidence for the first production namespace in four modes: process-local warm L1, a synthetic uncached origin fetch, warm Redis after a fresh client, and concurrent warm Redis reads. The synthetic origin benchmark deliberately includes a documented 5 ms network floor; it is a controlled comparison and is **not** measured Hugging Face network latency or a pass/fail performance threshold.
 
-The L1 memory cache remains first in the lookup chain and therefore stays the steady-state fast path. Redis is useful as the restart/shared-process L2: the integration test creates a fresh Hugging Face client and proves a warm Redis entry avoids another origin request entirely.
+The L1 memory cache remains first in the lookup chain and therefore stays the steady-state fast path. Redis is useful as the restart/shared-process L2: the integration test creates a fresh Hugging Face client and proves a warm Redis entry avoids another origin request entirely. A separate cold-concurrency test starts 16 identical requests together and requires local singleflight coalescing to reduce them to one authoritative origin fetch. Redis is never used for distributed locking or correctness.
 
 ## Metrics
 

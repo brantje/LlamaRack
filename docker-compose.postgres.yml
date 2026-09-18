@@ -1,7 +1,7 @@
 services:
   llamarack:
     environment:
-      LLAMARACK_DATABASE_URL: "postgres://llamarack:${LLAMARACK_POSTGRES_PASSWORD:?set LLAMARACK_POSTGRES_PASSWORD}@postgres:5432/llamarack?sslmode=disable"
+      LLAMARACK_DATABASE_URL: "${LLAMARACK_DATABASE_URL:?set LLAMARACK_DATABASE_URL}"
     depends_on:
       postgres:
         condition: service_healthy
