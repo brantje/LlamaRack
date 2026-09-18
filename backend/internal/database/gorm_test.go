@@ -3,9 +3,12 @@ package database
 import (
 	"context"
 	"errors"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenStoreUsesGORMAdapterWithoutChangingSQLiteSemantics(t *testing.T) {
@@ -58,6 +61,43 @@ func TestRedactDatabaseErrorDoesNotExposePasswordOrDSN(t *testing.T) {
 	err := redactDatabaseError("connect PostgreSQL database", dsn, errors.New("failed for "+dsn+" password=super-secret"))
 	if got := err.Error(); strings.Contains(got, dsn) || strings.Contains(got, "super-secret") {
 		t.Fatalf("database error leaked credentials: %q", got)
+	}
+}
+
+func TestOpenConfiguredUnreachablePostgresDoesNotFallbackOrLeakCredentials(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	fallback := filepath.Join(t.TempDir(), "sqlite-fallback", "manager.db")
+	password := "p@ss:/?#word"
+	dsnURL := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword("llamarack", password),
+		Host:   "127.0.0.1:1",
+		Path:   "/llamarack",
+	}
+	query := dsnURL.Query()
+	query.Set("sslmode", "disable")
+	dsnURL.RawQuery = query.Encode()
+	dsn := dsnURL.String()
+
+	store, err := OpenConfigured(ctx, fallback, dsn)
+	if store != nil {
+		_ = store.Close()
+		t.Fatal("unreachable PostgreSQL unexpectedly opened")
+	}
+	if err == nil {
+		t.Fatal("expected explicitly configured PostgreSQL to fail")
+	}
+	message := err.Error()
+	if strings.Contains(message, password) || strings.Contains(message, url.QueryEscape(password)) || strings.Contains(message, dsn) {
+		t.Fatalf("database error leaked credentials: %q", message)
+	}
+	if _, statErr := os.Stat(fallback); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("SQLite fallback was created: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Dir(fallback)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("SQLite fallback directory was created: %v", statErr)
 	}
 }
 
