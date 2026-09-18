@@ -1107,6 +1107,7 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	_, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
+	s.logRuntimeSpill(i.ID, runtimePlan)
 	if err != nil {
 		if isStartupInterrupt(err) {
 			return "", fmt.Errorf("%w: %w", errStartupKilled, err)

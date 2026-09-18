@@ -71,7 +71,6 @@ func (s *Service) prepareRuntimeLaunch(
 		}
 		if plan.Fits {
 			s.logReservation("reserved", instance.ID, lease)
-			s.logRuntimeSpill(instance.ID, plan)
 			return plan, nil
 		}
 		if !allowEviction {
@@ -114,7 +113,6 @@ func (s *Service) prepareRuntimeLaunch(
 			}
 		}
 		if victim.InstanceID == "" {
-			s.logRuntimeSpill(instance.ID, claimedPlan)
 			return claimedPlan, nil
 		}
 		if !s.victimPlacementCurrent(victim, snapshot) {
