@@ -97,7 +97,9 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 	if state != StateCancelled {
 		return errors.New("only cancelled downloads can be removed")
 	}
-	return nil
+	// A conditional DELETE that affected zero rows is not a successful removal,
+	// even if a follow-up read still observes the row as cancelled.
+	return errors.New("only cancelled downloads can be removed")
 }
 
 func (m *Manager) detailedList(ctx context.Context) ([]Job, error) {
