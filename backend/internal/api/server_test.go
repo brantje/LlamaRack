@@ -15,7 +15,9 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
@@ -25,6 +27,8 @@ type apiFixture struct {
 	server *Server
 	auth   *auth.Service
 	models *models.Service
+	instances *instances.Service
+	config *llamaconfig.Store
 	dbExec func(string, ...any)
 	dir    string
 }
@@ -44,8 +48,10 @@ func newAPIFixture(t *testing.T, profile func() (llamacpp.Profile, error)) *apiF
 	t.Cleanup(func() { _ = db.Close() })
 	a := auth.New(db, time.Hour)
 	m := models.New(db, modelsDir)
+	instanceService := instances.New(db)
+	configStore := llamaconfig.New(db)
 	sup := supervisor.New(filepath.Join(root, "missing-llama"), "127.0.0.1", 31000, 100*time.Millisecond)
-	l := lifecycle.New(m, sup)
+	l := lifecycle.New(m, instanceService, configStore, sup)
 	if profile == nil {
 		profile = func() (llamacpp.Profile, error) {
 			return llamacpp.Profile{Path: "/app/llama-server", Version: "test", Fingerprint: "abc", Options: []llamacpp.Option{
@@ -58,7 +64,7 @@ func newAPIFixture(t *testing.T, profile func() (llamacpp.Profile, error)) *apiF
 			}}, nil
 		}
 	}
-	return &apiFixture{server: New(m, l, profile), auth: a, models: m, dir: modelsDir, dbExec: func(q string, args ...any) {
+	return &apiFixture{server: New(m, l, profile), auth: a, models: m, instances: instanceService, config: configStore, dir: modelsDir, dbExec: func(q string, args ...any) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, q, args...); err != nil {
 			t.Fatal(err)
