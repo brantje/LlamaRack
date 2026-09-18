@@ -15,7 +15,8 @@ import (
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 const oidcStateCookie = "llamarack_oidc_state"
 
