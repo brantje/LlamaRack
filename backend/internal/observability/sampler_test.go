@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 	"github.com/brantje/llamarack/backend/internal/telemetry"
@@ -207,9 +209,9 @@ func TestAttachNativeMetricsForReadyRuntime(t *testing.T) {
 func TestSamplerRuntimeStates(t *testing.T) {
 	service := testService(t)
 	modelsDir := t.TempDir()
-	modelService := models.New(service.db, modelsDir)
+	modelService := models.New(observabilityTestDB(t, service), modelsDir)
 	sup := supervisor.New("unused", "127.0.0.1", 39901, time.Second)
-	life := lifecycle.New(modelService, sup)
+	life := lifecycle.New(modelService, instances.New(observabilityTestDB(t, service)), llamaconfig.New(observabilityTestDB(t, service)), sup)
 	sampler := NewSampler(life, service)
 	ctx := context.Background()
 
@@ -230,9 +232,9 @@ func TestSamplerRunPublishesManagerOwnedHardware(t *testing.T) {
 	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	modelService := models.New(service.db, modelsDir)
+	modelService := models.New(observabilityTestDB(t, service), modelsDir)
 	sup := supervisor.New("unused", "127.0.0.1", 39900, time.Second)
-	life := lifecycle.New(modelService, sup)
+	life := lifecycle.New(modelService, instances.New(observabilityTestDB(t, service)), llamaconfig.New(observabilityTestDB(t, service)), sup)
 	sampler := NewSampler(life, service)
 	sampler.interval = 20 * time.Millisecond
 	sampler.persist = time.Hour

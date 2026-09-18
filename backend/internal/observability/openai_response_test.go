@@ -2,9 +2,10 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestOpenAIResponsePersistenceAndDelete(t *testing.T) {
@@ -31,7 +32,7 @@ func TestOpenAIResponsePersistenceAndDelete(t *testing.T) {
 	if err != nil || !stored.Deleted || stored.ResponseBody == nil {
 		t.Fatalf("deleted flag should keep bodies=%+v err=%v", stored, err)
 	}
-	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_keep"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_keep"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("second delete=%v", err)
 	}
 }

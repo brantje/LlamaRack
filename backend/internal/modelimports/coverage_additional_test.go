@@ -2,7 +2,6 @@ package modelimports
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/models"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestPrepareReusesCompletedModelAndStartsImmediately(t *testing.T) {
@@ -142,7 +143,7 @@ func TestEnsureModelFileAndLookupErrorBranches(t *testing.T) {
 	if err := service.ensureModelFile("directory-model"); err == nil {
 		t.Fatal("expected directory model error")
 	}
-	if err := service.ensureModelFile("missing-model"); !errors.Is(err, sql.ErrNoRows) {
+	if err := service.ensureModelFile("missing-model"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing model error=%v", err)
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,context_length) VALUES('escape-model','Escape','../escape.gguf',0,0)`)

@@ -2,7 +2,7 @@ package observability
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,8 +19,13 @@ func playgroundTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return New(db)
+	service := New(db)
+	observabilityTestDBs.Store(service, db)
+	t.Cleanup(func() {
+		observabilityTestDBs.Delete(service)
+		_ = db.Close()
+	})
+	return service
 }
 
 func TestPlaygroundDiagnosticsUsesRequestRecordAndCorrelatedLifecycle(t *testing.T) {
@@ -114,7 +119,7 @@ func TestInferenceTurnStatsPreserveUnavailableVersusZero(t *testing.T) {
 func TestInferenceTurnStatsRequiresCorrelatedRequest(t *testing.T) {
 	service := playgroundTestService(t)
 	value := 1.0
-	if err := service.SaveInferenceTurnStats(context.Background(), "missing", InferenceTurnStats{PromptMS: &value}); err != sql.ErrNoRows {
+	if err := service.SaveInferenceTurnStats(context.Background(), "missing", InferenceTurnStats{PromptMS: &value}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing correlation err=%v", err)
 	}
 	if err := service.SaveInferenceTurnStats(context.Background(), " ", InferenceTurnStats{PromptMS: &value}); err == nil {
@@ -150,7 +155,7 @@ func TestPlaygroundLifecycleRecorderIgnoresUnrelatedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := service.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM playground_lifecycle_events`).Scan(&count); err != nil {
+	if err := observabilityTestDB(t, service).QueryRowContext(ctx, `SELECT COUNT(*) FROM playground_lifecycle_events`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -170,18 +175,18 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTableColumn(t, ctx, service.db, "playground_lifecycle_events", "correlation_id") {
+	if !hasTableColumn(t, ctx, observabilityTestDB(t, service), "playground_lifecycle_events", "correlation_id") {
 		t.Fatal("expected playground_lifecycle_events.correlation_id from migrations")
 	}
-	if !hasTableColumn(t, ctx, service.db, "inference_request_timings", "predicted_ms") {
+	if !hasTableColumn(t, ctx, observabilityTestDB(t, service), "inference_request_timings", "predicted_ms") {
 		t.Fatal("expected inference_request_timings.predicted_ms from migrations")
 	}
-	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
+	if _, err := observabilityTestDB(t, service).ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
 		t.Fatalf("insert playground event: %v", err)
 	}
 }
 
-func hasTableColumn(t *testing.T, ctx context.Context, db *sql.DB, table, column string) bool {
+func hasTableColumn(t *testing.T, ctx context.Context, db database.Querier, table, column string) bool {
 	t.Helper()
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {

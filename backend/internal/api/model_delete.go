@@ -1,12 +1,13 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/brantje/llamarack/backend/internal/models"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, id string) {
@@ -50,7 +51,7 @@ func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, id string) 
 
 func writeModelDeleteError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, database.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 	case errors.Is(err, models.ErrArtifactShared):
 		writeErr(w, http.StatusConflict, err)

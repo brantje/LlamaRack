@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	appcache "github.com/brantje/llamarack/backend/internal/cache"
 )
 
 type ManagementHandler struct{ service *Service }
@@ -304,6 +306,7 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.states != nil {
 		writeInstanceStateMetrics(w, h.states())
 	}
+	writeCacheMetrics(w)
 }
 
 func writeHardwareMetrics(w http.ResponseWriter, overview HardwareOverview) {
@@ -379,4 +382,33 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeCacheMetrics(w http.ResponseWriter) {
+	writeMetricHelp(w, "cache_hits_total", "Cache hits by non-authoritative cache namespace and backend.")
+	writeMetricType(w, "cache_hits_total", "counter")
+	writeMetricType(w, "cache_misses_total", "counter")
+	writeMetricType(w, "cache_errors_total", "counter")
+	writeMetricType(w, "cache_writes_total", "counter")
+	writeMetricType(w, "cache_deletes_total", "counter")
+	writeMetricType(w, "cache_operation_duration_seconds_total", "counter")
+	writeMetricType(w, "cache_origin_fetches_avoided_total", "counter")
+	for _, snapshot := range appcache.Metrics() {
+		labels := `{namespace="` + promEscape(snapshot.Namespace) + `",backend="` + promEscape(snapshot.Backend) + `"}`
+		writeMetricSample(w, "cache_hits_total", labels, strconv.FormatUint(snapshot.Hits, 10))
+		writeMetricSample(w, "cache_misses_total", labels, strconv.FormatUint(snapshot.Misses, 10))
+		writeMetricSample(w, "cache_errors_total", labels, strconv.FormatUint(snapshot.Errors, 10))
+		writeMetricSample(w, "cache_writes_total", labels, strconv.FormatUint(snapshot.Writes, 10))
+		writeMetricSample(w, "cache_deletes_total", labels, strconv.FormatUint(snapshot.Deletes, 10))
+		for operation, durationNS := range map[string]uint64{
+			"get": snapshot.GetDurationNS, "set": snapshot.SetDurationNS, "delete": snapshot.DeleteDurationNS,
+		} {
+			operationLabels := strings.TrimSuffix(labels, "}") + `,operation="` + operation + `"}`
+			writeMetricSample(w, "cache_operation_duration_seconds_total", operationLabels, strconv.FormatFloat(float64(durationNS)/float64(time.Second), 'f', 9, 64))
+		}
+	}
+	for _, snapshot := range appcache.OriginFetchesAvoidedMetrics() {
+		labels := `{namespace="` + promEscape(snapshot.Namespace) + `"}`
+		writeMetricSample(w, "cache_origin_fetches_avoided_total", labels, strconv.FormatUint(snapshot.Count, 10))
+	}
 }

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -59,16 +58,16 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 	if !found {
 		t.Fatal("managed key missing from API key list")
 	}
-	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("get hidden service account err=%v", err)
 	}
-	if err := s.UpdateServiceAccount(ctx, account.ID, strPtr("nope"), nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateServiceAccount(ctx, account.ID, strPtr("nope"), nil); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("patch hidden service account err=%v", err)
 	}
-	if err := s.DeleteServiceAccount(ctx, account.ID); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteServiceAccount(ctx, account.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("delete hidden service account err=%v", err)
 	}
-	if _, _, err := s.RotateAPIKey(ctx, key.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := s.RotateAPIKey(ctx, key.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("rotate managed key err=%v", err)
 	}
 	if err := s.UpdateAPIKey(ctx, key.ID, UpdateAPIKeyInput{Name: strPtr("renamed")}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
@@ -85,10 +84,10 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 	if err := s.UpdateAPIKey(ctx, key.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
 		t.Fatalf("reassign managed key err=%v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
 	allowlist := []string{"coder"}
@@ -102,7 +101,7 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 	if len(updated.InstanceIDs) != 1 || updated.InstanceIDs[0] != "coder" {
 		t.Fatalf("managed key instances=%v", updated.InstanceIDs)
 	}
-	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "hidden-owned", OwnerServiceAccountID: saID}); !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "hidden-owned", OwnerServiceAccountID: saID}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("create key for hidden owner err=%v", err)
 	}
 	rotated, newSecret, err := s.RotateManagedAPIKey(ctx, key.ID)
@@ -115,6 +114,7 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "password1234")
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "hidden-owned", OwnerServiceAccountID: hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "hidden-owned", OwnerServiceAccountID: hidden.ID}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("create ordinary key for hidden owner err=%v", err)
 	}
 
@@ -145,10 +145,10 @@ func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.UpdateAPIKey(ctx, userKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateAPIKey(ctx, userKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("reassign user key to hidden owner err=%v", err)
 	}
-	if err := s.UpdateAPIKey(ctx, saKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateAPIKey(ctx, saKey.ID, UpdateAPIKeyInput{OwnerServiceAccountID: &hidden.ID}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("reassign visible SA key to hidden owner err=%v", err)
 	}
 
@@ -169,10 +169,10 @@ func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 	if err := s.UpdateAPIKey(ctx, managed.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
 		t.Fatalf("reassign managed key err=%v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
 	allowlist := []string{"coder"}
@@ -206,7 +206,7 @@ func TestHiddenPrincipalHelpersAreIdempotent(t *testing.T) {
 func TestManagedInferenceKeyLookup(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if _, err := s.ManagedInferenceKey(ctx); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.ManagedInferenceKey(ctx); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("expected missing managed key, got err=%v", err)
 	}
 	account, err := s.EnsureHiddenServiceAccount(ctx, ManagedPrincipalName)
@@ -237,7 +237,7 @@ func TestRotateManagedAPIKeyRejectsNonManagedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.RotateManagedAPIKey(ctx, key.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := s.RotateManagedAPIKey(ctx, key.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("expected hidden-only rotate rejection, got %v", err)
 	}
 }
@@ -259,7 +259,7 @@ func TestDeleteHiddenServiceAccountByName(t *testing.T) {
 	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FindHiddenServiceAccountByName(ctx, ManagedPrincipalName); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.FindHiddenServiceAccountByName(ctx, ManagedPrincipalName); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("expected hidden account gone after delete, got %v", err)
 	}
 	if err := s.DeleteHiddenServiceAccountByName(ctx, ManagedPrincipalName); err != nil {

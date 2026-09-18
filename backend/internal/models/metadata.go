@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
-	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 )
 
 // InspectGGUF validates a path through the normal Model path rules and reads
@@ -70,13 +69,6 @@ func (s *Service) DetectedLlamaDefaults(ctx context.Context, modelID string) (ma
 	}, nil
 }
 
-// RegisterDetectedLlamaDefaults makes GGUF-derived defaults available to the
-// llama config store. Call this synchronously during backend initialization so
-// even resumed provider imports that autostart immediately receive the flags.
-func (s *Service) RegisterDetectedLlamaDefaults() func() {
-	return llamaconfig.RegisterDetectedDefaultsProvider(s.db, s.DetectedLlamaDefaults)
-}
-
 // DetectContext returns the architecture-specific context capability when it is
 // present in GGUF metadata. A zero result means the file was readable but did
 // not contain a usable context capability.
@@ -112,7 +104,7 @@ func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model,
 	if contextLength <= 0 {
 		return model, nil
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET context_length=?, updated_at=unixepoch() WHERE id=? AND context_length=0`, contextLength, id); err != nil {
+	if err := s.store.UpdateContextIfZero(ctx, id, contextLength); err != nil {
 		return Model{}, err
 	}
 	return s.GetByID(ctx, id)

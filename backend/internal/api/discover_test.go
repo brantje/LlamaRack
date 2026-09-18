@@ -39,7 +39,7 @@ func TestDiscoverRecommendationHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	managerSettings := settings.New(f.models.DB(), settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	managerSettings := settings.New(f.db, settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
 	handler := NewDiscoverRecommendationHandler(f.auth, hf, staticHardware{snapshot: hardware.Snapshot{
 		RAMAvailableBytes: 16 << 30, RAMTotalBytes: 32 << 30,
 		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 << 30, TotalBytes: 8 << 30}},
@@ -97,7 +97,7 @@ func TestDiscoverRecommendationHandler(t *testing.T) {
 func TestDiscoverSettingsHandler(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
-	managerSettings := settings.New(f.models.DB(), settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	managerSettings := settings.New(f.db, settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
 	handler := NewDiscoverSettingsHandler(f.auth, managerSettings)
 
 	if got := doRequest(t, handler, http.MethodGet, "/api/v1/settings/discover", nil, nil).Code; got != http.StatusUnauthorized {

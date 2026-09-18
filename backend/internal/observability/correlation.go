@@ -2,11 +2,13 @@ package observability
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 // CorrelatedRequestRecord is the request detail DTO. Full-mode bodies are
@@ -23,7 +25,7 @@ func (s *Service) EnsureCorrelationSchema(ctx context.Context) error {
 	if s.correlationReady {
 		return nil
 	}
-	if s.db == nil {
+	if s.store == nil {
 		return fmt.Errorf("database unavailable")
 	}
 	s.correlationReady = true
@@ -74,35 +76,9 @@ func (s *Service) BeginCorrelatedRequest(ctx context.Context, requestID string, 
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	keyID, keyName, keyPrefix, ownerKind, ownerID, _, _, requestBody, _ := requestValues(record)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-		started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
-		duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
-		trace_id,call_type,client_ip,user_agent
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		record.StartedAt, 0, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), 0, "pending",
-		0, nil, 0, 0, 0, nil, 0, 0, 0, "", requestBody, nil,
-		record.TraceID, record.CallType, record.ClientIP, record.UserAgent)
-	if err != nil {
-		return err
-	}
-	rowID, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_correlations(request_id,inference_request_id,prompt_tokens_per_second) VALUES(?,?,NULL)`, requestID, rowID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.store.BeginCorrelatedRequest(ctx, requestID, record)
 }
 
-// UpdateCorrelatedRequest persists metadata learned while the request remains in
-// flight (safe API-key identity, canonical Instance identity and opt-in body).
 func (s *Service) UpdateCorrelatedRequest(ctx context.Context, requestID string, record RequestRecord) error {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -117,22 +93,7 @@ func (s *Service) UpdateCorrelatedRequest(ctx context.Context, requestID string,
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	keyID, keyName, keyPrefix, ownerKind, ownerID, _, _, requestBody, _ := requestValues(record)
-	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET
-		instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,owner_kind=?,owner_id=?,streaming=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,request_body=?,
-		trace_id=?,call_type=?,client_ip=?,user_agent=?
-		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?) AND finished_at=0`,
-		record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), requestBody,
-		record.TraceID, record.CallType, record.ClientIP, record.UserAgent, requestID)
-	if err != nil {
-		return err
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.store.UpdateCorrelatedRequest(ctx, requestID, record)
 }
 
 func normalizeFinalRecord(record RequestRecord) RequestRecord {
@@ -166,90 +127,7 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	record = normalizeFinalRecord(record)
-	keyID, keyName, keyPrefix, ownerKind, ownerID, ttft, tps, requestBody, responseBody := requestValues(record)
-	var promptTPS any
-	if promptTokensPerSecond != nil {
-		promptTPS = *promptTokensPerSecond
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE inference_requests SET
-		started_at=?,finished_at=?,instance_id=?,endpoint=?,api_key_id=?,api_key_name=?,api_key_prefix=?,owner_kind=?,owner_id=?,streaming=?,status_code=?,result=?,duration_ms=?,ttft_ms=?,
-		prompt_tokens=?,generated_tokens=?,total_tokens=?,tokens_per_second=?,queue_duration_ms=?,load_duration_ms=?,autoloaded=?,error=?,request_body=?,response_body=?,
-		trace_id=?,call_type=?,client_ip=?,user_agent=?
-		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?) AND finished_at=0`,
-		record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result, record.DurationMS, ttft,
-		record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
-		record.TraceID, record.CallType, record.ClientIP, record.UserAgent, requestID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		var existing int64
-		err := tx.QueryRowContext(ctx, `SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&existing)
-		if err == nil {
-			// Already finalized: the exactly-once operation has completed.
-			return tx.Commit()
-		}
-		if err != sql.ErrNoRows {
-			return err
-		}
-		inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
-			started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
-			duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
-			trace_id,call_type,client_ip,user_agent
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result,
-			record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
-			record.TraceID, record.CallType, record.ClientIP, record.UserAgent)
-		if err != nil {
-			return err
-		}
-		rowID, err := inserted.LastInsertId()
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_correlations(request_id,inference_request_id,prompt_tokens_per_second) VALUES(?,?,?)`, requestID, rowID, promptTPS); err != nil {
-			return err
-		}
-		if err := addFinalCounters(ctx, tx, record); err != nil {
-			return err
-		}
-		// Insert triggers already account for autoload/load/failure lifecycle counters.
-		return tx.Commit()
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE inference_request_correlations SET prompt_tokens_per_second=? WHERE request_id=?`, promptTPS, requestID); err != nil {
-		return err
-	}
-	if err := addFinalCounters(ctx, tx, record); err != nil {
-		return err
-	}
-	// Early rows were inserted with autoloaded=0, so the legacy INSERT triggers
-	// did not fire. Preserve those cumulative lifecycle metrics at finalization.
-	if record.Autoloaded {
-		if err := addCounter(ctx, tx, Counter{Metric: "autoload_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
-			return err
-		}
-		if record.LoadDurationMS > 0 {
-			if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: record.InstanceID, Value: record.LoadDurationMS}); err != nil {
-				return err
-			}
-		}
-		if record.Result != "success" {
-			if err := addCounter(ctx, tx, Counter{Metric: "failed_start_total", InstanceID: record.InstanceID, Value: 1}); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit()
+	return s.store.FinalizeCorrelatedRequest(ctx, requestID, promptTokensPerSecond, record)
 }
 
 // RecordCorrelatedRequest preserves the completion-only API used by existing
@@ -282,16 +160,7 @@ func (s *Service) GetRequestByRequestID(ctx context.Context, requestID string) (
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return CorrelatedRequestRecord{}, err
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT COALESCE(c.request_id,''),
-		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
-		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
-		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body
-		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE c.request_id=?`, requestID)
-	record, err := scanEnrichedRequest(row)
-	if err != nil {
-		return CorrelatedRequestRecord{}, err
-	}
-	return CorrelatedRequestRecord{RequestRecord: record, RequestBody: record.RequestBody, ResponseBody: record.ResponseBody}, nil
+	return s.store.GetRequestByRequestID(ctx, requestID)
 }
 
 // StoredOpenAIResponse is the Manager-side lookup row for OpenAI Responses
@@ -323,19 +192,13 @@ func (s *Service) SetOpenAIResponseID(ctx context.Context, requestID, openaiID s
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET openai_response_id=?
-		WHERE id=(SELECT inference_request_id FROM inference_request_correlations WHERE request_id=?)
-		AND (openai_response_id IS NULL OR openai_response_id='')`, openaiID, requestID)
-	if err != nil && isUniqueConstraint(err) {
-		return ErrDuplicateOpenAIResponseID
-	}
-	return err
+	return s.store.SetOpenAIResponseID(ctx, requestID, openaiID)
 }
 
 func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) (StoredOpenAIResponse, error) {
 	openaiID = strings.TrimSpace(openaiID)
 	if openaiID == "" {
-		return StoredOpenAIResponse{}, sql.ErrNoRows
+		return StoredOpenAIResponse{}, database.ErrNotFound
 	}
 	if item, ok := s.bufferedStoredOpenAIResponse(openaiID); ok {
 		return item, nil
@@ -343,32 +206,13 @@ func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) 
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return StoredOpenAIResponse{}, err
 	}
-	var item StoredOpenAIResponse
-	var deleted, streaming int
-	var requestBody, responseBody sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT instance_id,owner_kind,owner_id,endpoint,streaming,openai_response_deleted,started_at,request_body,response_body
-		FROM inference_requests WHERE openai_response_id=? AND endpoint='/v1/responses'`, openaiID).Scan(
-		&item.InstanceID, &item.OwnerKind, &item.OwnerID, &item.Endpoint, &streaming, &deleted, &item.StartedAt, &requestBody, &responseBody)
-	if err != nil {
-		return StoredOpenAIResponse{}, err
-	}
-	item.Streaming = streaming != 0
-	item.Deleted = deleted != 0
-	if requestBody.Valid {
-		value := requestBody.String
-		item.RequestBody = &value
-	}
-	if responseBody.Valid {
-		value := responseBody.String
-		item.ResponseBody = &value
-	}
-	return item, nil
+	return s.store.GetStoredOpenAIResponse(ctx, openaiID)
 }
 
 func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openAIID string) error {
 	openAIID = strings.TrimSpace(openAIID)
 	if openAIID == "" {
-		return sql.ErrNoRows
+		return database.ErrNotFound
 	}
 	if handled, err := s.bufferMarkOpenAIResponseDeleted(openAIID); handled {
 		return err
@@ -376,26 +220,10 @@ func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openAIID string
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE inference_requests SET openai_response_deleted=1
-		WHERE openai_response_id=? AND endpoint='/v1/responses' AND openai_response_deleted=0`, openAIID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.store.MarkOpenAIResponseDeleted(ctx, openAIID)
 }
 
 var ErrDuplicateOpenAIResponseID = fmt.Errorf("duplicate openai response id")
-
-func isUniqueConstraint(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
-}
 
 func NewCorrelatedRequestHandler(service *Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -410,7 +238,7 @@ func NewCorrelatedRequestHandler(service *Service) http.Handler {
 		}
 		record, err := service.GetRequestByRequestID(r.Context(), requestID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
 				return
 			}

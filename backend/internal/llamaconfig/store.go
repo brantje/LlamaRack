@@ -1,6 +1,7 @@
 package llamaconfig
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -21,9 +22,9 @@ var companionOptions = map[string]bool{
 	"spec-draft-model": true,
 }
 
-type Store struct{ db *sql.DB }
+type Store struct{ db database.Store }
 
-func New(db *sql.DB) *Store { return &Store{db: db} }
+func New(db database.Store) *Store { return &Store{db: db} }
 
 type Effective struct {
 	Global   map[string]string `json:"global"`
@@ -38,7 +39,7 @@ func (s *Store) Global(ctx context.Context) (map[string]string, error) {
 }
 
 func (s *Store) ReplaceGlobal(ctx context.Context, options map[string]string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func TestRecommendationHandler(t *testing.T) {
 	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
 	gib := int64(1024 * 1024 * 1024)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 16 * gib,
 		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12 * gib, FreeBytes: 10 * gib}},
 	}})
@@ -49,7 +49,7 @@ func TestRecommendationReturnsEstimateWhenHardwareProbeFails(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{err: errors.New("probe unavailable")})
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{err: errors.New("probe unavailable")})
 	w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation", nil, cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "probe unavailable") || !strings.Contains(w.Body.String(), `"confidence":"low"`) {
 		t.Fatalf("hardware failure=%d body=%s", w.Code, w.Body.String())
@@ -171,7 +171,7 @@ func TestRecommendationInstanceRuntimeParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}})
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}})
 
 	w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&system_spillover_enabled=false&gpu_mode=auto", nil, cookie)
 	if w.Code != http.StatusOK {
@@ -210,7 +210,7 @@ func TestRecommendationRuntimePreviewOverridesAndModelBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	gib := int64(1024 * 1024 * 1024)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
 		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12 * gib, FreeBytes: 10 * gib}},
 	}}, func() (llamacpp.Profile, error) {
@@ -247,7 +247,7 @@ func TestRecommendationRuntimePreviewOverridesAndModelBinding(t *testing.T) {
 		t.Fatalf("model binding=%d body=%s", w.Code, w.Body.String())
 	}
 
-	profileErrorHandler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	profileErrorHandler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
 	}}, func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("profile unavailable") })
 	w = doRequest(t, profileErrorHandler, http.MethodGet,
@@ -271,7 +271,7 @@ func TestRecommendationUnboundSpilloverDefaultsDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
 		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 4 * gib, FreeBytes: 4 * gib}},
 	}}, func() (llamacpp.Profile, error) {
@@ -300,7 +300,7 @@ func TestRecommendationExplicitEmptyManualOverridesClearPersistedValues(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 16 << 30, RAMAvailableBytes: 12 << 30,
 		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 << 30}, {ID: "CUDA1", FreeBytes: 8 << 30}},
 	}})
@@ -331,7 +331,7 @@ func TestRecommendationPreviewOptionsAreValidated(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}}, func() (llamacpp.Profile, error) {
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 16 << 30}}, func() (llamacpp.Profile, error) {
 		return llamacpp.Profile{Version: "test", Options: []llamacpp.Option{{Key: "ctx-size", Kind: "integer"}, {Key: "n-gpu-layers", Kind: "integer"}, {Key: "mmproj", Kind: "string"}}}, nil
 	})
 	w := doRequest(t, handler, http.MethodGet,
@@ -372,14 +372,14 @@ func TestRecommendationAccountsForPendingSchedulerReservation(t *testing.T) {
 	if err != nil || lease.ID == "" {
 		t.Fatalf("pending reservation=%+v err=%v", lease, err)
 	}
-	handler := NewReservationAwareRecommendationHandler(f.auth, f.models, staticHardware{snapshot: raw}, ledger)
+	handler := NewReservationAwareRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: raw}, ledger)
 	w := doRequest(t, handler, http.MethodGet,
 		"/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":false`) {
 		t.Fatalf("pending reservation must reduce advertised capacity: %d %s", w.Code, w.Body.String())
 	}
 
-	withoutLedger := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: raw})
+	withoutLedger := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: raw})
 	w = doRequest(t, withoutLedger, http.MethodGet,
 		"/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":true`) {

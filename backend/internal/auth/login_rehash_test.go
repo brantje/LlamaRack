@@ -24,6 +24,7 @@ func legacyPasswordHash(password string) string {
 func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 	ctx := t.Context()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	user, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +33,7 @@ func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 	if !passwordNeedsRehash(legacy) || !verifyPassword("correct-horse-battery", legacy) {
 		t.Fatal("legacy hash fixture must verify and require rehash")
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=?,last_login_at=? WHERE id=?", legacy, 123, user.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET password_hash=?,last_login_at=? WHERE id=?", legacy, 123, user.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,14 +45,14 @@ func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 		t.Fatalf("bearer login result=%+v", bearer)
 	}
 	var current string
-	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
 		t.Fatal(err)
 	}
 	if passwordNeedsRehash(current) {
 		t.Fatal("bearer login did not upgrade password hash")
 	}
 
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", legacy, user.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", legacy, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	token, csrf, loggedIn, err := s.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "192.0.2.6", "legacy-agent")
@@ -61,7 +62,7 @@ func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 	if token == "" || csrf == "" || loggedIn.LastLoginAt == nil {
 		t.Fatalf("legacy login token=%q csrf=%q user=%+v", token, csrf, loggedIn)
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
 		t.Fatal(err)
 	}
 	if passwordNeedsRehash(current) {
@@ -72,39 +73,32 @@ func TestBearerAndLegacyLoginRehashOldPasswordParameters(t *testing.T) {
 func TestPersistPasswordRehashRejectsStaleHash(t *testing.T) {
 	ctx := t.Context()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	user, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
 	original := legacyPasswordHash("correct-horse-battery")
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", original, user.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", original, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	resetHash, err := hashPassword("replacement-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", resetHash, user.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", resetHash, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	rehashed, err := hashPassword("correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := persistPasswordRehash(ctx, tx, user.ID, original, rehashed); !errors.Is(err, ErrInvalidCredentials) {
+	if err := s.sessions.CommitLogin(ctx, user.ID, original, rehashed, 456, nil); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("stale rehash err=%v, want %v", err, ErrInvalidCredentials)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
 	}
 
 	var current string
-	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", user.ID).Scan(&current); err != nil {
 		t.Fatal(err)
 	}
 	if current != resetHash {

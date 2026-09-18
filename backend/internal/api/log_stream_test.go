@@ -77,7 +77,7 @@ func TestWorkerLogStreamStreamsLiveWorkerOutput(t *testing.T) {
 	instanceSlug := instance.Slug
 
 	sup := supervisor.New(fakeAPILogServer(t), "127.0.0.1", 33500, 5*time.Second)
-	f.server.lifecycle = lifecycle.New(f.models, sup)
+	f.server.lifecycle = lifecycle.New(f.models, f.instances, f.config, sup)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

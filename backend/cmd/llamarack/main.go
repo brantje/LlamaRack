@@ -16,6 +16,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/api"
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/benchmark"
+	appcache "github.com/brantje/llamarack/backend/internal/cache"
 	"github.com/brantje/llamarack/backend/internal/config"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
@@ -23,6 +24,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/gateway"
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
 	"github.com/brantje/llamarack/backend/internal/litellm"
 	"github.com/brantje/llamarack/backend/internal/llamaconfig"
@@ -55,13 +57,13 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err := database.EnsurePrivateDir(cfg.DataDir); err != nil {
 		return fmt.Errorf("restrict data dir: %w", err)
 	}
-	db, err := database.Open(ctx, cfg.DatabasePath)
+	db, err := database.OpenConfigured(ctx, cfg.DatabasePath, cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
 
-	managerSettings := settings.New(db, settings.Defaults{
+	managerSettings := settings.NewWithStore(settings.NewSettingStore(db), settings.Defaults{
 		SessionLifetime: cfg.SessionLifetime, AllowedOrigins: cfg.AllowedOrigin, StartupTimeout: cfg.StartupTimeout,
 		AlwaysOnReconcile: cfg.AlwaysOnReconcileInterval,
 		DataDir:           cfg.DataDir, ModelsDir: cfg.ModelsDir, DatabasePath: cfg.DatabasePath, ListenAddr: cfg.ListenAddr, LlamaServerPath: cfg.LlamaServerPath,
@@ -83,14 +85,19 @@ func run(ctx context.Context, cfg config.Config) error {
 		alwaysOnInterval = time.Duration(seconds) * time.Second
 	}
 
-	authService := auth.New(db, sessionLifetime)
+	authService := auth.NewWithStores(auth.Stores{
+		Users: auth.NewUserStore(db), Sessions: auth.NewSessionStore(db), APIKeys: auth.NewAPIKeyStore(db),
+		ServiceAccounts: auth.NewServiceAccountStore(db), OIDC: auth.NewOIDCStore(db),
+	}, sessionLifetime)
 	if err := authService.UsePersistentSigningKey(cfg.DataDir); err != nil {
 		return fmt.Errorf("initialize management signing key: %w", err)
 	}
 	network := managersecurity.NewNetwork(managerSettings)
 	loginProtector := managersecurity.NewLoginProtector(managerSettings)
-	modelService := models.New(db, cfg.ModelsDir)
-	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
+	modelService := models.NewWithStore(models.NewModelStore(db), cfg.ModelsDir)
+	instanceService := instances.NewWithStore(instances.NewInstanceStore(db))
+	llamaConfigStore := llamaconfig.New(db)
+	unregisterDetectedDefaults := llamaConfigStore.RegisterDetectedDefaultsProvider(modelService.DetectedLlamaDefaults)
 	defer unregisterDetectedDefaults()
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, startupTimeout)
 	installID, err := supervisor.EnsureInstallationID(ctx, db)
@@ -103,10 +110,9 @@ func run(ctx context.Context, cfg config.Config) error {
 		defer cancel()
 		sup.Shutdown(shutdownCtx)
 	}()
-	lifecycleService := lifecycle.New(modelService, sup)
+	lifecycleService := lifecycle.New(modelService, instanceService, llamaConfigStore, sup)
 	lifecycleService.SetDataDir(cfg.DataDir)
 	hardwareDetector := hardware.New()
-	llamaConfigStore := llamaconfig.New(db)
 	benchmarkService := benchmark.NewService(ctx, benchmark.NewSQLStore(db), lifecycleService.Instances(), modelService, llamaConfigStore, hardwareDetector, lifecycleService.Reservations(), cfg.LlamaBenchPath)
 	if err := benchmarkService.ReconcileInterrupted(ctx); err != nil {
 		return fmt.Errorf("reconcile interrupted benchmarks: %w", err)
@@ -118,7 +124,7 @@ func run(ctx context.Context, cfg config.Config) error {
 			slog.Error("benchmark shutdown failed", "error", err)
 		}
 	}()
-	observabilityService := observability.New(db)
+	observabilityService := observability.NewWithStore(observability.NewObservabilityStore(db))
 	writebackCtx, stopWriteback := context.WithCancel(ctx)
 	observabilityService.StartWriteback(writebackCtx)
 	defer func() {
@@ -180,11 +186,31 @@ func run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
 	}
-	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
+	if cfg.RedisURL != "" {
+		redisCache, cacheErr := appcache.NewRedis(cfg.RedisURL)
+		if cacheErr != nil {
+			slog.Warn("Redis cache disabled", "error", cacheErr)
+		} else {
+			defer redisCache.Close()
+			if pingErr := redisCache.Ping(ctx); pingErr != nil {
+				slog.Warn("Redis cache unavailable; continuing with in-memory cache", "error", pingErr)
+			} else {
+				hfClient.SetDerivedMetadataCache(appcache.NewLayered(
+					appcache.NewObserved("hf_derived", "memory", appcache.NewMemory()),
+					appcache.NewObserved("hf_derived", "redis", redisCache),
+					7*24*time.Hour,
+				))
+			}
+		}
+	}
+	downloadManager := downloads.NewWithStore(ctx, downloads.NewDownloadStore(db), cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
 		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)
 	})
-	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
-	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
+	// Imports keep their own Instance service so its change callback can notify
+	// the lifecycle service without becoming self-referential.
+	importInstanceService := instances.NewWithStore(instances.NewInstanceStore(db))
+	importService := modelimports.NewWithStores(modelimports.NewStore(db), importInstanceService, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
+	liteLLMService := litellm.NewWithStore(litellm.NewLiteLLMStore(db), authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
 	importService.SetInstanceOnChange(lifecycleService.Instances().NotifyChange)
 	if err := downloadManager.ResumePending(ctx); err != nil {
@@ -205,7 +231,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("POST /api/v1/models/inspect", api.NewModelInspectHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/details/value", api.NewModelMetadataValueHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/details", api.NewModelDetailsHandler(authService, modelService))
-	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewReservationAwareRecommendationHandler(authService, modelService, hardwareDetector, lifecycleService.Reservations(), profileGetter))
+	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewReservationAwareRecommendationHandler(authService, modelService, instanceService, llamaConfigStore, hardwareDetector, lifecycleService.Reservations(), profileGetter))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaConfigStore, profileGetter))
 	benchmarkHandler := api.NewBenchmarkHandler(benchmarkService, lifecycleService.Instances())
 	api.RegisterBenchmarkRoutes(managementAPI, benchmarkHandler)

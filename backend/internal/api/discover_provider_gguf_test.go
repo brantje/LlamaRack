@@ -46,7 +46,7 @@ func TestDiscoverRecommendationUsesHubGGUFMetadataForMixedProfile(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	managerSettings := settings.New(fixture.models.DB(), settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
+	managerSettings := settings.New(fixture.db, settings.Defaults{SessionLifetime: time.Hour, StartupTimeout: time.Minute, AlwaysOnReconcile: time.Second})
 	fullSnapshot := hardware.Snapshot{
 		RAMAvailableBytes:          64 << 30,
 		RAMTotalBytes:              64 << 30,

@@ -5,22 +5,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestRequestListMaximumPagePreservesHasMore(t *testing.T) {
 	s := testService(t)
 	ctx := t.Context()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO inference_requests(started_at,finished_at,instance_id,endpoint,status_code,result) VALUES(?,?,?,?,?,?)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stmt.Close()
 	for i := 0; i < 501; i++ {
-		if _, err := stmt.ExecContext(ctx, int64(i+1), int64(i+2), "coder", "/v1/completions", 200, "success"); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(started_at,finished_at,instance_id,endpoint,status_code,result) VALUES(?,?,?,?,?,?)`, int64(i+1), int64(i+2), "coder", "/v1/completions", 200, "success"); err != nil {
 			t.Fatal(err)
 		}
 	}

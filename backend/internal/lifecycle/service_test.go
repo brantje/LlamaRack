@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 )
@@ -75,6 +77,17 @@ func TestLifecycleHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+var lifecycleTestStores sync.Map
+
+func lifecycleTestDB(t *testing.T, service *Service) database.Store {
+	t.Helper()
+	value, ok := lifecycleTestStores.Load(service)
+	if !ok {
+		t.Fatal("lifecycle test database is unavailable")
+	}
+	return value.(database.Store)
+}
+
 func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Service, models.Model, *supervisor.Supervisor, func(string, ...any)) {
 	t.Helper()
 	ctx := context.Background()
@@ -122,7 +135,9 @@ func setupLifecycle(t *testing.T, autoload, alwaysOn bool) (*Service, *models.Se
 		defer cancel()
 		sup.Shutdown(ctx)
 	})
-	s := New(ms, sup)
+	s := New(ms, instances.New(db), llamaconfig.New(db), sup)
+	lifecycleTestStores.Store(s, db)
+	t.Cleanup(func() { lifecycleTestStores.Delete(s) })
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, query, args...); err != nil {

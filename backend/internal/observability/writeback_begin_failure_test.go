@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
@@ -12,7 +14,6 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.startWriteback(ctx, time.Hour)
-	s.db.SetMaxOpenConns(1)
 
 	state := writebackStateFor(s)
 	state.mu.Lock()
@@ -24,7 +25,7 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 		t.Fatalf("begin err=%v", err)
 	}
 
-	conn, err := s.db.Conn(ctx)
+	blocker, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,23 +33,23 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 	defer hotCancel()
 
 	if err := s.SetRequestModelSlug(hotCtx, "req-begin-overflow", "public-model"); err != nil {
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("model slug fell back to SQLite: %v", err)
 	}
 	record.InstanceID = "instance-a"
 	if err := s.UpdateCorrelatedRequest(hotCtx, "req-begin-overflow", record); err != nil {
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("update fell back to SQLite: %v", err)
 	}
 	if err := s.SetOpenAIResponseID(hotCtx, "req-begin-overflow", "resp_overflow"); err != nil {
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("response id fell back to SQLite: %v", err)
 	}
 	if err := s.AttachRequestLogContext(hotCtx, "req-begin-overflow", "session-a", "public-model"); err != nil {
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("request context fell back to SQLite: %v", err)
 	}
-	if err := conn.Close(); err != nil {
+	if err := blocker.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,7 +68,7 @@ func TestWritebackFailedBeginDoesNotFallBackToSQLite(t *testing.T) {
 	}
 
 	var instanceID string
-	if err := s.db.QueryRowContext(ctx, `SELECT r.instance_id
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT r.instance_id
 		FROM inference_requests r
 		JOIN inference_request_correlations c ON c.inference_request_id=r.id
 		WHERE c.request_id=?`, "req-begin-overflow").Scan(&instanceID); err != nil {

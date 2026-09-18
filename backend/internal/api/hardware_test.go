@@ -56,7 +56,7 @@ func TestHardwareHandler(t *testing.T) {
 func TestLlamaConfigHandlerGlobalAndEffectiveValues(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
-	store := llamaconfig.New(f.models.DB())
+	store := llamaconfig.New(f.db)
 	handler := NewLlamaConfigHandler(f.auth, store, llamaConfigProfile)
 
 	if w := doRequest(t, handler, http.MethodGet, "/api/v1/llamacpp/config", nil, nil); w.Code != http.StatusUnauthorized {
@@ -86,7 +86,7 @@ func TestLlamaConfigHandlerGlobalAndEffectiveValues(t *testing.T) {
 func TestLlamaConfigHandlerProfileAndLookupErrors(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
-	store := llamaconfig.New(f.models.DB())
+	store := llamaconfig.New(f.db)
 	unavailable := NewLlamaConfigHandler(f.auth, store, func() (llamacpp.Profile, error) {
 		return llamacpp.Profile{}, errors.New("binary unavailable")
 	})

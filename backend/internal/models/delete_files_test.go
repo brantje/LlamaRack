@@ -135,13 +135,14 @@ func TestDeleteFilesRemovesOwnedCompanionsFromDownloadJob(t *testing.T) {
 func TestPrepareFileDeletionRejectsEscapedAndSymlinkTargets(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
+	db := testModelDB(t, s)
 	main := writeGGUF(t, dir, "safe.gguf")
 	outside := writeGGUF(t, t.TempDir(), "outside.gguf")
 	model, err := s.Create(ctx, CreateModelInput{Name: "Safe", GGUFPath: main})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET gguf_path='../outside.gguf' WHERE id=?`, model.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE models SET gguf_path='../outside.gguf' WHERE id=?`, model.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PrepareFileDeletion(ctx, model.ID); !errors.Is(err, ErrUnsafeArtifactPath) {
@@ -151,7 +152,7 @@ func TestPrepareFileDeletionRejectsEscapedAndSymlinkTargets(t *testing.T) {
 		t.Fatalf("outside file was touched: %v", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET gguf_path='safe.gguf' WHERE id=?`, model.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE models SET gguf_path='safe.gguf' WHERE id=?`, model.ID); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "helper.gguf")
@@ -218,6 +219,7 @@ func TestPrepareFileDeletionRefusesSharedOwnedCompanion(t *testing.T) {
 func TestPrepareFileDeletionRefusesOwnedCompanionUsedByOtherInstance(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
+	db := testModelDB(t, s)
 	shared := writeGGUF(t, dir, "instance-mmproj.gguf")
 	firstPath := writeGGUF(t, dir, "first.gguf")
 	first, err := s.Create(ctx, CreateModelInput{Name: "First", GGUFPath: firstPath})
@@ -228,10 +230,10 @@ func TestPrepareFileDeletionRefusesOwnedCompanionUsedByOtherInstance(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-shared','inst-shared',?,'Second instance')`, second.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-shared','inst-shared',?,'Second instance')`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-shared','mmproj',?)`, shared); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-shared','mmproj',?)`, shared); err != nil {
 		t.Fatal(err)
 	}
 	linkDownloadArtifacts(t, s, first.ID, "job-instance-owned", firstPath, shared)
@@ -243,16 +245,17 @@ func TestPrepareFileDeletionRefusesOwnedCompanionUsedByOtherInstance(t *testing.
 func TestPrepareFileDeletionIgnoresCompanionOnOwnInstance(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
+	db := testModelDB(t, s)
 	helper := writeGGUF(t, dir, "own-mmproj.gguf")
 	main := writeGGUF(t, dir, "own-main.gguf")
 	model, err := s.Create(ctx, CreateModelInput{Name: "Owned", GGUFPath: main, Options: map[string]string{"mmproj": helper}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-own','inst-own',?,'Own instance')`, model.ID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('inst-own','inst-own',?,'Own instance')`, model.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-own','mmproj',?)`, helper); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES('inst-own','mmproj',?)`, helper); err != nil {
 		t.Fatal(err)
 	}
 	linkDownloadArtifacts(t, s, model.ID, "job-own-instance", main, helper)

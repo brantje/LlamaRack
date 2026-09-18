@@ -1,6 +1,7 @@
 package huggingface
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -25,11 +26,11 @@ type TokenStatus struct {
 }
 
 type SecretStore struct {
-	db   *sql.DB
+	db database.Store
 	aead cipher.AEAD
 }
 
-func NewSecretStore(db *sql.DB, dataDir string) (*SecretStore, error) {
+func NewSecretStore(db database.Store, dataDir string) (*SecretStore, error) {
 	key, err := loadOrCreateKey(filepath.Join(dataDir, "provider-secrets.key"))
 	if err != nil {
 		return nil, err

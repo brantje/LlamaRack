@@ -11,7 +11,7 @@ import (
 func TestDatabaseFailuresAreReportedWithoutPanics(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if err := s.db.Close(); err != nil {
+	if err := observabilityTestDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 

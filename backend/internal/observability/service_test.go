@@ -2,16 +2,29 @@ package observability
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/database"
 )
+
+var observabilityTestDBs sync.Map
+
+func observabilityTestDB(t *testing.T, service *Service) *sql.DB {
+	t.Helper()
+	value, ok := observabilityTestDBs.Load(service)
+	if !ok {
+		t.Fatal("observability test database is unavailable")
+	}
+	return value.(*sql.DB)
+}
 
 func testService(t *testing.T) *Service {
 	t.Helper()
@@ -19,8 +32,13 @@ func testService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return New(db)
+	service := New(db)
+	observabilityTestDBs.Store(service, db)
+	t.Cleanup(func() {
+		observabilityTestDBs.Delete(service)
+		_ = db.Close()
+	})
+	return service
 }
 
 func floatp(value float64) *float64 { return &value }

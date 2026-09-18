@@ -9,7 +9,8 @@ import (
 
 func TestVerifyLoginCredentialsReturnsDatabaseErrorsBeforePasswordWork(t *testing.T) {
 	service := testService(t)
-	if err := service.db.Close(); err != nil {
+	db := testServiceDB(t, service)
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 

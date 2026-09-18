@@ -2,7 +2,8 @@ package auth
 
 import (
 	"context"
-	"database/sql"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 	"strings"
 	"time"
 )
@@ -18,7 +19,6 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 	if err != nil {
 		return "", "", User{}, err
 	}
-
 	var rehashed string
 	if passwordNeedsRehash(hash) {
 		rehashed, err = hashPasswordWithReservation(ctx, work, password)
@@ -41,23 +41,12 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 		return "", "", User{}, err
 	}
 	now := time.Now()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", "", User{}, err
+	session := &sessionCreate{
+		ID: id, UserID: user.ID, TokenHash: tokenHash(token), CSRFTokenHash: tokenHash(csrf),
+		CreatedAt: now.Unix(), ExpiresAt: now.Add(s.SessionLifetime()).Unix(),
+		RemoteAddress: strings.TrimSpace(remoteAddress), UserAgent: truncate(userAgent, 512),
 	}
-	defer func() { _ = tx.Rollback() }()
-	if rehashed != "" {
-		if err := persistPasswordRehash(ctx, tx, user.ID, hash, rehashed); err != nil {
-			return "", "", User{}, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", now.Unix(), user.ID); err != nil {
-		return "", "", User{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,user_id,token_hash,csrf_token_hash,created_at,expires_at,remote_address,user_agent) VALUES(?,?,?,?,?,?,?,?)`, id, user.ID, tokenHash(token), tokenHash(csrf), now.Unix(), now.Add(s.SessionLifetime()).Unix(), strings.TrimSpace(remoteAddress), truncate(userAgent, 512)); err != nil {
-		return "", "", User{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.sessions.CommitLogin(ctx, user.ID, hash, rehashed, now.Unix(), session); err != nil {
 		return "", "", User{}, err
 	}
 	last := now.Unix()
@@ -66,28 +55,13 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 }
 
 func (s *Service) Logout(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash=?", tokenHash(token))
-	return err
+	return s.sessions.DeleteByTokenHash(ctx, tokenHash(token))
 }
 
 func (s *Service) SessionUserWithSession(ctx context.Context, token string) (User, Session, error) {
-	var user User
-	var session Session
-	var enabled int
-	var lastLogin sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT u.id,u.username,u.enabled,u.created_at,u.last_login_at,s.id,s.user_id,s.created_at,s.expires_at,s.remote_address,s.user_agent
-		FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.token_hash=? AND s.expires_at>?`, tokenHash(token), time.Now().Unix()).Scan(
-		&user.ID, &user.Username, &enabled, &user.CreatedAt, &lastLogin,
-		&session.ID, &session.UserID, &session.CreatedAt, &session.ExpiresAt, &session.RemoteAddress, &session.UserAgent,
-	)
-	if err != nil || enabled == 0 {
+	user, session, err := s.sessions.ResolveByTokenHash(ctx, tokenHash(token), time.Now().Unix())
+	if err != nil {
 		return User{}, Session{}, ErrSessionInvalid
-	}
-	user.Enabled = true
-	if lastLogin.Valid {
-		value := lastLogin.Int64
-		user.LastLoginAt = &value
 	}
 	session.Current = true
 	return user, session, nil
@@ -97,78 +71,40 @@ func (s *Service) ValidateCSRF(ctx context.Context, sessionToken, csrfToken stri
 	if sessionToken == "" || csrfToken == "" {
 		return ErrCSRFInvalid
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.token_hash=? AND s.csrf_token_hash=? AND s.expires_at>? AND u.enabled=1`, tokenHash(sessionToken), tokenHash(csrfToken), time.Now().Unix()).Scan(&count); err != nil || count != 1 {
+	ok, err := s.sessions.ValidateCSRF(ctx, tokenHash(sessionToken), tokenHash(csrfToken), time.Now().Unix())
+	if err != nil || !ok {
 		return ErrCSRFInvalid
 	}
 	return nil
 }
 
 func (s *Service) ListSessions(ctx context.Context, userID int64, currentSessionID string) ([]Session, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,user_id,created_at,expires_at,remote_address,user_agent FROM sessions WHERE user_id=? AND expires_at>? ORDER BY created_at DESC`, userID, time.Now().Unix())
+	items, err := s.sessions.List(ctx, userID, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	items := make([]Session, 0)
-	for rows.Next() {
-		var item Session
-		if err := rows.Scan(&item.ID, &item.UserID, &item.CreatedAt, &item.ExpiresAt, &item.RemoteAddress, &item.UserAgent); err != nil {
-			return nil, err
-		}
-		item.Current = currentSessionID != "" && item.ID == currentSessionID
-		items = append(items, item)
+	for i := range items {
+		items[i].Current = currentSessionID != "" && items[i].ID == currentSessionID
 	}
-	return items, rows.Err()
+	return items, nil
 }
 
 func (s *Service) RevokeSession(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE id=?", id)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.sessions.Revoke(ctx, id)
 }
 
 func (s *Service) RevokeOwnSession(ctx context.Context, userID int64, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" || userID <= 0 {
-		return sql.ErrNoRows
+		return database.ClassifyError(database.ErrNotFound)
 	}
-	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE id=? AND user_id=?", id, userID)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.sessions.RevokeOwn(ctx, userID, id)
 }
 
 func (s *Service) RevokeOtherSessions(ctx context.Context, userID int64, keepSessionID string) (int64, error) {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=? AND id<>?", userID, keepSessionID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	return s.sessions.RevokeOther(ctx, userID, keepSessionID)
 }
 
 func (s *Service) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", userID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	return s.sessions.RevokeAll(ctx, userID)
 }

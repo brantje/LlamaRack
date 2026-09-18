@@ -15,37 +15,14 @@ const (
 )
 
 func (s *Service) RecordLifecycle(ctx context.Context, event, instanceID string, duration time.Duration) error {
-	metric := ""
 	switch event {
 	case LifecycleAutoload:
-		// Autoload totals are derived from autoloaded inference_requests so a
-		// single cold start is not counted here and again when the request lands.
 		return s.recordPlaygroundLifecycleEvent(ctx, event, instanceID)
-	case LifecycleLoad:
-		metric = "load_total"
-	case LifecycleFailedStart:
-		metric = "failed_start_total"
-	case LifecycleEviction:
-		metric = "eviction_total"
-	case LifecycleIdleUnload:
-		metric = "idle_unload_total"
+	case LifecycleLoad, LifecycleFailedStart, LifecycleEviction, LifecycleIdleUnload:
 	default:
 		return fmt.Errorf("unsupported lifecycle event %q", event)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := addCounter(ctx, tx, Counter{Metric: metric, InstanceID: instanceID, Value: 1}); err != nil {
-		return err
-	}
-	if event == LifecycleLoad && duration > 0 {
-		if err := addCounter(ctx, tx, Counter{Metric: "load_duration_ms_total", InstanceID: instanceID, Value: float64(duration.Microseconds()) / 1000}); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.RecordLifecycleCounters(ctx, event, instanceID, float64(duration.Microseconds())/1000); err != nil {
 		return err
 	}
 	return s.recordPlaygroundLifecycleEvent(ctx, event, instanceID)

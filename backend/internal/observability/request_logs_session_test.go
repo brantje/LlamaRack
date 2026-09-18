@@ -2,23 +2,24 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func seedSessionRequestLogs(t *testing.T) (*Service, context.Context) {
 	t.Helper()
 	s := testService(t)
 	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`, "m1", "Qwen Coder 7B", "/models/coder.gguf", 1, "Q4_K_M", 4096); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`, "m1", "Qwen Coder 7B", "/models/coder.gguf", 1, "Q4_K_M", 4096); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`, "coder", "m1", "Coder", 1, 1, 0, "normal", 1, 0); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds) VALUES(?,?,?,?,?,?,?,?,?)`, "coder", "m1", "Coder", 1, 1, 0, "normal", 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	promptTPS := 42.5
@@ -99,7 +100,7 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	if err := s.UpdateRequestLogContext(ctx, "", "session-abc", "coder"); err == nil {
 		t.Fatal("expected empty context request id validation error")
 	}
-	if err := s.UpdateRequestLogContext(ctx, "missing", "session-abc", "coder"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateRequestLogContext(ctx, "missing", "session-abc", "coder"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing context update err=%v", err)
 	}
 }

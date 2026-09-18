@@ -128,10 +128,10 @@ func TestWritebackPersistsRichContextAndResponseState(t *testing.T) {
 	defer cancel()
 	s.startWriteback(ctx, time.Hour)
 
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-rich','model-rich','Rich Model','/tmp/rich.gguf',1)`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-rich','model-rich','Rich Model','/tmp/rich.gguf',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-rich','public-rich','model-rich','Rich Instance')`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-rich','public-rich','model-rich','Rich Instance')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,7 +169,7 @@ func TestWritebackPersistsRichContextAndResponseState(t *testing.T) {
 		t.Fatal(err)
 	}
 	var persistedBeforeFlush int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests WHERE instance_id='instance-rich'").Scan(&persistedBeforeFlush); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests WHERE instance_id='instance-rich'").Scan(&persistedBeforeFlush); err != nil {
 		t.Fatal(err)
 	}
 	if persistedBeforeFlush != 0 {
@@ -180,7 +180,7 @@ func TestWritebackPersistsRichContextAndResponseState(t *testing.T) {
 	}
 
 	var modelID, modelName, sessionID string
-	if err := s.db.QueryRowContext(ctx, `SELECT x.model_id,x.model_name,x.session_id
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT x.model_id,x.model_name,x.session_id
 		FROM inference_request_log_context x WHERE x.request_id='req-rich'`).Scan(&modelID, &modelName, &sessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestWritebackPersistsRichContextAndResponseState(t *testing.T) {
 
 	var openAIID string
 	var deleted int
-	if err := s.db.QueryRowContext(ctx, `SELECT openai_response_id,openai_response_deleted FROM inference_requests WHERE instance_id='instance-rich'`).Scan(&openAIID, &deleted); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT openai_response_id,openai_response_deleted FROM inference_requests WHERE instance_id='instance-rich'`).Scan(&openAIID, &deleted); err != nil {
 		t.Fatal(err)
 	}
 	if openAIID != "resp_rich" || deleted != 1 {

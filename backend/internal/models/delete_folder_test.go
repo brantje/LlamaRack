@@ -161,7 +161,7 @@ func TestPrepareFileDeletionRejectsSymlinkedModelDirectory(t *testing.T) {
 	if err := os.Symlink(realDir, alias); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET gguf_path=? WHERE id=?`, filepath.ToSlash(filepath.Join("alias", "model.gguf")), model.ID); err != nil {
+	if _, err := testModelDB(t, s).ExecContext(ctx, `UPDATE models SET gguf_path=? WHERE id=?`, filepath.ToSlash(filepath.Join("alias", "model.gguf")), model.ID); err != nil {
 		t.Fatal(err)
 	}
 

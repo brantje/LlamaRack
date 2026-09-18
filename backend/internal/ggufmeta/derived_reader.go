@@ -66,13 +66,15 @@ func InspectDerivedReader(reader io.Reader) (Derived, error) {
 		}
 	}
 	derived := derive(scalars)
-	if !derivedCoreReady(derived) {
+	if !DerivedCoreReady(derived) {
 		return derived, errors.New("GGUF metadata unavailable: architecture dimensions are incomplete")
 	}
 	return derived, nil
 }
 
-func derivedCoreReady(value Derived) bool {
+// DerivedCoreReady reports whether the architecture dimensions required by
+// downstream recommendation logic are present.
+func DerivedCoreReady(value Derived) bool {
 	return value.Architecture != "" && value.BlockCount > 0 && value.Embedding > 0 && value.HeadCount > 0
 }
 

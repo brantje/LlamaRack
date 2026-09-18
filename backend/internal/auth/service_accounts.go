@@ -2,10 +2,11 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func (s *Service) CreateServiceAccount(ctx context.Context, name string, createdByUserID int64) (ServiceAccount, error) {
@@ -21,7 +22,7 @@ func (s *Service) EnsureHiddenServiceAccount(ctx context.Context, name string) (
 	if err == nil {
 		return existing, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return ServiceAccount{}, err
 	}
 	return s.createServiceAccount(ctx, name, 0, true)
@@ -36,52 +37,32 @@ func (s *Service) createServiceAccount(ctx context.Context, name string, created
 	if err != nil {
 		return ServiceAccount{}, err
 	}
-	now := time.Now().Unix()
-	var creator any
-	var creatorPtr *int64
+	item := ServiceAccount{ID: id, Name: name, Enabled: true, Hidden: hidden, CreatedAt: time.Now().Unix()}
 	if createdByUserID > 0 {
-		creator = createdByUserID
 		value := createdByUserID
-		creatorPtr = &value
+		item.CreatedByUserID = &value
 	}
-	hiddenValue := 0
-	if hidden {
-		hiddenValue = 1
-	}
-	if _, err := s.db.ExecContext(ctx, "INSERT INTO service_accounts(id,name,enabled,hidden,created_at,created_by_user_id) VALUES(?,?,1,?,?,?)", id, name, hiddenValue, now, creator); err != nil {
+	if err := s.serviceAccounts.Create(ctx, item); err != nil {
 		return ServiceAccount{}, err
 	}
-	return ServiceAccount{ID: id, Name: name, Enabled: true, Hidden: hidden, CreatedAt: now, CreatedByUserID: creatorPtr}, nil
+	return item, nil
 }
 
 func (s *Service) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE hidden=0 ORDER BY name COLLATE NOCASE, id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]ServiceAccount, 0)
-	for rows.Next() {
-		item, err := scanServiceAccount(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return s.serviceAccounts.ListVisible(ctx)
 }
 
 func (s *Service) GetServiceAccount(ctx context.Context, id string) (ServiceAccount, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return ServiceAccount{}, sql.ErrNoRows
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
-	item, err := scanServiceAccount(s.db.QueryRowContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE id=?", id))
+	item, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return ServiceAccount{}, err
 	}
 	if item.Hidden {
-		return ServiceAccount{}, sql.ErrNoRows
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
 	keys, err := s.ListAPIKeysForServiceAccount(ctx, id)
 	if err != nil {
@@ -98,18 +79,14 @@ func (s *Service) FindHiddenServiceAccountByName(ctx context.Context, name strin
 func (s *Service) findServiceAccountByName(ctx context.Context, name string, hiddenOnly bool) (ServiceAccount, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return ServiceAccount{}, sql.ErrNoRows
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
-	query := "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE name=?"
-	if hiddenOnly {
-		query += " AND hidden=1"
-	}
-	return scanServiceAccount(s.db.QueryRowContext(ctx, query, name))
+	return s.serviceAccounts.FindByName(ctx, name, hiddenOnly)
 }
 
 func (s *Service) DeleteHiddenServiceAccountByName(ctx context.Context, name string) error {
 	account, err := s.findServiceAccountByName(ctx, name, true)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -121,14 +98,14 @@ func (s *Service) DeleteHiddenServiceAccountByName(ctx context.Context, name str
 func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *string, enabled *bool) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return sql.ErrNoRows
+		return database.ClassifyError(database.ErrNotFound)
 	}
-	existing, err := scanServiceAccount(s.db.QueryRowContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE id=?", id))
+	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if existing.Hidden {
-		return sql.ErrNoRows
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	nextName := existing.Name
 	if name != nil {
@@ -137,26 +114,12 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 			return ErrServiceAccountNameRequired
 		}
 	}
-	nextEnabled := 0
-	if existing.Enabled {
-		nextEnabled = 1
-	}
+	nextEnabled := existing.Enabled
 	if enabled != nil {
-		nextEnabled = 0
-		if *enabled {
-			nextEnabled = 1
-		}
+		nextEnabled = *enabled
 	}
-	result, err := s.db.ExecContext(ctx, "UPDATE service_accounts SET name=?, enabled=? WHERE id=?", nextName, nextEnabled, id)
-	if err != nil {
+	if err := s.serviceAccounts.Update(ctx, id, nextName, nextEnabled); err != nil {
 		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
 	}
 	s.clearAPIKeyCache()
 	return nil
@@ -165,50 +128,22 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 func (s *Service) DeleteServiceAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return sql.ErrNoRows
+		return database.ClassifyError(database.ErrNotFound)
 	}
-	existing, err := scanServiceAccount(s.db.QueryRowContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE id=?", id))
+	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if existing.Hidden {
-		return sql.ErrNoRows
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	return s.deleteServiceAccount(ctx, id)
 }
 
 func (s *Service) deleteServiceAccount(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM service_accounts WHERE id=?", id)
-	if err != nil {
+	if err := s.serviceAccounts.Delete(ctx, id); err != nil {
 		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
 	}
 	s.clearAPIKeyCache()
 	return nil
-}
-
-type serviceAccountRow interface {
-	Scan(dest ...any) error
-}
-
-func scanServiceAccount(row serviceAccountRow) (ServiceAccount, error) {
-	var item ServiceAccount
-	var enabled, hidden int
-	var creator sql.NullInt64
-	if err := row.Scan(&item.ID, &item.Name, &enabled, &hidden, &item.CreatedAt, &creator); err != nil {
-		return ServiceAccount{}, err
-	}
-	item.Enabled = enabled != 0
-	item.Hidden = hidden != 0
-	if creator.Valid {
-		value := creator.Int64
-		item.CreatedByUserID = &value
-	}
-	return item, nil
 }

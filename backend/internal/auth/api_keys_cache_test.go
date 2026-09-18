@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestAPIKeyCacheHitAvoidsSQLite(t *testing.T) {
@@ -23,7 +25,7 @@ func TestAPIKeyCacheHitAvoidsSQLite(t *testing.T) {
 		t.Fatalf("first auth=%+v err=%v", first, err)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, testServiceDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,10 +150,11 @@ func TestAPIKeyUseWriteSeedsFromPersistedTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	persisted := time.Now().Add(-5 * time.Second).Unix()
-	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=?", persisted, key.ID); err != nil {
+	db := testServiceDB(t, s)
+	if _, err := db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=?", persisted, key.ID); err != nil {
 		t.Fatal(err)
 	}
-	reloaded := New(s.db, time.Hour)
+	reloaded := New(db, time.Hour)
 	item, err := reloaded.AuthenticateAPIKeyInfo(ctx, secret)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +163,7 @@ func TestAPIKeyUseWriteSeedsFromPersistedTimestamp(t *testing.T) {
 		t.Fatalf("in-memory last_used_at=%v", item.LastUsedAt)
 	}
 	var stored int64
-	if err := s.db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&stored); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT last_used_at FROM api_keys WHERE id=?", key.ID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored != persisted {

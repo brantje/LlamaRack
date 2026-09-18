@@ -21,7 +21,9 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
@@ -234,7 +236,7 @@ func newGatewayFixture(t *testing.T, autoload bool) *gatewayFixture {
 		defer cancel()
 		sup.Shutdown(ctx)
 	})
-	l := lifecycle.New(m, sup)
+	l := lifecycle.New(m, instances.New(db), llamaconfig.New(db), sup)
 	instance, err := l.Instances().GetBySlug(ctx, "gateway-model")
 	if err != nil {
 		t.Fatal(err)
@@ -458,7 +460,7 @@ func TestListModelsDatabaseError(t *testing.T) {
 	}
 
 	sup := supervisor.New("unused", "127.0.0.1", 39000, time.Second)
-	l := lifecycle.New(m, sup)
+	l := lifecycle.New(m, instances.New(modelDB), llamaconfig.New(modelDB), sup)
 	g := New(a, m, l)
 	w := gatewayRequest(t, g, http.MethodGet, "/v1/models", secret, "")
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "database_error") {

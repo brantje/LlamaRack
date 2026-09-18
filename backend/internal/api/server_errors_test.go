@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
@@ -27,7 +29,7 @@ func TestCorePersistenceFailuresBecomeHTTPErrorResponses(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := models.New(db, modelsDir)
-	l := lifecycle.New(m, supervisor.New(filepath.Join(root, "missing"), "127.0.0.1", 37000, time.Millisecond))
+	l := lifecycle.New(m, instances.New(db), llamaconfig.New(db), supervisor.New(filepath.Join(root, "missing"), "127.0.0.1", 37000, time.Millisecond))
 	s := New(m, l, func() (llamacpp.Profile, error) { return llamacpp.Profile{}, nil })
 	if err := db.Close(); err != nil {
 		t.Fatal(err)

@@ -15,7 +15,7 @@ func TestInstanceGPUParsingAndClosedDatabaseErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE instances SET gpu_mode='manual',gpu_devices='0,1',tensor_split='1,1' WHERE model_id=?", m.ID); err != nil {
+	if _, err := testModelDB(t, s).ExecContext(ctx, "UPDATE instances SET gpu_mode='manual',gpu_devices='0,1',tensor_split='1,1' WHERE model_id=?", m.ID); err != nil {
 		t.Fatal(err)
 	}
 	instances, err := s.Instances(ctx, m.ID)
@@ -27,7 +27,7 @@ func TestInstanceGPUParsingAndClosedDatabaseErrors(t *testing.T) {
 	}
 
 	closedPath := writeGGUF(t, dir, "after-close.gguf")
-	if err := s.db.Close(); err != nil {
+	if err := testModelDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Create(ctx, CreateModelInput{PublicID: "closed", Name: "Closed", GGUFPath: closedPath}); err == nil {

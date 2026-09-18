@@ -2,7 +2,6 @@ package downloads
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"io/fs"
 	"os"
@@ -112,13 +111,11 @@ func (m *Manager) persistTempPath(ctx context.Context, jobID, providerPath, absT
 	if rel == "" || strings.HasPrefix(rel, "../") {
 		return errTempPathEscaped
 	}
-	_, err := m.db.ExecContext(ctx, "UPDATE download_files SET temp_path=? WHERE job_id=? AND path=?", rel, jobID, providerPath)
-	return err
+	return m.store.SetTempPath(ctx, jobID, providerPath, rel)
 }
 
 func (m *Manager) clearTempPath(ctx context.Context, jobID, providerPath string) error {
-	_, err := m.db.ExecContext(ctx, "UPDATE download_files SET temp_path='' WHERE job_id=? AND path=?", jobID, providerPath)
-	return err
+	return m.store.SetTempPath(ctx, jobID, providerPath, "")
 }
 
 func regularFileSize(path string) (int64, bool, error) {
@@ -229,12 +226,7 @@ func (m *Manager) resolveTempFile(ctx context.Context, job Job, file File, final
 }
 
 func (m *Manager) jobDownloadedExcept(ctx context.Context, jobID, providerPath string) (int64, error) {
-	var total sql.NullInt64
-	err := m.db.QueryRowContext(ctx, "SELECT COALESCE(SUM(downloaded_bytes),0) FROM download_files WHERE job_id=? AND path<>?", jobID, providerPath).Scan(&total)
-	if err != nil {
-		return 0, err
-	}
-	return total.Int64, nil
+	return m.store.DownloadedExcept(ctx, jobID, providerPath)
 }
 
 func (m *Manager) removePartial(job Job, file File) error {

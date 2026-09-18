@@ -2,7 +2,6 @@ package downloads
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -88,21 +87,18 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 		}
 	}
 
-	result, err := m.db.ExecContext(ctx, "DELETE FROM download_jobs WHERE id=? AND state=?", id, StateCancelled)
+	removed, state, err := m.store.RemoveCancelled(ctx, id)
 	if err != nil {
 		return err
 	}
-	count, _ := result.RowsAffected()
-	if count == 1 {
+	if removed {
 		return nil
 	}
-	var state string
-	if err := m.db.QueryRowContext(ctx, "SELECT state FROM download_jobs WHERE id=?", id).Scan(&state); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return sql.ErrNoRows
-		}
-		return err
+	if state != StateCancelled {
+		return errors.New("only cancelled downloads can be removed")
 	}
+	// A conditional DELETE that affected zero rows is not a successful removal,
+	// even if a follow-up read still observes the row as cancelled.
 	return errors.New("only cancelled downloads can be removed")
 }
 
@@ -112,7 +108,7 @@ func (m *Manager) detailedList(ctx context.Context) ([]Job, error) {
 		return nil, err
 	}
 	for index := range jobs {
-		files, err := m.files(ctx, jobs[index].ID)
+		files, err := m.store.Files(ctx, jobs[index].ID)
 		if err != nil {
 			return nil, err
 		}

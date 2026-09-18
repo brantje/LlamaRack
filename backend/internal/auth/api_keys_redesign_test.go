@@ -2,16 +2,18 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +55,7 @@ func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 		t.Fatalf("valid through UTC EOD: %v", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET expires_on=? WHERE id=?", yesterday, key.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE api_keys SET expires_on=? WHERE id=?", yesterday, key.ID); err != nil {
 		t.Fatal(err)
 	}
 	// Raw SQL bypasses the service mutation hooks that normally invalidate the
@@ -105,7 +107,7 @@ func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys WHERE id=?", owned.ID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys WHERE id=?", owned.ID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -116,6 +118,7 @@ func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 func TestServiceAccountCRUDAndOwnedKeys(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -157,11 +160,11 @@ func TestServiceAccountCRUDAndOwnedKeys(t *testing.T) {
 	if err := s.DeleteServiceAccount(ctx, account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("deleted SA lookup=%v", err)
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys WHERE id=?", key.ID).Scan(&count); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM api_keys WHERE id=?", key.ID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -172,6 +175,7 @@ func TestServiceAccountCRUDAndOwnedKeys(t *testing.T) {
 func TestAPIKeyUnknownInstanceAndPrefix(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
@@ -194,17 +198,17 @@ func TestAPIKeyUnknownInstanceAndPrefix(t *testing.T) {
 		t.Fatalf("non-sk secret=%v", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
 	scoped, _, err := s.CreateAPIKey(ctx, CreateAPIKeyInput{Name: "scoped", OwnerUserID: &operator.ID, InstanceIDs: []string{"coder"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM instances WHERE id='coder'`); err != nil {
+	if _, err := db.ExecContext(ctx, `DELETE FROM instances WHERE id='coder'`); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := s.ListAPIKeys(ctx)
@@ -257,13 +261,13 @@ func TestAPIKeyStatusPriorityAndServiceAccountEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA get=%v", err)
 	}
-	if err := s.UpdateServiceAccount(ctx, "missing", nil, nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateServiceAccount(ctx, "missing", nil, nil); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing SA update=%v", err)
 	}
-	if err := s.DeleteServiceAccount(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteServiceAccount(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing SA delete=%v", err)
 	}
 	account, err := s.CreateServiceAccount(ctx, "bots", admin.ID)
@@ -288,16 +292,16 @@ func TestAPIKeyStatusPriorityAndServiceAccountEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.UpdateServiceAccount(ctx, "", nil, nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateServiceAccount(ctx, "", nil, nil); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA update=%v", err)
 	}
-	if err := s.DeleteServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA delete=%v", err)
 	}
-	if _, err := s.ListAPIKeysForServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.ListAPIKeysForServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA key list=%v", err)
 	}
-	if err := s.SetAPIKeyEnabled(ctx, "missing", true); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.SetAPIKeyEnabled(ctx, "missing", true); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing enable=%v", err)
 	}
 

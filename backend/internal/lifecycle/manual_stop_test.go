@@ -74,7 +74,7 @@ func TestAlwaysOnManualStopPersistsUntilDemandOrLifecycleRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForRuntimeState(t, sup, instanceID, supervisor.Unloaded)
-	restarted := New(ms, sup)
+	restarted := New(ms, s.instances, s.config, sup)
 	if restarted.isManuallyStopped(instanceID) {
 		t.Fatal("manual stop must not persist across lifecycle restart")
 	}

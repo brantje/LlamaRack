@@ -3,7 +3,6 @@ package auth
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"sync"
 	"time"
@@ -38,6 +37,7 @@ const (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrBootstrapCompleted = errors.New("bootstrap already completed")
 	ErrLastEnabledUser    = errors.New("cannot disable or delete the last enabled management user")
 	ErrSelfDelete         = errors.New("cannot delete the current management user")
 	ErrSessionInvalid     = errors.New("session invalid")
@@ -151,7 +151,11 @@ type wsTicket struct {
 }
 
 type Service struct {
-	db *sql.DB
+	users    UserStore
+	sessions SessionStore
+	apiKeys   APIKeyStore
+	serviceAccounts ServiceAccountStore
+	oidc            OIDCStore
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
@@ -165,15 +169,26 @@ type Service struct {
 	wsTickets map[string]wsTicket
 }
 
-func New(db *sql.DB, sessionLifetime time.Duration) *Service {
+type Stores struct {
+	Users           UserStore
+	Sessions        SessionStore
+	APIKeys         APIKeyStore
+	ServiceAccounts ServiceAccountStore
+	OIDC            OIDCStore
+}
+
+// NewWithStores constructs auth from domain persistence contracts only.
+func NewWithStores(stores Stores, sessionLifetime time.Duration) *Service {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		users: stores.Users, sessions: stores.Sessions, apiKeys: stores.APIKeys,
+		serviceAccounts: stores.ServiceAccounts, oidc: stores.OIDC,
+		sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
-		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
+		jwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}
 }
 

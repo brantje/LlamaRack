@@ -29,11 +29,11 @@ func (h *countingHardware) Snapshot(ctx context.Context) (hardware.Snapshot, err
 func setupIdentity(t *testing.T, s *Service, sup *supervisor.Supervisor) (supervisor.RuntimeStore, string) {
 	t.Helper()
 	ctx := context.Background()
-	id, err := supervisor.EnsureInstallationID(ctx, s.models.DB())
+	id, err := supervisor.EnsureInstallationID(ctx, lifecycleTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := supervisor.NewSQLStore(s.models.DB())
+	store := supervisor.NewSQLStore(lifecycleTestDB(t, s))
 	sup.SetRuntimeIdentity(id, store)
 	return store, id
 }
@@ -182,7 +182,7 @@ func TestManagerRestartRemovesOwnedWorkerAndStartsOneReplacement(t *testing.T) {
 		defer stopCancel()
 		restartedSup.Shutdown(stopCtx)
 	})
-	restarted := New(ms, restartedSup)
+	restarted := New(ms, s.instances, s.config, restartedSup)
 	restarted.hardware = abundantSingleGPUHardware()
 	restarted.ArmStartupReconcile()
 	if err := restarted.ReconcileStaleWorkers(ctx); err != nil {

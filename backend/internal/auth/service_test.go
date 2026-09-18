@@ -2,15 +2,17 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/database"
 )
+
+var authTestStores sync.Map
 
 func testService(t *testing.T) *Service {
 	t.Helper()
@@ -18,8 +20,22 @@ func testService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return New(db, time.Hour)
+	s := New(db, time.Hour)
+	authTestStores.Store(s, db)
+	t.Cleanup(func() {
+		authTestStores.Delete(s)
+		_ = db.Close()
+	})
+	return s
+}
+
+func testServiceDB(t *testing.T, s *Service) database.Store {
+	t.Helper()
+	value, ok := authTestStores.Load(s)
+	if !ok {
+		t.Fatal("auth test database is unavailable")
+	}
+	return value.(database.Store)
 }
 
 func TestBootstrapLoginSessionLogout(t *testing.T) {
@@ -167,10 +183,10 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if _, err := s.RevokeOtherSessions(ctx, admin.ID, adminSession.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.RevokeSession(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing revoke=%v", err)
 	}
-	if err := s.RevokeOwnSession(ctx, admin.ID, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.RevokeOwnSession(ctx, admin.ID, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing own revoke=%v", err)
 	}
 	if _, err := s.RevokeAllSessions(ctx, admin.ID); err != nil {

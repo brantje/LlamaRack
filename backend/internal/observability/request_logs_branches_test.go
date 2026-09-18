@@ -2,11 +2,12 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestRequestLogLifecycleValidationAndRecoveryBranches(t *testing.T) {
@@ -30,7 +31,7 @@ func TestRequestLogLifecycleValidationAndRecoveryBranches(t *testing.T) {
 	if err := s.UpdateCorrelatedRequest(ctx, "", base); err == nil {
 		t.Fatal("expected update request ID validation error")
 	}
-	if err := s.UpdateCorrelatedRequest(ctx, "lcm_missing", base); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateCorrelatedRequest(ctx, "lcm_missing", base); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing update err=%v", err)
 	}
 	if err := s.FinalizeCorrelatedRequest(ctx, "", nil, base); err == nil {
@@ -117,7 +118,7 @@ func TestRequestLogSchemaExistingColumnsAndFailure(t *testing.T) {
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		t.Fatalf("idempotent schema: %v", err)
 	}
-	fresh := New(s.db)
+	fresh := New(observabilityTestDB(t, s))
 	if err := fresh.EnsureCorrelationSchema(ctx); err != nil {
 		t.Fatalf("existing schema: %v", err)
 	}

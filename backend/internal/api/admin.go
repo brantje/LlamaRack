@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -16,6 +15,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 type adminHandler struct {
@@ -290,7 +291,7 @@ func (h *adminHandler) sessionRoute(w http.ResponseWriter, r *http.Request, prin
 		return
 	}
 	if err := h.auth.RevokeSession(r.Context(), id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
 			return
 		}
@@ -307,7 +308,7 @@ func (h *adminHandler) revokeOwnSession(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if err := h.auth.RevokeOwnSession(r.Context(), actor.ID, id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
 			return
 		}
@@ -537,7 +538,7 @@ func writeUserMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, auth.ErrPasswordWorkBusy):
 		writePasswordWorkUnavailable(w)
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, database.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 	case errors.Is(err, auth.ErrLastEnabledUser), errors.Is(err, auth.ErrSelfDelete):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})

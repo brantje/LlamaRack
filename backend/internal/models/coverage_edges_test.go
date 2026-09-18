@@ -9,9 +9,7 @@ import (
 func TestServiceDBAndDiscoveryEdgePaths(t *testing.T) {
 	ctx := context.Background()
 	s, dir := testModelService(t)
-	if s.DB() == nil {
-		t.Fatal("expected service database handle")
-	}
+	db := testModelDB(t, s)
 	if got := normalizePriority(" low "); got != "low" {
 		t.Fatalf("normalizePriority low=%q", got)
 	}
@@ -19,7 +17,7 @@ func TestServiceDBAndDiscoveryEdgePaths(t *testing.T) {
 		t.Fatalf("normalizePriority default=%q", got)
 	}
 
-	missingRoot := New(s.DB(), filepath.Join(dir, "does-not-exist"))
+	missingRoot := New(db, filepath.Join(dir, "does-not-exist"))
 	if _, err := missingRoot.AvailableGGUFs(ctx); err == nil {
 		t.Fatal("expected discovery error for missing model directory")
 	}
@@ -27,7 +25,7 @@ func TestServiceDBAndDiscoveryEdgePaths(t *testing.T) {
 
 func TestAvailableGGUFsReturnsDatabaseQueryError(t *testing.T) {
 	s, _ := testModelService(t)
-	db := s.DB()
+	db := testModelDB(t, s)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}

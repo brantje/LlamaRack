@@ -70,14 +70,14 @@ func TestInspectGGUFArtifactUsesExactCompletedDownloadScope(t *testing.T) {
 
 	mainRel := filepath.ToSlash(filepath.Join("huggingface", "org", "repo", filepath.Base(main)))
 	selectedRel := filepath.ToSlash(filepath.Join("huggingface", "org", "repo", filepath.Base(selected)))
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes,downloaded_bytes) VALUES('job','huggingface','org/repo','rev','artifact','model-Q5_K_M.gguf','COMPLETED',20,20)`); err != nil {
+	if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,state,total_bytes,downloaded_bytes) VALUES('job','huggingface','org/repo','rev','artifact','model-Q5_K_M.gguf','COMPLETED',20,20)`); err != nil {
 		t.Fatal(err)
 	}
 	for ordinal, item := range []struct{ provider, local string }{
 		{"model-Q5_K_M.gguf", mainRel},
 		{"selected-Q8_0.gguf", selectedRel},
 	} {
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('job',?,10,'COMPLETED',10,?,?)`, item.provider, ordinal, item.local); err != nil {
+		if _, err := testModelDB(t, s).ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('job',?,10,'COMPLETED',10,?,?)`, item.provider, ordinal, item.local); err != nil {
 			t.Fatal(err)
 		}
 	}

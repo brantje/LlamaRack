@@ -2,8 +2,9 @@ package settings
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 	"strconv"
 	"time"
 )
@@ -15,8 +16,7 @@ type Discover struct {
 }
 
 func (s *Service) Discover(ctx context.Context) (Discover, error) {
-	var stored string
-	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", DiscoverHybridRecommendations).Scan(&stored)
+	stored, err := s.store.Get(ctx, DiscoverHybridRecommendations)
 	if err == nil {
 		value, parseErr := strconv.ParseBool(stored)
 		if parseErr != nil {
@@ -24,16 +24,14 @@ func (s *Service) Discover(ctx context.Context) (Discover, error) {
 		}
 		return Discover{HybridRecommendations: Value{Value: value, Source: "database", Editable: true}}, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return Discover{}, err
 	}
 	return Discover{HybridRecommendations: Value{Value: true, Source: "default", Editable: true}}, nil
 }
 
 func (s *Service) SetDiscoverHybridRecommendations(ctx context.Context, enabled bool) (Discover, error) {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)
-		ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=excluded.updated_at`,
-		DiscoverHybridRecommendations, strconv.FormatBool(enabled), time.Now().Unix())
+	err := s.store.Set(ctx, DiscoverHybridRecommendations, strconv.FormatBool(enabled), time.Now().Unix())
 	if err != nil {
 		return Discover{}, err
 	}

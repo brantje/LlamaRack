@@ -395,7 +395,7 @@ VALUES('import-1','cancelled-job',?,?,0,0,?)`, model.ID, instance.ID, StateCance
 	if err := service.CleanupJobSafe(ctx, "cancelled-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.instances.Get(ctx, instance.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := service.instances.Get(ctx, instance.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("pending instance still exists, err=%v", err)
 	}
 	if _, err := modelService.GetByID(ctx, model.ID); err != nil {

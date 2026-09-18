@@ -580,6 +580,10 @@ SQLite state lives at `{dataDir}/manager.db` (default `/config/manager.db` in co
 
 Schema upgrades run automatically during startup through embedded Goose migrations. Unmanaged databases and databases created by a newer release than the running binary fail startup instead of wiping data.
 
+PostgreSQL is available as an optional authoritative database for 1.1 deployments. SQLite remains the default and simplest single-node setup. See [PostgreSQL storage](./docs/postgresql.md) for the supported configuration, optional Compose override, backup/restore expectations, and the current no-cross-engine-migration policy.
+
+Redis is independently optional and non-authoritative. It is used only for safe recomputable cache data; see [Optional Redis cache](./docs/redis-cache.md).
+
 ---
 
 ## Common configuration
@@ -590,6 +594,10 @@ Schema upgrades run automatically during startup through embedded Goose migratio
 | `LLAMARACK_DATA_DIR` | `/config` | Persistent manager data |
 | `LLAMARACK_MODELS_DIR` | `/models` | GGUF model storage |
 | `LLAMARACK_DATABASE_PATH` | `{dataDir}/manager.db` | SQLite database path |
+| `LLAMARACK_DATABASE_URL` | empty | Optional PostgreSQL URL; when set, PostgreSQL is authoritative and startup does not fall back to SQLite |
+| `DATABASE_URL` | empty | PostgreSQL URL fallback when `LLAMARACK_DATABASE_URL` is unset |
+| `LLAMARACK_REDIS_URL` | empty | Optional Redis URL for non-authoritative derived-data caching |
+| `REDIS_URL` | empty | Redis URL fallback when `LLAMARACK_REDIS_URL` is unset |
 | `LLAMARACK_LLAMA_SERVER` | `/app/llama-server` | Managed `llama-server` binary |
 | `LLAMARACK_HUGGINGFACE_BASE_URL` | `https://huggingface.co` | Hugging Face API base URL |
 | `LLAMARACK_WORKER_HOST` | `127.0.0.1` | Bind address for managed workers |

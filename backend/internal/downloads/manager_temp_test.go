@@ -74,7 +74,7 @@ func TestResumeRejectsSymlinkOnPersistedTempPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	rel := relativeSlash(manager.modelsDir, tempPath)
-	if _, err := manager.db.Exec(`UPDATE download_files SET temp_path=? WHERE job_id=?`, rel, job.ID); err != nil {
+	if _, err := downloadTestDB(t, manager).ExecContext(context.Background(), `UPDATE download_files SET temp_path=? WHERE job_id=?`, rel, job.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(tempPath); err != nil {
@@ -117,7 +117,7 @@ func TestResumeRejectsDirectoryOnPersistedTempPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	rel := relativeSlash(manager.modelsDir, finalPath+".lcm-dir.part")
-	if _, err := manager.db.Exec(`UPDATE download_files SET temp_path=? WHERE job_id=?`, rel, job.ID); err != nil {
+	if _, err := downloadTestDB(t, manager).ExecContext(context.Background(), `UPDATE download_files SET temp_path=? WHERE job_id=?`, rel, job.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.ResumePending(context.Background()); err != nil {

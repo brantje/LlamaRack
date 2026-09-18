@@ -2,17 +2,14 @@ package observability
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
-	"sync"
 )
 
-import "github.com/brantje/llamarack/backend/internal/lifecycle"
-
-var (
-	playgroundSchemaReady sync.Map
-	playgroundSchemaMu    sync.Mutex
+import (
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/lifecycle"
 )
 
 type PlaygroundDiagnostics struct {
@@ -23,16 +20,7 @@ type PlaygroundDiagnostics struct {
 }
 
 func (s *Service) ensurePlaygroundSchema(ctx context.Context) error {
-	if _, ok := playgroundSchemaReady.Load(s.db); ok {
-		return nil
-	}
-	playgroundSchemaMu.Lock()
-	defer playgroundSchemaMu.Unlock()
-	if _, ok := playgroundSchemaReady.Load(s.db); ok {
-		return nil
-	}
-	playgroundSchemaReady.Store(s.db, struct{}{})
-	return nil
+	return s.EnsureCorrelationSchema(ctx)
 }
 
 func (s *Service) recordPlaygroundLifecycleEvent(ctx context.Context, event, instanceID string) error {
@@ -47,8 +35,7 @@ func (s *Service) recordPlaygroundLifecycleEvent(ctx context.Context, event, ins
 	if err := s.ensurePlaygroundSchema(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, event, instanceID, correlationID)
-	return err
+	return s.store.RecordPlaygroundLifecycleEvent(ctx, event, instanceID, correlationID)
 }
 
 func requestStateTrace(record RequestRecord) []string {
@@ -72,28 +59,7 @@ func (s *Service) playgroundEvictions(ctx context.Context, record RequestRecord)
 	if err := s.ensurePlaygroundSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT instance_id FROM playground_lifecycle_events
-		WHERE event=? AND correlation_id=? AND instance_id<>?
-		ORDER BY id`, LifecycleEviction, correlationID, record.InstanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	seen := map[string]bool{}
-	var out []string
-	for rows.Next() {
-		var instanceID string
-		if err := rows.Scan(&instanceID); err != nil {
-			return nil, err
-		}
-		instanceID = strings.TrimSpace(instanceID)
-		if instanceID == "" || seen[instanceID] {
-			continue
-		}
-		seen[instanceID] = true
-		out = append(out, instanceID)
-	}
-	return out, rows.Err()
+	return s.store.PlaygroundEvictions(ctx, correlationID, record.InstanceID)
 }
 
 func (s *Service) PlaygroundDiagnostics(ctx context.Context, requestID string) (PlaygroundDiagnostics, error) {
@@ -130,7 +96,7 @@ func NewPlaygroundDiagnosticsHandler(service *Service) http.Handler {
 		}
 		diagnostics, err := service.PlaygroundDiagnostics(r.Context(), requestID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
 				return
 			}

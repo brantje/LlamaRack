@@ -2,7 +2,6 @@ package litellm
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
-	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/settings"
 )
 
@@ -55,7 +53,7 @@ type DisconnectInput struct {
 }
 
 type Service struct {
-	db       *sql.DB
+	store    LiteLLMStore
 	auth     *auth.Service
 	secrets  *huggingface.SecretStore
 	settings *settings.Service
@@ -64,8 +62,8 @@ type Service struct {
 	reconcileMu sync.Mutex
 }
 
-func New(db *sql.DB, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
-	return &Service{db: db, auth: authService, secrets: secrets, settings: managerSettings, http: &http.Client{Timeout: 30 * time.Second}}
+func NewWithStore(store LiteLLMStore, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
+	return &Service{store: store, auth: authService, secrets: secrets, settings: managerSettings, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
 func (s *Service) SetHTTPClient(client *http.Client) {
@@ -417,36 +415,7 @@ func (s *Service) newClient(ctx context.Context) (*Client, error) {
 }
 
 func (s *Service) enabledInstances(ctx context.Context) ([]instances.Instance, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode FROM instances WHERE enabled=1 AND NOT EXISTS (SELECT 1 FROM provider_imports pi WHERE pi.instance_id=instances.id AND pi.state=?) ORDER BY name,id`, modelimports.StateDownloading)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]instances.Instance, 0)
-	for rows.Next() {
-		var item instances.Instance
-		var enabled, autoload, alwaysOn, eviction int
-		var devices, split sql.NullString
-		if err := rows.Scan(&item.ID, &item.Slug, &item.ModelID, &item.Name, &enabled, &autoload, &alwaysOn, &item.Priority, &eviction, &item.IdleUnloadSeconds, &item.MaxPendingRequests, &item.GPUMode, &devices, &split, &item.RequestLogMode); err != nil {
-			return nil, err
-		}
-		item.Enabled = enabled != 0
-		item.Autoload = autoload != 0
-		item.AlwaysOn = alwaysOn != 0
-		item.EvictionEnabled = eviction != 0
-		if devices.Valid && strings.TrimSpace(devices.String) != "" {
-			for _, device := range strings.Split(devices.String, ",") {
-				if device = strings.TrimSpace(device); device != "" {
-					item.GPUDevices = append(item.GPUDevices, device)
-				}
-			}
-		}
-		if split.Valid {
-			item.TensorSplit = split.String
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return s.store.SyncInstances(ctx)
 }
 
 func (s *Service) defaultAPIBase(ctx context.Context) (string, error) {
@@ -474,23 +443,16 @@ func (s *Service) effectiveAPIBase(ctx context.Context) (string, error) {
 }
 
 func (s *Service) getSetting(ctx context.Context, key string) (string, error) {
-	var value string
-	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
+	value, _, err := s.store.Setting(ctx, key)
 	return value, err
 }
 
 func (s *Service) setSetting(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)
-		ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=excluded.updated_at`, key, value, time.Now().Unix())
-	return err
+	return s.store.SetSetting(ctx, key, value)
 }
 
 func (s *Service) deleteSetting(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM manager_settings WHERE setting_key=?", key)
-	return err
+	return s.store.DeleteSetting(ctx, key)
 }
 
 func (s *Service) persistLastSync(ctx context.Context, syncResult LastSync) error {

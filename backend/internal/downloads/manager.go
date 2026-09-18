@@ -3,7 +3,6 @@ package downloads
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -66,7 +65,7 @@ type File struct {
 
 type Manager struct {
 	ctx       context.Context
-	db        *sql.DB
+	store     DownloadStore
 	modelsDir string
 	hf        *huggingface.Client
 	limit     SizeLimitFunc
@@ -74,12 +73,12 @@ type Manager struct {
 	cancels   map[string]context.CancelFunc
 }
 
-func New(ctx context.Context, db *sql.DB, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
+func NewWithStore(ctx context.Context, store DownloadStore, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
 	var limit SizeLimitFunc
 	if len(limits) > 0 {
 		limit = limits[0]
 	}
-	return &Manager{ctx: ctx, db: db, modelsDir: modelsDir, hf: hf, limit: limit, cancels: map[string]context.CancelFunc{}}
+	return &Manager{ctx: ctx, store: store, modelsDir: modelsDir, hf: hf, limit: limit, cancels: map[string]context.CancelFunc{}}
 }
 
 func (m *Manager) CreateHuggingFace(ctx context.Context, detail huggingface.ModelDetail, artifact huggingface.Artifact) (Job, error) {
@@ -96,39 +95,26 @@ func (m *Manager) CreateHuggingFace(ctx context.Context, detail huggingface.Mode
 	if knownDownloadBytes(artifact) > limit {
 		return Job{}, errDownloadExceedsLimit
 	}
-	var existing string
-	err = m.db.QueryRowContext(ctx, `SELECT id FROM download_jobs WHERE provider='huggingface' AND repo_id=? AND revision=? AND artifact_id=? AND state='COMPLETED' LIMIT 1`, detail.ID, detail.Revision, artifact.ID).Scan(&existing)
-	if err == nil {
-		return m.Get(ctx, existing)
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	existing, found, err := m.store.FindCompleted(ctx, detail.ID, detail.Revision, artifact.ID)
+	if err != nil {
 		return Job{}, err
+	}
+	if found {
+		return m.Get(ctx, existing)
 	}
 	id, err := randomID()
 	if err != nil {
 		return Job{}, err
 	}
-	tx, err := m.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Job{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
-VALUES(?,?,?,?,?,?,?,?,?,0,0,'',unixepoch(),unixepoch())`, id, "huggingface", detail.ID, detail.Revision, artifact.ID, artifact.Name, artifact.Quantization, StateQueued, artifact.TotalBytes)
-	if err != nil {
-		return Job{}, err
-	}
+	files := make([]File, 0, len(artifact.Files))
 	for index, file := range artifact.Files {
 		if !safeProviderPath(file.Path) {
 			return Job{}, fmt.Errorf("unsafe provider filename %q", file.Path)
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path)
-VALUES(?,?,?,?,?,0,'',?, '')`, id, file.Path, file.Size, file.OID, StateQueued, index)
-		if err != nil {
-			return Job{}, err
-		}
+		files = append(files, File{Path: file.Path, Size: file.Size, OID: file.OID, State: StateQueued, Ordinal: index})
 	}
-	if err := tx.Commit(); err != nil {
+	job := Job{ID: id, Provider: "huggingface", RepoID: detail.ID, Revision: detail.Revision, ArtifactID: artifact.ID, Name: artifact.Name, Quantization: artifact.Quantization, State: StateQueued, TotalBytes: artifact.TotalBytes}
+	if err := m.store.Create(ctx, job, files); err != nil {
 		return Job{}, err
 	}
 	m.launch(id)
@@ -136,29 +122,15 @@ VALUES(?,?,?,?,?,0,'',?, '')`, id, file.Path, file.Size, file.OID, StateQueued, 
 }
 
 func (m *Manager) List(ctx context.Context) ([]Job, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at FROM download_jobs ORDER BY created_at DESC, id DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	jobs := make([]Job, 0)
-	for rows.Next() {
-		job, err := scanJob(rows)
-		if err != nil {
-			return nil, err
-		}
-		jobs = append(jobs, job)
-	}
-	return jobs, rows.Err()
+	return m.store.List(ctx)
 }
 
 func (m *Manager) Get(ctx context.Context, id string) (Job, error) {
-	row := m.db.QueryRowContext(ctx, `SELECT id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at FROM download_jobs WHERE id=?`, id)
-	job, err := scanJob(row)
+	job, err := m.store.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
-	files, err := m.files(ctx, id)
+	files, err := m.store.Files(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
@@ -167,24 +139,14 @@ func (m *Manager) Get(ctx context.Context, id string) (Job, error) {
 }
 
 func (m *Manager) ResumePending(ctx context.Context) error {
-	rows, err := m.db.QueryContext(ctx, `SELECT id FROM download_jobs WHERE state IN (?,?,?,?)`, StateQueued, StateResolving, StateDownloading, StateVerifying)
+	ids, err := m.store.PendingIDs(ctx)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+	for _, id := range ids {
+		if err := m.store.Requeue(ctx, id); err != nil {
 			return err
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		_, _ = m.db.ExecContext(ctx, "UPDATE download_jobs SET state=?,speed_bps=0,error='',updated_at=unixepoch() WHERE id=?", StateQueued, id)
 		m.launch(id)
 	}
 	return nil
@@ -201,15 +163,13 @@ func (m *Manager) Retry(ctx context.Context, id string) (Job, error) {
 	if err := m.waitForLaunchSlot(ctx, id); err != nil {
 		return Job{}, err
 	}
-	result, err := m.db.ExecContext(ctx, `UPDATE download_jobs SET state=?,error='',speed_bps=0,updated_at=unixepoch() WHERE id=? AND state IN (?,?)`, StateQueued, id, StateFailed, StateCancelled)
+	retried, err := m.store.Retry(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
-	count, _ := result.RowsAffected()
-	if count != 1 {
+	if !retried {
 		return Job{}, errors.New("download is not retryable")
 	}
-	_, _ = m.db.ExecContext(ctx, `UPDATE download_files SET state=CASE WHEN state=? THEN ? ELSE state END WHERE job_id=?`, StateFailed, StateQueued, id)
 	m.launch(id)
 	return m.Get(ctx, id)
 }
@@ -233,19 +193,12 @@ func (m *Manager) waitForLaunchSlot(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Cancel(ctx context.Context, id string) error {
-	result, err := m.db.ExecContext(ctx, `UPDATE download_jobs SET state=?,speed_bps=0,updated_at=unixepoch() WHERE id=? AND state NOT IN (?,?)`, StateCancelled, id, StateCompleted, StateCancelled)
+	changed, state, err := m.store.Cancel(ctx, id)
 	if err != nil {
 		return err
 	}
-	count, _ := result.RowsAffected()
-	if count == 0 {
-		var state string
-		if err := m.db.QueryRowContext(ctx, "SELECT state FROM download_jobs WHERE id=?", id).Scan(&state); err != nil {
-			return err
-		}
-		if state == StateCompleted || state == StateCancelled {
-			return nil
-		}
+	if !changed && (state == StateCompleted || state == StateCancelled) {
+		return nil
 	}
 	m.mu.Lock()
 	cancel := m.cancels[id]
@@ -273,7 +226,7 @@ func (m *Manager) launch(id string) {
 			cancel()
 		}()
 		if err := m.run(ctx, id); err != nil && !errors.Is(err, context.Canceled) {
-			_, _ = m.db.ExecContext(context.Background(), "UPDATE download_jobs SET state=?,speed_bps=0,error=?,updated_at=unixepoch() WHERE id=? AND state<>?", StateFailed, err.Error(), id, StateCancelled)
+			_ = m.store.MarkJobFailedUnlessCancelled(context.Background(), id, err.Error())
 		}
 	}()
 }
@@ -300,14 +253,14 @@ func (m *Manager) run(ctx context.Context, id string) error {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
-			_, _ = m.db.ExecContext(context.Background(), "UPDATE download_files SET state=? WHERE job_id=? AND path=?", StateFailed, id, file.Path)
+			_ = m.store.SetFileState(context.Background(), id, file.Path, StateFailed)
 			return fmt.Errorf("%s: %w", file.Path, err)
 		}
 	}
 	if err := m.setJobState(ctx, id, StateVerifying, ""); err != nil {
 		return err
 	}
-	files, err := m.files(ctx, id)
+	files, err := m.store.Files(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -316,8 +269,7 @@ func (m *Manager) run(ctx context.Context, id string) error {
 			return fmt.Errorf("download verification failed for %s", file.Path)
 		}
 	}
-	_, err = m.db.ExecContext(ctx, "UPDATE download_jobs SET state=?,downloaded_bytes=total_bytes,speed_bps=0,error='',updated_at=unixepoch() WHERE id=?", StateCompleted, id)
-	return err
+	return m.store.CompleteJob(ctx, id)
 }
 
 func knownDownloadBytes(artifact huggingface.Artifact) int64 {
@@ -342,7 +294,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 		return err
 	}
 	if info, err := os.Stat(finalPath); err == nil && info.Mode().IsRegular() && (file.Size <= 0 || info.Size() == file.Size) {
-		_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=?,temp_path='' WHERE job_id=? AND path=?", StateCompleted, info.Size(), relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
+		err = m.store.CompleteFile(ctx, job.ID, file.Path, info.Size(), relativeSlash(m.modelsDir, finalPath))
 		if err == nil {
 			_ = m.refreshAggregate(ctx, job.ID, 0)
 		}
@@ -393,7 +345,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 		return errDownloadExceedsLimit
 	}
 
-	_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,etag=? WHERE job_id=? AND path=?", StateDownloading, offset, remoteETag, job.ID, file.Path)
+	err = m.store.SetFileDownloading(ctx, job.ID, file.Path, offset, remoteETag)
 	if err != nil {
 		return err
 	}
@@ -447,7 +399,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 				if elapsed > 0 {
 					speed = int64(float64(offset-startOffset) / elapsed)
 				}
-				if _, err := m.db.ExecContext(ctx, "UPDATE download_files SET downloaded_bytes=? WHERE job_id=? AND path=?", offset, job.ID, file.Path); err != nil {
+				if err := m.store.SetFileDownloaded(ctx, job.ID, file.Path, offset); err != nil {
 					return err
 				}
 				if err := m.refreshAggregate(ctx, job.ID, speed); err != nil {
@@ -478,7 +430,7 @@ func (m *Manager) downloadFile(ctx context.Context, job Job, file File) error {
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		return err
 	}
-	_, err = m.db.ExecContext(ctx, "UPDATE download_files SET state=?,downloaded_bytes=?,local_path=?,temp_path='' WHERE job_id=? AND path=?", StateCompleted, offset, relativeSlash(m.modelsDir, finalPath), job.ID, file.Path)
+	err = m.store.CompleteFile(ctx, job.ID, file.Path, offset, relativeSlash(m.modelsDir, finalPath))
 	if err == nil {
 		err = m.refreshAggregate(ctx, job.ID, 0)
 	}
@@ -523,34 +475,11 @@ func (m *Manager) get(ctx context.Context, rawURL string, offset int64) (*http.R
 }
 
 func (m *Manager) setJobState(ctx context.Context, id, state, message string) error {
-	_, err := m.db.ExecContext(ctx, "UPDATE download_jobs SET state=?,error=?,updated_at=unixepoch() WHERE id=? AND state<>?", state, message, id, StateCancelled)
-	return err
+	return m.store.SetJobState(ctx, id, state, message)
 }
 
 func (m *Manager) refreshAggregate(ctx context.Context, id string, speed int64) error {
-	var total sql.NullInt64
-	if err := m.db.QueryRowContext(ctx, "SELECT SUM(downloaded_bytes) FROM download_files WHERE job_id=?", id).Scan(&total); err != nil {
-		return err
-	}
-	_, err := m.db.ExecContext(ctx, "UPDATE download_jobs SET downloaded_bytes=?,speed_bps=?,updated_at=unixepoch() WHERE id=?", total.Int64, speed, id)
-	return err
-}
-
-func (m *Manager) files(ctx context.Context, id string) ([]File, error) {
-	rows, err := m.db.QueryContext(ctx, "SELECT path,size,oid,state,downloaded_bytes,etag,ordinal,local_path,temp_path FROM download_files WHERE job_id=? ORDER BY ordinal,path", id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var files []File
-	for rows.Next() {
-		var file File
-		if err := rows.Scan(&file.Path, &file.Size, &file.OID, &file.State, &file.DownloadedBytes, &file.ETag, &file.Ordinal, &file.LocalPath, &file.TempPath); err != nil {
-			return nil, err
-		}
-		files = append(files, file)
-	}
-	return files, rows.Err()
+	return m.store.RefreshAggregate(ctx, id, speed)
 }
 
 func (m *Manager) completedFileValid(job Job, file File) bool {
@@ -586,12 +515,6 @@ func (m *Manager) localPath(job Job, providerPath string) (string, error) {
 		return "", errors.New("download destination escaped models directory")
 	}
 	return destination, nil
-}
-
-func scanJob(scanner interface{ Scan(...any) error }) (Job, error) {
-	var job Job
-	err := scanner.Scan(&job.ID, &job.Provider, &job.RepoID, &job.Revision, &job.ArtifactID, &job.Name, &job.Quantization, &job.State, &job.TotalBytes, &job.DownloadedBytes, &job.SpeedBPS, &job.Error, &job.CreatedAt, &job.UpdatedAt)
-	return job, err
 }
 
 func safeProviderPath(value string) bool {

@@ -2,9 +2,10 @@ package models
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestModelSlugLookupAndRenamePreserveDurableID(t *testing.T) {
@@ -39,8 +40,8 @@ func TestModelSlugLookupAndRenamePreserveDurableID(t *testing.T) {
 	if renamed.ID != created.ID || renamed.Slug != "qwen-coder-management" {
 		t.Fatalf("slug rename changed durable identity: created=%+v renamed=%+v", created, renamed)
 	}
-	if _, err := service.GetBySlug(ctx, created.Slug); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("old slug lookup error=%v want sql.ErrNoRows", err)
+	if _, err := service.GetBySlug(ctx, created.Slug); !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("old slug lookup error=%v want database.ErrNotFound", err)
 	}
 	current, err := service.GetBySlug(ctx, renamed.Slug)
 	if err != nil || current.ID != created.ID {

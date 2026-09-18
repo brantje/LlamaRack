@@ -40,7 +40,7 @@ func TestLegacyRequestScannerFullAndErrorPaths(t *testing.T) {
 	if err := s.RecordRequest(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT id,started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body FROM inference_requests WHERE instance_id=?`, "coder")
+	row := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT id,started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body FROM inference_requests WHERE instance_id=?`, "coder")
 	got, err := scanRequest(row)
 	if err != nil {
 		t.Fatal(err)

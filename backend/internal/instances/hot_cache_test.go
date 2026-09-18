@@ -2,10 +2,11 @@ package instances
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestHotCacheIsOptInAndReturnsClones(t *testing.T) {
@@ -96,7 +97,7 @@ func TestHotCacheInvalidatesCreateUpdateDeleteAndOldSlug(t *testing.T) {
 	if _, ok := s.cachedBySlug("original"); ok {
 		t.Fatal("old slug remained cached")
 	}
-	if _, err := s.GetBySlug(ctx, "original"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetBySlug(ctx, "original"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("old slug lookup=%v", err)
 	}
 	if err := s.Delete(ctx, item.ID); err != nil {

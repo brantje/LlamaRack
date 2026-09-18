@@ -3,7 +3,6 @@ package modelimports
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
@@ -31,7 +31,7 @@ type InstanceStarter interface {
 }
 
 type Service struct {
-	db        *sql.DB
+	store     Store
 	modelsDir string
 	models    *models.Service
 	instances *instances.Service
@@ -75,9 +75,9 @@ func (s *Service) SetInstanceOnChange(fn instances.ChangeNotifier) {
 	s.instances.SetOnChange(fn)
 }
 
-func New(db *sql.DB, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
+func NewWithStores(store Store, instanceService *instances.Service, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
 	return &Service{
-		db: db, modelsDir: modelsDir, models: modelService, instances: instances.New(db),
+		store: store, modelsDir: modelsDir, models: modelService, instances: instanceService,
 		downloads: downloadManager, starter: starter,
 	}
 }
@@ -145,8 +145,7 @@ func (s *Service) Prepare(ctx context.Context, detail huggingface.ModelDetail, a
 		}
 		return PrepareResult{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,instance_id,owns_model,start_when_ready,state,error,start_attempted,created_at,updated_at)
-VALUES(?,?,?,?,?,?,?,'',0,unixepoch(),unixepoch())`, importID, job.ID, model.ID, instance.ID, boolInt(ownsModel), boolInt(in.FirstInstance.Start), publicState(job.State))
+	err = s.store.CreateImport(ctx, importCreate{ID: importID, JobID: job.ID, ModelID: model.ID, InstanceID: instance.ID, OwnsModel: ownsModel, StartWhenReady: in.FirstInstance.Start, State: publicState(job.State)})
 	if err != nil {
 		_ = s.instances.Delete(ctx, instance.ID)
 		if ownsModel {
@@ -163,29 +162,7 @@ VALUES(?,?,?,?,?,?,?,'',0,unixepoch(),unixepoch())`, importID, job.ID, model.ID,
 }
 
 func (s *Service) List(ctx context.Context) ([]Status, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT pi.id,pi.job_id,pi.model_id,COALESCE(pi.instance_id,''),dj.state,
-       CASE WHEN pi.error<>'' THEN pi.error ELSE dj.error END,pi.start_when_ready
-FROM provider_imports pi
-JOIN download_jobs dj ON dj.id=pi.job_id
-ORDER BY pi.created_at DESC,pi.id DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]Status, 0)
-	for rows.Next() {
-		var item Status
-		var start int
-		var downloadState string
-		if err := rows.Scan(&item.ID, &item.JobID, &item.ModelID, &item.InstanceID, &downloadState, &item.Error, &start); err != nil {
-			return nil, err
-		}
-		item.State = publicState(downloadState)
-		item.StartWhenReady = start != 0
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return s.store.List(ctx, false)
 }
 
 func (s *Service) Run(ctx context.Context, interval time.Duration) {
@@ -215,27 +192,15 @@ func (s *Service) Reconcile(ctx context.Context) error {
 }
 
 func (s *Service) CleanupJob(ctx context.Context, jobID string) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT model_id FROM provider_imports WHERE job_id=? AND owns_model=1`, jobID)
+	owned, err := s.store.OwnedModelIDs(ctx, jobID)
 	if err != nil {
 		return err
 	}
-	var owned []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		owned = append(owned, id)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM provider_imports WHERE job_id=?`, jobID); err != nil {
+	if err := s.store.DeleteByJob(ctx, jobID); err != nil {
 		return err
 	}
 	for _, modelID := range owned {
-		if err := s.models.Delete(ctx, modelID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := s.models.Delete(ctx, modelID); err != nil && !errors.Is(err, database.ErrNotFound) && !errors.Is(err, database.ErrNotFound) {
 			return err
 		}
 	}
@@ -243,70 +208,44 @@ func (s *Service) CleanupJob(ctx context.Context, jobID string) error {
 }
 
 func (s *Service) reconcilePrepared(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT pi.id,pi.model_id,COALESCE(pi.instance_id,''),pi.start_when_ready,pi.start_attempted,dj.state,dj.error
-FROM provider_imports pi
-JOIN download_jobs dj ON dj.id=pi.job_id
-WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
+	items, err := s.store.Prepared(ctx)
 	if err != nil {
 		return err
 	}
-	type pending struct {
-		id, modelID, instanceID, downloadState, downloadError string
-		startWhenReady, startAttempted                        bool
-	}
-	var items []pending
-	for rows.Next() {
-		var item pending
-		var start, attempted int
-		if err := rows.Scan(&item.id, &item.modelID, &item.instanceID, &start, &attempted, &item.downloadState, &item.downloadError); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		item.startWhenReady, item.startAttempted = start != 0, attempted != 0
-		items = append(items, item)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
 	for _, item := range items {
-		switch item.downloadState {
+		switch item.DownloadState {
 		case downloads.StateFailed, downloads.StateCancelled:
-			_, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error=?,updated_at=unixepoch() WHERE id=?`, publicState(item.downloadState), item.downloadError, item.id)
-			if err != nil {
+			if err := s.store.SetState(ctx, item.ID, publicState(item.DownloadState), item.DownloadError); err != nil {
 				return err
 			}
 		case downloads.StateCompleted:
-			if err := s.ensureModelFile(item.modelID); err != nil {
-				_, _ = s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error=?,updated_at=unixepoch() WHERE id=?`, StateFailed, err.Error(), item.id)
+			if err := s.ensureModelFile(item.ModelID); err != nil {
+				_ = s.store.SetState(ctx, item.ID, StateFailed, err.Error())
 				continue
 			}
-			if _, err := s.db.ExecContext(ctx, `UPDATE instances SET enabled=1,updated_at=unixepoch() WHERE id=?`, item.instanceID); err != nil {
-				return err
-			}
-			result, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error='',updated_at=unixepoch() WHERE id=? AND state=?`, StateCompleted, item.id, StateDownloading)
+			claimed, err := s.store.CompletePrepared(ctx, item.ID, item.InstanceID)
 			if err != nil {
 				return err
 			}
-			claimed, err := result.RowsAffected()
-			if err != nil {
-				return err
+			if claimed {
+				s.instances.NotifyChange(ctx, item.InstanceID)
 			}
-			if claimed > 0 {
-				s.instances.NotifyChange(ctx, item.instanceID)
-			}
-			if item.startWhenReady && !item.startAttempted && s.starter != nil {
-				_, startErr := s.starter.StartInstance(context.Background(), item.instanceID)
-				message := ""
-				if startErr != nil {
-					message = startErr.Error()
+			if item.StartWhenReady && s.starter != nil {
+				startClaimed, err := s.store.ClaimStartAttempt(ctx, item.ID)
+				if err != nil {
+					return err
 				}
-				_, _ = s.db.ExecContext(context.Background(), `UPDATE provider_imports SET start_attempted=1,error=?,updated_at=unixepoch() WHERE id=?`, message, item.id)
+				if startClaimed {
+					_, startErr := s.starter.StartInstance(context.Background(), item.InstanceID)
+					message := ""
+					if startErr != nil {
+						message = startErr.Error()
+					}
+					_ = s.store.RecordStartAttemptResult(context.Background(), item.ID, message)
+				}
 			}
 		default:
-			_, err := s.db.ExecContext(ctx, `UPDATE provider_imports SET state=?,error='',updated_at=unixepoch() WHERE id=?`, StateDownloading, item.id)
-			if err != nil {
+			if err := s.store.SetState(ctx, item.ID, StateDownloading, ""); err != nil {
 				return err
 			}
 		}
@@ -315,38 +254,16 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 }
 
 func (s *Service) registerUnclaimedCompleted(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT dj.id,dj.repo_id,dj.name,dj.quantization
-FROM download_jobs dj
-WHERE dj.state=? AND dj.updated_at<=unixepoch()-1
-  AND NOT EXISTS (SELECT 1 FROM provider_imports pi WHERE pi.job_id=dj.id)
-ORDER BY dj.updated_at,dj.id`, downloads.StateCompleted)
+	jobs, err := s.store.UnclaimedCompleted(ctx)
 	if err != nil {
 		return err
 	}
-	type completed struct{ id, repoID, name, quantization string }
-	var jobs []completed
-	for rows.Next() {
-		var job completed
-		if err := rows.Scan(&job.id, &job.repoID, &job.name, &job.quantization); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		jobs = append(jobs, job)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-
 	for _, job := range jobs {
-		var localPath string
-		if err := s.db.QueryRowContext(ctx, `SELECT local_path FROM download_files WHERE job_id=? AND ordinal=0 AND state=?`, job.id, downloads.StateCompleted).Scan(&localPath); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
+		localPath, found, err := s.store.CompletedMainPath(ctx, job.ID)
+		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(localPath) == "" {
+		if !found || strings.TrimSpace(localPath) == "" {
 			continue
 		}
 		model, found, err := s.modelByPath(ctx, filepath.ToSlash(filepath.Clean(filepath.FromSlash(localPath))))
@@ -370,13 +287,12 @@ ORDER BY dj.updated_at,dj.id`, downloads.StateCompleted)
 				break
 			}
 			model, err = s.models.Create(ctx, models.CreateModelInput{
-				Name: defaultModelName(job.repoID, job.quantization, job.name), GGUFPath: localPath, Options: options,
+				Name: defaultModelName(job.RepoID, job.Quantization, job.Name), GGUFPath: localPath, Options: options,
 			})
 			if err != nil {
-				// Another path may have registered it between the lookup and create.
 				model, found, _ = s.modelByPath(ctx, filepath.ToSlash(localPath))
 				if !found {
-					slog.Warn("completed download could not be registered as a model", "job_id", job.id, "error", err)
+					slog.Warn("completed download could not be registered as a model", "job_id", job.ID, "error", err)
 					continue
 				}
 			} else {
@@ -387,9 +303,9 @@ ORDER BY dj.updated_at,dj.id`, downloads.StateCompleted)
 		if err != nil {
 			return err
 		}
-		_, err = s.db.ExecContext(ctx, `INSERT INTO provider_imports(id,job_id,model_id,instance_id,owns_model,start_when_ready,state,error,start_attempted,created_at,updated_at)
-VALUES(?,?,?,NULL,?,0,?,'',1,unixepoch(),unixepoch())`, id, job.id, model.ID, boolInt(ownsModel), StateCompleted)
-		if err != nil {
+		if err := s.store.CreateImport(ctx, importCreate{
+			ID: id, JobID: job.ID, ModelID: model.ID, OwnsModel: ownsModel, State: StateCompleted, StartAttempted: true,
+		}); err != nil {
 			return err
 		}
 	}
@@ -414,21 +330,7 @@ func (s *Service) createPendingModel(ctx context.Context, mainPath string, artif
 		ID: modelID, Name: name, GGUFPath: mainPath, TotalBytes: artifact.ModelBytes,
 		Quantization: artifact.Quantization, ContextLength: contextLength,
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return models.Model{}, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES(?,?,?,?,?,?)`,
-		model.ID, model.Name, model.GGUFPath, model.TotalBytes, nullable(model.Quantization), model.ContextLength); err != nil {
-		return models.Model{}, err
-	}
-	for key, value := range options {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO model_options(model_id,option_key,option_value) VALUES(?,?,?)`, model.ID, key, value); err != nil {
-			return models.Model{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.CreatePendingModel(ctx, model, options); err != nil {
 		return models.Model{}, err
 	}
 	return model, nil

@@ -2,7 +2,6 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -67,13 +66,13 @@ func TestRequestModelIdentityValidationAndMissingRows(t *testing.T) {
 	if err := service.SetRequestModelSlug(ctx, "missing", ""); err != nil {
 		t.Fatalf("empty model slug should be ignored: %v", err)
 	}
-	if err := service.SetRequestModelSlug(ctx, "missing", "model"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("missing request error=%v want sql.ErrNoRows", err)
+	if err := service.SetRequestModelSlug(ctx, "missing", "model"); !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("missing request error=%v want database.ErrNotFound", err)
 	}
 	if _, err := service.RequestModelIdentity(ctx, "  "); err == nil {
 		t.Fatal("expected empty request ID validation error")
 	}
-	if _, err := service.RequestModelIdentity(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("missing identity error=%v want sql.ErrNoRows", err)
+	if _, err := service.RequestModelIdentity(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("missing identity error=%v want database.ErrNotFound", err)
 	}
 }

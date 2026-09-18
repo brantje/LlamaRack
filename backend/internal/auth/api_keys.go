@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func (s *Service) CreateAPIKeyForUser(ctx context.Context, name string, ownerUserID int64) (APIKey, string, error) {
@@ -85,32 +86,11 @@ func (s *Service) insertAPIKey(ctx context.Context, name, keyType string, ownerU
 	if err != nil {
 		return APIKey{}, "", err
 	}
-	now := time.Now().Unix()
-	var creator any
-	if createdByUserID != nil && *createdByUserID > 0 {
-		creator = *createdByUserID
-	}
-	instanceJSON, err := json.Marshal(instanceIDs)
-	if err != nil {
-		return APIKey{}, "", err
-	}
-	var ownerUserValue any
-	if ownerUserID != nil {
-		ownerUserValue = *ownerUserID
-	}
-	var ownerSADB any
-	if ownerServiceAccountID != "" {
-		ownerSADB = ownerServiceAccountID
-	}
-	var expiresDB any
-	if expiresOn != "" {
-		expiresDB = expiresOn
-	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO api_keys(
-		id,name,prefix,token_hash,key_type,owner_user_id,owner_service_account_id,enabled,expires_on,instance_ids,created_by_user_id,created_at
-	) VALUES(?,?,?,?,?,?,?,1,?,?,?,?)`,
-		id, name, prefix, tokenHash(secret), keyType, ownerUserValue, ownerSADB, expiresDB, string(instanceJSON), creator, now,
-	); err != nil {
+	if err := s.apiKeys.Insert(ctx, apiKeyInsert{
+		ID: id, Name: name, Prefix: prefix, TokenHash: tokenHash(secret), KeyType: keyType,
+		OwnerUserID: ownerUserID, OwnerServiceAccountID: ownerServiceAccountID, InstanceIDs: instanceIDs,
+		ExpiresOn: expiresOn, CreatedByUserID: createdByUserID, CreatedAt: time.Now().Unix(),
+	}); err != nil {
 		return APIKey{}, "", err
 	}
 	item, err := s.getAPIKeyIncludingHidden(ctx, id)
@@ -127,54 +107,29 @@ func (s *Service) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 func (s *Service) ListAPIKeysForServiceAccount(ctx context.Context, serviceAccountID string) ([]APIKey, error) {
 	serviceAccountID = strings.TrimSpace(serviceAccountID)
 	if serviceAccountID == "" {
-		return nil, sql.ErrNoRows
+		return nil, database.ErrNotFound
 	}
 	return s.listAPIKeys(ctx, serviceAccountID)
 }
 
 func (s *Service) listAPIKeys(ctx context.Context, serviceAccountID string) ([]APIKey, error) {
+	items, err := s.apiKeys.List(ctx, serviceAccountID)
+	if err != nil {
+		return nil, err
+	}
 	liveIDs, err := s.liveInstanceIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	query := apiKeySelectSQL
-	args := []any{}
-	if serviceAccountID != "" {
-		query = apiKeySelectSQL + " WHERE k.owner_service_account_id=?"
-		args = append(args, serviceAccountID)
+	for i := range items {
+		decorateAPIKey(&items[i], liveIDs)
 	}
-	query += " ORDER BY k.created_at DESC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]APIKey, 0)
-	for rows.Next() {
-		item, err := scanAPIKey(rows, liveIDs)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return items, nil
 }
 
 func (s *Service) SetAPIKeyEnabled(ctx context.Context, id string, enabled bool) error {
-	value := 0
-	if enabled {
-		value = 1
-	}
-	result, err := s.db.ExecContext(ctx, "UPDATE api_keys SET enabled=? WHERE id=?", value, id)
-	if err != nil {
+	if err := s.apiKeys.SetEnabled(ctx, id, enabled); err != nil {
 		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
 	}
 	s.clearAPIKeyCache()
 	return nil
@@ -256,21 +211,13 @@ func (s *Service) UpdateAPIKey(ctx context.Context, id string, in UpdateAPIKeyIn
 			enabled = 1
 		}
 	}
-	instanceJSON, err := json.Marshal(instanceIDs)
-	if err != nil {
+	ownerUserID, ownerServiceAccountID = ownersFromNormalized(ownerUserValue, ownerSAValue)
+	expiresString := expiresOnString(expiresOnValue)
+	if err := s.apiKeys.Update(ctx, id, apiKeyUpdate{
+		Name: name, OwnerUserID: ownerUserID, OwnerServiceAccountID: ownerServiceAccountID,
+		InstanceIDs: instanceIDs, ExpiresOn: expiresString, Enabled: enabled != 0,
+	}); err != nil {
 		return err
-	}
-	result, err := s.db.ExecContext(ctx, `UPDATE api_keys SET name=?, owner_user_id=?, owner_service_account_id=?, instance_ids=?, expires_on=?, enabled=? WHERE id=?`,
-		name, ownerUserValue, ownerSAValue, string(instanceJSON), expiresOnValue, enabled, id)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
 	}
 	s.clearAPIKeyCache()
 	return nil
@@ -282,7 +229,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, id string) (APIKey, string, 
 		return APIKey{}, "", err
 	}
 	if existing.Managed {
-		return APIKey{}, "", sql.ErrNoRows
+		return APIKey{}, "", database.ErrNotFound
 	}
 	return s.rotateAPIKeySecret(ctx, id)
 }
@@ -293,30 +240,18 @@ func (s *Service) RotateManagedAPIKey(ctx context.Context, id string) (APIKey, s
 		return APIKey{}, "", err
 	}
 	if !existing.Managed {
-		return APIKey{}, "", sql.ErrNoRows
+		return APIKey{}, "", database.ErrNotFound
 	}
 	return s.rotateAPIKeySecret(ctx, id)
 }
 
 func (s *Service) rotateAPIKeySecret(ctx context.Context, id string) (APIKey, string, error) {
-	var exists int
-	if err := s.db.QueryRowContext(ctx, "SELECT 1 FROM api_keys WHERE id=?", id).Scan(&exists); err != nil {
-		return APIKey{}, "", err
-	}
 	secret, prefix, err := generateAPIKeySecret()
 	if err != nil {
 		return APIKey{}, "", err
 	}
-	result, err := s.db.ExecContext(ctx, "UPDATE api_keys SET prefix=?, token_hash=? WHERE id=?", prefix, tokenHash(secret), id)
-	if err != nil {
+	if err := s.apiKeys.RotateSecret(ctx, id, prefix, tokenHash(secret)); err != nil {
 		return APIKey{}, "", err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return APIKey{}, "", err
-	}
-	if rows != 1 {
-		return APIKey{}, "", sql.ErrNoRows
 	}
 	s.clearAPIUseWrite(id)
 	s.clearAPIKeyCache()
@@ -351,7 +286,7 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 			var err error
 			item, err = s.lookupAPIKeyByHash(ctx, hash)
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, database.ErrNotFound) {
 					return APIKey{}, ErrAPIKeyInvalid
 				}
 				return APIKey{}, err
@@ -374,7 +309,7 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 		if !s.reserveAPIUseWrite(item.ID, now) {
 			return item, nil
 		}
-		if _, err := s.db.ExecContext(ctx, "UPDATE api_keys SET last_used_at=? WHERE id=? AND enabled=1", now.Unix(), item.ID); err != nil {
+		if err := s.apiKeys.TouchLastUsed(ctx, item.ID, now.Unix()); err != nil {
 			s.releaseAPIUseWrite(item.ID, now)
 			return APIKey{}, err
 		}
@@ -406,87 +341,42 @@ func (s *Service) clearAPIUseWrite(id string) {
 	s.mu.Unlock()
 }
 
-const apiKeySelectSQL = `SELECT k.id,k.name,k.prefix,k.key_type,k.enabled,k.expires_on,k.instance_ids,k.created_by_user_id,k.created_at,k.last_used_at,
-	k.owner_user_id,k.owner_service_account_id,u.username,u.enabled,sa.name,sa.enabled,COALESCE(sa.hidden,0)
-	FROM api_keys k
-	LEFT JOIN users u ON u.id=k.owner_user_id
-	LEFT JOIN service_accounts sa ON sa.id=k.owner_service_account_id`
-
 func (s *Service) getAPIKey(ctx context.Context, id string) (APIKey, error) {
 	return s.getAPIKeyIncludingHidden(ctx, id)
 }
 
 func (s *Service) getAPIKeyIncludingHidden(ctx context.Context, id string) (APIKey, error) {
+	item, err := s.apiKeys.GetByID(ctx, id)
+	if err != nil {
+		return APIKey{}, err
+	}
 	liveIDs, err := s.liveInstanceIDs(ctx)
 	if err != nil {
 		return APIKey{}, err
 	}
-	return scanAPIKey(s.db.QueryRowContext(ctx, apiKeySelectSQL+" WHERE k.id=?", id), liveIDs)
+	decorateAPIKey(&item, liveIDs)
+	return item, nil
 }
 
 func (s *Service) lookupAPIKeyByHash(ctx context.Context, hash string) (APIKey, error) {
+	item, err := s.apiKeys.GetByHash(ctx, hash)
+	if err != nil {
+		return APIKey{}, err
+	}
 	liveIDs, err := s.liveInstanceIDs(ctx)
 	if err != nil {
 		return APIKey{}, err
 	}
-	return scanAPIKey(s.db.QueryRowContext(ctx, apiKeySelectSQL+" WHERE k.token_hash=?", hash), liveIDs)
+	decorateAPIKey(&item, liveIDs)
+	return item, nil
 }
 
-type apiKeyRow interface {
-	Scan(dest ...any) error
-}
-
-func scanAPIKey(row apiKeyRow, liveIDs map[string]struct{}) (APIKey, error) {
-	var item APIKey
-	var enabled int
-	var expiresOn sql.NullString
-	var instanceJSON string
-	var creator, lastUsed, ownerUserID sql.NullInt64
-	var ownerServiceAccountID sql.NullString
-	var userName sql.NullString
-	var userEnabled sql.NullInt64
-	var saName sql.NullString
-	var saEnabled, saHidden sql.NullInt64
-	if err := row.Scan(
-		&item.ID, &item.Name, &item.Prefix, &item.KeyType, &enabled, &expiresOn, &instanceJSON, &creator, &item.CreatedAt, &lastUsed,
-		&ownerUserID, &ownerServiceAccountID, &userName, &userEnabled, &saName, &saEnabled, &saHidden,
-	); err != nil {
-		return APIKey{}, err
-	}
-	item.Enabled = enabled != 0
-	item.InstanceIDs = decodeInstanceIDs(instanceJSON)
-	if expiresOn.Valid && strings.TrimSpace(expiresOn.String) != "" {
-		value := expiresOn.String
-		item.ExpiresOn = &value
-	}
-	if creator.Valid {
-		value := creator.Int64
-		item.CreatedByUserID = &value
-	}
-	if lastUsed.Valid {
-		value := lastUsed.Int64
-		item.LastUsedAt = &value
-	}
-	switch {
-	case ownerUserID.Valid:
-		item.OwnerKind = OwnerKindUser
-		item.OwnerID = strconv.FormatInt(ownerUserID.Int64, 10)
-		item.OwnerName = userName.String
-		item.OwnerEnabled = userEnabled.Valid && userEnabled.Int64 != 0
-	case ownerServiceAccountID.Valid:
-		item.OwnerKind = OwnerKindServiceAccount
-		item.OwnerID = ownerServiceAccountID.String
-		item.OwnerName = saName.String
-		item.OwnerEnabled = saEnabled.Valid && saEnabled.Int64 != 0
-		item.HiddenOwner = saHidden.Valid && saHidden.Int64 != 0
-		item.Managed = item.HiddenOwner && item.Name == ManagedPrincipalName && item.OwnerName == ManagedPrincipalName
-	}
+func decorateAPIKey(item *APIKey, liveIDs map[string]struct{}) {
 	item.MissingInstanceIDs = missingInstanceIDs(item.InstanceIDs, liveIDs)
 	item.Status = computeAPIKeyStatus(item.Enabled, item.OwnerEnabled, item.ExpiresOn, time.Now().UTC())
 	if item.InstanceIDs == nil {
 		item.InstanceIDs = []string{}
 	}
-	return item, nil
 }
 
 func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string, ownerUserID *int64, ownerServiceAccountID string, instanceIDs []string, expiresOn string, requireExpiresFuture, validateOwnerEnabled, validateInstanceIDs bool) (string, string, any, any, []string, any, error) {
@@ -509,28 +399,15 @@ func (s *Service) normalizeAPIKeyWrite(ctx context.Context, name, keyType string
 	if hasUser == hasSA {
 		return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerRequired
 	}
-	if hasUser {
-		var enabled int
-		if err := s.db.QueryRowContext(ctx, "SELECT enabled FROM users WHERE id=?", *ownerUserID).Scan(&enabled); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerNotFound
-			}
-			return "", "", nil, nil, nil, nil, err
+	enabled, err := s.apiKeys.OwnerEnabled(ctx, ownerUserID, ownerServiceAccountID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerNotFound
 		}
-		if validateOwnerEnabled && enabled == 0 {
-			return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerDisabled
-		}
-	} else {
-		var enabled int
-		if err := s.db.QueryRowContext(ctx, "SELECT enabled FROM service_accounts WHERE id=?", ownerServiceAccountID).Scan(&enabled); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerNotFound
-			}
-			return "", "", nil, nil, nil, nil, err
-		}
-		if validateOwnerEnabled && enabled == 0 {
-			return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerDisabled
-		}
+		return "", "", nil, nil, nil, nil, err
+	}
+	if validateOwnerEnabled && !enabled {
+		return "", "", nil, nil, nil, nil, ErrAPIKeyOwnerDisabled
 	}
 	if instanceIDs == nil {
 		instanceIDs = []string{}
@@ -587,20 +464,7 @@ func (s *Service) rejectUnknownInstanceIDs(ctx context.Context, ids []string) er
 }
 
 func (s *Service) liveInstanceIDs(ctx context.Context) (map[string]struct{}, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id FROM instances")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]struct{}{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out[id] = struct{}{}
-	}
-	return out, rows.Err()
+	return s.apiKeys.LiveInstanceIDs(ctx)
 }
 
 func generateAPIKeySecret() (secret, prefix string, err error) {
@@ -698,21 +562,17 @@ func utcTodayAt(now time.Time) time.Time {
 }
 
 func (s *Service) serviceAccountHidden(ctx context.Context, id string) (bool, error) {
-	var hidden int
-	err := s.db.QueryRowContext(ctx, "SELECT hidden FROM service_accounts WHERE id=?", strings.TrimSpace(id)).Scan(&hidden)
-	if errors.Is(err, sql.ErrNoRows) {
+	hidden, err := s.apiKeys.ServiceAccountHidden(ctx, strings.TrimSpace(id))
+	if errors.Is(err, database.ErrNotFound) {
 		return false, ErrAPIKeyOwnerNotFound
 	}
-	if err != nil {
-		return false, err
-	}
-	return hidden != 0, nil
+	return hidden, err
 }
 
 // rejectHiddenOrdinaryAPIKeyOwner rejects hidden service-account owners on
 // generic/public API-key write paths. Missing accounts already fail in
 // normalizeAPIKeyWrite as ErrAPIKeyOwnerNotFound. Hidden accounts that exist
-// return sql.ErrNoRows so HTTP maps to 404 "api key not found" without
+// return database.ErrNotFound so HTTP maps to 404 "api key not found" without
 // disclosing the hidden principal.
 func (s *Service) rejectHiddenOrdinaryAPIKeyOwner(ctx context.Context, ownerServiceAccountID string) error {
 	if strings.TrimSpace(ownerServiceAccountID) == "" {
@@ -723,7 +583,7 @@ func (s *Service) rejectHiddenOrdinaryAPIKeyOwner(ctx context.Context, ownerServ
 		return err
 	}
 	if hidden {
-		return sql.ErrNoRows
+		return database.ErrNotFound
 	}
 	return nil
 }
@@ -748,8 +608,8 @@ func (s *Service) EnsureManagedInferenceKey(ctx context.Context, serviceAccountI
 
 func (s *Service) ManagedInferenceKey(ctx context.Context) (APIKey, error) {
 	account, err := s.FindHiddenServiceAccountByName(ctx, ManagedPrincipalName)
-	if errors.Is(err, sql.ErrNoRows) {
-		return APIKey{}, sql.ErrNoRows
+	if errors.Is(err, database.ErrNotFound) {
+		return APIKey{}, database.ErrNotFound
 	}
 	if err != nil {
 		return APIKey{}, err
@@ -763,27 +623,9 @@ func (s *Service) ManagedInferenceKey(ctx context.Context) (APIKey, error) {
 			return key, nil
 		}
 	}
-	return APIKey{}, sql.ErrNoRows
+	return APIKey{}, database.ErrNotFound
 }
 
 func (s *Service) listAPIKeysIncludingHidden(ctx context.Context, serviceAccountID string) ([]APIKey, error) {
-	liveIDs, err := s.liveInstanceIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	query := apiKeySelectSQL + " WHERE k.owner_service_account_id=? ORDER BY k.created_at DESC"
-	rows, err := s.db.QueryContext(ctx, query, serviceAccountID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]APIKey, 0)
-	for rows.Next() {
-		item, err := scanAPIKey(rows, liveIDs)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return s.listAPIKeys(ctx, serviceAccountID)
 }

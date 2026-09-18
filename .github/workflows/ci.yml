@@ -10,6 +10,32 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: llamarack
+          POSTGRES_PASSWORD: 'llamarack-test:p@ss/word?'
+          POSTGRES_DB: llamarack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U llamarack -d llamarack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LLAMARACK_TEST_POSTGRES_URL: postgres://llamarack:llamarack-test%3Ap%40ss%2Fword%3F@127.0.0.1:5432/llamarack?sslmode=disable
+      LLAMARACK_TEST_REDIS_URL: redis://127.0.0.1:6379/0
     defaults:
       run:
         working-directory: backend
@@ -39,6 +65,86 @@ jobs:
           awk -v coverage="$coverage" 'BEGIN { if ((coverage + 0) < 90.0) { printf "Coverage %.1f%% is below required 90.0%%\n", coverage; exit 1 } }'
       - name: Vet
         run: go vet ./...
+      - name: CGO-free backend build
+        run: CGO_ENABLED=0 go build ./cmd/llamarack
+      - name: Storage hot-path performance evidence
+        run: go test ./internal/database -run '^$' -bench '^BenchmarkPersistenceHotPaths$' -benchmem -benchtime=200ms -count=5
+
+  storage-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: llamarack
+          POSTGRES_PASSWORD: 'llamarack-test:p@ss/word?'
+          POSTGRES_DB: llamarack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U llamarack -d llamarack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LLAMARACK_TEST_POSTGRES_URL: postgres://llamarack:llamarack-test%3Ap%40ss%2Fword%3F@127.0.0.1:5432/llamarack?sslmode=disable
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: PostgreSQL storage and model-import qualification
+        run: |
+          go test ./internal/database ./internal/storagecontract -count=1
+          go test ./internal/modelimports -count=10
+          go test ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderSQLiteConcurrency' -v -count=1
+          go test ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
+      - name: PostgreSQL storage and model-import qualification with race detector
+        run: |
+          go test -race ./internal/database ./internal/storagecontract -count=1
+          go test -race ./internal/modelimports -count=10
+          go test -race ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderSQLiteConcurrency' -v -count=1
+          go test -race ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
+
+  cache-redis:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LLAMARACK_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: Redis cache contracts
+        run: go test ./internal/cache ./internal/huggingface -count=1
+      - name: Redis cache contracts with race detector
+        run: go test -race ./internal/cache ./internal/huggingface -count=1
+      - name: Cold metadata request coalescing
+        run: go test ./internal/huggingface -run '^TestDerivedMetadataConcurrentColdMissCoalescesOrigin$' -count=10
+      - name: Derived metadata cache benchmark evidence
+        run: go test ./internal/huggingface -run '^$' -bench '^BenchmarkDerivedMetadata(OriginFetch|WarmMemoryCache|WarmRedis|WarmRedisParallel)$' -benchmem -count=3
 
   backend-race:
     runs-on: ubuntu-latest
@@ -86,6 +192,11 @@ jobs:
           python3 -m py_compile scripts/release-qualification/*.py
           bash scripts/release-qualification/test-resolve-llama-runtime.sh
           bash scripts/release-qualification/test-run-gpu-soak.sh
+          LLAMARACK_POSTGRES_PASSWORD='p@ss:/?#word' \
+          LLAMARACK_DATABASE_URL='postgres://llamarack:p%40ss%3A%2F%3F%23word@postgres:5432/llamarack?sslmode=disable' \
+            docker compose -f docker-compose.yml -f docker-compose.postgres.yml config >/tmp/llamarack-postgres-compose.yml
+          grep -F 'p@ss:/?#word' /tmp/llamarack-postgres-compose.yml
+          grep -F 'postgres://llamarack:p%40ss%3A%2F%3F%23word@postgres:5432/llamarack?sslmode=disable' /tmp/llamarack-postgres-compose.yml
 
   frontend:
     runs-on: ubuntu-latest

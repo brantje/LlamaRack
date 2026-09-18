@@ -66,7 +66,7 @@ func (s *Service) RefreshLogicalSize(ctx context.Context, id string) (Model, err
 	if total == model.TotalBytes {
 		return model, nil
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET total_bytes=?,updated_at=unixepoch() WHERE id=?`, total, id); err != nil {
+	if err := s.store.UpdateTotalBytes(ctx, id, total); err != nil {
 		return Model{}, err
 	}
 	return s.GetByID(ctx, id)

@@ -45,7 +45,7 @@ func TestResolveModelDirectorySafetyBranches(t *testing.T) {
 		t.Fatalf("expected outside directory rejection, got %v", err)
 	}
 
-	missingRoot := New(s.db, filepath.Join(root, "missing-model-root"))
+	missingRoot := New(testModelDB(t, s), filepath.Join(root, "missing-model-root"))
 	if _, err := missingRoot.resolveModelDirectory(artifactFile{absolutePath: filepath.Join(root, "missing-model-root", "nested", "model.gguf")}); err == nil {
 		t.Fatal("expected missing models root resolution to fail")
 	}

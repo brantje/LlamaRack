@@ -112,7 +112,7 @@ func TestDerivedMetadataFailureBranches(t *testing.T) {
 	}
 }
 
-func discoveryGGUF(t *testing.T) []byte {
+func discoveryGGUF(t testing.TB) []byte {
 	t.Helper()
 	var b bytes.Buffer
 	b.WriteString("GGUF")
@@ -139,7 +139,7 @@ func discoveryGGUF(t *testing.T) []byte {
 	return b.Bytes()
 }
 
-func discoveryLargeGGUF(t *testing.T) []byte {
+func discoveryLargeGGUF(t testing.TB) []byte {
 	t.Helper()
 	var b bytes.Buffer
 	b.WriteString("GGUF")
@@ -163,20 +163,20 @@ func discoveryLargeGGUF(t *testing.T) []byte {
 	return b.Bytes()
 }
 
-func writeDiscoveryInt(t *testing.T, b *bytes.Buffer, key string, value int64) {
+func writeDiscoveryInt(t testing.TB, b *bytes.Buffer, key string, value int64) {
 	t.Helper()
 	writeDiscoveryString(t, b, key)
 	writeDiscoveryBinary(t, b, uint32(11))
 	writeDiscoveryBinary(t, b, value)
 }
 
-func writeDiscoveryString(t *testing.T, b *bytes.Buffer, value string) {
+func writeDiscoveryString(t testing.TB, b *bytes.Buffer, value string) {
 	t.Helper()
 	writeDiscoveryBinary(t, b, uint64(len(value)))
 	_, _ = b.WriteString(value)
 }
 
-func writeDiscoveryBinary(t *testing.T, b *bytes.Buffer, value any) {
+func writeDiscoveryBinary(t testing.TB, b *bytes.Buffer, value any) {
 	t.Helper()
 	if err := binary.Write(b, binary.LittleEndian, value); err != nil {
 		t.Fatal(err)

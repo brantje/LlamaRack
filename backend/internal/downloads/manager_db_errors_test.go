@@ -11,7 +11,7 @@ import (
 
 func TestDatabaseFailuresAreReturned(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
-	if err := manager.db.Close(); err != nil {
+	if err := downloadTestDB(t, manager).Close(); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -38,7 +38,7 @@ func TestDatabaseFailuresAreReturned(t *testing.T) {
 	if err := manager.refreshAggregate(ctx, "missing", 0); err == nil {
 		t.Fatal("refreshAggregate should return a closed-database error")
 	}
-	if _, err := manager.files(ctx, "missing"); err == nil {
+	if _, err := manager.store.Files(ctx, "missing"); err == nil {
 		t.Fatal("files should return a closed-database error")
 	}
 	if err := manager.run(ctx, "missing"); err == nil {

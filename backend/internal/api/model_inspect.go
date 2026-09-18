@@ -1,7 +1,7 @@
 package api
 
 import (
-	"database/sql"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,12 +17,16 @@ import (
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
 	"github.com/brantje/llamarack/backend/internal/scheduler"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 type recommendationHandler struct {
-	auth     *auth.Service
-	models   *models.Service
-	hardware hardware.Snapshotter
+	auth      *auth.Service
+	models    *models.Service
+	instances *instances.Service
+	config    *llamaconfig.Store
+	hardware  hardware.Snapshotter
 	profile      func() (llamacpp.Profile, error)
 	reservations *scheduler.Ledger
 }
@@ -37,20 +41,20 @@ type modelDetailsHandler struct {
 	models *models.Service
 }
 
-func NewRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
-	return newRecommendationHandler(a, modelService, detector, nil, profileGetters...)
+func NewRecommendationHandler(a *auth.Service, modelService *models.Service, instanceService *instances.Service, configStore *llamaconfig.Store, detector hardware.Snapshotter, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	return newRecommendationHandler(a, modelService, instanceService, configStore, detector, nil, profileGetters...)
 }
 
-func NewReservationAwareRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
-	return newRecommendationHandler(a, modelService, detector, reservations, profileGetters...)
+func NewReservationAwareRecommendationHandler(a *auth.Service, modelService *models.Service, instanceService *instances.Service, configStore *llamaconfig.Store, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	return newRecommendationHandler(a, modelService, instanceService, configStore, detector, reservations, profileGetters...)
 }
 
-func newRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+func newRecommendationHandler(a *auth.Service, modelService *models.Service, instanceService *instances.Service, configStore *llamaconfig.Store, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
 	var profile func() (llamacpp.Profile, error)
 	if len(profileGetters) > 0 {
 		profile = profileGetters[0]
 	}
-	return &recommendationHandler{auth: a, models: modelService, hardware: detector, profile: profile, reservations: reservations}
+	return &recommendationHandler{auth: a, models: modelService, instances: instanceService, config: configStore, hardware: detector, profile: profile, reservations: reservations}
 }
 
 func NewModelInspectHandler(a *auth.Service, modelService *models.Service) http.Handler {
@@ -72,7 +76,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}
@@ -99,9 +103,9 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	runtime := recommendations.RuntimeConfig{GPUMode: "auto"}
 	instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id"))
 	if instanceID != "" {
-		instance, instanceErr := instances.New(h.models.DB()).Get(r.Context(), instanceID)
+		instance, instanceErr := h.instances.Get(r.Context(), instanceID)
 		if instanceErr != nil {
-			if instanceErr == sql.ErrNoRows {
+			if errors.Is(instanceErr, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "instance not found"})
 				return
 			}
@@ -145,7 +149,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	store := llamaconfig.New(h.models.DB())
+	store := h.config
 	effective, configErr := store.Effective(r.Context(), model.ID, instanceID)
 	if configErr != nil {
 		writeErr(w, http.StatusInternalServerError, configErr)
@@ -231,7 +235,7 @@ func (h *modelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}
