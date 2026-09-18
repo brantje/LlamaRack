@@ -322,6 +322,7 @@ INSERT INTO manager_settings(setting_key, setting_value, updated_at)
 VALUES ('schema_owner', 'llamarack', CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT));
 
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION inference_requests_counters_after_insert_fn()
 RETURNS trigger AS $
 BEGIN
@@ -344,6 +345,7 @@ BEGIN
  RETURN NEW;
 END;
 $ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER inference_requests_counters_after_insert
 AFTER INSERT ON inference_requests

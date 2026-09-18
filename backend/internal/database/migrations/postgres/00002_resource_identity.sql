@@ -11,6 +11,7 @@ ALTER TABLE models ALTER COLUMN slug SET NOT NULL;
 CREATE UNIQUE INDEX instances_slug_uidx ON instances(slug);
 CREATE UNIQUE INDEX models_slug_uidx ON models(slug);
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION instances_slug_default_insert_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -18,7 +19,9 @@ BEGIN
  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION instances_slug_required_update_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -26,7 +29,9 @@ BEGIN
  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION models_slug_default_insert_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -34,7 +39,9 @@ BEGIN
  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION models_slug_required_update_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -42,6 +49,7 @@ BEGIN
  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER instances_slug_default_insert BEFORE INSERT ON instances
 FOR EACH ROW EXECUTE FUNCTION instances_slug_default_insert_fn();

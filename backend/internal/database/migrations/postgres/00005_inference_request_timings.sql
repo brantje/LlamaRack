@@ -33,6 +33,7 @@ CREATE TABLE inference_request_timing_staging (
     tool_call_count BIGINT
 );
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION promote_inference_request_timing(p_request_id TEXT)
 RETURNS void AS $$
 BEGIN
@@ -61,7 +62,9 @@ BEGIN
       );
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION inference_request_timing_stage_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -69,6 +72,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER inference_request_timing_stage_after_insert
 AFTER INSERT ON inference_request_timing_staging
@@ -78,6 +82,7 @@ CREATE TRIGGER inference_request_timing_stage_after_update
 AFTER UPDATE ON inference_request_timing_staging
 FOR EACH ROW EXECUTE FUNCTION inference_request_timing_stage_fn();
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION inference_request_timing_request_finalize_fn()
 RETURNS trigger AS $$
 DECLARE request_key TEXT;
@@ -90,11 +95,13 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER inference_request_timing_promote_after_request_finalize
 AFTER UPDATE OF finished_at ON inference_requests
 FOR EACH ROW EXECUTE FUNCTION inference_request_timing_request_finalize_fn();
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION inference_request_timing_correlation_insert_fn()
 RETURNS trigger AS $$
 BEGIN
@@ -102,6 +109,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER inference_request_timing_promote_after_correlation_insert
 AFTER INSERT ON inference_request_correlations
