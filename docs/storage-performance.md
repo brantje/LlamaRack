@@ -47,32 +47,35 @@ loads.
 
 ## Recorded CI evidence
 
-GitHub Actions CI run `35384253391` on source commit
-`f25db474647acce846d0537f07eebb35a7edc09e` ran the benchmark with five
-samples per sub-benchmark. The table below reports the median sample.
+GitHub Actions CI run `35399621025` on source commit
+`25cb655caf7cf4a8fabfb55abd075890c8c9805c` reran the hot-path benchmark
+after the model-import start-claim fix was in place. The persistence benchmark
+target itself was unchanged by the later model-import/CI cleanup. The table
+below reports the median of five samples from that run.
 
-| Hot path | Raw main-equivalent | GORM store adapter | Median delta | Raw → adapter allocations |
-| --- | ---: | ---: | ---: | ---: |
-| Inference logging/writeback | 631,628 ns/op | 740,141 ns/op | +17.2% (+108,513 ns) | 80 → 248 allocs/op |
-| Counter update | 433,111 ns/op | 479,591 ns/op | +10.7% (+46,480 ns) | 17 → 64 allocs/op |
-| Hardware sample persistence | 419,628 ns/op | 463,048 ns/op | +10.3% (+43,420 ns) | 61 → 179 allocs/op |
-| API-key last-used update | 398,294 ns/op | 448,378 ns/op | +12.6% (+50,084 ns) | 7 → 26 allocs/op |
-| Runtime upsert | 405,570 ns/op | 457,034 ns/op | +12.7% (+51,464 ns) | 13 → 40 allocs/op |
-| 100-model/100-instance lists | 501,813 ns/op | 527,195 ns/op | +5.1% (+25,382 ns) | 4,266 → 4,305 allocs/op |
-| 50-row request pagination | 287,145 ns/op | 292,937 ns/op | +2.0% (+5,792 ns) | 725 → 749 allocs/op |
+| Hot path | Raw main-equivalent | GORM store adapter | Raw → adapter allocations |
+| --- | ---: | ---: | ---: |
+| Inference logging/writeback | 652,297 ns/op, 4,002 B/op | 610,861 ns/op, 4,024 B/op | 80 → 81 allocs/op |
+| Counter update | 457,873 ns/op, 944 B/op | 432,748 ns/op, 968 B/op | 17 → 18 allocs/op |
+| Hardware sample persistence | 414,347 ns/op, 2,329 B/op | 395,109 ns/op, 2,354 B/op | 61 → 62 allocs/op |
+| API-key last-used update | 436,497 ns/op, 204 B/op | 393,055 ns/op, 204 B/op | 7 → 7 allocs/op |
+| Runtime upsert | 439,741 ns/op, 452 B/op | 412,372 ns/op, 452 B/op | 13 → 13 allocs/op |
+| 100-model/100-instance lists | 492,945 ns/op, 71,808 B/op | 498,650 ns/op, 71,808 B/op | 4,266 → 4,266 allocs/op |
+| 50-row request pagination | 283,929 ns/op, 10,488 B/op | 282,753 ns/op, 10,488 B/op | 725 → 725 allocs/op |
 
-The adapter therefore has visible CPU/allocation overhead in this SQLite
-microbenchmark, especially for short write operations. The absolute median
-latency cost is bounded to about 0.11 ms/op in the measured set, while the
-larger list/pagination paths remain within 2–5%. The adapter does not introduce
-additional application queries or N+1 loading: both variants execute the same
-explicit SQL and transaction boundaries.
+The important result is allocation and query-shape stability, not the direction
+of small wall-clock differences on a shared CI host. In this run the adapter is
+allocation-neutral on four measured paths and adds one allocation on the other
+three, with only small byte differences. The raw and adapter variants still
+execute the same explicit SQL and transaction boundaries, so there is no
+adapter-induced N+1 query pattern or extra per-row ORM loading.
 
-For the 1.1 storage foundation this is accepted as implementation overhead
-rather than a material user-visible regression. The explicit-SQL adapters are
-retained instead of converting these paths into ORM object loading, and the
-benchmark remains in CI so a future increase can be compared against this
-recorded baseline.
+Recent CI samples have moved in both latency directions while retaining this
+allocation profile. That makes the earlier claim of substantial adapter
+CPU/allocation overhead stale: the current explicit-SQL adapter does not show a
+repeatable material regression or allocation explosion in these measured
+paths. Continue using multiple samples and avoid treating small `ns/op`
+differences as a release threshold.
 
 The same CI run reported total backend coverage of exactly `90.0%`, satisfying
 the repository threshold.
