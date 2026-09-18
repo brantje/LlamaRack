@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,9 +121,63 @@ func (c *Connection) Close() error {
 
 func (c *Connection) query(query string) string {
 	if c != nil && c.dialect == DialectPostgres {
-		return strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+		query = strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+		query = bindPostgresPlaceholders(query)
 	}
 	return query
+}
+
+// bindPostgresPlaceholders converts the adapter's portable question-mark
+// placeholders to PostgreSQL's $n form without touching quoted SQL literals
+// or identifiers. Runtime adapter SQL does not rely on GORM statement building
+// for this translation.
+func bindPostgresPlaceholders(query string) string {
+	var out strings.Builder
+	out.Grow(len(query) + 8)
+	placeholder := 1
+	inSingle, inDouble := false, false
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+		if inSingle {
+			out.WriteByte(ch)
+			if ch == '\'' {
+				if i+1 < len(query) && query[i+1] == '\'' {
+					out.WriteByte(query[i+1])
+					i++
+				} else {
+					inSingle = false
+				}
+			}
+			continue
+		}
+		if inDouble {
+			out.WriteByte(ch)
+			if ch == '"' {
+				if i+1 < len(query) && query[i+1] == '"' {
+					out.WriteByte(query[i+1])
+					i++
+				} else {
+					inDouble = false
+				}
+			}
+			continue
+		}
+		switch ch {
+		case '\'':
+			inSingle = true
+			out.WriteByte(ch)
+		case '"':
+			inDouble = true
+			out.WriteByte(ch)
+		case '?':
+			out.WriteByte('$')
+			out.WriteString(strconv.Itoa(placeholder))
+			placeholder++
+		default:
+			out.WriteByte(ch)
+		}
+	}
+	return out.String()
 }
 
 type result struct{ rows int64 }
@@ -133,21 +188,25 @@ func (r result) LastInsertId() (int64, error) {
 func (r result) RowsAffected() (int64, error) { return r.rows, nil }
 
 func (c *Connection) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	if c == nil || c.orm == nil {
+	if c == nil || c.raw == nil {
 		return nil, errors.New("database store is closed")
 	}
-	tx := c.orm.WithContext(ctx).Exec(c.query(query), args...)
-	if tx.Error != nil {
-		return nil, ClassifyError(tx.Error)
+	res, err := c.raw.ExecContext(ctx, c.query(query), args...)
+	if err != nil {
+		return nil, ClassifyError(err)
 	}
-	return result{rows: tx.RowsAffected}, nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, ClassifyError(err)
+	}
+	return result{rows: rows}, nil
 }
 
 func (c *Connection) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	if c == nil || c.orm == nil {
+	if c == nil || c.raw == nil {
 		return nil, errors.New("database store is closed")
 	}
-	rows, err := c.orm.WithContext(ctx).Raw(c.query(query), args...).Rows()
+	rows, err := c.raw.QueryContext(ctx, c.query(query), args...)
 	if err != nil {
 		return nil, ClassifyError(err)
 	}
@@ -155,65 +214,76 @@ func (c *Connection) QueryContext(ctx context.Context, query string, args ...any
 }
 
 func (c *Connection) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return c.orm.WithContext(ctx).Raw(c.query(query), args...).Row()
+	if c == nil || c.raw == nil {
+		return (&sql.DB{}).QueryRowContext(ctx, query, args...)
+	}
+	return c.raw.QueryRowContext(ctx, c.query(query), args...)
 }
 
 func (c *Connection) beginTransaction(ctx context.Context) (Transaction, error) {
-	tx := c.orm.WithContext(ctx).Begin()
-	if tx.Error != nil {
-		return nil, tx.Error
+	if c == nil || c.raw == nil {
+		return nil, errors.New("database store is closed")
 	}
-	return &gormTransaction{orm: tx, dialect: c.dialect}, nil
+	tx, err := c.raw.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, ClassifyError(err)
+	}
+	return &sqlTransaction{tx: tx, dialect: c.dialect}, nil
 }
 
-type gormTransaction struct {
-	orm     *gorm.DB
+type sqlTransaction struct {
+	tx      *sql.Tx
 	dialect Dialect
 }
 
-func (t *gormTransaction) query(query string) string {
+func (t *sqlTransaction) query(query string) string {
 	if t != nil && t.dialect == DialectPostgres {
-		return strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+		query = strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+		query = bindPostgresPlaceholders(query)
 	}
 	return query
 }
 
-func (t *gormTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	if t == nil || t.orm == nil {
+func (t *sqlTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if t == nil || t.tx == nil {
 		return nil, errors.New("database transaction is closed")
 	}
-	tx := t.orm.WithContext(ctx).Exec(t.query(query), args...)
-	if tx.Error != nil {
-		return nil, ClassifyError(tx.Error)
+	res, err := t.tx.ExecContext(ctx, t.query(query), args...)
+	if err != nil {
+		return nil, ClassifyError(err)
 	}
-	return result{rows: tx.RowsAffected}, nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, ClassifyError(err)
+	}
+	return result{rows: rows}, nil
 }
 
-func (t *gormTransaction) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	if t == nil || t.orm == nil {
+func (t *sqlTransaction) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if t == nil || t.tx == nil {
 		return nil, errors.New("database transaction is closed")
 	}
-	rows, err := t.orm.WithContext(ctx).Raw(t.query(query), args...).Rows()
+	rows, err := t.tx.QueryContext(ctx, t.query(query), args...)
 	if err != nil {
 		return nil, ClassifyError(err)
 	}
 	return rows, nil
 }
 
-func (t *gormTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return t.orm.WithContext(ctx).Raw(t.query(query), args...).Row()
+func (t *sqlTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return t.tx.QueryRowContext(ctx, t.query(query), args...)
 }
 
-func (t *gormTransaction) Commit() error {
-	if t == nil || t.orm == nil {
+func (t *sqlTransaction) Commit() error {
+	if t == nil || t.tx == nil {
 		return errors.New("database transaction is closed")
 	}
-	return ClassifyError(t.orm.Commit().Error)
+	return ClassifyError(t.tx.Commit())
 }
 
-func (t *gormTransaction) Rollback() error {
-	if t == nil || t.orm == nil {
+func (t *sqlTransaction) Rollback() error {
+	if t == nil || t.tx == nil {
 		return nil
 	}
-	return t.orm.Rollback().Error
+	return ClassifyError(t.tx.Rollback())
 }

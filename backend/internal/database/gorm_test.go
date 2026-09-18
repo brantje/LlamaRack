@@ -221,3 +221,65 @@ func TestSQLiteClassifiesConstraintErrors(t *testing.T) {
 		t.Fatalf("check classification=%v", err)
 	}
 }
+
+
+func TestBindPostgresPlaceholdersPreservesQuotedQuestionMarks(t *testing.T) {
+	query := `SELECT '?' AS literal, "?" AS identifier, value FROM demo WHERE a=? AND b='it''s ?' AND c=?`
+	got := bindPostgresPlaceholders(query)
+	want := `SELECT '?' AS literal, "?" AS identifier, value FROM demo WHERE a=$1 AND b='it''s ?' AND c=$2`
+	if got != want {
+		t.Fatalf("bound query=%q want=%q", got, want)
+	}
+}
+
+func TestExplicitSQLAdapterAllocationOverhead(t *testing.T) {
+	ctx := context.Background()
+	open := func(name string, adapter bool) Store {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), name+".db")
+		if adapter {
+			store, err := OpenStore(ctx, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			return store
+		}
+		store, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		return store
+	}
+	raw := open("raw", false)
+	adapter := open("adapter", true)
+	for _, store := range []Store{raw, adapter} {
+		if _, err := store.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)`, "alloc", "value", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	measureQuery := func(store Store) float64 {
+		return testing.AllocsPerRun(100, func() {
+			var value string
+			if err := store.QueryRowContext(ctx, `SELECT setting_value FROM manager_settings WHERE setting_key=?`, "alloc").Scan(&value); err != nil {
+				panic(err)
+			}
+		})
+	}
+	measureExec := func(store Store) float64 {
+		return testing.AllocsPerRun(100, func() {
+			if _, err := store.ExecContext(ctx, `UPDATE manager_settings SET updated_at=updated_at+1 WHERE setting_key=?`, "alloc"); err != nil {
+				panic(err)
+			}
+		})
+	}
+	rawQuery, adapterQuery := measureQuery(raw), measureQuery(adapter)
+	rawExec, adapterExec := measureExec(raw), measureExec(adapter)
+	if adapterQuery > rawQuery+4 {
+		t.Fatalf("query allocations regressed: raw=%.1f adapter=%.1f", rawQuery, adapterQuery)
+	}
+	if adapterExec > rawExec+4 {
+		t.Fatalf("exec allocations regressed: raw=%.1f adapter=%.1f", rawExec, adapterExec)
+	}
+}
