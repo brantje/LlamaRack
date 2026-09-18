@@ -10,6 +10,32 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: llamarack
+          POSTGRES_PASSWORD: llamarack-test
+          POSTGRES_DB: llamarack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U llamarack -d llamarack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LLAMARACK_TEST_POSTGRES_URL: postgres://llamarack:llamarack-test@127.0.0.1:5432/llamarack?sslmode=disable
+      LLAMARACK_TEST_REDIS_URL: redis://127.0.0.1:6379/0
     defaults:
       run:
         working-directory: backend
