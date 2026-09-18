@@ -43,7 +43,10 @@ type artifactReference struct {
 	size int64
 }
 
-const companionOptionSQL = "option_key IN ('mmproj','spec-draft-model','draft-model')"
+type namedArtifactReference struct {
+	modelName string
+	path      string
+}
 
 // PrepareFileDeletion resolves the LlamaRack-owned file set for a Model and
 // validates every unlink target before lifecycle shutdown begins. Ownership is
@@ -104,47 +107,15 @@ func (s *Service) DeleteFilesAndModel(ctx context.Context, id string, plan FileD
 
 func (s *Service) ownedArtifactReferences(ctx context.Context, model Model) ([]artifactReference, error) {
 	refs := []artifactReference{{path: model.GGUFPath, size: model.TotalBytes}}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT df.local_path,df.size
-FROM provider_imports pi
-JOIN download_files df ON df.job_id=pi.job_id
-WHERE pi.model_id=? AND df.state='COMPLETED' AND TRIM(df.local_path)<>''
-ORDER BY df.ordinal,df.path`, model.ID)
+	owned, err := s.store.OwnedArtifactReferences(ctx, model.ID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var ref artifactReference
-		if err := rows.Scan(&ref.path, &ref.size); err != nil {
-			return nil, err
-		}
-		refs = append(refs, ref)
-	}
-	return refs, rows.Err()
+	return append(refs, owned...), nil
 }
 
 func (s *Service) companionOptionReferences(ctx context.Context, modelID string) ([]artifactReference, error) {
-	optionRows, err := s.db.QueryContext(ctx, `
-SELECT option_value
-FROM model_options
-WHERE model_id=? AND `+companionOptionSQL+`
-ORDER BY option_key`, modelID)
-	if err != nil {
-		return nil, err
-	}
-	defer optionRows.Close()
-	var refs []artifactReference
-	for optionRows.Next() {
-		var value string
-		if err := optionRows.Scan(&value); err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(value) != "" {
-			refs = append(refs, artifactReference{path: value})
-		}
-	}
-	return refs, optionRows.Err()
+	return s.store.CompanionOptionReferences(ctx, modelID)
 }
 
 func (s *Service) artifactReferences(ctx context.Context, model Model) ([]artifactReference, error) {
@@ -167,23 +138,14 @@ func (s *Service) ensureArtifactNotShared(ctx context.Context, modelID string, f
 	for _, file := range files {
 		targets[file.canonicalPath] = file.relativePath
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+modelColumns+` FROM models WHERE id<>? ORDER BY name`, modelID)
+	others, err := s.store.List(ctx)
 	if err != nil {
 		return err
 	}
-	var others []Model
-	for rows.Next() {
-		model, err := scanModel(rows)
-		if err != nil {
-			_ = rows.Close()
-			return err
-		}
-		others = append(others, model)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
 	for _, other := range others {
+		if other.ID == modelID {
+			continue
+		}
 		refs, err := s.artifactReferences(ctx, other)
 		if err != nil {
 			return err
@@ -201,24 +163,17 @@ func (s *Service) ensureInstanceCompanionNotShared(ctx context.Context, modelID 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT m.name, io.option_value
 FROM instance_options io
-JOIN instances i ON i.id=io.instance_id
-JOIN models m ON m.id=i.model_id
-WHERE i.model_id<>? AND `+companionOptionSQL+` AND TRIM(io.option_value)<>''
-ORDER BY m.name, io.option_key`, modelID)
+JOIN instances i ON i.id=io.instafunc (s *Service) ensureInstanceCompanionNotShared(ctx context.Context, modelID string, targets map[string]string) error {
+	refs, err := s.store.InstanceCompanionReferencesExcluding(ctx, modelID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name, value string
-		if err := rows.Scan(&name, &value); err != nil {
-			return err
-		}
-		if target, shared := s.sharedDeletionTarget(targets, value); shared {
-			return fmt.Errorf("%w: %q is referenced by Model %q", ErrArtifactShared, target, name)
+	for _, ref := range refs {
+		if target, shared := s.sharedDeletionTarget(targets, ref.path); shared {
+			return fmt.Errorf("%w: %q is referenced by Model %q", ErrArtifactShared, target, ref.modelName)
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (s *Service) sharedDeletionTarget(targets map[string]string, storedPath string) (string, bool) {

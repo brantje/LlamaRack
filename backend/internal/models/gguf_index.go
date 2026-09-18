@@ -17,65 +17,15 @@ type ggufIndexEntry struct {
 }
 
 func (s *Service) loadGGUFIndex(ctx context.Context) (map[string]ggufIndexEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT path,size_bytes,mtime_ns,gguf_version,tensor_count,metadata_count,architecture,
-       context_length,block_count,embedding_length,head_count,kv_head_count,key_length,value_length,
-       nextn_predict_layers,has_mtp,mtp_only,projector,inspect_error
-FROM gguf_index`)
+	index, err := s.store.LoadGGUFIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make(map[string]ggufIndexEntry)
-	for rows.Next() {
-		var (
-			path                                                                    string
-			entry                                                                   ggufIndexEntry
-			version, tensorCount, metadataCount, nextN                              int64
-			architecture                                                            string
-			contextLength, blockCount, embedding, headCount, kvHead, keyLen, valLen int64
-			hasMTP, mtpOnly, projector                                              int
-		)
-		if err := rows.Scan(
-			&path, &entry.SizeBytes, &entry.MTimeNS, &version, &tensorCount, &metadataCount, &architecture,
-			&contextLength, &blockCount, &embedding, &headCount, &kvHead, &keyLen, &valLen,
-			&nextN, &hasMTP, &mtpOnly, &projector, &entry.Warning,
-		); err != nil {
-			return nil, err
-		}
-		entry.Summary = ggufmeta.Summary{
-			Version:       uint32(version),
-			TensorCount:   uint64(tensorCount),
-			MetadataCount: uint64(metadataCount),
-			Derived: ggufmeta.Derived{
-				Architecture:  architecture,
-				ContextLength: contextLength,
-				BlockCount:    blockCount,
-				Embedding:     embedding,
-				HeadCount:     headCount,
-				KVHeadCount:   kvHead,
-				KeyLength:     keyLen,
-				ValueLength:   valLen,
-			},
-			Features: ggufmeta.Features{
-				Architecture:       architecture,
-				NextNPredictLayers: nextN,
-				HasMTP:             hasMTP != 0,
-				MTPOnly:            mtpOnly != 0,
-				Projector:          projector != 0,
-			},
-		}
-		// Classification rules can improve independently of the file fingerprint.
-		// Normalize architecture-defined helpers when loading old cached rows so
-		// users do not have to touch the GGUF or delete their database after an
-		// application upgrade.
-		if ggufmeta.IsStandaloneMTPArchitecture(architecture) {
-			entry.Summary.Features.HasMTP = true
-			entry.Summary.Features.MTPOnly = true
-		}
+	out := make(map[string]ggufIndexEntry, len(index))
+	for path, entry := range index {
 		out[filepath.ToSlash(filepath.Clean(path))] = entry
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Service) cachedGGUFSummary(
@@ -105,48 +55,7 @@ func (s *Service) cachedGGUFSummary(
 }
 
 func (s *Service) storeGGUFIndex(ctx context.Context, path string, entry ggufIndexEntry) error {
-	tensorCount, err := ggufIndexUint(entry.Summary.TensorCount)
-	if err != nil {
-		return err
-	}
-	metadataCount, err := ggufIndexUint(entry.Summary.MetadataCount)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `
-INSERT INTO gguf_index(
- path,size_bytes,mtime_ns,gguf_version,tensor_count,metadata_count,architecture,
- context_length,block_count,embedding_length,head_count,kv_head_count,key_length,value_length,
- nextn_predict_layers,has_mtp,mtp_only,projector,inspect_error,updated_at
-) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,unixepoch())
-ON CONFLICT(path) DO UPDATE SET
- size_bytes=excluded.size_bytes,
- mtime_ns=excluded.mtime_ns,
- gguf_version=excluded.gguf_version,
- tensor_count=excluded.tensor_count,
- metadata_count=excluded.metadata_count,
- architecture=excluded.architecture,
- context_length=excluded.context_length,
- block_count=excluded.block_count,
- embedding_length=excluded.embedding_length,
- head_count=excluded.head_count,
- kv_head_count=excluded.kv_head_count,
- key_length=excluded.key_length,
- value_length=excluded.value_length,
- nextn_predict_layers=excluded.nextn_predict_layers,
- has_mtp=excluded.has_mtp,
- mtp_only=excluded.mtp_only,
- projector=excluded.projector,
- inspect_error=excluded.inspect_error,
- updated_at=unixepoch()`,
-		path, entry.SizeBytes, entry.MTimeNS, int64(entry.Summary.Version), tensorCount, metadataCount,
-		entry.Summary.Derived.Architecture, entry.Summary.Derived.ContextLength, entry.Summary.Derived.BlockCount,
-		entry.Summary.Derived.Embedding, entry.Summary.Derived.HeadCount, entry.Summary.Derived.KVHeadCount,
-		entry.Summary.Derived.KeyLength, entry.Summary.Derived.ValueLength,
-		entry.Summary.Features.NextNPredictLayers, boolInt(entry.Summary.Features.HasMTP),
-		boolInt(entry.Summary.Features.MTPOnly), boolInt(entry.Summary.Features.Projector), entry.Warning,
-	)
-	return err
+	return s.store.StoreGGUFIndex(ctx, path, entry)
 }
 
 func (s *Service) removeMissingGGUFIndex(ctx context.Context, index map[string]ggufIndexEntry, seen map[string]bool) error {
@@ -154,7 +63,7 @@ func (s *Service) removeMissingGGUFIndex(ctx context.Context, index map[string]g
 		if seen[path] {
 			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM gguf_index WHERE path=?`, path); err != nil {
+		if err := s.store.DeleteGGUFIndex(ctx, path); err != nil {
 			return err
 		}
 		delete(index, path)

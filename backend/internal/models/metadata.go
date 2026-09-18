@@ -112,7 +112,7 @@ func (s *Service) RefreshDetectedContext(ctx context.Context, id string) (Model,
 	if contextLength <= 0 {
 		return model, nil
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE models SET context_length=?, updated_at=unixepoch() WHERE id=? AND context_length=0`, contextLength, id); err != nil {
+	if err := s.store.UpdateContextIfZero(ctx, id, contextLength); err != nil {
 		return Model{}, err
 	}
 	return s.GetByID(ctx, id)

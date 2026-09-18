@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 type LegacyInstanceCreate struct {
@@ -33,6 +34,12 @@ type ModelStore interface {
 	Delete(context.Context, string) error
 	Options(context.Context, string) (map[string]string, error)
 	Instances(context.Context, string) ([]Instance, error)
+	LoadGGUFIndex(context.Context) (map[string]ggufIndexEntry, error)
+	StoreGGUFIndex(context.Context, string, ggufIndexEntry) error
+	DeleteGGUFIndex(context.Context, string) error
+	OwnedArtifactReferences(context.Context, string) ([]artifactReference, error)
+	CompanionOptionReferences(context.Context, string) ([]artifactReference, error)
+	InstanceCompanionReferencesExcluding(context.Context, string) ([]namedArtifactReference, error)
 	UpdateTotalBytes(context.Context, string, int64) error
 	UpdateContextIfZero(context.Context, string, int) error
 }
@@ -308,4 +315,165 @@ func (s *sqlModelStore) withLegacyPolicy(ctx context.Context, m Model) Model {
 	return m
 }
 
+func ggufSummaryFromStored(version, tensorCount, metadataCount int64, architecture string, contextLength, blockCount, embedding, headCount, kvHead, keyLen, valLen, nextN int64, hasMTP, mtpOnly, projector int) ggufmeta.Summary {
+	summary := ggufmeta.Summary{
+		Version: uint32(version), TensorCount: uint64(tensorCount), MetadataCount: uint64(metadataCount),
+		Derived: ggufmeta.Derived{Architecture: architecture, ContextLength: contextLength, BlockCount: blockCount, Embedding: embedding, HeadCount: headCount, KVHeadCount: kvHead, KeyLength: keyLen, ValueLength: valLen},
+		Features: ggufmeta.Features{Architecture: architecture, NextNPredictLayers: nextN, HasMTP: hasMTP != 0, MTPOnly: mtpOnly != 0, Projector: projector != 0},
+	}
+	if ggufmeta.IsStandaloneMTPArchitecture(architecture) {
+		summary.Features.HasMTP = true
+		summary.Features.MTPOnly = true
+	}
+	return summary
+}
+
 var _ ModelStore = (*sqlModelStore)(nil)
+
+
+func (s *sqlModelStore) LoadGGUFIndex(ctx context.Context) (map[string]ggufIndexEntry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT path,size_bytes,mtime_ns,gguf_version,tensor_count,metadata_count,architecture,
+       context_length,block_count,embedding_length,head_count,kv_head_count,key_length,value_length,
+       nextn_predict_layers,has_mtp,mtp_only,projector,inspect_error
+FROM gguf_index`)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	out := make(map[string]ggufIndexEntry)
+	for rows.Next() {
+		var (
+			path string
+			entry ggufIndexEntry
+			version, tensorCount, metadataCount, nextN int64
+			architecture string
+			contextLength, blockCount, embedding, headCount, kvHead, keyLen, valLen int64
+			hasMTP, mtpOnly, projector int
+		)
+		if err := rows.Scan(
+			&path, &entry.SizeBytes, &entry.MTimeNS, &version, &tensorCount, &metadataCount, &architecture,
+			&contextLength, &blockCount, &embedding, &headCount, &kvHead, &keyLen, &valLen,
+			&nextN, &hasMTP, &mtpOnly, &projector, &entry.Warning,
+		); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		entry.Summary = ggufSummaryFromStored(version, tensorCount, metadataCount, architecture, contextLength, blockCount, embedding, headCount, kvHead, keyLen, valLen, nextN, hasMTP, mtpOnly, projector)
+		out[path] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func (s *sqlModelStore) StoreGGUFIndex(ctx context.Context, path string, entry ggufIndexEntry) error {
+	tensorCount, err := ggufIndexUint(entry.Summary.TensorCount)
+	if err != nil {
+		return err
+	}
+	metadataCount, err := ggufIndexUint(entry.Summary.MetadataCount)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO gguf_index(
+ path,size_bytes,mtime_ns,gguf_version,tensor_count,metadata_count,architecture,
+ context_length,block_count,embedding_length,head_count,kv_head_count,key_length,value_length,
+ nextn_predict_layers,has_mtp,mtp_only,projector,inspect_error,updated_at
+) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,unixepoch())
+ON CONFLICT(path) DO UPDATE SET
+ size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,gguf_version=excluded.gguf_version,
+ tensor_count=excluded.tensor_count,metadata_count=excluded.metadata_count,architecture=excluded.architecture,
+ context_length=excluded.context_length,block_count=excluded.block_count,embedding_length=excluded.embedding_length,
+ head_count=excluded.head_count,kv_head_count=excluded.kv_head_count,key_length=excluded.key_length,
+ value_length=excluded.value_length,nextn_predict_layers=excluded.nextn_predict_layers,has_mtp=excluded.has_mtp,
+ mtp_only=excluded.mtp_only,projector=excluded.projector,inspect_error=excluded.inspect_error,updated_at=unixepoch()`,
+		path, entry.SizeBytes, entry.MTimeNS, int64(entry.Summary.Version), tensorCount, metadataCount,
+		entry.Summary.Derived.Architecture, entry.Summary.Derived.ContextLength, entry.Summary.Derived.BlockCount,
+		entry.Summary.Derived.Embedding, entry.Summary.Derived.HeadCount, entry.Summary.Derived.KVHeadCount,
+		entry.Summary.Derived.KeyLength, entry.Summary.Derived.ValueLength, entry.Summary.Features.NextNPredictLayers,
+		boolInt(entry.Summary.Features.HasMTP), boolInt(entry.Summary.Features.MTPOnly), boolInt(entry.Summary.Features.Projector), entry.Warning)
+	return database.ClassifyError(err)
+}
+
+func (s *sqlModelStore) DeleteGGUFIndex(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM gguf_index WHERE path=?`, path)
+	return database.ClassifyError(err)
+}
+
+func (s *sqlModelStore) OwnedArtifactReferences(ctx context.Context, modelID string) ([]artifactReference, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT DISTINCT df.local_path,df.size
+FROM provider_imports pi
+JOIN download_files df ON df.job_id=pi.job_id
+WHERE pi.model_id=? AND df.state='COMPLETED' AND TRIM(df.local_path)<>''
+ORDER BY df.ordinal,df.path`, modelID)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	var refs []artifactReference
+	for rows.Next() {
+		var ref artifactReference
+		if err := rows.Scan(&ref.path, &ref.size); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return refs, nil
+}
+
+func (s *sqlModelStore) CompanionOptionReferences(ctx context.Context, modelID string) ([]artifactReference, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT option_value FROM model_options
+WHERE model_id=? AND option_key IN ('mmproj','spec-draft-model','draft-model')
+ORDER BY option_key`, modelID)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	var refs []artifactReference
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		if strings.TrimSpace(value) != "" {
+			refs = append(refs, artifactReference{path: value})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return refs, nil
+}
+
+func (s *sqlModelStore) InstanceCompanionReferencesExcluding(ctx context.Context, modelID string) ([]namedArtifactReference, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT m.name,io.option_value
+FROM instance_options io
+JOIN instances i ON i.id=io.instance_id
+JOIN models m ON m.id=i.model_id
+WHERE i.model_id<>? AND io.option_key IN ('mmproj','spec-draft-model','draft-model') AND TRIM(io.option_value)<>''
+ORDER BY m.name,io.option_key`, modelID)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	var refs []namedArtifactReference
+	for rows.Next() {
+		var ref namedArtifactReference
+		if err := rows.Scan(&ref.modelName, &ref.path); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return refs, nil
+}
