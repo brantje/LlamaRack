@@ -324,7 +324,7 @@ VALUES ('schema_owner', 'llamarack', CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) 
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION inference_requests_counters_after_insert_fn()
-RETURNS trigger AS $
+RETURNS trigger AS $$
 BEGIN
  IF NEW.autoloaded=1 THEN
   INSERT INTO observability_counters(metric,instance_id,value)
@@ -344,7 +344,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 -- +goose StatementEnd
 
 CREATE TRIGGER inference_requests_counters_after_insert
