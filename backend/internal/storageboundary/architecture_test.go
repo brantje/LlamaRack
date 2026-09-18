@@ -1,4 +1,4 @@
-package storageboundary_test
+package storageboundary
 
 import (
 	"go/ast"
