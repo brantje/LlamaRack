@@ -75,10 +75,6 @@ func (s *Service) SetInstanceOnChange(fn instances.ChangeNotifier) {
 	s.instances.SetOnChange(fn)
 }
 
-func New(db database.Store, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
-	return NewWithStores(NewStore(db), instances.NewWithStore(instances.NewInstanceStore(db)), modelsDir, modelService, downloadManager, starter)
-}
-
 func NewWithStores(store Store, instanceService *instances.Service, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
 	return &Service{
 		store: store, modelsDir: modelsDir, models: modelService, instances: instanceService,

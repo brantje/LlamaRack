@@ -104,10 +104,6 @@ type Service struct {
 	runtime RuntimeInfo
 }
 
-func New(db database.Store, defaults Defaults) *Service {
-	return NewWithStore(NewSettingStore(db), defaults)
-}
-
 func NewWithStore(store SettingStore, defaults Defaults) *Service {
 	return &Service{
 		store: store,

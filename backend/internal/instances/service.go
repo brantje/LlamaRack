@@ -73,10 +73,6 @@ type Service struct {
 	hotCache instanceHotCache
 }
 
-func New(db database.Store) *Service {
-	return NewWithStore(NewInstanceStore(db))
-}
-
 func NewWithStore(store InstanceStore) *Service {
 	return &Service{store: store, hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
 }
