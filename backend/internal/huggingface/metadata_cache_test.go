@@ -13,6 +13,8 @@ import (
 	appcache "github.com/brantje/llamarack/backend/internal/cache"
 )
 
+const benchmarkOriginNetworkFloor = 5 * time.Millisecond
+
 type cacheFailure struct{}
 type cacheMiss struct{}
 
@@ -173,6 +175,10 @@ func BenchmarkDerivedMetadataWarmMemoryCache(b *testing.B) {
 func BenchmarkDerivedMetadataOriginFetch(b *testing.B) {
 	payload := discoveryGGUF(b)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Even a nearby remote provider has non-zero network latency. Keep the
+		// controlled floor conservative so this benchmark compares Redis against
+		// the workload it replaces rather than an in-process HTTP round trip.
+		time.Sleep(benchmarkOriginNetworkFloor)
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write(payload)
 	}))
@@ -229,4 +235,44 @@ func BenchmarkDerivedMetadataWarmRedis(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func BenchmarkDerivedMetadataWarmRedisParallel(b *testing.B) {
+	rawURL := os.Getenv("LLAMARACK_TEST_REDIS_URL")
+	if rawURL == "" {
+		b.Skip("LLAMARACK_TEST_REDIS_URL is not configured")
+	}
+	payload := discoveryGGUF(b)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+	redisCache, err := appcache.NewRedis(rawURL)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer redisCache.Close()
+	client, err := NewClientWithHTTP(server.URL, nil, server.Client())
+	if err != nil {
+		b.Fatal(err)
+	}
+	client.SetDerivedMetadataCache(redisCache)
+	detail := ModelDetail{ID: "acme/bench", Revision: "redis-parallel", Artifacts: []Artifact{{
+		ID: "q4", Complete: true, Files: []File{{Path: "bench-Q4_K_M.gguf", Size: int64(len(payload))}},
+	}}}
+	key := client.derivedMetadataCacheKey(detail, detail.Artifacts[0].Files[0].Path)
+	_ = redisCache.Delete(context.Background(), key)
+	defer redisCache.Delete(context.Background(), key)
+	if _, err := client.DerivedMetadata(context.Background(), detail); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := client.DerivedMetadata(context.Background(), detail); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

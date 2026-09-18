@@ -56,6 +56,12 @@ Cached values use explicit JSON serialization and a seven-day TTL. LlamaRack kee
 
 Malformed cached values are ignored and removed best-effort; the authoritative Hugging Face metadata path refills the cache.
 
+## Performance qualification
+
+CI benchmarks the first production namespace in four modes: process-local warm L1, uncached origin fetch, warm Redis after a fresh client, and concurrent warm Redis reads. The controlled origin benchmark includes a conservative 5 ms network floor so it represents the remote range request Redis replaces rather than a same-process HTTP round trip.
+
+The L1 memory cache remains first in the lookup chain and therefore stays the steady-state fast path. Redis is useful as the restart/shared-process L2: the integration test creates a fresh Hugging Face client and proves a warm Redis entry avoids another origin request entirely.
+
 ## Metrics
 
 The normal `/metrics` endpoint exposes cache counters by a low-cardinality `namespace` and `backend` label:

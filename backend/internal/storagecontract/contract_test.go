@@ -1,9 +1,11 @@
 package storagecontract_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"net/url"
@@ -15,6 +17,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/observability"
@@ -70,13 +73,14 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 	}
 	ctx := context.Background()
 	store := backend.open(t)
+	secretsDir := t.TempDir()
 
 	defaults := settings.Defaults{
 		SessionLifetime: 24 * time.Hour,
 		AllowedOrigins: "http://localhost:3000",
 		StartupTimeout: 180 * time.Second,
 		AlwaysOnReconcile: 15 * time.Second,
-		DataDir: t.TempDir(),
+		DataDir: secretsDir,
 		ModelsDir: modelsDir,
 		DatabasePath: "contract.db",
 		ListenAddr: ":8000",
@@ -109,10 +113,47 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 		t.Fatalf("%s api key re-enable: %v", backend.name, err)
 	}
 
-	modelPath := filepath.Join(modelsDir, "contract-Q4_K_M.gguf")
-	if err := os.WriteFile(modelPath, []byte("contract-gguf"), 0o644); err != nil {
-		t.Fatal(err)
+	serviceAccount, err := authService.CreateServiceAccount(ctx, "Contract Service", admin.ID)
+	if err != nil {
+		t.Fatalf("%s service account create: %v", backend.name, err)
 	}
+	_, serviceSecret, err := authService.CreateAPIKey(ctx, auth.CreateAPIKeyInput{
+		Name: "contract-service-key", OwnerServiceAccountID: serviceAccount.ID,
+	})
+	if err != nil {
+		t.Fatalf("%s service account api key create: %v", backend.name, err)
+	}
+	if err := authService.AuthenticateAPIKey(ctx, serviceSecret); err != nil {
+		t.Fatalf("%s service account api key authenticate: %v", backend.name, err)
+	}
+
+	secretStore, err := huggingface.NewSecretStore(store, secretsDir)
+	if err != nil {
+		t.Fatalf("%s provider secret store: %v", backend.name, err)
+	}
+	if err := secretStore.SetToken(ctx, "hf_contract_token"); err != nil {
+		t.Fatalf("%s provider token write: %v", backend.name, err)
+	}
+	if token, err := secretStore.GetToken(ctx); err != nil || token != "hf_contract_token" {
+		t.Fatalf("%s provider token=%q err=%v", backend.name, token, err)
+	}
+	oidcSecret := "contract-oidc-secret"
+	oidcManager := auth.NewOIDCManager(authService, settingService, secretStore)
+	oidcProvider, err := oidcManager.CreateProvider(ctx, auth.OIDCProviderInput{
+		Name: "Contract OIDC", Enabled: true, Issuer: "https://id.example.test",
+		ClientID: "contract-client", ClientSecret: &oidcSecret, Scopes: []string{"openid", "profile"},
+		AuthorizationEndpoint: "https://id.example.test/authorize",
+		TokenEndpoint: "https://id.example.test/token",
+		JWKSURL: "https://id.example.test/jwks",
+	})
+	if err != nil {
+		t.Fatalf("%s oidc provider create: %v", backend.name, err)
+	}
+	if providers, err := oidcManager.ListProviders(ctx); err != nil || len(providers) != 1 || providers[0].ID != oidcProvider.ID || !providers[0].SecretConfigured {
+		t.Fatalf("%s oidc providers=%+v err=%v", backend.name, providers, err)
+	}
+
+	modelPath := writeContractGGUF(t, modelsDir, "contract-Q4_K_M.gguf")
 	modelService := models.New(store, modelsDir)
 	model, err := modelService.Create(ctx, models.CreateModelInput{
 		Name: "Contract Model", GGUFPath: modelPath, ContextLength: 4096,
@@ -133,6 +174,13 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 	}
 	if opts, err := instanceService.Options(ctx, instance.ID); err != nil || opts["threads"] != "4" {
 		t.Fatalf("%s instance options=%v err=%v", backend.name, opts, err)
+	}
+	if summary, err := modelService.GGUFSummary(ctx, modelPath); err != nil || summary.Derived.Architecture != "llama" || summary.Derived.ContextLength != 4096 {
+		t.Fatalf("%s GGUF summary=%+v err=%v", backend.name, summary, err)
+	}
+	var indexed int
+	if err := store.QueryRowContext(ctx, `SELECT COUNT(*) FROM gguf_index WHERE path=?`, filepath.Base(modelPath)).Scan(&indexed); err != nil || indexed != 1 {
+		t.Fatalf("%s GGUF index count=%d err=%v", backend.name, indexed, err)
 	}
 
 	runtimeStore := supervisor.NewSQLStore(store)
@@ -211,9 +259,29 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 	if err := authService.AuthenticateAPIKey(ctx, secret); err != nil {
 		t.Fatalf("%s reopened api key auth: %v", backend.name, err)
 	}
+	if err := authService.AuthenticateAPIKey(ctx, serviceSecret); err != nil {
+		t.Fatalf("%s reopened service account api key auth: %v", backend.name, err)
+	}
+	if got, err := authService.GetServiceAccount(ctx, serviceAccount.ID); err != nil || got.ID != serviceAccount.ID {
+		t.Fatalf("%s reopened service account=%+v err=%v", backend.name, got, err)
+	}
+	secretStore, err = huggingface.NewSecretStore(store, secretsDir)
+	if err != nil {
+		t.Fatalf("%s reopened provider secret store: %v", backend.name, err)
+	}
+	if token, err := secretStore.GetToken(ctx); err != nil || token != "hf_contract_token" {
+		t.Fatalf("%s reopened provider token=%q err=%v", backend.name, token, err)
+	}
+	oidcManager = auth.NewOIDCManager(authService, settingService, secretStore)
+	if got, err := oidcManager.GetProvider(ctx, oidcProvider.ID); err != nil || got.ID != oidcProvider.ID || !got.SecretConfigured {
+		t.Fatalf("%s reopened oidc provider=%+v err=%v", backend.name, got, err)
+	}
 	modelService = models.New(store, modelsDir)
 	if got, err := modelService.GetByID(ctx, model.ID); err != nil || got.ID != model.ID {
 		t.Fatalf("%s reopened model=%+v err=%v", backend.name, got, err)
+	}
+	if summary, err := modelService.GGUFSummary(ctx, modelPath); err != nil || summary.Derived.Architecture != "llama" {
+		t.Fatalf("%s reopened GGUF summary=%+v err=%v", backend.name, summary, err)
 	}
 	instanceService = instances.New(store)
 	if got, err := instanceService.GetByID(ctx, instance.ID); err != nil || got.ID != instance.ID {
@@ -271,4 +339,37 @@ func isolatedPostgresDSN(t *testing.T, base string) string {
 	query.Set("search_path", schema)
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func writeContractGGUF(t testing.TB, dir, name string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.WriteString("GGUF")
+	writeContractBinary(t, &buf, uint32(3))
+	writeContractBinary(t, &buf, uint64(0))
+	writeContractBinary(t, &buf, uint64(2))
+	writeContractString(t, &buf, "general.architecture")
+	writeContractBinary(t, &buf, uint32(8))
+	writeContractString(t, &buf, "llama")
+	writeContractString(t, &buf, "llama.context_length")
+	writeContractBinary(t, &buf, uint32(4))
+	writeContractBinary(t, &buf, uint32(4096))
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeContractString(t testing.TB, buf *bytes.Buffer, value string) {
+	t.Helper()
+	writeContractBinary(t, buf, uint64(len(value)))
+	_, _ = buf.WriteString(value)
+}
+
+func writeContractBinary(t testing.TB, buf *bytes.Buffer, value any) {
+	t.Helper()
+	if err := binary.Write(buf, binary.LittleEndian, value); err != nil {
+		t.Fatal(err)
+	}
 }
