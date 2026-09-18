@@ -138,17 +138,17 @@ network benefit.
 
 ### Recorded CI evidence
 
-GitHub Actions CI run `35399621025` on source commit
-`25cb655caf7cf4a8fabfb55abd075890c8c9805c` reran the deterministic Redis
-benchmarks after the model-import correctness fix. Median values from three
-samples were:
+GitHub Actions CI run `35400373639` on final implementation commit
+`bcd696991939cfcf048d8ab82bf575cf1bd9b150` reran the deterministic Redis
+benchmarks after the correctness and qualification changes were complete.
+Median values from three samples were:
 
 | Mode | Median latency | Allocations |
 | --- | ---: | ---: |
-| Warm in-process L1 | 2,179 ns/op | 13 allocs/op |
-| Synthetic authoritative origin | 5,347,643 ns/op | 156 allocs/op |
-| Warm Redis from an empty L1 | 171,296 ns/op | 25 allocs/op |
-| Warm Redis parallel | 58,557 ns/op | 25 allocs/op |
+| Warm in-process L1 | 1,703 ns/op | 13 allocs/op |
+| Synthetic authoritative origin | 5,300,530 ns/op | 156 allocs/op |
+| Warm Redis from an empty L1 | 86,827 ns/op | 25 allocs/op |
+| Warm Redis parallel | 27,143 ns/op | 25 allocs/op |
 
 These measurements are deterministic CI evidence only. They continue to show
 the intended hierarchy—process-local L1 is the fastest path and Redis can serve
@@ -174,3 +174,6 @@ under the validity policy above. Current #162 release evidence must come from a
 successful manual `.github/workflows/redis-release-qualification.yml` run
 against the commit intended for release, with its uploaded
 `redis-live-qualification-<sha>` artifact.
+
+The commit after the deterministic measurement only refreshes these
+documentation records; it does not change the measured cache implementation.
