@@ -39,6 +39,14 @@ type ObservabilityStore interface {
 	RecordLifecycleCounters(context.Context, string, string, float64) error
 	SetRequestModelSlug(context.Context, string, string) error
 	RequestModelIdentity(context.Context, string) (RequestModelIdentity, error)
+	RecordPlaygroundLifecycleEvent(context.Context, string, string, string) error
+	PlaygroundEvictions(context.Context, string, string) ([]string, error)
+	StageInferenceTurnStats(context.Context, string, InferenceTurnStats) error
+	SaveInferenceTurnStats(context.Context, string, InferenceTurnStats) error
+	InferenceTurnStats(context.Context, string) (*InferenceTurnStats, error)
+	UpdateRequestLogContext(context.Context, string, string, string) error
+	ListRequestLogs(context.Context, RequestFilters, string) ([]RequestLogRecord, error)
+	GetRequestLogByRequestID(context.Context, string) (RequestLogDetail, error)
 }
 
 type sqlObservabilityStore struct {
@@ -844,6 +852,288 @@ func (s *sqlObservabilityStore) RequestModelIdentity(ctx context.Context, reques
 		FROM inference_requests r JOIN inference_request_correlations c ON c.inference_request_id=r.id
 		WHERE c.request_id=?`, requestID).Scan(&identity.InstanceID, &identity.ModelSlug)
 	return identity, database.ClassifyError(err)
+}
+
+
+func (s *sqlObservabilityStore) RecordPlaygroundLifecycleEvent(ctx context.Context, event, instanceID, correlationID string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, event, instanceID, correlationID)
+	return database.ClassifyError(err)
+}
+
+func (s *sqlObservabilityStore) PlaygroundEvictions(ctx context.Context, correlationID, excludeInstanceID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT instance_id FROM playground_lifecycle_events
+		WHERE event=? AND correlation_id=? AND instance_id<>? ORDER BY id`, LifecycleEviction, correlationID, excludeInstanceID)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	out := make([]string, 0)
+	for rows.Next() {
+		var instanceID string
+		if err := rows.Scan(&instanceID); err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		instanceID = strings.TrimSpace(instanceID)
+		if instanceID == "" || seen[instanceID] {
+			continue
+		}
+		seen[instanceID] = true
+		out = append(out, instanceID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func (s *sqlObservabilityStore) StageInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	return s.stageInferenceTurnStats(ctx, requestID, stats)
+}
+
+func (s *sqlObservabilityStore) SaveInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&exists); err != nil {
+		return database.ClassifyError(err)
+	}
+	return s.stageInferenceTurnStats(ctx, requestID, stats)
+}
+
+func (s *sqlObservabilityStore) stageInferenceTurnStats(ctx context.Context, requestID string, stats InferenceTurnStats) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO inference_request_timing_staging(
+		request_id,prompt_n,prompt_ms,prompt_per_second,prompt_per_token_ms,
+		predicted_n,predicted_ms,predicted_per_second,predicted_per_token_ms,
+		cache_n,draft_n,draft_n_accepted,finish_reason,tool_call_count
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	ON CONFLICT(request_id) DO UPDATE SET
+		prompt_n=excluded.prompt_n,prompt_ms=excluded.prompt_ms,prompt_per_second=excluded.prompt_per_second,prompt_per_token_ms=excluded.prompt_per_token_ms,
+		predicted_n=excluded.predicted_n,predicted_ms=excluded.predicted_ms,predicted_per_second=excluded.predicted_per_second,predicted_per_token_ms=excluded.predicted_per_token_ms,
+		cache_n=excluded.cache_n,draft_n=excluded.draft_n,draft_n_accepted=excluded.draft_n_accepted,finish_reason=excluded.finish_reason,tool_call_count=excluded.tool_call_count`,
+		requestID,
+		nullableValue(stats.PromptN), nullableValue(stats.PromptMS), nullableValue(stats.PromptPerSecond), nullableValue(stats.PromptPerTokenMS),
+		nullableValue(stats.PredictedN), nullableValue(stats.PredictedMS), nullableValue(stats.PredictedPerSecond), nullableValue(stats.PredictedPerTokenMS),
+		nullableValue(stats.CacheN), nullableValue(stats.DraftN), nullableValue(stats.DraftNAccepted), nullableValue(stats.FinishReason), nullableValue(stats.ToolCallCount))
+	return database.ClassifyError(err)
+}
+
+func (s *sqlObservabilityStore) InferenceTurnStats(ctx context.Context, requestID string) (*InferenceTurnStats, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT
+		prompt_n,prompt_ms,prompt_per_second,prompt_per_token_ms,
+		predicted_n,predicted_ms,predicted_per_second,predicted_per_token_ms,
+		cache_n,draft_n,draft_n_accepted,finish_reason,tool_call_count
+		FROM inference_request_timings WHERE request_id=?`, requestID)
+	var promptN, predictedN, cacheN, draftN, draftNAccepted, toolCallCount sql.NullInt64
+	var promptMS, promptPerSecond, promptPerTokenMS, predictedMS, predictedPerSecond, predictedPerTokenMS sql.NullFloat64
+	var finishReason sql.NullString
+	if err := row.Scan(
+		&promptN, &promptMS, &promptPerSecond, &promptPerTokenMS,
+		&predictedN, &predictedMS, &predictedPerSecond, &predictedPerTokenMS,
+		&cacheN, &draftN, &draftNAccepted, &finishReason, &toolCallCount,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, database.ClassifyError(err)
+	}
+	return &InferenceTurnStats{
+		PromptN: nullInt64Ptr(promptN), PromptMS: nullFloat64Ptr(promptMS),
+		PromptPerSecond: nullFloat64Ptr(promptPerSecond), PromptPerTokenMS: nullFloat64Ptr(promptPerTokenMS),
+		PredictedN: nullInt64Ptr(predictedN), PredictedMS: nullFloat64Ptr(predictedMS),
+		PredictedPerSecond: nullFloat64Ptr(predictedPerSecond), PredictedPerTokenMS: nullFloat64Ptr(predictedPerTokenMS),
+		CacheN: nullInt64Ptr(cacheN), DraftN: nullInt64Ptr(draftN), DraftNAccepted: nullInt64Ptr(draftNAccepted),
+		FinishReason: nullStringPtr(finishReason), ToolCallCount: nullInt64Ptr(toolCallCount),
+	}, nil
+}
+
+func nullInt64Ptr(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Int64
+	return &v
+}
+
+func nullFloat64Ptr(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Float64
+	return &v
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	v := value.String
+	return &v
+}
+
+func (s *sqlObservabilityStore) UpdateRequestLogContext(ctx context.Context, requestID, sessionID, instanceID string) error {
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM inference_request_correlations WHERE request_id=?`, requestID).Scan(&exists); err != nil {
+		return database.ClassifyError(err)
+	}
+	var modelID, modelName string
+	if instanceID != "" {
+		err := s.db.QueryRowContext(ctx, `SELECT i.model_id,m.name FROM instances i JOIN models m ON m.id=i.model_id WHERE i.id=?`, instanceID).Scan(&modelID, &modelName)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return database.ClassifyError(err)
+		}
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO inference_request_log_context(request_id,session_id,model_id,model_name)
+		VALUES(?,?,?,?)
+		ON CONFLICT(request_id) DO UPDATE SET
+			session_id=CASE WHEN excluded.session_id<>'' THEN excluded.session_id ELSE inference_request_log_context.session_id END,
+			model_id=CASE WHEN excluded.model_id<>'' THEN excluded.model_id ELSE inference_request_log_context.model_id END,
+			model_name=CASE WHEN excluded.model_name<>'' THEN excluded.model_name ELSE inference_request_log_context.model_name END`,
+		requestID, sessionID, modelID, modelName)
+	return database.ClassifyError(err)
+}
+
+func (s *sqlObservabilityStore) ListRequestLogs(ctx context.Context, filters RequestFilters, sessionID string) ([]RequestLogRecord, error) {
+	selectSQL := `SELECT COALESCE(c.request_id,''),
+		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
+		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
+		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL,
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),COALESCE(r.model_slug,''),
+		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
+		FROM inference_requests r
+		LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id
+		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id`
+	whereSQL := " WHERE 1=1"
+	args := []any{}
+	add := func(clause string, value any) {
+		whereSQL += clause
+		args = append(args, value)
+	}
+	if filters.SinceMS > 0 {
+		add(" AND r.started_at>=?", filters.SinceMS)
+	}
+	if filters.BeforeMS > 0 {
+		add(" AND r.started_at<?", filters.BeforeMS)
+	}
+	if filters.InstanceID != "" {
+		add(" AND r.instance_id=?", filters.InstanceID)
+	}
+	if filters.Endpoint != "" {
+		add(" AND r.endpoint=?", filters.Endpoint)
+	}
+	if filters.APIKeyID != "" {
+		add(" AND r.api_key_id=?", filters.APIKeyID)
+	}
+	if filters.Result != "" {
+		add(" AND r.result=?", filters.Result)
+	}
+	if filters.StatusCode > 0 {
+		add(" AND r.status_code=?", filters.StatusCode)
+	}
+	if filters.Streaming != nil {
+		add(" AND r.streaming=?", boolInt(*filters.Streaming))
+	}
+	if filters.RequestID != "" {
+		add(" AND c.request_id=?", filters.RequestID)
+	}
+	if filters.TraceID != "" {
+		add(" AND r.trace_id=?", filters.TraceID)
+	}
+	if search := strings.TrimSpace(filters.Search); search != "" {
+		like := "%" + search + "%"
+		whereSQL += ` AND (LOWER(COALESCE(c.request_id,'')) LIKE LOWER(?) OR LOWER(r.trace_id) LIKE LOWER(?) OR LOWER(COALESCE(x.session_id,'')) LIKE LOWER(?) OR LOWER(r.instance_id) LIKE LOWER(?) OR LOWER(r.model_slug) LIKE LOWER(?) OR LOWER(COALESCE(x.model_id,'')) LIKE LOWER(?) OR LOWER(COALESCE(x.model_name,'')) LIKE LOWER(?) OR LOWER(r.endpoint) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_prefix,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.error,'')) LIKE LOWER(?) OR LOWER(r.client_ip) LIKE LOWER(?) OR LOWER(r.user_agent) LIKE LOWER(?))`
+		for i := 0; i < 13; i++ {
+			args = append(args, like)
+		}
+	}
+	order := "DESC"
+	if filters.TraceID != "" {
+		order = "ASC"
+	}
+	if sessionID != "" {
+		whereSQL += " AND x.session_id=?"
+		args = append(args, sessionID)
+	}
+	query := selectSQL + whereSQL + " ORDER BY r.started_at " + order + ",r.id " + order + " LIMIT ? OFFSET ?"
+	args = append(args, filters.Limit, filters.Offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	defer rows.Close()
+	out := make([]RequestLogRecord, 0)
+	for rows.Next() {
+		item, err := scanRequestLog(rows)
+		if err != nil {
+			return nil, database.ClassifyError(err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, database.ClassifyError(err)
+	}
+	return out, nil
+}
+
+func scanRequestLog(row interface{ Scan(...any) error }) (RequestLogRecord, error) {
+	var item RequestLogRecord
+	var keyID, keyName, keyPrefix, errText, requestBody, responseBody sql.NullString
+	var streaming, autoloaded int
+	var ttft, tps, promptTPS sql.NullFloat64
+	if err := row.Scan(
+		&item.RequestID, &item.ID, &item.TraceID, &item.CallType, &item.StartedAt, &item.FinishedAt, &item.InstanceID, &item.Endpoint,
+		&keyID, &keyName, &keyPrefix, &item.ClientIP, &item.UserAgent, &streaming, &item.StatusCode, &item.Result, &item.DurationMS,
+		&ttft, &item.PromptTokens, &item.GeneratedTokens, &item.TotalTokens, &tps, &promptTPS, &item.QueueDurationMS, &item.LoadDurationMS,
+		&autoloaded, &errText, &requestBody, &responseBody, &item.SessionID, &item.ModelID, &item.ModelName, &item.ModelSlug, &item.SessionTotalCount,
+	); err != nil {
+		return RequestLogRecord{}, err
+	}
+	item.Streaming = streaming != 0
+	item.Autoloaded = autoloaded != 0
+	if keyID.Valid || keyName.Valid || keyPrefix.Valid {
+		item.APIKey = &APIKeyRef{ID: keyID.String, Name: keyName.String, Prefix: keyPrefix.String}
+	}
+	if ttft.Valid {
+		value := ttft.Float64
+		item.TTFTMS = &value
+	}
+	if tps.Valid {
+		value := tps.Float64
+		item.TokensPerSecond = &value
+		generation := value
+		item.GenerationTokensPerSecond = &generation
+	}
+	if promptTPS.Valid {
+		value := promptTPS.Float64
+		item.PromptTokensPerSecond = &value
+	}
+	if errText.Valid {
+		item.Error = errText.String
+	}
+	if requestBody.Valid {
+		value := requestBody.String
+		item.RequestBody = &value
+	}
+	if responseBody.Valid {
+		value := responseBody.String
+		item.ResponseBody = &value
+	}
+	return item, nil
+}
+
+func (s *sqlObservabilityStore) GetRequestLogByRequestID(ctx context.Context, requestID string) (RequestLogDetail, error) {
+	record, err := scanRequestLog(s.db.QueryRowContext(ctx, `SELECT COALESCE(c.request_id,''),
+		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
+		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
+		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,r.request_body,r.response_body,
+		COALESCE(x.session_id,''),COALESCE(x.model_id,''),COALESCE(x.model_name,''),COALESCE(r.model_slug,''),
+		CASE WHEN COALESCE(x.session_id,'')<>'' THEN (SELECT COUNT(*) FROM inference_request_log_context sx WHERE sx.session_id=x.session_id) ELSE 1 END
+		FROM inference_requests r
+		JOIN inference_request_correlations c ON c.inference_request_id=r.id
+		LEFT JOIN inference_request_log_context x ON x.request_id=c.request_id
+		WHERE c.request_id=?`, requestID))
+	if err != nil {
+		return RequestLogDetail{}, database.ClassifyError(err)
+	}
+	return RequestLogDetail{RequestLogRecord: record, RequestBody: record.RequestBody, ResponseBody: record.ResponseBody}, nil
 }
 
 var _ ObservabilityStore = (*sqlObservabilityStore)(nil)
