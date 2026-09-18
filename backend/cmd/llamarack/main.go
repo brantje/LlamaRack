@@ -93,6 +93,8 @@ func run(ctx context.Context, cfg config.Config) error {
 	modelService := models.New(db, cfg.ModelsDir)
 	unregisterDetectedDefaults := modelService.RegisterDetectedLlamaDefaults()
 	defer unregisterDetectedDefaults()
+	instanceService := instances.New(db)
+	llamaConfigStore := llamaconfig.New(db)
 	sup := supervisor.New(cfg.LlamaServerPath, cfg.WorkerHost, cfg.WorkerPortStart, startupTimeout)
 	installID, err := supervisor.EnsureInstallationID(ctx, db)
 	if err != nil {
@@ -104,10 +106,9 @@ func run(ctx context.Context, cfg config.Config) error {
 		defer cancel()
 		sup.Shutdown(shutdownCtx)
 	}()
-	lifecycleService := lifecycle.New(modelService, sup)
+	lifecycleService := lifecycle.New(modelService, instanceService, llamaConfigStore, sup)
 	lifecycleService.SetDataDir(cfg.DataDir)
 	hardwareDetector := hardware.New()
-	llamaConfigStore := llamaconfig.New(db)
 	benchmarkService := benchmark.NewService(ctx, benchmark.NewSQLStore(db), lifecycleService.Instances(), modelService, llamaConfigStore, hardwareDetector, lifecycleService.Reservations(), cfg.LlamaBenchPath)
 	if err := benchmarkService.ReconcileInterrupted(ctx); err != nil {
 		return fmt.Errorf("reconcile interrupted benchmarks: %w", err)
