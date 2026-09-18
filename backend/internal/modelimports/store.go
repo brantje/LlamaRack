@@ -19,7 +19,7 @@ type importCreate struct {
 
 type pendingImport struct {
 	ID, ModelID, InstanceID, DownloadState, DownloadError string
-	StartWhenReady, StartAttempted                         bool
+	StartWhenReady                                         bool
 }
 
 type completedDownload struct {
@@ -151,7 +151,7 @@ func (s *sqlStore) DeleteByJob(ctx context.Context, jobID string) error {
 
 func (s *sqlStore) Prepared(ctx context.Context) ([]pendingImport, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT pi.id,pi.model_id,COALESCE(pi.instance_id,''),pi.start_when_ready,pi.start_attempted,dj.state,dj.error
+SELECT pi.id,pi.model_id,COALESCE(pi.instance_id,''),pi.start_when_ready,dj.state,dj.error
 FROM provider_imports pi JOIN download_jobs dj ON dj.id=pi.job_id
 WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 	if err != nil {
@@ -161,11 +161,11 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 	out := make([]pendingImport, 0)
 	for rows.Next() {
 		var item pendingImport
-		var start, attempted int
-		if err := rows.Scan(&item.ID, &item.ModelID, &item.InstanceID, &start, &attempted, &item.DownloadState, &item.DownloadError); err != nil {
+		var start int
+		if err := rows.Scan(&item.ID, &item.ModelID, &item.InstanceID, &start, &item.DownloadState, &item.DownloadError); err != nil {
 			return nil, database.ClassifyError(err)
 		}
-		item.StartWhenReady, item.StartAttempted = start != 0, attempted != 0
+		item.StartWhenReady = start != 0
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
