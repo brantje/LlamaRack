@@ -256,7 +256,6 @@ func TestAPIKeyStatusPriorityAndServiceAccountEdges(t *testing.T) {
 
 	ctx := context.Background()
 	s := testService(t)
-	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
