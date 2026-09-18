@@ -152,8 +152,9 @@ type wsTicket struct {
 }
 
 type Service struct {
-	db    database.Store
-	users UserStore
+	db       database.Store
+	users    UserStore
+	sessions SessionStore
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
@@ -173,7 +174,7 @@ func New(db database.Store, sessionLifetime time.Duration) *Service {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		db: db, users: NewUserStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		db: db, users: NewUserStore(db), sessions: NewSessionStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
 		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}

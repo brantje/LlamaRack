@@ -2,8 +2,9 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 	"strings"
 )
 
@@ -13,24 +14,13 @@ import (
 const dummyPasswordHash = "argon2id$v=19$m=65536,t=3,p=2$bGxhbWFyYWNrLWR1bW15IQ$a6Cr0DiCWqUX8furaAqzoBPmehriMwC0QbbXDWi5QyQ"
 
 func (s *Service) verifyLoginCredentials(ctx context.Context, work *passwordWorkReservation, username, password string) (User, string, error) {
-	var user User
-	var hash string
-	var enabled int
-	var lastLogin sql.NullInt64
-	queryErr := s.db.QueryRowContext(ctx, "SELECT id,username,password_hash,enabled,created_at,last_login_at FROM users WHERE username=?", strings.TrimSpace(username)).Scan(
-		&user.ID,
-		&user.Username,
-		&hash,
-		&enabled,
-		&user.CreatedAt,
-		&lastLogin,
-	)
-	if queryErr != nil && !errors.Is(queryErr, sql.ErrNoRows) {
+	user, hash, enabled, queryErr := s.sessions.Credentials(ctx, strings.TrimSpace(username))
+	if queryErr != nil && !errors.Is(queryErr, database.ErrNotFound) {
 		return User{}, "", queryErr
 	}
 
 	verificationHash := dummyPasswordHash
-	realAccount := queryErr == nil && enabled != 0
+	realAccount := queryErr == nil && enabled
 	if realAccount {
 		verificationHash = hash
 	}
@@ -42,10 +32,5 @@ func (s *Service) verifyLoginCredentials(ctx context.Context, work *passwordWork
 		return User{}, "", ErrInvalidCredentials
 	}
 
-	user.Enabled = true
-	if lastLogin.Valid {
-		value := lastLogin.Int64
-		user.LastLoginAt = &value
-	}
 	return user, hash, nil
 }

@@ -1,11 +1,9 @@
 package auth
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
-	"context"
+		"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -84,21 +82,6 @@ func loadOrCreateEd25519Key(path string) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
-func persistPasswordRehash(ctx context.Context, tx database.Querier, userID int64, originalHash, rehashed string) error {
-	result, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=? AND password_hash=?", rehashed, userID, originalHash)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return ErrInvalidCredentials
-	}
-	return nil
-}
-
 func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, password, remoteAddress, userAgent string) (LoginResult, error) {
 	work, err := reservePasswordWork()
 	if err != nil {
@@ -121,20 +104,7 @@ func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, passwor
 	work.Release()
 
 	now := time.Now()
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if rehashed != "" {
-		if err := persistPasswordRehash(ctx, tx, user.ID, hash, rehashed); err != nil {
-			return LoginResult{}, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", now.Unix(), user.ID); err != nil {
-		return LoginResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.sessions.CommitLogin(ctx, user.ID, hash, rehashed, now.Unix(), nil); err != nil {
 		return LoginResult{}, err
 	}
 	last := now.Unix()
@@ -176,9 +146,10 @@ func (s *Service) CreateBearerSession(ctx context.Context, user User, remoteAddr
 	if err != nil {
 		return LoginResult{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions(id,user_id,token_hash,csrf_token_hash,created_at,expires_at,remote_address,user_agent) VALUES(?,?,?,?,?,?,?,?)`,
-		sessionID, user.ID, tokenHash(jti), "", now.Unix(), expiresAt.Unix(), strings.TrimSpace(remoteAddress), truncate(userAgent, 512))
-	if err != nil {
+	if err := s.sessions.Insert(ctx, sessionCreate{
+		ID: sessionID, UserID: user.ID, TokenHash: tokenHash(jti), CreatedAt: now.Unix(), ExpiresAt: expiresAt.Unix(),
+		RemoteAddress: strings.TrimSpace(remoteAddress), UserAgent: truncate(userAgent, 512),
+	}); err != nil {
 		return LoginResult{}, err
 	}
 	return LoginResult{AccessToken: token, TokenType: "Bearer", ExpiresAt: expiresAt.Unix(), User: user}, nil
@@ -218,25 +189,11 @@ func (s *Service) parseManagementToken(encoded string) (managementClaims, error)
 }
 
 func (s *Service) sessionByIdentity(ctx context.Context, userID int64, sessionID, jti string) (User, Session, error) {
-	var user User
-	var session Session
-	var enabled int
-	var lastLogin sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT u.id,u.username,u.enabled,u.created_at,u.last_login_at,s.id,s.user_id,s.created_at,s.expires_at,s.remote_address,s.user_agent
-		FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.id=? AND s.user_id=? AND s.token_hash=? AND s.expires_at>?`, sessionID, userID, tokenHash(jti), time.Now().Unix()).Scan(
-		&user.ID, &user.Username, &enabled, &user.CreatedAt, &lastLogin,
-		&session.ID, &session.UserID, &session.CreatedAt, &session.ExpiresAt, &session.RemoteAddress, &session.UserAgent,
-	)
-	if err != nil || enabled == 0 {
+	user, session, err := s.sessions.ResolveByIdentity(ctx, userID, sessionID, tokenHash(jti), time.Now().Unix())
+	if err != nil {
 		return User{}, Session{}, ErrSessionInvalid
 	}
-	user.Enabled = true
 	session.JTI = jti
-	if lastLogin.Valid {
-		value := lastLogin.Int64
-		user.LastLoginAt = &value
-	}
 	session.Current = true
 	return user, session, nil
 }
@@ -311,8 +268,8 @@ func (s *Service) ConsumeWebSocketTicket(ctx context.Context, ticket string) (Us
 	if !ok || !item.ExpiresAt.After(time.Now()) {
 		return User{}, Session{}, ErrSessionInvalid
 	}
-	var userID int64
-	if err := s.db.QueryRowContext(ctx, "SELECT user_id FROM sessions WHERE id=? AND token_hash=?", item.SessionID, tokenHash(item.JTI)).Scan(&userID); err != nil {
+	userID, err := s.sessions.UserIDForIdentity(ctx, item.SessionID, tokenHash(item.JTI))
+	if err != nil {
 		return User{}, Session{}, ErrSessionInvalid
 	}
 	return s.sessionByIdentity(ctx, userID, item.SessionID, item.JTI)
