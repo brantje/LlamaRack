@@ -1,7 +1,6 @@
 package observability
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -109,7 +108,8 @@ type Counter struct {
 }
 
 type Service struct {
-	db database.Store
+	db    database.Store
+	store ObservabilityStore
 
 	mu     sync.RWMutex
 	active map[string]int
@@ -123,7 +123,7 @@ type Service struct {
 }
 
 func New(db database.Store) *Service {
-	return &Service{db: db, active: map[string]int{}, queued: map[string]int{}, now: time.Now}
+	return &Service{db: db, store: NewObservabilityStore(db), active: map[string]int{}, queued: map[string]int{}, now: time.Now}
 }
 
 func (s *Service) Queue(instanceID string) {
@@ -175,15 +175,7 @@ func (s *Service) RecordQueueLimitRejection(ctx context.Context, instanceID, sco
 	if scope != "instance" && scope != "global" {
 		scope = "instance"
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := addCounter(ctx, tx, Counter{Metric: "gateway_queue_limit_rejections_total", InstanceID: instanceID, Result: scope, Value: 1}); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.store.AddCounter(ctx, Counter{Metric: "gateway_queue_limit_rejections_total", InstanceID: instanceID, Result: scope, Value: 1})
 }
 
 func (s *Service) Activity() (active, queued map[string]int) {
@@ -217,100 +209,19 @@ func (s *Service) RecordRequest(ctx context.Context, record RequestRecord) error
 			record.Result = "error"
 		}
 	}
-	var keyID, keyName, keyPrefix any
-	if record.APIKey != nil {
-		keyID, keyName, keyPrefix = record.APIKey.ID, record.APIKey.Name, record.APIKey.Prefix
-	}
-	var ttft, tps, requestBody, responseBody any
-	if record.TTFTMS != nil {
-		ttft = *record.TTFTMS
-	}
-	if record.TokensPerSecond != nil {
-		tps = *record.TokensPerSecond
-	}
-	if record.RequestBody != nil {
-		requestBody = *record.RequestBody
-	}
-	if record.ResponseBody != nil {
-		responseBody = *record.ResponseBody
-	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var insertedID int64
-	if err := tx.QueryRowContext(ctx, `INSERT INTO inference_requests(
-		started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,streaming,status_code,result,
-		duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
-		record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, boolInt(record.Streaming), record.StatusCode, record.Result,
-		record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody).Scan(&insertedID); err != nil {
-		return err
-	}
-	if record.ID == 0 {
-		record.ID = insertedID
-	}
-	if err := addFinalCounters(ctx, tx, record); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func addFinalCounters(ctx context.Context, tx database.Querier, record RequestRecord) error {
-	if err := addCounter(ctx, tx, Counter{Metric: "gateway_requests_total", InstanceID: record.InstanceID, Endpoint: record.Endpoint, StatusCode: record.StatusCode, Result: record.Result, Streaming: record.Streaming, Value: 1}); err != nil {
-		return err
-	}
-	for metric, value := range map[string]int64{
-		"prompt_tokens_total": record.PromptTokens, "generated_tokens_total": record.GeneratedTokens, "tokens_total": record.TotalTokens,
-	} {
-		if value > 0 {
-			if err := addCounter(ctx, tx, Counter{Metric: metric, InstanceID: record.InstanceID, Endpoint: record.Endpoint, Streaming: record.Streaming, Value: float64(value)}); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func addCounter(ctx context.Context, tx database.Querier, counter Counter) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO observability_counters(metric,instance_id,endpoint,status_code,result,streaming,value)
-		VALUES(?,?,?,?,?,?,?) ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
-		DO UPDATE SET value=observability_counters.value+excluded.value`, counter.Metric, counter.InstanceID, counter.Endpoint, counter.StatusCode, counter.Result, boolInt(counter.Streaming), counter.Value)
-	return err
+	return s.store.RecordRequest(ctx, record)
 }
 
 func (s *Service) Counters(ctx context.Context) ([]Counter, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT metric,instance_id,endpoint,status_code,result,streaming,value FROM observability_counters ORDER BY metric,instance_id,endpoint,status_code,result,streaming`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Counter
-	for rows.Next() {
-		var item Counter
-		var streaming int
-		if err := rows.Scan(&item.Metric, &item.InstanceID, &item.Endpoint, &item.StatusCode, &item.Result, &streaming, &item.Value); err != nil {
-			return nil, err
-		}
-		item.Streaming = streaming != 0
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return s.store.Counters(ctx)
 }
 
 func (s *Service) Summary(ctx context.Context, sinceMS int64) (Summary, error) {
 	if sinceMS <= 0 {
 		sinceMS = s.now().Add(-15 * time.Minute).UnixMilli()
 	}
-	var summary Summary
-	summary.Since = sinceMS
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
-		COALESCE(SUM(CASE WHEN result='success' THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN result='error' THEN 1 ELSE 0 END),0),
-		COUNT(DISTINCT CASE WHEN api_key_id IS NOT NULL AND api_key_id<>'' THEN api_key_id END),
-		COALESCE(SUM(prompt_tokens),0),COALESCE(SUM(generated_tokens),0),COALESCE(SUM(total_tokens),0)
-		FROM inference_requests WHERE started_at>=? AND finished_at>0`, sinceMS).Scan(&summary.Requests, &summary.Successes, &summary.Errors, &summary.ActiveAPIKeys, &summary.PromptTokens, &summary.GeneratedTokens, &summary.TotalTokens); err != nil {
+	summary, durations, ttfts, err := s.store.Summary(ctx, sinceMS)
+	if err != nil {
 		return Summary{}, err
 	}
 	active, queued := s.Activity()
@@ -319,26 +230,6 @@ func (s *Service) Summary(ctx context.Context, sinceMS int64) (Summary, error) {
 	}
 	for _, value := range queued {
 		summary.Queued += value
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT duration_ms,ttft_ms FROM inference_requests WHERE started_at>=? AND finished_at>0 ORDER BY started_at`, sinceMS)
-	if err != nil {
-		return Summary{}, err
-	}
-	var durations, ttfts []float64
-	for rows.Next() {
-		var duration float64
-		var ttft sql.NullFloat64
-		if err := rows.Scan(&duration, &ttft); err != nil {
-			rows.Close()
-			return Summary{}, err
-		}
-		durations = append(durations, duration)
-		if ttft.Valid {
-			ttfts = append(ttfts, ttft.Float64)
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return Summary{}, err
 	}
 	summary.LatencyMS = percentiles(durations)
 	summary.TTFTMS = percentiles(ttfts)
@@ -375,71 +266,7 @@ func (s *Service) ListRequests(ctx context.Context, filters RequestFilters) ([]R
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return nil, err
 	}
-	query := `SELECT COALESCE(c.request_id,''),
-		r.id,r.trace_id,r.call_type,r.started_at,r.finished_at,r.instance_id,r.endpoint,r.api_key_id,r.api_key_name,r.api_key_prefix,r.client_ip,r.user_agent,
-		r.streaming,r.status_code,r.result,r.duration_ms,r.ttft_ms,r.prompt_tokens,r.generated_tokens,r.total_tokens,r.tokens_per_second,
-		c.prompt_tokens_per_second,r.queue_duration_ms,r.load_duration_ms,r.autoloaded,r.error,NULL,NULL
-		FROM inference_requests r LEFT JOIN inference_request_correlations c ON c.inference_request_id=r.id WHERE 1=1`
-	var args []any
-	add := func(clause string, value any) { query += clause; args = append(args, value) }
-	if filters.SinceMS > 0 {
-		add(" AND r.started_at>=?", filters.SinceMS)
-	}
-	if filters.BeforeMS > 0 {
-		add(" AND r.started_at<?", filters.BeforeMS)
-	}
-	if filters.InstanceID != "" {
-		add(" AND r.instance_id=?", filters.InstanceID)
-	}
-	if filters.Endpoint != "" {
-		add(" AND r.endpoint=?", filters.Endpoint)
-	}
-	if filters.APIKeyID != "" {
-		add(" AND r.api_key_id=?", filters.APIKeyID)
-	}
-	if filters.Result != "" {
-		add(" AND r.result=?", filters.Result)
-	}
-	if filters.StatusCode > 0 {
-		add(" AND r.status_code=?", filters.StatusCode)
-	}
-	if filters.Streaming != nil {
-		add(" AND r.streaming=?", boolInt(*filters.Streaming))
-	}
-	if filters.RequestID != "" {
-		add(" AND c.request_id=?", filters.RequestID)
-	}
-	if filters.TraceID != "" {
-		add(" AND r.trace_id=?", filters.TraceID)
-	}
-	if search := strings.TrimSpace(filters.Search); search != "" {
-		like := "%" + search + "%"
-		query += ` AND (LOWER(COALESCE(c.request_id,'')) LIKE LOWER(?) OR LOWER(r.trace_id) LIKE LOWER(?) OR LOWER(r.instance_id) LIKE LOWER(?) OR LOWER(r.endpoint) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_prefix,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.error,'')) LIKE LOWER(?) OR LOWER(r.client_ip) LIKE LOWER(?) OR LOWER(r.user_agent) LIKE LOWER(?))`
-		for i := 0; i < 9; i++ {
-			args = append(args, like)
-		}
-	}
-	if filters.TraceID != "" {
-		query += " ORDER BY r.started_at ASC,r.id ASC"
-	} else {
-		query += " ORDER BY r.started_at DESC,r.id DESC"
-	}
-	query += " LIMIT ? OFFSET ?"
-	args = append(args, filters.Limit, filters.Offset)
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []RequestRecord
-	for rows.Next() {
-		item, err := scanEnrichedRequest(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return s.store.ListRequests(ctx, filters)
 }
 
 func scanEnrichedRequest(row interface{ Scan(...any) error }) (RequestRecord, error) {
@@ -533,44 +360,7 @@ func (s *Service) Timeseries(ctx context.Context, metric string, sinceMS int64, 
 	if bucketSeconds > 24*3600 {
 		bucketSeconds = 24 * 3600
 	}
-	bucketMS := int64(bucketSeconds) * 1000
-	expression := "COUNT(*)"
-	completedOnly := ""
-	switch metric {
-	case "requests", "":
-		metric = "requests"
-		completedOnly = " AND finished_at>0"
-	case "latency":
-		expression = "AVG(duration_ms)"
-		completedOnly = " AND finished_at>0"
-	case "ttft":
-		expression = "AVG(ttft_ms)"
-		completedOnly = " AND finished_at>0"
-	case "tokens":
-		expression = "COALESCE(SUM(total_tokens),0)"
-		completedOnly = " AND finished_at>0"
-	default:
-		return nil, fmt.Errorf("unsupported metric %q", metric)
-	}
-	query := fmt.Sprintf(`SELECT (started_at / ?) * ? AS bucket,%s FROM inference_requests WHERE started_at>=?%s GROUP BY bucket ORDER BY bucket`, expression, completedOnly)
-	rows, err := s.db.QueryContext(ctx, query, bucketMS, bucketMS, sinceMS)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []SeriesPoint
-	for rows.Next() {
-		var point SeriesPoint
-		var value sql.NullFloat64
-		if err := rows.Scan(&point.Timestamp, &value); err != nil {
-			return nil, err
-		}
-		if value.Valid {
-			point.Value = value.Float64
-		}
-		out = append(out, point)
-	}
-	return out, rows.Err()
+	return s.store.Timeseries(ctx, metric, sinceMS, bucketSeconds)
 }
 
 func (s *Service) Prune(ctx context.Context, retentionDays int) error {
@@ -578,8 +368,7 @@ func (s *Service) Prune(ctx context.Context, retentionDays int) error {
 		retentionDays = DefaultRetentionDays
 	}
 	cutoff := s.now().Add(-time.Duration(retentionDays) * 24 * time.Hour).UnixMilli()
-	_, err := s.db.ExecContext(ctx, `DELETE FROM inference_requests WHERE started_at<?`, cutoff)
-	return err
+	return s.store.PruneRequests(ctx, cutoff)
 }
 
 func (s *Service) RunRetention(ctx context.Context, retentionDays func(context.Context) int) {
