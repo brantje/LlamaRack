@@ -75,3 +75,41 @@ The normal `/metrics` endpoint exposes cache counters by a low-cardinality `name
 - `llamarack_cache_operation_duration_seconds_total`
 
 Cache keys and model/repository identifiers are deliberately not metrics labels.
+
+
+## Real-provider qualification
+
+The deterministic cache benchmarks above intentionally add a synthetic 5 ms
+origin floor. They are useful for stable CI comparisons, but they do not by
+themselves prove that Redis helps the intended shared/restart workload.
+
+`TestLiveRedisDerivedMetadataQualification` is the real-provider qualification.
+It uses the public `Qwen/Qwen2.5-0.5B-Instruct-GGUF` repository, resolves its
+current immutable revision, and measures the actual bounded GGUF range-read path
+used by `DerivedMetadata`. The test records:
+
+- a cold authoritative lookup with Redis and L1 cleared;
+- a warm L1 lookup on the same client;
+- a warm Redis lookup from a fresh client with an empty L1, representing a
+  restart/process-equivalent local cache reset;
+- 16 concurrent requests from another fresh client against the warm Redis L2.
+
+The HTTP transport counts actual Range requests and response bytes consumed.
+Warm L1/L2 phases are required to perform zero origin range traffic. Latency is
+logged as evidence rather than enforced with a wall-clock threshold.
+
+Run it with a disposable Redis:
+
+```bash
+cd backend
+LLAMARACK_TEST_REDIS_URL=redis://127.0.0.1:6379/0 \
+LLAMARACK_LIVE_HF_QUALIFICATION=1 \
+go test ./internal/huggingface \
+  -run '^TestLiveRedisDerivedMetadataQualification$' \
+  -v -count=1
+```
+
+CI also runs this as non-threshold evidence with its Redis service. An external
+provider outage must not make ordinary correctness CI fail; the deterministic
+cache contracts remain mandatory. Record the successful qualification run and
+its measurements here when release evidence is collected.
