@@ -2,13 +2,14 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func seedSessionRequestLogs(t *testing.T) (*Service, context.Context) {
@@ -99,7 +100,7 @@ func TestSessionRequestLogPersistenceFilteringAndDetail(t *testing.T) {
 	if err := s.UpdateRequestLogContext(ctx, "", "session-abc", "coder"); err == nil {
 		t.Fatal("expected empty context request id validation error")
 	}
-	if err := s.UpdateRequestLogContext(ctx, "missing", "session-abc", "coder"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateRequestLogContext(ctx, "missing", "session-abc", "coder"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing context update err=%v", err)
 	}
 }
