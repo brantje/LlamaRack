@@ -85,10 +85,10 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 	if err := s.UpdateAPIKey(ctx, key.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
 		t.Fatalf("reassign managed key err=%v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
 	allowlist := []string{"coder"}
@@ -115,6 +115,7 @@ func TestHiddenServiceAccountStaysHiddenWhileManagedKeyIsListed(t *testing.T) {
 func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "password1234")
 	if err != nil {
 		t.Fatal(err)
@@ -169,10 +170,10 @@ func TestOrdinaryAPIKeyWriteRejectsHiddenServiceAccountOwner(t *testing.T) {
 	if err := s.UpdateAPIKey(ctx, managed.ID, UpdateAPIKeyInput{OwnerUserID: &admin.ID}); !errors.Is(err, ErrManagedAPIKeyImmutable) {
 		t.Fatalf("reassign managed key err=%v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,quantization,context_length) VALUES('m1','M','/tmp/m.gguf',1,'Q4',0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO instances(id,model_id,name) VALUES('coder','m1','Coder')`); err != nil {
 		t.Fatal(err)
 	}
 	allowlist := []string{"coder"}

@@ -9,25 +9,26 @@ import (
 func TestDisabledAndExpiredCredentials(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	u, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET enabled=0 WHERE id=?", u.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET enabled=0 WHERE id=?", u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := s.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "", ""); err == nil {
 		t.Fatal("disabled user should not login")
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET enabled=1 WHERE id=?", u.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET enabled=1 WHERE id=?", u.ID); err != nil {
 		t.Fatal(err)
 	}
 	token, _, _, err := s.LoginWithMetadata(ctx, "admin", "correct-horse-battery", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET expires_at=? WHERE token_hash=?", time.Now().Add(-time.Hour).Unix(), tokenHash(token)); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE sessions SET expires_at=? WHERE token_hash=?", time.Now().Add(-time.Hour).Unix(), tokenHash(token)); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.SessionUserWithSession(ctx, token); err == nil {
@@ -38,7 +39,7 @@ func TestDisabledAndExpiredCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE users SET enabled=0 WHERE id=?", u.ID); err != nil {
+	if _, err := db.ExecContext(ctx, "UPDATE users SET enabled=0 WHERE id=?", u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.SessionUserWithSession(ctx, token); err == nil {
@@ -49,7 +50,8 @@ func TestDisabledAndExpiredCredentials(t *testing.T) {
 func TestDatabaseErrors(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if err := s.db.Close(); err != nil {
+	db := testServiceDB(t, s)
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.BootstrapRequired(ctx); err == nil {

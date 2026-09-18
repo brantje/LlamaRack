@@ -13,6 +13,7 @@ import (
 func TestPersistentSigningKeyAndBearerLoginLifecycle(t *testing.T) {
 	ctx := t.Context()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	keyDir := t.TempDir()
 
 	if err := s.UsePersistentSigningKey(keyDir); err != nil {
@@ -28,7 +29,7 @@ func TestPersistentSigningKeyAndBearerLoginLifecycle(t *testing.T) {
 	}
 	firstPublic := append(ed25519.PublicKey(nil), s.jwtPublic...)
 
-	reloaded := New(s.db, s.SessionLifetime())
+	reloaded := New(db, s.SessionLifetime())
 	if err := reloaded.UsePersistentSigningKey(keyDir); err != nil {
 		t.Fatal(err)
 	}

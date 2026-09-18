@@ -8,7 +8,8 @@ import (
 func TestBootstrapHandlesUserCountQueryFailure(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if _, err := s.db.ExecContext(ctx, `DROP TABLE users`); err != nil {
+	db := testServiceDB(t, s)
+	if _, err := db.ExecContext(ctx, `DROP TABLE users`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Bootstrap(ctx, "admin", "correct-horse-battery"); err == nil {
@@ -19,7 +20,8 @@ func TestBootstrapHandlesUserCountQueryFailure(t *testing.T) {
 func TestSetAPIKeyEnabledClosedDatabase(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
-	if err := s.db.Close(); err != nil {
+	db := testServiceDB(t, s)
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetAPIKeyEnabled(ctx, "missing", true); err == nil {
@@ -30,11 +32,12 @@ func TestSetAPIKeyEnabledClosedDatabase(t *testing.T) {
 func TestListAPIKeysReturnsScanError(t *testing.T) {
 	ctx := context.Background()
 	s := testService(t)
+	db := testServiceDB(t, s)
 	admin, err := s.Bootstrap(ctx, "admin", "correct-horse-battery")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,key_type,owner_user_id,enabled,created_at) VALUES('bad','Bad','sk-bad','hash','inference',?,1,'not-a-number')`, admin.ID)
+	_, err = db.ExecContext(ctx, `INSERT INTO api_keys(id,name,prefix,token_hash,key_type,owner_user_id,enabled,created_at) VALUES('bad','Bad','sk-bad','hash','inference',?,1,'not-a-number')`, admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
