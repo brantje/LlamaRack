@@ -74,7 +74,7 @@ func (s *sqlDownloadStore) List(ctx context.Context) ([]Job, error) {
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var jobs []Job
+	jobs := make([]Job, 0)
 	for rows.Next() {
 		job, err := scanDownloadJob(rows)
 		if err != nil {
@@ -98,7 +98,7 @@ func (s *sqlDownloadStore) Files(ctx context.Context, id string) ([]File, error)
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var files []File
+	files := make([]File, 0)
 	for rows.Next() {
 		var file File
 		if err := rows.Scan(&file.Path, &file.Size, &file.OID, &file.State, &file.DownloadedBytes, &file.ETag, &file.Ordinal, &file.LocalPath, &file.TempPath); err != nil {
@@ -118,7 +118,7 @@ func (s *sqlDownloadStore) PendingIDs(ctx context.Context) ([]string, error) {
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var ids []string
+	ids := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
