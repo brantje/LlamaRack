@@ -134,6 +134,7 @@ func TestPlanRuntimeCPUFallbackNeedsRAMHeadroom(t *testing.T) {
 		Demand: DemandInput{WeightsBytes: 20 * gib, Metadata: KVMetadata{BlockCount: 0}},
 		Placement: PlacementRequest{Mode: "auto"},
 		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true},
 	}
 	plan, err := PlanRuntime(req)
 	if err != nil {
