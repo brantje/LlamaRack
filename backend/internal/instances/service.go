@@ -3,7 +3,6 @@ package instances
 import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
-	"database/sql"
 	"errors"
 	"regexp"
 	"sort"
@@ -70,13 +69,13 @@ type UpdateInput struct {
 
 type ChangeNotifier func(ctx context.Context, instanceID string)
 type Service struct {
-	db database.Store
+	store InstanceStore
 	onChange ChangeNotifier
 	hotCache instanceHotCache
 }
 
 func New(db database.Store) *Service {
-	return &Service{db: db, hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
+	return &Service{store: NewInstanceStore(db), hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
 }
 func (s *Service) SetOnChange(fn ChangeNotifier) { s.onChange = fn }
 func (s *Service) notifyChange(ctx context.Context, instanceID string) {
@@ -95,26 +94,14 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 	if err != nil {
 		return Instance{}, err
 	}
-	var modelExists int
-	if err := s.db.QueryRowContext(ctx, "SELECT 1 FROM models WHERE id=?", i.ModelID).Scan(&modelExists); err != nil {
+	if err := s.store.RequireModel(ctx, i.ModelID); err != nil {
 		return Instance{}, err
 	}
 	i.ID, err = resourceid.NewUUID()
 	if err != nil {
 		return Instance{}, err
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return Instance{}, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,system_spillover_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), boolInt(i.SystemSpilloverEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode); err != nil {
-		return Instance{}, err
-	}
-	if err := replaceOptions(ctx, tx, i.ID, in.Options); err != nil {
-		return Instance{}, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.Create(ctx, i, in.Options); err != nil {
 		return Instance{}, err
 	}
 	resourceid.RememberInstanceSlug(i.ID, i.Slug)
@@ -132,24 +119,7 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err != nil {
 		return Instance{}, err
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return Instance{}, err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE instances SET slug=?,model_id=?,name=?,enabled=?,autoload_enabled=?,always_on=?,priority=?,eviction_enabled=?,system_spillover_enabled=?,idle_unload_seconds=?,max_pending_requests=?,gpu_mode=?,gpu_devices=?,tensor_split=?,request_log_mode=?,updated_at=unixepoch() WHERE id=?`, i.Slug, i.ModelID, i.Name, boolInt(i.Enabled), boolInt(i.Autoload), boolInt(i.AlwaysOn), i.Priority, boolInt(i.EvictionEnabled), boolInt(i.SystemSpilloverEnabled), i.IdleUnloadSeconds, i.MaxPendingRequests, i.GPUMode, joinDevices(i.GPUDevices), nullString(i.TensorSplit), i.RequestLogMode, currentID)
-	if err != nil {
-		return Instance{}, err
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return Instance{}, sql.ErrNoRows
-	}
-	if in.Options != nil {
-		if err := replaceOptions(ctx, tx, currentID, in.Options); err != nil {
-			return Instance{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.store.Update(ctx, currentID, i, in.Options, in.Options != nil); err != nil {
 		return Instance{}, err
 	}
 	s.forgetHot(currentID)
@@ -178,126 +148,67 @@ func (s *Service) Duplicate(ctx context.Context, id string) (Instance, error) {
 		if err == nil {
 			return copy, nil
 		}
-		if !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if !errors.Is(err, database.ErrConflict) {
 			return Instance{}, err
 		}
 	}
 	return Instance{}, errors.New("unable to generate unique instance copy name")
 }
 
-const instanceColumns = `id,slug,model_id,name,enabled,autoload_enabled,always_on,priority,eviction_enabled,system_spillover_enabled,idle_unload_seconds,max_pending_requests,gpu_mode,gpu_devices,tensor_split,request_log_mode`
-
 func (s *Service) Get(ctx context.Context, id string) (Instance, error) { return s.GetByID(ctx, id) }
+
 func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) {
 	id = strings.TrimSpace(id)
 	for {
 		if item, generation, ok := s.cachedByIDAtGeneration(id); ok {
 			return item, nil
-		} else {
-			item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE id=?`, id))
-			if err != nil {
-				return Instance{}, err
-			}
-			if s.rememberHotIfGeneration(item, generation) {
-				return cloneInstance(item), nil
-			}
+		}
+		item, err := s.store.GetByID(ctx, id)
+		if err != nil {
+			return Instance{}, err
+		}
+		if s.rememberHotIfGeneration(item, generation) {
+			return cloneInstance(item), nil
 		}
 	}
 }
+
 func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) {
 	slug = resourceid.Slugify(slug)
 	for {
 		if item, generation, ok := s.cachedBySlugAtGeneration(slug); ok {
 			return item, nil
-		} else {
-			item, err := scan(s.db.QueryRowContext(ctx, `SELECT `+instanceColumns+` FROM instances WHERE slug=?`, slug))
-			if err != nil {
-				return Instance{}, err
-			}
-			if s.rememberHotIfGeneration(item, generation) {
-				return cloneInstance(item), nil
-			}
 		}
-	}
-}
-func (s *Service) List(ctx context.Context) ([]Instance, error) {
-	return s.list(ctx, `SELECT `+instanceColumns+` FROM instances ORDER BY name,id`)
-}
-func (s *Service) ListByModel(ctx context.Context, modelID string) ([]Instance, error) {
-	return s.list(ctx, `SELECT `+instanceColumns+` FROM instances WHERE model_id=? ORDER BY name,id`, modelID)
-}
-func (s *Service) list(ctx context.Context, query string, args ...any) ([]Instance, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Instance
-	for rows.Next() {
-		i, err := scan(rows)
+		item, err := s.store.GetBySlug(ctx, slug)
 		if err != nil {
-			return nil, err
+			return Instance{}, err
 		}
-		out = append(out, i)
+		if s.rememberHotIfGeneration(item, generation) {
+			return cloneInstance(item), nil
+		}
 	}
-	return out, rows.Err()
 }
+
+func (s *Service) List(ctx context.Context) ([]Instance, error) {
+	return s.store.List(ctx)
+}
+
+func (s *Service) ListByModel(ctx context.Context, modelID string) ([]Instance, error) {
+	return s.store.ListByModel(ctx, modelID)
+}
+
 func (s *Service) Options(ctx context.Context, id string) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT option_key,option_value FROM instance_options WHERE instance_id=? ORDER BY option_key`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			return nil, err
-		}
-		out[key] = value
-	}
-	return out, rows.Err()
+	return s.store.Options(ctx, id)
 }
+
 func (s *Service) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM instances WHERE id=?`, id)
-	if err != nil {
+	if err := s.store.Delete(ctx, id); err != nil {
 		return err
-	}
-	if n, _ := result.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
 	}
 	s.forgetHot(id)
 	resourceid.ForgetInstanceSlug(id)
 	s.notifyChange(ctx, id)
 	return nil
-}
-
-type scanner interface{ Scan(...any) error }
-
-func scan(row scanner) (Instance, error) {
-	var i Instance
-	var enabled, autoload, alwaysOn, eviction, spillover int
-	var devices, split sql.NullString
-	if err := row.Scan(&i.ID, &i.Slug, &i.ModelID, &i.Name, &enabled, &autoload, &alwaysOn, &i.Priority, &eviction, &spillover, &i.IdleUnloadSeconds, &i.MaxPendingRequests, &i.GPUMode, &devices, &split, &i.RequestLogMode); err != nil {
-		return Instance{}, err
-	}
-	i.Enabled = enabled != 0
-	i.Autoload = autoload != 0
-	i.AlwaysOn = alwaysOn != 0
-	i.EvictionEnabled = eviction != 0
-	i.SystemSpilloverEnabled = spillover != 0
-	if devices.Valid {
-		for _, value := range strings.Split(devices.String, ",") {
-			if value = strings.TrimSpace(value); value != "" {
-				i.GPUDevices = append(i.GPUDevices, value)
-			}
-		}
-	}
-	if split.Valid {
-		i.TensorSplit = split.String
-	}
-	resourceid.RememberInstanceSlug(i.ID, i.Slug)
-	return i, nil
 }
 
 func normalizeCreate(in CreateInput) (Instance, error) {
@@ -434,26 +345,6 @@ func normalizeValues(base Instance, modelID, name string, enabledInput, autoload
 	return base, nil
 }
 
-func replaceOptions(ctx context.Context, tx database.Querier, id string, options map[string]string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM instance_options WHERE instance_id=?`, id); err != nil {
-		return err
-	}
-	keys := make([]string, 0, len(options))
-	for key := range options {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO instance_options(instance_id,option_key,option_value) VALUES(?,?,?)`, id, trimmed, options[key]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 func boolInt(v bool) int {
 	if v {
 		return 1
