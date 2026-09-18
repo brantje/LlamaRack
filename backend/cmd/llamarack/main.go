@@ -206,7 +206,10 @@ func run(ctx context.Context, cfg config.Config) error {
 	downloadManager := downloads.NewWithStore(ctx, downloads.NewDownloadStore(db), cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
 		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)
 	})
-	importService := modelimports.NewWithStores(modelimports.NewStore(db), instanceService, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
+	// Imports keep their own Instance service so its change callback can notify
+	// the lifecycle service without becoming self-referential.
+	importInstanceService := instances.NewWithStore(instances.NewInstanceStore(db))
+	importService := modelimports.NewWithStores(modelimports.NewStore(db), importInstanceService, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
 	liteLLMService := litellm.NewWithStore(litellm.NewLiteLLMStore(db), authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
 	importService.SetInstanceOnChange(lifecycleService.Instances().NotifyChange)
