@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 	ctx := context.Background()
