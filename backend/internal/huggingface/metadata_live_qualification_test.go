@@ -174,6 +174,9 @@ func TestLiveRedisDerivedMetadataQualification(t *testing.T) {
 	if warmRedis.rangeRequests != 0 || warmRedis.rangeBytes != 0 {
 		t.Fatalf("fresh-client warm L2 unexpectedly reached origin: %+v", warmRedis)
 	}
+	if warmRedis.duration*5 >= cold.duration {
+		t.Fatalf("fresh-client warm L2 was not at least 5x faster than cold authoritative lookup: cold=%s redis=%s", cold.duration, warmRedis.duration)
+	}
 
 	concurrent := newClient()
 	const callers = 16

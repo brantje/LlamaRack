@@ -109,10 +109,31 @@ go test ./internal/huggingface \
   -v -count=1
 ```
 
-CI also runs this as non-threshold evidence with its Redis service. An external
-provider outage must not make ordinary correctness CI fail; the deterministic
-cache contracts remain mandatory. Record the successful qualification run and
-its measurements here when release evidence is collected.
+Ordinary correctness CI deliberately does **not** run the live provider test:
+Hugging Face availability must not gate unrelated pull requests. Instead,
+`.github/workflows/redis-release-qualification.yml` is the release gate for
+#162. Run it manually before treating #162 as releasable.
+
+A valid release qualification result is:
+
+1. the dedicated workflow completes successfully against the commit intended
+   for release;
+2. the cold authoritative phase performs at least one measured range request;
+3. warm L1 and a fresh-client warm Redis L2 perform zero Hugging Face range
+   requests and transfer zero origin bytes;
+4. the fresh-client Redis L2 lookup is at least **5x faster** than the cold
+   authoritative lookup in that same run;
+5. the uploaded `redis-live-qualification-<sha>` artifact is retained with the
+   exact test log and measurements.
+
+Treat a successful run as current release evidence for 30 days. If the release
+commit is newer than the recorded qualification or the evidence is older than
+30 days, rerun the workflow. Provider/network failure produces a failed release
+qualification, but it does not make ordinary correctness CI fail.
+
+The deterministic 5 ms origin benchmark remains useful for repeatable
+microbenchmark comparisons only; it is not evidence of real Hugging Face
+network benefit.
 
 
 ### Recorded CI evidence
