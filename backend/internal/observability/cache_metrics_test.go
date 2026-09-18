@@ -24,6 +24,9 @@ func TestMetricsExposeLowCardinalityCacheStats(t *testing.T) {
 	if hit, err := observed.Get(ctx, key, &value); err != nil || !hit {
 		t.Fatalf("cache hit=%v err=%v", hit, err)
 	}
+	// Origin avoidance is a consumer decision made only after semantic
+	// validation, not a property of the backend cache hit itself.
+	appcache.RecordOriginFetchAvoided(namespace)
 
 	handler := NewMetricsHandler(testService(t), nil)
 	response := httptest.NewRecorder()
@@ -32,7 +35,7 @@ func TestMetricsExposeLowCardinalityCacheStats(t *testing.T) {
 	for _, expected := range []string{
 		"llamarack_cache_hits_total{namespace=\"metrics-cache-test\",backend=\"memory\"} 1",
 		"llamarack_cache_misses_total{namespace=\"metrics-cache-test\",backend=\"memory\"} 1",
-		"llamarack_cache_origin_fetches_avoided_total{namespace=\"metrics-cache-test\",backend=\"memory\"} 1",
+		"llamarack_cache_origin_fetches_avoided_total{namespace=\"metrics-cache-test\"} 1",
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("metrics missing %q:\n%s", expected, body)
