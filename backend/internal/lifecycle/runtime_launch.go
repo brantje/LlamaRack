@@ -50,7 +50,8 @@ func (s *Service) prepareRuntimeLaunch(
 		}, nil
 	}
 
-	request = preserveMoEEvictionPreference(request, snapshot)
+	idleSnapshot := recommendations.AssumeIdleSnapshot(snapshot)
+	request.IdleSnapshot = &idleSnapshot
 	stopped := make([]scheduler.Candidate, 0, 2)
 	skip := map[string]bool{}
 
@@ -135,20 +136,6 @@ func (s *Service) prepareRuntimeLaunch(
 		}
 	}
 	return scheduler.RuntimePlan{}, fmt.Errorf("%w: eviction attempts exhausted", errResourcePressureBlocked)
-}
-
-func preserveMoEEvictionPreference(request scheduler.RuntimePlanRequest, snapshot hardware.Snapshot) scheduler.RuntimePlanRequest {
-	if request.AllowSystemSpillover || !request.Capabilities.NCPUMoe || hasAnyOption(request.Demand.Options, "gpu-layers", "n-gpu-layers", "cpu-moe", "n-cpu-moe", "no-kv-offload") {
-		return request
-	}
-	idle := request
-	idle.Snapshot = recommendations.AssumeIdleSnapshot(snapshot)
-	plan, err := scheduler.PlanRuntime(idle)
-	if err == nil && plan.Fits && (plan.Mode == "full" || plan.Mode == "multi_gpu") {
-		request.Capabilities.NCPUMoe = false
-		request.Capabilities.CPUMoe = false
-	}
-	return request
 }
 
 func runtimeCapabilities(profile llamacpp.Profile) scheduler.RuntimeCapabilities {

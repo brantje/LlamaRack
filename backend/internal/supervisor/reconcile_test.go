@@ -123,12 +123,25 @@ func TestReconcileTerminatesOwnedOrphans(t *testing.T) {
 	s := New("unused", "127.0.0.1", 30000, time.Second)
 	store := NewMemoryStore()
 	s.SetRuntimeIdentity("install-1", store)
-	one := ownedProc(11, "install-1", "a", "gen-a", 100, "10001")
-	two := ownedProc(12, "install-1", "b", "gen-b", 101, "10002")
-	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "a", Generation: "gen-a", PID: 11, StartTicks: 100, Port: 10001}); err != nil {
+	// The fake orphan processes do not own listening sockets. Allocate their
+	// port identities so unrelated local services cannot block reconciliation.
+	ports := make([]int, 2)
+	for i := range ports {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ports[i] = listener.Addr().(*net.TCPAddr).Port
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one := ownedProc(11, "install-1", "a", "gen-a", 100, strconv.Itoa(ports[0]))
+	two := ownedProc(12, "install-1", "b", "gen-b", 101, strconv.Itoa(ports[1]))
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "a", Generation: "gen-a", PID: 11, StartTicks: 100, Port: ports[0]}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "b", Generation: "gen-b", PID: 12, StartTicks: 101, Port: 10002}); err != nil {
+	if err := store.Upsert(context.Background(), WorkerRecord{InstanceID: "b", Generation: "gen-b", PID: 12, StartTicks: 101, Port: ports[1]}); err != nil {
 		t.Fatal(err)
 	}
 	scanner := newFakeScanner(one, two)

@@ -18,6 +18,7 @@ type RuntimeCapabilities struct {
 
 type RuntimePlanRequest struct {
 	Snapshot             hardware.Snapshot
+	IdleSnapshot         *hardware.Snapshot
 	Demand               DemandInput
 	Placement            PlacementRequest
 	AllowSystemSpillover bool
@@ -35,6 +36,16 @@ type RuntimePlan struct {
 
 func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 	base := cloneStringMap(req.Demand.Options)
+	if req.IdleSnapshot != nil && !req.AllowSystemSpillover && req.Capabilities.NCPUMoe && !hasExplicitOffload(base) {
+		idleReq := req
+		idleReq.Snapshot = *req.IdleSnapshot
+		idleReq.IdleSnapshot = nil
+		idlePlan, err := PlanRuntime(idleReq)
+		if err == nil && idlePlan.Fits && (idlePlan.Mode == "full" || idlePlan.Mode == "multi_gpu") {
+			req.Capabilities.NCPUMoe = false
+			req.Capabilities.CPUMoe = false
+		}
+	}
 	if len(req.Snapshot.GPUs) == 0 {
 		cpuDemandOptions := cloneStringMap(base)
 		cpuDemandOptions["n-gpu-layers"] = "0"
@@ -44,7 +55,7 @@ func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 			options["n-gpu-layers"] = "0"
 		}
 		return RuntimePlan{
-			Fits: hostRAMFits(req.Snapshot.RAMAvailableBytes, demand.HostRAMBytes),
+			Fits: runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes),
 			Mode: "cpu", Demand: demand, Placement: Placement{RequiredBytes: 0, Fits: true},
 			Options: options,
 		}, nil
@@ -205,7 +216,7 @@ func evaluateRuntimeCandidate(req RuntimePlanRequest, options map[string]string,
 	if err != nil {
 		return RuntimePlan{}, err
 	}
-	fits := placement.Fits && hostRAMFits(req.Snapshot.RAMAvailableBytes, demand.HostRAMBytes)
+	fits := placement.Fits && runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes)
 	mode := candidateMode(options, demand, placement)
 	return RuntimePlan{
 		Fits: fits, Mode: mode, Demand: demand, Placement: placement,
@@ -225,17 +236,18 @@ func planDemandPlacement(base PlacementRequest, snapshot hardware.Snapshot, dema
 	}
 	request := base
 	request.RequiredBytes = required
+	request.HostRAMBytes = demand.HostRAMBytes
 	return PlanPlacement(snapshot, request)
 }
 
-func hostRAMFits(available, required int64) bool {
-	if required <= 0 {
+func runtimeHostRAMFits(snapshot hardware.Snapshot, required int64) bool {
+	if required <= 0 || snapshot.RAMTotalBytes <= 0 && snapshot.RAMAvailableBytes <= 0 {
 		return true
 	}
-	if available <= defaultRAMReserveBytes {
+	if snapshot.RAMAvailableBytes <= defaultRAMReserveBytes {
 		return false
 	}
-	return available-defaultRAMReserveBytes >= required
+	return snapshot.RAMAvailableBytes-defaultRAMReserveBytes >= required
 }
 
 func candidateMode(options map[string]string, demand ResourceDemand, placement Placement) string {

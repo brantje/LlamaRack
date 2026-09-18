@@ -47,9 +47,8 @@ type KVMetadata struct {
 }
 
 type DemandInput struct {
-	// WeightsBytes is the primary model GGUF weight size. CompanionBytes holds
-	// auxiliary GGUFs such as mmproj/spec-draft-model so layer/expert spill
-	// calculations never treat companion tensors as transformer weights.
+	// WeightsBytes is the primary model GGUF size. CompanionBytes tracks
+	// auxiliary artifacts separately so spill math never treats them as layers.
 	WeightsBytes   int64
 	CompanionBytes int64
 	Context      int64
@@ -290,7 +289,10 @@ func gpuOffloadFraction(options map[string]string, blockCount int64) (float64, b
 	if err != nil {
 		return 1, false
 	}
-	if layers <= 0 {
+	if layers < 0 {
+		return 1, false
+	}
+	if layers == 0 {
 		return 0, true
 	}
 	if blockCount <= 0 || layers >= blockCount {

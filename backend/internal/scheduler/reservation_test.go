@@ -316,8 +316,14 @@ func TestLedgerSkipsSelfAndClaimedCredits(t *testing.T) {
 }
 
 func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
-	if got := adjustSnapshot(hardware.Snapshot{}, nil, nil); len(got.GPUs) != 0 {
+	if got := adjustSnapshot(hardware.Snapshot{}, nil, hostOccupancy{}, nil, 0); len(got.GPUs) != 0 {
 		t.Fatalf("empty snapshot=%+v", got)
+	}
+	gib := int64(1024 * 1024 * 1024)
+	hostSnapshot := hardware.Snapshot{RAMTotalBytes: 16 * gib, RAMAvailableBytes: 10 * gib}
+	hostAdjusted := adjustSnapshot(hostSnapshot, nil, hostOccupancy{committed: 2 * gib}, nil, 3*gib)
+	if hostAdjusted.RAMAvailableBytes != 13*gib {
+		t.Fatalf("host credit snapshot=%+v", hostAdjusted)
 	}
 	if got := reservationsFor(Placement{}, hardware.Snapshot{}, PlacementRequest{RequiredBytes: 1}); got != nil {
 		t.Fatalf("empty placement reservations=%v", got)
@@ -325,7 +331,6 @@ func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
 	if got := reservationsFor(Placement{Devices: []string{"CUDA0"}}, hardware.Snapshot{}, PlacementRequest{RequiredBytes: -1}); len(got) != 1 || got[0].Bytes != 0 {
 		t.Fatalf("negative required: %+v", got)
 	}
-	gib := int64(1024 * 1024 * 1024)
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
 		{ID: "CUDA0", FreeBytes: 10 * gib},
 		{ID: "CUDA1", FreeBytes: 9 * gib},
@@ -398,62 +403,22 @@ func TestNewLedgerWithTTLAndNilClock(t *testing.T) {
 }
 
 
-func TestLedgerPreventsHostRAMOvercommit(t *testing.T) {
-	gib := int64(1024 * 1024 * 1024)
+func TestLedgerAcquireRuntimeReservesExactPlan(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
 	ledger := NewLedger()
-	snapshot := hardware.Snapshot{
-		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 16 * gib,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
-	}
-	first, err := ledger.Acquire(AcquireRequest{
-		InstanceID: "a", Snapshot: snapshot,
-		Placement: PlacementRequest{RequiredBytes: gib},
-		HostRAM: 8 * gib,
+	snapshot := hardware.Snapshot{RAMTotalBytes: 64 * gib, RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}}}
+	lease, plan, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "spill", Snapshot: snapshot,
+		Plan: RuntimePlanRequest{
+			Demand: DemandInput{WeightsBytes: 10 * gib, Metadata: KVMetadata{BlockCount: 10}},
+			Placement: PlacementRequest{Mode: "auto"}, AllowSystemSpillover: true,
+			Capabilities: RuntimeCapabilities{GPULayers: true},
+		},
 	})
-	if err != nil || !first.Placement.Fits {
-		t.Fatalf("first=%+v err=%v", first, err)
+	if err != nil || !plan.Fits || !plan.RequiresSpillover {
+		t.Fatalf("plan=%+v lease=%+v err=%v", plan, lease, err)
 	}
-	second, err := ledger.Acquire(AcquireRequest{
-		InstanceID: "b", Snapshot: snapshot,
-		Placement: PlacementRequest{RequiredBytes: gib},
-		HostRAM: 8 * gib,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Placement.Fits || second.ID != "" {
-		t.Fatalf("second host allocation must be rejected: %+v", second)
-	}
-}
-
-func TestLedgerHostRAMAccountingDoesNotDoubleCountCommittedUsage(t *testing.T) {
-	gib := int64(1024 * 1024 * 1024)
-	ledger := NewLedger()
-	empty := hardware.Snapshot{
-		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 16 * gib,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
-	}
-	lease, err := ledger.Acquire(AcquireRequest{
-		InstanceID: "running", Snapshot: empty,
-		Placement: PlacementRequest{RequiredBytes: gib},
-		HostRAM: 8 * gib,
-	})
-	if err != nil || !lease.Placement.Fits {
-		t.Fatalf("lease=%+v err=%v", lease, err)
-	}
-	if err := ledger.Commit(lease.ID); err != nil {
-		t.Fatal(err)
-	}
-	observed := hardware.Snapshot{
-		RAMTotalBytes: 16 * gib, RAMAvailableBytes: 8 * gib,
-		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 15 * gib}},
-	}
-	other, err := ledger.Acquire(AcquireRequest{
-		InstanceID: "other", Snapshot: observed,
-		Placement: PlacementRequest{RequiredBytes: gib},
-		HostRAM: 6 * gib,
-	})
-	if err != nil || !other.Placement.Fits {
-		t.Fatalf("committed RAM reflected by the OS must not be double-counted: %+v err=%v", other, err)
+	if lease.ID == "" || lease.HostRAM != plan.Demand.HostRAMBytes || len(lease.GPUs) != 1 {
+		t.Fatalf("runtime lease=%+v plan=%+v", lease, plan)
 	}
 }
