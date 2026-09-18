@@ -10,7 +10,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/benchmark"
 	"github.com/brantje/llamarack/backend/internal/instances"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 var errAmbiguousBenchmarkInstance = errors.New("ambiguous instance identifier")
 
