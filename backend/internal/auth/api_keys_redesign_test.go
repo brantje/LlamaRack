@@ -2,12 +2,12 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 	"time"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 func TestAPIKeyTypedAuthAndOwnerLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -159,7 +159,7 @@ func TestServiceAccountCRUDAndOwnedKeys(t *testing.T) {
 	if err := s.DeleteServiceAccount(ctx, account.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetServiceAccount(ctx, account.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("deleted SA lookup=%v", err)
 	}
 	var count int
@@ -260,13 +260,13 @@ func TestAPIKeyStatusPriorityAndServiceAccountEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.GetServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA get=%v", err)
 	}
-	if err := s.UpdateServiceAccount(ctx, "missing", nil, nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateServiceAccount(ctx, "missing", nil, nil); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing SA update=%v", err)
 	}
-	if err := s.DeleteServiceAccount(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteServiceAccount(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing SA delete=%v", err)
 	}
 	account, err := s.CreateServiceAccount(ctx, "bots", admin.ID)
@@ -291,16 +291,16 @@ func TestAPIKeyStatusPriorityAndServiceAccountEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.UpdateServiceAccount(ctx, "", nil, nil); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateServiceAccount(ctx, "", nil, nil); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA update=%v", err)
 	}
-	if err := s.DeleteServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA delete=%v", err)
 	}
-	if _, err := s.ListAPIKeysForServiceAccount(ctx, ""); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.ListAPIKeysForServiceAccount(ctx, ""); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("empty SA key list=%v", err)
 	}
-	if err := s.SetAPIKeyEnabled(ctx, "missing", true); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.SetAPIKeyEnabled(ctx, "missing", true); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing enable=%v", err)
 	}
 
