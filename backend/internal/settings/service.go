@@ -105,8 +105,12 @@ type Service struct {
 }
 
 func New(db database.Store, defaults Defaults) *Service {
+	return NewWithStore(NewSettingStore(db), defaults)
+}
+
+func NewWithStore(store SettingStore, defaults Defaults) *Service {
 	return &Service{
-		store: NewSettingStore(db),
+		store: store,
 		defs: map[string]definition{
 			SessionLifetimeSeconds:        {env: "LLAMARACK_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
 			LoginProtectionEnabled:        {env: "LLAMARACK_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},

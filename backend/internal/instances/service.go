@@ -74,7 +74,11 @@ type Service struct {
 }
 
 func New(db database.Store) *Service {
-	return &Service{store: NewInstanceStore(db), hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
+	return NewWithStore(NewInstanceStore(db))
+}
+
+func NewWithStore(store InstanceStore) *Service {
+	return &Service{store: store, hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
 }
 func (s *Service) SetOnChange(fn ChangeNotifier) { s.onChange = fn }
 func (s *Service) notifyChange(ctx context.Context, instanceID string) {

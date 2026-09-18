@@ -63,7 +63,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 	defer db.Close()
 
-	managerSettings := settings.New(db, settings.Defaults{
+	managerSettings := settings.NewWithStore(settings.NewSettingStore(db), settings.Defaults{
 		SessionLifetime: cfg.SessionLifetime, AllowedOrigins: cfg.AllowedOrigin, StartupTimeout: cfg.StartupTimeout,
 		AlwaysOnReconcile: cfg.AlwaysOnReconcileInterval,
 		DataDir:           cfg.DataDir, ModelsDir: cfg.ModelsDir, DatabasePath: cfg.DatabasePath, ListenAddr: cfg.ListenAddr, LlamaServerPath: cfg.LlamaServerPath,
@@ -85,14 +85,17 @@ func run(ctx context.Context, cfg config.Config) error {
 		alwaysOnInterval = time.Duration(seconds) * time.Second
 	}
 
-	authService := auth.New(db, sessionLifetime)
+	authService := auth.NewWithStores(auth.Stores{
+		Users: auth.NewUserStore(db), Sessions: auth.NewSessionStore(db), APIKeys: auth.NewAPIKeyStore(db),
+		ServiceAccounts: auth.NewServiceAccountStore(db), OIDC: auth.NewOIDCStore(db),
+	}, sessionLifetime)
 	if err := authService.UsePersistentSigningKey(cfg.DataDir); err != nil {
 		return fmt.Errorf("initialize management signing key: %w", err)
 	}
 	network := managersecurity.NewNetwork(managerSettings)
 	loginProtector := managersecurity.NewLoginProtector(managerSettings)
-	modelService := models.New(db, cfg.ModelsDir)
-	instanceService := instances.New(db)
+	modelService := models.NewWithStore(models.NewModelStore(db), cfg.ModelsDir)
+	instanceService := instances.NewWithStore(instances.NewInstanceStore(db))
 	llamaConfigStore := llamaconfig.New(db)
 	unregisterDetectedDefaults := llamaConfigStore.RegisterDetectedDefaultsProvider(modelService.DetectedLlamaDefaults)
 	defer unregisterDetectedDefaults()
@@ -121,7 +124,7 @@ func run(ctx context.Context, cfg config.Config) error {
 			slog.Error("benchmark shutdown failed", "error", err)
 		}
 	}()
-	observabilityService := observability.New(db)
+	observabilityService := observability.NewWithStore(observability.NewObservabilityStore(db))
 	writebackCtx, stopWriteback := context.WithCancel(ctx)
 	observabilityService.StartWriteback(writebackCtx)
 	defer func() {
@@ -200,11 +203,11 @@ func run(ctx context.Context, cfg config.Config) error {
 			}
 		}
 	}
-	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
+	downloadManager := downloads.NewWithStore(ctx, downloads.NewDownloadStore(db), cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
 		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)
 	})
-	importService := modelimports.New(db, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
-	liteLLMService := litellm.New(db, authService, providerSecrets, managerSettings)
+	importService := modelimports.NewWithStores(modelimports.NewStore(db), instanceService, cfg.ModelsDir, modelService, downloadManager, lifecycleService)
+	liteLLMService := litellm.NewWithStore(litellm.NewLiteLLMStore(db), authService, providerSecrets, managerSettings)
 	lifecycleService.Instances().SetOnChange(liteLLMService.NotifyInstanceChange)
 	importService.SetInstanceOnChange(lifecycleService.Instances().NotifyChange)
 	if err := downloadManager.ResumePending(ctx); err != nil {

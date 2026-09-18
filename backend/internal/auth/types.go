@@ -170,15 +170,34 @@ type Service struct {
 	wsTickets map[string]wsTicket
 }
 
+type Stores struct {
+	Users           UserStore
+	Sessions        SessionStore
+	APIKeys         APIKeyStore
+	ServiceAccounts ServiceAccountStore
+	OIDC            OIDCStore
+}
+
+// New is the compatibility/composition helper for the SQL-backed adapters.
 func New(db database.Store, sessionLifetime time.Duration) *Service {
+	return NewWithStores(Stores{
+		Users: NewUserStore(db), Sessions: NewSessionStore(db), APIKeys: NewAPIKeyStore(db),
+		ServiceAccounts: NewServiceAccountStore(db), OIDC: NewOIDCStore(db),
+	}, sessionLifetime)
+}
+
+// NewWithStores constructs auth from domain persistence contracts only.
+func NewWithStores(stores Stores, sessionLifetime time.Duration) *Service {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		users: NewUserStore(db), sessions: NewSessionStore(db), apiKeys: NewAPIKeyStore(db), serviceAccounts: NewServiceAccountStore(db), oidc: NewOIDCStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		users: stores.Users, sessions: stores.Sessions, apiKeys: stores.APIKeys,
+		serviceAccounts: stores.ServiceAccounts, oidc: stores.OIDC,
+		sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
-		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
+		jwtPrivate: privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}
 }
 

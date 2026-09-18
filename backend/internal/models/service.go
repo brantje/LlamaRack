@@ -84,7 +84,11 @@ type Service struct {
 }
 
 func New(db database.Store, modelsDir string) *Service {
-	return &Service{store: NewModelStore(db), modelsDir: modelsDir}
+	return NewWithStore(NewModelStore(db), modelsDir)
+}
+
+func NewWithStore(store ModelStore, modelsDir string) *Service {
+	return &Service{store: store, modelsDir: modelsDir}
 }
 
 func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error) {

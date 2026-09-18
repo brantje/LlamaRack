@@ -123,7 +123,11 @@ type Service struct {
 }
 
 func New(db database.Store) *Service {
-	return &Service{store: NewObservabilityStore(db), active: map[string]int{}, queued: map[string]int{}, now: time.Now}
+	return NewWithStore(NewObservabilityStore(db))
+}
+
+func NewWithStore(store ObservabilityStore) *Service {
+	return &Service{store: store, active: map[string]int{}, queued: map[string]int{}, now: time.Now}
 }
 
 func (s *Service) Queue(instanceID string) {
