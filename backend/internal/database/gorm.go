@@ -4,7 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
 
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -13,7 +18,8 @@ import (
 type Dialect string
 
 const (
-	DialectSQLite Dialect = "sqlite"
+	DialectSQLite   Dialect = "sqlite"
+	DialectPostgres Dialect = "postgres"
 )
 
 // Connection is the production persistence handle. GORM is intentionally
@@ -35,15 +41,67 @@ func OpenStore(ctx context.Context, path string) (*Connection, error) {
 		DriverName: "sqlite",
 		DSN:        path,
 		Conn:       raw,
-	}), &gorm.Config{
-		DisableForeignKeyConstraintWhenMigrating: true,
-		Logger:                                   logger.Default.LogMode(logger.Silent),
-	})
+	}), gormConfig())
 	if err != nil {
 		_ = raw.Close()
 		return nil, err
 	}
 	return &Connection{orm: orm, raw: raw, dialect: DialectSQLite}, nil
+}
+
+// OpenConfigured selects SQLite when databaseURL is empty and PostgreSQL when
+// it is explicitly configured. An invalid or unreachable PostgreSQL database
+// is an error; this function never silently falls back to SQLite.
+func OpenConfigured(ctx context.Context, sqlitePath, databaseURL string) (*Connection, error) {
+	databaseURL = strings.TrimSpace(databaseURL)
+	if databaseURL == "" {
+		return OpenStore(ctx, sqlitePath)
+	}
+	parsed, err := url.Parse(databaseURL)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") {
+		return nil, errors.New("database URL must use postgres:// or postgresql://")
+	}
+	orm, err := gorm.Open(postgres.Open(databaseURL), gormConfig())
+	if err != nil {
+		return nil, redactDatabaseError("open PostgreSQL database", databaseURL, err)
+	}
+	raw, err := orm.DB()
+	if err != nil {
+		return nil, redactDatabaseError("initialize PostgreSQL pool", databaseURL, err)
+	}
+	raw.SetMaxOpenConns(25)
+	raw.SetMaxIdleConns(5)
+	raw.SetConnMaxLifetime(30 * time.Minute)
+	if err := raw.PingContext(ctx); err != nil {
+		_ = raw.Close()
+		return nil, redactDatabaseError("connect PostgreSQL database", databaseURL, err)
+	}
+	if _, err := migratePostgres(ctx, raw); err != nil {
+		_ = raw.Close()
+		return nil, redactDatabaseError("migrate PostgreSQL database", databaseURL, err)
+	}
+	return &Connection{orm: orm, raw: raw, dialect: DialectPostgres}, nil
+}
+
+func gormConfig() *gorm.Config {
+	return &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		Logger:                                   logger.Default.LogMode(logger.Silent),
+	}
+}
+
+func redactDatabaseError(prefix, dsn string, err error) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	message = strings.ReplaceAll(message, dsn, "<redacted>")
+	if parsed, parseErr := url.Parse(dsn); parseErr == nil && parsed.User != nil {
+		if password, ok := parsed.User.Password(); ok && password != "" {
+			message = strings.ReplaceAll(message, password, "<redacted>")
+		}
+	}
+	return fmt.Errorf("%s: %s", prefix, message)
 }
 
 func (c *Connection) Dialect() Dialect {
@@ -60,25 +118,40 @@ func (c *Connection) Close() error {
 	return c.raw.Close()
 }
 
+func (c *Connection) query(query string) string {
+	if c != nil && c.dialect == DialectPostgres {
+		return strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+	}
+	return query
+}
+
+type result struct{ rows int64 }
+
+func (r result) LastInsertId() (int64, error) {
+	return 0, errors.New("LastInsertId is not supported; use INSERT ... RETURNING")
+}
+func (r result) RowsAffected() (int64, error) { return r.rows, nil }
+
 func (c *Connection) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	if c == nil || c.orm == nil || c.orm.Statement == nil || c.orm.Statement.ConnPool == nil {
+	if c == nil || c.orm == nil {
 		return nil, errors.New("database store is closed")
 	}
-	// SQLite's database/sql Result carries LastInsertId, which a few existing
-	// persistence paths still require. Keep that behavior while queries flow
-	// through the GORM-owned connection pool.
-	return c.orm.Statement.ConnPool.ExecContext(ctx, query, args...)
+	tx := c.orm.WithContext(ctx).Exec(c.query(query), args...)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return result{rows: tx.RowsAffected}, nil
 }
 
 func (c *Connection) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	if c == nil || c.orm == nil {
 		return nil, errors.New("database store is closed")
 	}
-	return c.orm.WithContext(ctx).Raw(query, args...).Rows()
+	return c.orm.WithContext(ctx).Raw(c.query(query), args...).Rows()
 }
 
 func (c *Connection) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return c.orm.WithContext(ctx).Raw(query, args...).Row()
+	return c.orm.WithContext(ctx).Raw(c.query(query), args...).Row()
 }
 
 func (c *Connection) beginTransaction(ctx context.Context) (Transaction, error) {
@@ -94,22 +167,33 @@ type gormTransaction struct {
 	dialect Dialect
 }
 
+func (t *gormTransaction) query(query string) string {
+	if t != nil && t.dialect == DialectPostgres {
+		return strings.ReplaceAll(query, "unixepoch()", "CAST(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS BIGINT)")
+	}
+	return query
+}
+
 func (t *gormTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	if t == nil || t.orm == nil || t.orm.Statement == nil || t.orm.Statement.ConnPool == nil {
+	if t == nil || t.orm == nil {
 		return nil, errors.New("database transaction is closed")
 	}
-	return t.orm.Statement.ConnPool.ExecContext(ctx, query, args...)
+	tx := t.orm.WithContext(ctx).Exec(t.query(query), args...)
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	return result{rows: tx.RowsAffected}, nil
 }
 
 func (t *gormTransaction) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	if t == nil || t.orm == nil {
 		return nil, errors.New("database transaction is closed")
 	}
-	return t.orm.WithContext(ctx).Raw(query, args...).Rows()
+	return t.orm.WithContext(ctx).Raw(t.query(query), args...).Rows()
 }
 
 func (t *gormTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return t.orm.WithContext(ctx).Raw(query, args...).Row()
+	return t.orm.WithContext(ctx).Raw(t.query(query), args...).Row()
 }
 
 func (t *gormTransaction) Commit() error {

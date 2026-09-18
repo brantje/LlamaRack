@@ -39,12 +39,8 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 		return User{}, err
 	}
 	now := time.Now().Unix()
-	result, err := tx.ExecContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?)", username, hash, now)
-	if err != nil {
-		return User{}, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
+	var id int64
+	if err := tx.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?) RETURNING id", username, hash, now).Scan(&id); err != nil {
 		return User{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -63,12 +59,8 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 		return User{}, err
 	}
 	now := time.Now().Unix()
-	result, err := s.db.ExecContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?)", username, hash, now)
-	if err != nil {
-		return User{}, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
+	var id int64
+	if err := s.db.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?) RETURNING id", username, hash, now).Scan(&id); err != nil {
 		return User{}, err
 	}
 	return User{ID: id, Username: username, Enabled: true, CreatedAt: now}, nil
@@ -77,7 +69,7 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT u.id,u.username,u.enabled,u.created_at,u.last_login_at,
 		(SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id AND s.expires_at>?)
-		FROM users u ORDER BY u.username COLLATE NOCASE`, time.Now().Unix())
+		FROM users u ORDER BY LOWER(u.username),u.username`, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}

@@ -557,19 +557,14 @@ func (s *Service) persistWritebackEntry(ctx context.Context, tx database.Querier
 	}
 
 	if !existing {
-		inserted, err := tx.ExecContext(ctx, `INSERT INTO inference_requests(
+		if err := tx.QueryRowContext(ctx, `INSERT INTO inference_requests(
             started_at,finished_at,instance_id,endpoint,api_key_id,api_key_name,api_key_prefix,owner_kind,owner_id,streaming,status_code,result,
             duration_ms,ttft_ms,prompt_tokens,generated_tokens,total_tokens,tokens_per_second,queue_duration_ms,load_duration_ms,autoloaded,error,request_body,response_body,
             trace_id,call_type,client_ip,user_agent,model_slug,openai_response_id,openai_response_deleted
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
 			record.StartedAt, record.FinishedAt, record.InstanceID, record.Endpoint, keyID, keyName, keyPrefix, ownerKind, ownerID, boolInt(record.Streaming), record.StatusCode, record.Result,
 			record.DurationMS, ttft, record.PromptTokens, record.GeneratedTokens, record.TotalTokens, tps, record.QueueDurationMS, record.LoadDurationMS, boolInt(record.Autoloaded), record.Error, requestBody, responseBody,
-			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted))
-		if err != nil {
-			return err
-		}
-		rowID, err = inserted.LastInsertId()
-		if err != nil {
+			record.TraceID, record.CallType, record.ClientIP, record.UserAgent, entry.modelSlug, openAIID, boolInt(entry.openAIDeleted)).Scan(&rowID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO inference_request_correlations(request_id,inference_request_id,prompt_tokens_per_second) VALUES(?,?,?)`, entry.requestID, rowID, promptTPS); err != nil {

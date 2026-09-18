@@ -306,7 +306,7 @@ func (m *OIDCManager) GetProvider(ctx context.Context, id string) (OIDCProvider,
 }
 
 func (m *OIDCManager) ListProviders(ctx context.Context) ([]OIDCProvider, error) {
-	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name,enabled,issuer,discovery_url,client_id,scopes,username_claim,authorization_endpoint,token_endpoint,jwks_url,last_tested_at,last_test_succeeded,created_at,updated_at FROM oidc_providers ORDER BY name COLLATE NOCASE`)
+	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name,enabled,issuer,discovery_url,client_id,scopes,username_claim,authorization_endpoint,token_endpoint,jwks_url,last_tested_at,last_test_succeeded,created_at,updated_at FROM oidc_providers ORDER BY LOWER(name),name`)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func scanOIDCProvider(scan scanFunc) (OIDCProvider, error) {
 }
 
 func (m *OIDCManager) PublicProviders(ctx context.Context) ([]PublicOIDCProvider, error) {
-	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name FROM oidc_providers WHERE enabled=1 ORDER BY name COLLATE NOCASE`)
+	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name FROM oidc_providers WHERE enabled=1 ORDER BY LOWER(name),name`)
 	if err != nil {
 		return nil, err
 	}
@@ -748,7 +748,7 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 		return User{}, errors.New("OIDC username claim is too short")
 	}
 	var existingID int64
-	err = m.auth.db.QueryRowContext(ctx, "SELECT id FROM users WHERE username=? COLLATE NOCASE", username).Scan(&existingID)
+	err = m.auth.db.QueryRowContext(ctx, "SELECT id FROM users WHERE LOWER(username)=LOWER(?)", username).Scan(&existingID)
 	if err == nil {
 		autoLink, err := m.settings.Bool(ctx, settings.OIDCAutoLinkEnabled)
 		if err != nil {
@@ -775,12 +775,8 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 	}
 	defer tx.Rollback()
 	now := time.Now().Unix()
-	result, err := tx.ExecContext(ctx, "INSERT INTO users(username,password_hash,enabled,created_at) VALUES(?,?,1,?)", username, "!oidc", now)
-	if err != nil {
-		return User{}, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
+	var id int64
+	if err := tx.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,enabled,created_at) VALUES(?,?,1,?) RETURNING id", username, "!oidc", now).Scan(&id); err != nil {
 		return User{}, err
 	}
 	identityID, err := randomToken(12)

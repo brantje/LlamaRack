@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,12 +18,8 @@ func TestOpenStoreUsesGORMAdapterWithoutChangingSQLiteSemantics(t *testing.T) {
 	if store.Dialect() != DialectSQLite {
 		t.Fatalf("dialect=%q", store.Dialect())
 	}
-	result, err := store.ExecContext(ctx, "INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)", "gorm-store", "ok", 1)
-	if err != nil {
+	if _, err := store.ExecContext(ctx, "INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)", "gorm-store", "ok", 1); err != nil {
 		t.Fatal(err)
-	}
-	if id, err := result.LastInsertId(); err != nil || id <= 0 {
-		t.Fatalf("last insert id=%d err=%v", id, err)
 	}
 	var value string
 	if err := store.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", "gorm-store").Scan(&value); err != nil {
@@ -46,5 +44,19 @@ func TestOpenStoreUsesGORMAdapterWithoutChangingSQLiteSemantics(t *testing.T) {
 	}
 	if value != "tx" {
 		t.Fatalf("transaction value=%q", value)
+	}
+}
+
+func TestOpenConfiguredRejectsUnsupportedDatabaseURL(t *testing.T) {
+	if _, err := OpenConfigured(context.Background(), filepath.Join(t.TempDir(), "manager.db"), "mysql://user:secret@db/llamarack"); err == nil {
+		t.Fatal("expected unsupported database URL error")
+	}
+}
+
+func TestRedactDatabaseErrorDoesNotExposePasswordOrDSN(t *testing.T) {
+	dsn := "postgres://user:super-secret@db.example/llamarack?sslmode=require"
+	err := redactDatabaseError("connect PostgreSQL database", dsn, errors.New("failed for "+dsn+" password=super-secret"))
+	if got := err.Error(); strings.Contains(got, dsn) || strings.Contains(got, "super-secret") {
+		t.Fatalf("database error leaked credentials: %q", got)
 	}
 }

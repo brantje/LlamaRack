@@ -12,6 +12,7 @@ type Config struct {
 	DataDir                   string
 	ModelsDir                 string
 	DatabasePath              string
+	DatabaseURL               string
 	LlamaServerPath           string
 	LlamaBenchPath            string
 	HuggingFaceBaseURL        string
@@ -41,6 +42,7 @@ func Load() Config {
 		DataDir:                   dataDir,
 		ModelsDir:                 env("LLAMARACK_MODELS_DIR", "/models"),
 		DatabasePath:              env("LLAMARACK_DATABASE_PATH", filepath.Join(dataDir, "manager.db")),
+		DatabaseURL:               firstEnv("LLAMARACK_DATABASE_URL", "DATABASE_URL"),
 		LlamaServerPath:           llamaServerPath,
 		LlamaBenchPath:            env("LLAMARACK_LLAMA_BENCH", llamaBenchDefault),
 		HuggingFaceBaseURL:        env("LLAMARACK_HUGGINGFACE_BASE_URL", "https://huggingface.co"),
@@ -51,6 +53,15 @@ func Load() Config {
 		AllowedOrigin:             env("LLAMARACK_ALLOWED_ORIGIN", "http://localhost:3000"),
 		AlwaysOnReconcileInterval: time.Duration(alwaysOnSeconds) * time.Second,
 	}
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func env(key, fallback string) string {

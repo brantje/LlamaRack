@@ -55,7 +55,7 @@ func (s *Service) createServiceAccount(ctx context.Context, name string, created
 }
 
 func (s *Service) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE hidden=0 ORDER BY name COLLATE NOCASE, id")
+	rows, err := s.db.QueryContext(ctx, "SELECT id,name,enabled,hidden,created_at,created_by_user_id FROM service_accounts WHERE hidden=0 ORDER BY LOWER(name),name,id")
 	if err != nil {
 		return nil, err
 	}
