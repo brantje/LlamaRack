@@ -123,7 +123,7 @@ describe('GPU placement cards', () => {
       route: false,
       props: {
         gpuMode: 'manual', gpuDevices: ['CUDA0'], tensorSplit: '1',
-        modelId: 'model-1', instanceId: 'instance-1', systemSpilloverEnabled: true, llamaOptions: {}
+        modelId: 'model-1', instanceId: 'instance-1', runtimePreview: true, systemSpilloverEnabled: true, llamaOptions: {}
       }
     })
     await flushPromises()
@@ -135,7 +135,7 @@ describe('GPU placement cards', () => {
     ][0]
     expect(slider).toBeTruthy()
     expect(slider!.props('max')).toBe(1)
-    expect(wrapper.text()).toContain('65K')
+    expect(wrapper.text()).toContain('64K')
     expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true')
   })
 

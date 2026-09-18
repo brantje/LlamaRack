@@ -73,6 +73,7 @@ const props = defineProps<{
   tensorSplit: string
   modelId?: string
   instanceId?: string
+  runtimePreview?: boolean
   systemSpilloverEnabled?: boolean
   llamaOptions?: Record<string, string>
   hidePlacementControls?: boolean
@@ -223,7 +224,7 @@ async function refreshRecommendation() {
   recommendationLoading.value = true
   try {
     const query = new URLSearchParams({ context_length: String(commitContext(contextSize.value)) })
-    const runtimeBound = props.systemSpilloverEnabled !== undefined || Boolean(props.instanceId)
+    const runtimeBound = Boolean(props.runtimePreview || props.instanceId)
     if (runtimeBound) {
       if (props.instanceId) query.set('instance_id', props.instanceId)
       query.set('gpu_mode', props.gpuMode)
@@ -336,10 +337,10 @@ watch(() => props.gpuMode, (mode) => {
     emit('update:gpuDevices', [])
     emit('update:tensorSplit', '')
   }
-  if (props.systemSpilloverEnabled !== undefined || props.instanceId) scheduleRecommendation()
+  if (props.runtimePreview || props.instanceId) scheduleRecommendation()
 })
-watch(() => [props.instanceId, props.systemSpilloverEnabled, props.tensorSplit, props.gpuDevices.join(',')], () => {
-  if (props.systemSpilloverEnabled !== undefined || props.instanceId) scheduleRecommendation()
+watch(() => [props.instanceId, props.runtimePreview, props.systemSpilloverEnabled, props.tensorSplit, props.gpuDevices.join(',')], () => {
+  if (props.runtimePreview || props.instanceId) scheduleRecommendation()
 })
 watch(() => props.modelId, async () => {
   recommendation.value = null

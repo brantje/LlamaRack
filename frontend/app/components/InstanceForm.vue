@@ -458,6 +458,7 @@ onMounted(() => {
           hide-placement-controls
           :model-id="form.model_id"
           :instance-id="instanceId"
+          :runtime-preview="true"
           :system-spillover-enabled="form.system_spillover_enabled"
           :llama-options="form.options"
           v-model:gpu-mode="form.gpu_mode"
