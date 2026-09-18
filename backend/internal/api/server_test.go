@@ -29,6 +29,7 @@ type apiFixture struct {
 	models *models.Service
 	instances *instances.Service
 	config *llamaconfig.Store
+	db database.Store
 	dbExec func(string, ...any)
 	dir    string
 }
@@ -64,7 +65,7 @@ func newAPIFixture(t *testing.T, profile func() (llamacpp.Profile, error)) *apiF
 			}}, nil
 		}
 	}
-	return &apiFixture{server: New(m, l, profile), auth: a, models: m, instances: instanceService, config: configStore, dir: modelsDir, dbExec: func(q string, args ...any) {
+	return &apiFixture{server: New(m, l, profile), auth: a, models: m, instances: instanceService, config: configStore, db: db, dir: modelsDir, dbExec: func(q string, args ...any) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, q, args...); err != nil {
 			t.Fatal(err)
