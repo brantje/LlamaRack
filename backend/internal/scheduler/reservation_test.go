@@ -422,3 +422,51 @@ func TestLedgerAcquireRuntimeReservesExactPlan(t *testing.T) {
 		t.Fatalf("runtime lease=%+v plan=%+v", lease, plan)
 	}
 }
+
+
+func TestPlanningSnapshotSubtractsReservationsWithoutMutatingLedger(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * gib, FreeBytes: 16 * gib}},
+	}
+	first, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "committed", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: 4 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		HostRAM: 6 * gib,
+	})
+	if err != nil || first.ID == "" {
+		t.Fatalf("first lease=%+v err=%v", first, err)
+	}
+	if err := ledger.Commit(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "pending", Snapshot: snapshot,
+		Placement: PlacementRequest{RequiredBytes: 3 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+		HostRAM: 5 * gib,
+	})
+	if err != nil || second.ID == "" {
+		t.Fatalf("second lease=%+v err=%v", second, err)
+	}
+
+	adjusted := ledger.PlanningSnapshot(snapshot, ResourceOwner{})
+	if got := adjusted.GPUs[0].FreeBytes; got != 9*gib {
+		t.Fatalf("GPU free=%d want=%d", got, 9*gib)
+	}
+	if adjusted.RAMAvailableBytes != 21*gib {
+		t.Fatalf("RAM available=%d want=%d", adjusted.RAMAvailableBytes, 21*gib)
+	}
+	if len(ledger.All()) != 2 {
+		t.Fatalf("planning snapshot mutated leases: %+v", ledger.All())
+	}
+
+	forOwner := ledger.PlanningSnapshot(snapshot, ResourceOwner{Kind: ResourceOwnerInstance, ID: "committed"})
+	if forOwner.GPUs[0].FreeBytes != 13*gib || forOwner.RAMAvailableBytes != 27*gib {
+		t.Fatalf("requester lease must be excluded without release: %+v", forOwner)
+	}
+	if lease, ok := ledger.Get(first.ID); !ok || lease.State != LeaseCommitted {
+		t.Fatalf("requester lease was mutated: %+v ok=%v", lease, ok)
+	}
+}

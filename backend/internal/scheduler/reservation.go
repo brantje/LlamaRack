@@ -325,6 +325,19 @@ func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
 	return l.GetByOwner(ResourceOwner{Kind: ResourceOwnerInstance, ID: instanceID})
 }
 
+func (l *Ledger) PlanningSnapshot(snapshot hardware.Snapshot, owner ResourceOwner) hardware.Snapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sweepExpiredLocked()
+
+	ignoreOwner := ""
+	if normalized, err := normalizeOwner(owner, ""); err == nil {
+		ignoreOwner = resourceOwnerKey(normalized)
+	}
+	occupancy, host := l.occupancyLocked(ignoreOwner, nil)
+	return adjustSnapshot(snapshot, occupancy, host, nil, 0)
+}
+
 func (l *Ledger) Pending() []ResourceLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()

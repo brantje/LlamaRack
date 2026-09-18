@@ -16,13 +16,15 @@ import (
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
 
 type recommendationHandler struct {
 	auth     *auth.Service
 	models   *models.Service
 	hardware hardware.Snapshotter
-	profile  func() (llamacpp.Profile, error)
+	profile      func() (llamacpp.Profile, error)
+	reservations *scheduler.Ledger
 }
 
 type modelInspectHandler struct {
@@ -36,11 +38,19 @@ type modelDetailsHandler struct {
 }
 
 func NewRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	return newRecommendationHandler(a, modelService, detector, nil, profileGetters...)
+}
+
+func NewReservationAwareRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
+	return newRecommendationHandler(a, modelService, detector, reservations, profileGetters...)
+}
+
+func newRecommendationHandler(a *auth.Service, modelService *models.Service, detector hardware.Snapshotter, reservations *scheduler.Ledger, profileGetters ...func() (llamacpp.Profile, error)) http.Handler {
 	var profile func() (llamacpp.Profile, error)
 	if len(profileGetters) > 0 {
 		profile = profileGetters[0]
 	}
-	return &recommendationHandler{auth: a, models: modelService, hardware: detector, profile: profile}
+	return &recommendationHandler{auth: a, models: modelService, hardware: detector, profile: profile, reservations: reservations}
 }
 
 func NewModelInspectHandler(a *auth.Service, modelService *models.Service) http.Handler {
@@ -167,6 +177,13 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	runtime.CompanionBytes = recommendations.CompanionBytes(runtime.Options)
+	if hardwareErr == nil && h.reservations != nil {
+		owner := scheduler.ResourceOwner{}
+		if instanceID != "" {
+			owner = scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerInstance, ID: instanceID}
+		}
+		snapshot = h.reservations.PlanningSnapshot(snapshot, owner)
+	}
 	result := recommendations.AnalyzeRuntime(model, path, snapshot, contextLength, hardwareErr, capabilities, runtime)
 	writeJSON(w, http.StatusOK, result)
 }

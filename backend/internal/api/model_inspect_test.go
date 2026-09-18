@@ -14,6 +14,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/scheduler"
 )
 
 func TestRecommendationHandler(t *testing.T) {
@@ -342,5 +343,46 @@ func TestRecommendationPreviewOptionsAreValidated(t *testing.T) {
 		"/api/v1/models/"+model.ID+"/recommendation?preview_options=%7B%22mmproj%22%3A%22%22%2C%22n-gpu-layers%22%3A%222%22%7D", nil, cookie)
 	if w.Code != http.StatusOK {
 		t.Fatalf("validated preview=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+
+func TestRecommendationAccountsForPendingSchedulerReservation(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	const gib int64 = 1024 * 1024 * 1024
+	path := filepath.Join(f.dir, "reservation-aware.gguf")
+	writeAPIMetadataGGUF(t, path, "qwen2", 32768)
+	if err := os.Truncate(path, 8*gib); err != nil {
+		t.Fatal(err)
+	}
+	model, err := f.models.Create(t.Context(), models.CreateModelInput{Name: "Reservation aware", GGUFPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12 * gib, FreeBytes: 12 * gib}},
+	}
+	ledger := scheduler.NewLedger()
+	lease, err := ledger.Acquire(scheduler.AcquireRequest{
+		InstanceID: "starting-other", Snapshot: raw,
+		Placement: scheduler.PlacementRequest{RequiredBytes: 6 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+	})
+	if err != nil || lease.ID == "" {
+		t.Fatalf("pending reservation=%+v err=%v", lease, err)
+	}
+	handler := NewReservationAwareRecommendationHandler(f.auth, f.models, staticHardware{snapshot: raw}, ledger)
+	w := doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":false`) {
+		t.Fatalf("pending reservation must reduce advertised capacity: %d %s", w.Code, w.Body.String())
+	}
+
+	withoutLedger := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: raw})
+	w = doRequest(t, withoutLedger, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":true`) {
+		t.Fatalf("control recommendation should see raw free capacity: %d %s", w.Code, w.Body.String())
 	}
 }
