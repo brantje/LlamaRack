@@ -85,6 +85,78 @@ func TestPostgresRejectsUnknownSchema(t *testing.T) {
 	}
 }
 
+func TestPostgresRejectsUnownedNonTableSchemaObjects(t *testing.T) {
+	tests := []struct {
+		name       string
+		createSQL  string
+		existsSQL  string
+	}{
+		{
+			name:      "view",
+			createSQL: `CREATE VIEW unrelated_view AS SELECT 1 AS value`,
+			existsSQL: `SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname='unrelated_view' AND c.relkind='v')`,
+		},
+		{
+			name:      "sequence",
+			createSQL: `CREATE SEQUENCE unrelated_sequence`,
+			existsSQL: `SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname='unrelated_sequence' AND c.relkind='S')`,
+		},
+		{
+			name:      "materialized_view",
+			createSQL: `CREATE MATERIALIZED VIEW unrelated_materialized AS SELECT 1 AS value`,
+			existsSQL: `SELECT EXISTS(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relname='unrelated_materialized' AND c.relkind='m')`,
+		},
+		{
+			name:      "custom_type",
+			createSQL: `CREATE TYPE unrelated_status AS ENUM ('ready')`,
+			existsSQL: `SELECT EXISTS(SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname=current_schema() AND t.typname='unrelated_status' AND t.typtype='e')`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dsn := postgresIntegrationDSN(t)
+			db, err := sql.Open("pgx", dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err := db.ExecContext(context.Background(), tt.createSQL); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = OpenConfigured(context.Background(), "", dsn)
+			if err == nil || !strings.Contains(err.Error(), ErrUnsupportedDatabaseSchema.Error()) {
+				t.Fatalf("unowned %s schema error=%v", tt.name, err)
+			}
+
+			marker, err := postgresSchemaMarker(context.Background(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if marker != "" {
+				t.Fatalf("schema ownership marker installed after rejection: %q", marker)
+			}
+			for _, table := range []string{"manager_settings", goose.DefaultTablename} {
+				exists, err := postgresTableExists(context.Background(), db, table)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if exists {
+					t.Fatalf("LlamaRack table %q created after rejection", table)
+				}
+			}
+			var exists bool
+			if err := db.QueryRowContext(context.Background(), tt.existsSQL).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if !exists {
+				t.Fatalf("unrelated %s was modified or removed", tt.name)
+			}
+		})
+	}
+}
+
 func TestPostgresRejectsNewerSchema(t *testing.T) {
 	dsn := postgresIntegrationDSN(t)
 	ctx := context.Background()

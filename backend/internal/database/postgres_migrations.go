@@ -135,14 +135,58 @@ func classifyPostgresDatabase(ctx context.Context, db *sql.DB) (dbClass, error) 
 		return dbClassUnsupported, nil
 	}
 
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_type='BASE TABLE'`).Scan(&count); err != nil {
+	occupied, err := postgresSchemaOccupied(ctx, db)
+	if err != nil {
 		return dbClassUnsupported, err
 	}
-	if count == 0 {
+	if !occupied {
 		return dbClassEmpty, nil
 	}
 	return dbClassUnsupported, nil
+}
+
+// postgresSchemaOccupied reports whether the active schema contains application
+// objects. A fresh PostgreSQL schema has none of these catalog entries. We use
+// namespace OIDs rather than interpolating the search_path/schema name, and we
+// intentionally ignore objects owned by other namespaces such as pg_catalog
+// and pg_toast.
+func postgresSchemaOccupied(ctx context.Context, db *sql.DB) (bool, error) {
+	var occupied bool
+	err := db.QueryRowContext(ctx, `
+WITH current_namespace AS (
+	SELECT oid
+	FROM pg_namespace
+	WHERE nspname = current_schema()
+)
+SELECT EXISTS (
+	SELECT 1 FROM pg_class c JOIN current_namespace n ON c.relnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_type t JOIN current_namespace n ON t.typnamespace = n.oid
+		WHERE t.typtype IN ('b','c','d','e','r','m')
+	UNION ALL
+	SELECT 1 FROM pg_proc p JOIN current_namespace n ON p.pronamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_operator o JOIN current_namespace n ON o.oprnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_collation c JOIN current_namespace n ON c.collnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_conversion c JOIN current_namespace n ON c.connamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_opclass c JOIN current_namespace n ON c.opcnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_opfamily f JOIN current_namespace n ON f.opfnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_ts_config c JOIN current_namespace n ON c.cfgnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_ts_dict d JOIN current_namespace n ON d.dictnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_ts_parser p JOIN current_namespace n ON p.prsnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_ts_template t JOIN current_namespace n ON t.tmplnamespace = n.oid
+	UNION ALL
+	SELECT 1 FROM pg_statistic_ext s JOIN current_namespace n ON s.stxnamespace = n.oid
+)`).Scan(&occupied)
+	return occupied, err
 }
 
 func postgresSchemaMarker(ctx context.Context, db *sql.DB) (string, error) {
