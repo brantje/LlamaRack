@@ -132,7 +132,9 @@ jobs:
       - name: Redis cache contracts with race detector
         run: go test -race ./internal/cache ./internal/huggingface -count=1
       - name: Cold metadata request coalescing
-        run: go test ./internal/huggingface -run '^TestDerivedMetadataConcurrentColdMissCoalescesOrigin
+        run: go test ./internal/huggingface -run '^TestDerivedMetadataConcurrentColdMissCoalescesOrigin$' -count=10
+      - name: Derived metadata cache benchmark evidence
+        run: go test ./internal/huggingface -run '^$' -bench '^BenchmarkDerivedMetadata(OriginFetch|WarmMemoryCache|WarmRedis|WarmRedisParallel)$' -benchmem -count=3
 
   backend-race:
     runs-on: ubuntu-latest
