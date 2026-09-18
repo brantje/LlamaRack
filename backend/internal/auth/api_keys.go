@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -108,7 +107,7 @@ func (s *Service) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 func (s *Service) ListAPIKeysForServiceAccount(ctx context.Context, serviceAccountID string) ([]APIKey, error) {
 	serviceAccountID = strings.TrimSpace(serviceAccountID)
 	if serviceAccountID == "" {
-		return nil, sql.ErrNoRows
+		return nil, database.ErrNotFound
 	}
 	return s.listAPIKeys(ctx, serviceAccountID)
 }
@@ -230,7 +229,7 @@ func (s *Service) RotateAPIKey(ctx context.Context, id string) (APIKey, string, 
 		return APIKey{}, "", err
 	}
 	if existing.Managed {
-		return APIKey{}, "", sql.ErrNoRows
+		return APIKey{}, "", database.ErrNotFound
 	}
 	return s.rotateAPIKeySecret(ctx, id)
 }
@@ -241,7 +240,7 @@ func (s *Service) RotateManagedAPIKey(ctx context.Context, id string) (APIKey, s
 		return APIKey{}, "", err
 	}
 	if !existing.Managed {
-		return APIKey{}, "", sql.ErrNoRows
+		return APIKey{}, "", database.ErrNotFound
 	}
 	return s.rotateAPIKeySecret(ctx, id)
 }
@@ -287,7 +286,7 @@ func (s *Service) AuthenticateAPIKeyInfo(ctx context.Context, token string) (API
 			var err error
 			item, err = s.lookupAPIKeyByHash(ctx, hash)
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, database.ErrNotFound) {
 					return APIKey{}, ErrAPIKeyInvalid
 				}
 				return APIKey{}, err
@@ -573,7 +572,7 @@ func (s *Service) serviceAccountHidden(ctx context.Context, id string) (bool, er
 // rejectHiddenOrdinaryAPIKeyOwner rejects hidden service-account owners on
 // generic/public API-key write paths. Missing accounts already fail in
 // normalizeAPIKeyWrite as ErrAPIKeyOwnerNotFound. Hidden accounts that exist
-// return sql.ErrNoRows so HTTP maps to 404 "api key not found" without
+// return database.ErrNotFound so HTTP maps to 404 "api key not found" without
 // disclosing the hidden principal.
 func (s *Service) rejectHiddenOrdinaryAPIKeyOwner(ctx context.Context, ownerServiceAccountID string) error {
 	if strings.TrimSpace(ownerServiceAccountID) == "" {
@@ -584,7 +583,7 @@ func (s *Service) rejectHiddenOrdinaryAPIKeyOwner(ctx context.Context, ownerServ
 		return err
 	}
 	if hidden {
-		return sql.ErrNoRows
+		return database.ErrNotFound
 	}
 	return nil
 }
@@ -609,8 +608,8 @@ func (s *Service) EnsureManagedInferenceKey(ctx context.Context, serviceAccountI
 
 func (s *Service) ManagedInferenceKey(ctx context.Context) (APIKey, error) {
 	account, err := s.FindHiddenServiceAccountByName(ctx, ManagedPrincipalName)
-	if errors.Is(err, sql.ErrNoRows) {
-		return APIKey{}, sql.ErrNoRows
+	if errors.Is(err, database.ErrNotFound) {
+		return APIKey{}, database.ErrNotFound
 	}
 	if err != nil {
 		return APIKey{}, err
@@ -624,7 +623,7 @@ func (s *Service) ManagedInferenceKey(ctx context.Context) (APIKey, error) {
 			return key, nil
 		}
 	}
-	return APIKey{}, sql.ErrNoRows
+	return APIKey{}, database.ErrNotFound
 }
 
 func (s *Service) listAPIKeysIncludingHidden(ctx context.Context, serviceAccountID string) ([]APIKey, error) {

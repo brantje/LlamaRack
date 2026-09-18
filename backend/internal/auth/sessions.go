@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/brantje/llamarack/backend/internal/database"
 	"strings"
@@ -97,7 +96,7 @@ func (s *Service) RevokeSession(ctx context.Context, id string) error {
 func (s *Service) RevokeOwnSession(ctx context.Context, userID int64, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" || userID <= 0 {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	return s.sessions.RevokeOwn(ctx, userID, id)
 }

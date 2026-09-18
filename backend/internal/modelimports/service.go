@@ -4,7 +4,6 @@ import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -205,7 +204,7 @@ func (s *Service) CleanupJob(ctx context.Context, jobID string) error {
 		return err
 	}
 	for _, modelID := range owned {
-		if err := s.models.Delete(ctx, modelID); err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, database.ErrNotFound) {
+		if err := s.models.Delete(ctx, modelID); err != nil && !errors.Is(err, database.ErrNotFound) && !errors.Is(err, database.ErrNotFound) {
 			return err
 		}
 	}

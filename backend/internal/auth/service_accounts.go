@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -56,14 +55,14 @@ func (s *Service) ListServiceAccounts(ctx context.Context) ([]ServiceAccount, er
 func (s *Service) GetServiceAccount(ctx context.Context, id string) (ServiceAccount, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return ServiceAccount{}, database.ClassifyError(sql.ErrNoRows)
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
 	item, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return ServiceAccount{}, err
 	}
 	if item.Hidden {
-		return ServiceAccount{}, database.ClassifyError(sql.ErrNoRows)
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
 	keys, err := s.ListAPIKeysForServiceAccount(ctx, id)
 	if err != nil {
@@ -80,7 +79,7 @@ func (s *Service) FindHiddenServiceAccountByName(ctx context.Context, name strin
 func (s *Service) findServiceAccountByName(ctx context.Context, name string, hiddenOnly bool) (ServiceAccount, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return ServiceAccount{}, database.ClassifyError(sql.ErrNoRows)
+		return ServiceAccount{}, database.ClassifyError(database.ErrNotFound)
 	}
 	return s.serviceAccounts.FindByName(ctx, name, hiddenOnly)
 }
@@ -99,14 +98,14 @@ func (s *Service) DeleteHiddenServiceAccountByName(ctx context.Context, name str
 func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *string, enabled *bool) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if existing.Hidden {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	nextName := existing.Name
 	if name != nil {
@@ -129,14 +128,14 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, id string, name *str
 func (s *Service) DeleteServiceAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	existing, err := s.serviceAccounts.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if existing.Hidden {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	return s.deleteServiceAccount(ctx, id)
 }

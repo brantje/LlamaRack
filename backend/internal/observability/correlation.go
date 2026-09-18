@@ -2,13 +2,13 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 // CorrelatedRequestRecord is the request detail DTO. Full-mode bodies are
 // deliberately exposed here only; RequestRecord itself never serializes them.
@@ -197,7 +197,7 @@ func (s *Service) SetOpenAIResponseID(ctx context.Context, requestID, openaiID s
 func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) (StoredOpenAIResponse, error) {
 	openaiID = strings.TrimSpace(openaiID)
 	if openaiID == "" {
-		return StoredOpenAIResponse{}, sql.ErrNoRows
+		return StoredOpenAIResponse{}, database.ErrNotFound
 	}
 	if item, ok := s.bufferedStoredOpenAIResponse(openaiID); ok {
 		return item, nil
@@ -211,7 +211,7 @@ func (s *Service) GetStoredOpenAIResponse(ctx context.Context, openaiID string) 
 func (s *Service) MarkOpenAIResponseDeleted(ctx context.Context, openAIID string) error {
 	openAIID = strings.TrimSpace(openAIID)
 	if openAIID == "" {
-		return sql.ErrNoRows
+		return database.ErrNotFound
 	}
 	if handled, err := s.bufferMarkOpenAIResponseDeleted(openAIID); handled {
 		return err
@@ -237,7 +237,7 @@ func NewCorrelatedRequestHandler(service *Service) http.Handler {
 		}
 		record, err := service.GetRequestByRequestID(r.Context(), requestID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
 				return
 			}

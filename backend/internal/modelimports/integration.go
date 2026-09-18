@@ -2,7 +2,6 @@ package modelimports
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -133,7 +132,7 @@ func (s *Service) CleanupJobSafe(ctx context.Context, jobID string) error {
 		if item.InstanceID == "" {
 			continue
 		}
-		if err := s.instances.Delete(ctx, item.InstanceID); err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, database.ErrNotFound) {
+		if err := s.instances.Delete(ctx, item.InstanceID); err != nil && !errors.Is(err, database.ErrNotFound) && !errors.Is(err, database.ErrNotFound) {
 			return err
 		}
 	}
@@ -144,7 +143,7 @@ func (s *Service) CleanupJobSafe(ctx context.Context, jobID string) error {
 		if !item.OwnsModel || item.ModelID == "" {
 			continue
 		}
-		if err := s.models.Delete(ctx, item.ModelID); err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, database.ErrNotFound) {
+		if err := s.models.Delete(ctx, item.ModelID); err != nil && !errors.Is(err, database.ErrNotFound) && !errors.Is(err, database.ErrNotFound) {
 			return err
 		}
 	}

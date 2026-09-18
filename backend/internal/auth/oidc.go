@@ -4,7 +4,6 @@ import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -771,7 +770,7 @@ func (m *OIDCManager) UnlinkIdentity(ctx context.Context, id string) error {
 func (m *OIDCManager) UnlinkOwnIdentity(ctx context.Context, userID int64, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" || userID <= 0 {
-		return database.ClassifyError(sql.ErrNoRows)
+		return database.ClassifyError(database.ErrNotFound)
 	}
 	return m.auth.oidc.UnlinkOwnIdentity(ctx, userID, id)
 }
