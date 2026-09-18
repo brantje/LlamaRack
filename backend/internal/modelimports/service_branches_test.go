@@ -2,7 +2,6 @@ package modelimports
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/models"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestPrepareValidationBranches(t *testing.T) {
@@ -70,7 +71,7 @@ func TestLegacyListAndCleanupOwnedImport(t *testing.T) {
 	if err := service.CleanupJob(ctx, "legacy-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := modelService.GetByID(ctx, model.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := modelService.GetByID(ctx, model.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("owned model remains, err=%v", err)
 	}
 }
