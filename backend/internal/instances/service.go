@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/brantje/llamarack/backend/internal/resourceid"
@@ -160,7 +159,8 @@ func (s *Service) Get(ctx context.Context, id string) (Instance, error) { return
 func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) {
 	id = strings.TrimSpace(id)
 	for {
-		if item, generation, ok := s.cachedByIDAtGeneration(id); ok {
+		item, generation, ok := s.cachedByIDAtGeneration(id)
+		if ok {
 			return item, nil
 		}
 		item, err := s.store.GetByID(ctx, id)
@@ -176,7 +176,8 @@ func (s *Service) GetByID(ctx context.Context, id string) (Instance, error) {
 func (s *Service) GetBySlug(ctx context.Context, slug string) (Instance, error) {
 	slug = resourceid.Slugify(slug)
 	for {
-		if item, generation, ok := s.cachedBySlugAtGeneration(slug); ok {
+		item, generation, ok := s.cachedBySlugAtGeneration(slug)
+		if ok {
 			return item, nil
 		}
 		item, err := s.store.GetBySlug(ctx, slug)
