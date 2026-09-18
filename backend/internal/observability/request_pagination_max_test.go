@@ -12,7 +12,7 @@ import (
 func TestRequestListMaximumPagePreservesHasMore(t *testing.T) {
 	s := testService(t)
 	ctx := t.Context()
-	tx, err := database.Begin(ctx, s.db)
+	tx, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
