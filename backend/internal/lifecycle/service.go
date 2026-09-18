@@ -56,6 +56,7 @@ type committedWorkerReservation struct {
 type Service struct {
 	models                *models.Service
 	instances             *instances.Service
+	config                *llamaconfig.Store
 	sup                   *supervisor.Supervisor
 	hardware              hardware.Snapshotter
 	profile               func() (llamacpp.Profile, error)
@@ -92,9 +93,9 @@ type loadCall struct {
 	autoload bool
 }
 
-func New(modelsService *models.Service, sup *supervisor.Supervisor) *Service {
+func New(modelsService *models.Service, instanceService *instances.Service, configStore *llamaconfig.Store, sup *supervisor.Supervisor) *Service {
 	service := &Service{
-		models: modelsService, instances: instances.New(modelsService.DB()), sup: sup, hardware: hardware.New(),
+		models: modelsService, instances: instanceService, config: configStore, sup: sup, hardware: hardware.New(),
 		reservations: scheduler.NewLedger(),
 		loads:        map[string]*loadCall{}, manuallyStopped: map[string]bool{}, resourceBlocked: map[string]string{},
 		activities: map[string]Activity{}, startFailures: map[string]StartFailureState{}, idleLocks: map[string]*sync.Mutex{},
@@ -1075,7 +1076,7 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 
-	store := llamaconfig.New(s.models.DB())
+	store := s.config
 	effective, err := store.Effective(ctx, m.ID, i.ID)
 	if err != nil {
 		return "", err
@@ -1414,7 +1415,7 @@ func (s *Service) evictInstance(ctx context.Context, id string) error {
 }
 
 func (s *Service) resolveLaunchOptions(ctx context.Context, modelID, instanceID string) (map[string]string, error) {
-	effective, err := llamaconfig.New(s.models.DB()).Effective(ctx, modelID, instanceID)
+	effective, err := s.config.Effective(ctx, modelID, instanceID)
 	if err != nil {
 		return nil, err
 	}
