@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
+	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/lifecycle"
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 	"github.com/brantje/llamarack/backend/internal/telemetry"
@@ -209,7 +211,7 @@ func TestSamplerRuntimeStates(t *testing.T) {
 	modelsDir := t.TempDir()
 	modelService := models.New(service.db, modelsDir)
 	sup := supervisor.New("unused", "127.0.0.1", 39901, time.Second)
-	life := lifecycle.New(modelService, sup)
+	life := lifecycle.New(modelService, instances.New(service.db), llamaconfig.New(service.db), sup)
 	sampler := NewSampler(life, service)
 	ctx := context.Background()
 
@@ -232,7 +234,7 @@ func TestSamplerRunPublishesManagerOwnedHardware(t *testing.T) {
 	}
 	modelService := models.New(service.db, modelsDir)
 	sup := supervisor.New("unused", "127.0.0.1", 39900, time.Second)
-	life := lifecycle.New(modelService, sup)
+	life := lifecycle.New(modelService, instances.New(service.db), llamaconfig.New(service.db), sup)
 	sampler := NewSampler(life, service)
 	sampler.interval = 20 * time.Millisecond
 	sampler.persist = time.Hour
