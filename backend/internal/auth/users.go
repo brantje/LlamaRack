@@ -1,20 +1,14 @@
 package auth
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
 )
 
 func (s *Service) BootstrapRequired(ctx context.Context) (bool, error) {
-	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return false, err
-	}
-	return count == 0, nil
+	return s.users.BootstrapRequired(ctx)
 }
 
 func (s *Service) Bootstrap(ctx context.Context, username, password string) (User, error) {
@@ -22,31 +16,11 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 	if err != nil {
 		return User{}, err
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-	var count int
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return User{}, err
-	}
-	if count != 0 {
-		return User{}, errors.New("bootstrap already completed")
-	}
 	hash, err := hashPasswordContext(ctx, password)
 	if err != nil {
 		return User{}, err
 	}
-	now := time.Now().Unix()
-	var id int64
-	if err := tx.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?) RETURNING id", username, hash, now).Scan(&id); err != nil {
-		return User{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-	return User{ID: id, Username: username, Enabled: true, CreatedAt: now}, nil
+	return s.users.Bootstrap(ctx, username, hash, time.Now().Unix())
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string) (User, error) {
@@ -58,76 +32,19 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 	if err != nil {
 		return User{}, err
 	}
-	now := time.Now().Unix()
-	var id int64
-	if err := s.db.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?) RETURNING id", username, hash, now).Scan(&id); err != nil {
-		return User{}, err
-	}
-	return User{ID: id, Username: username, Enabled: true, CreatedAt: now}, nil
+	return s.users.Create(ctx, username, hash, time.Now().Unix())
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT u.id,u.username,u.enabled,u.created_at,u.last_login_at,
-		(SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id AND s.expires_at>?)
-		FROM users u ORDER BY LOWER(u.username),u.username`, time.Now().Unix())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	users := make([]User, 0)
-	for rows.Next() {
-		var user User
-		var enabled int
-		var lastLogin sql.NullInt64
-		if err := rows.Scan(&user.ID, &user.Username, &enabled, &user.CreatedAt, &lastLogin, &user.ActiveSessions); err != nil {
-			return nil, err
-		}
-		user.Enabled = enabled != 0
-		if lastLogin.Valid {
-			value := lastLogin.Int64
-			user.LastLoginAt = &value
-		}
-		users = append(users, user)
-	}
-	return users, rows.Err()
+	return s.users.List(ctx, time.Now().Unix())
 }
 
 func (s *Service) UserByID(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, "SELECT id,username,enabled,created_at,last_login_at FROM users WHERE id=?", id).Scan)
+	return s.users.ByID(ctx, id)
 }
 
 func (s *Service) SetUserEnabled(ctx context.Context, id int64, enabled bool) error {
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var current int
-	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM users WHERE id=?", id).Scan(&current); err != nil {
-		return err
-	}
-	if !enabled && current != 0 {
-		var enabledCount int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE enabled=1").Scan(&enabledCount); err != nil {
-			return err
-		}
-		if enabledCount <= 1 {
-			return ErrLastEnabledUser
-		}
-	}
-	value := 0
-	if enabled {
-		value = 1
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET enabled=? WHERE id=?", value, id); err != nil {
-		return err
-	}
-	if !enabled {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", id); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.users.SetEnabled(ctx, id, enabled); err != nil {
 		return err
 	}
 	s.clearAPIKeyCache()
@@ -138,28 +55,7 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, id int64) error {
 	if actorID == id {
 		return ErrSelfDelete
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var enabled int
-	if err := tx.QueryRowContext(ctx, "SELECT enabled FROM users WHERE id=?", id).Scan(&enabled); err != nil {
-		return err
-	}
-	if enabled != 0 {
-		var enabledCount int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE enabled=1").Scan(&enabledCount); err != nil {
-			return err
-		}
-		if enabledCount <= 1 {
-			return ErrLastEnabledUser
-		}
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM users WHERE id=?", id); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.users.Delete(ctx, id); err != nil {
 		return err
 	}
 	s.clearAPIKeyCache()
@@ -174,34 +70,15 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, newPassword s
 	if err != nil {
 		return err
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", hash, userID)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", userID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.users.ResetPassword(ctx, userID, hash)
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassword, newPassword, keepSessionID string) error {
 	if err := validatePassword(newPassword); err != nil {
 		return err
 	}
-	var currentHash string
-	if err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=? AND enabled=1", userID).Scan(&currentHash); err != nil {
+	currentHash, err := s.users.EnabledPasswordHash(ctx, userID)
+	if err != nil {
 		return ErrInvalidCredentials
 	}
 	verified, err := verifyPasswordContext(ctx, currentPassword, currentHash)
@@ -215,23 +92,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassw
 	if err != nil {
 		return err
 	}
-	tx, err := database.Begin(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", newHash, userID); err != nil {
-		return err
-	}
-	if keepSessionID == "" {
-		_, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", userID)
-	} else {
-		_, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=? AND id<>?", userID, keepSessionID)
-	}
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.users.ChangePassword(ctx, userID, newHash, keepSessionID)
 }
 
 func validateCredentials(username, password string) (string, error) {
@@ -243,21 +104,4 @@ func validateCredentials(username, password string) (string, error) {
 		return "", err
 	}
 	return username, nil
-}
-
-type scanner func(dest ...any) error
-
-func scanUser(scan scanner) (User, error) {
-	var user User
-	var enabled int
-	var lastLogin sql.NullInt64
-	if err := scan(&user.ID, &user.Username, &enabled, &user.CreatedAt, &lastLogin); err != nil {
-		return User{}, err
-	}
-	user.Enabled = enabled != 0
-	if lastLogin.Valid {
-		value := lastLogin.Int64
-		user.LastLoginAt = &value
-	}
-	return user, nil
 }

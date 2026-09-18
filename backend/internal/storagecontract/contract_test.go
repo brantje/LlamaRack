@@ -373,3 +373,188 @@ func writeContractBinary(t testing.TB, buf *bytes.Buffer, value any) {
 		t.Fatal(err)
 	}
 }
+
+
+func TestSQLiteUserStoreContract(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manager.db")
+	store, err := database.OpenConfigured(context.Background(), path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	runUserStoreContract(t, auth.NewUserStore(store))
+}
+
+func TestPostgresUserStoreContract(t *testing.T) {
+	base := os.Getenv("LLAMARACK_TEST_POSTGRES_URL")
+	if base == "" {
+		t.Skip("LLAMARACK_TEST_POSTGRES_URL is not configured")
+	}
+	store, err := database.OpenConfigured(context.Background(), "", isolatedPostgresDSN(t, base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	runUserStoreContract(t, auth.NewUserStore(store))
+}
+
+func runUserStoreContract(t *testing.T, users auth.UserStore) {
+	t.Helper()
+	ctx := context.Background()
+	required, err := users.BootstrapRequired(ctx)
+	if err != nil || !required {
+		t.Fatalf("bootstrap required=%v err=%v", required, err)
+	}
+	admin, err := users.Bootstrap(ctx, "Admin", "hash-a", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.Bootstrap(ctx, "Other", "hash-b", 2); !errors.Is(err, auth.ErrBootstrapCompleted) {
+		t.Fatalf("second bootstrap err=%v", err)
+	}
+	second, err := users.Create(ctx, "Second", "hash-b", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.SetEnabled(ctx, admin.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.SetEnabled(ctx, second.ID, false); !errors.Is(err, auth.ErrLastEnabledUser) {
+		t.Fatalf("last enabled disable err=%v", err)
+	}
+	if err := users.SetEnabled(ctx, admin.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := users.Delete(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := users.ByID(ctx, admin.ID); err != nil || !got.Enabled || got.Username != "Admin" {
+		t.Fatalf("admin=%+v err=%v", got, err)
+	}
+}
+
+func TestPostgresManagementUserConcurrencyInvariants(t *testing.T) {
+	base := os.Getenv("LLAMARACK_TEST_POSTGRES_URL")
+	if base == "" {
+		t.Skip("LLAMARACK_TEST_POSTGRES_URL is not configured")
+	}
+
+	t.Run("bootstrap", func(t *testing.T) {
+		store, err := database.OpenConfigured(context.Background(), "", isolatedPostgresDSN(t, base))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer store.Close()
+		users := auth.NewUserStore(store)
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		for i, name := range []string{"admin-a", "admin-b"} {
+			i, name := i, name
+			go func() {
+				<-start
+				_, err := users.Bootstrap(context.Background(), name, "hash-"+string(rune('a'+i)), int64(i+1))
+				errs <- err
+			}()
+		}
+		close(start)
+		var success, completed int
+		for range 2 {
+			err := <-errs
+			switch {
+			case err == nil:
+				success++
+			case errors.Is(err, auth.ErrBootstrapCompleted):
+				completed++
+			default:
+				t.Fatalf("bootstrap err=%v", err)
+			}
+		}
+		if success != 1 || completed != 1 {
+			t.Fatalf("success=%d completed=%d", success, completed)
+		}
+		items, err := users.List(context.Background(), 0)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("users=%v err=%v", items, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		left func(auth.UserStore, int64) error
+		right func(auth.UserStore, int64) error
+	}{
+		{
+			name: "disable-disable",
+			left: func(s auth.UserStore, id int64) error { return s.SetEnabled(context.Background(), id, false) },
+			right: func(s auth.UserStore, id int64) error { return s.SetEnabled(context.Background(), id, false) },
+		},
+		{
+			name: "delete-delete",
+			left: func(s auth.UserStore, id int64) error { return s.Delete(context.Background(), id) },
+			right: func(s auth.UserStore, id int64) error { return s.Delete(context.Background(), id) },
+		},
+		{
+			name: "delete-disable",
+			left: func(s auth.UserStore, id int64) error { return s.Delete(context.Background(), id) },
+			right: func(s auth.UserStore, id int64) error { return s.SetEnabled(context.Background(), id, false) },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := database.OpenConfigured(context.Background(), "", isolatedPostgresDSN(t, base))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			users := auth.NewUserStore(store)
+			actor, err := users.Bootstrap(context.Background(), "actor", "hash", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			left, err := users.Create(context.Background(), "left", "hash", 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			right, err := users.Create(context.Background(), "right", "hash", 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := users.SetEnabled(context.Background(), actor.ID, false); err != nil {
+				t.Fatal(err)
+			}
+
+			start := make(chan struct{})
+			errs := make(chan error, 2)
+			go func() { <-start; errs <- tc.left(users, left.ID) }()
+			go func() { <-start; errs <- tc.right(users, right.ID) }()
+			close(start)
+			var success, protected int
+			for range 2 {
+				err := <-errs
+				switch {
+				case err == nil:
+					success++
+				case errors.Is(err, auth.ErrLastEnabledUser):
+					protected++
+				default:
+					t.Fatalf("mutation err=%v", err)
+				}
+			}
+			if success != 1 || protected != 1 {
+				t.Fatalf("success=%d protected=%d", success, protected)
+			}
+			items, err := users.List(context.Background(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			enabled := 0
+			for _, item := range items {
+				if item.Enabled {
+					enabled++
+				}
+			}
+			if enabled != 1 {
+				t.Fatalf("enabled users=%d items=%+v", enabled, items)
+			}
+		})
+	}
+}

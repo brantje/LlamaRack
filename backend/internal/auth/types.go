@@ -38,6 +38,7 @@ const (
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrBootstrapCompleted = errors.New("bootstrap already completed")
 	ErrLastEnabledUser    = errors.New("cannot disable or delete the last enabled management user")
 	ErrSelfDelete         = errors.New("cannot delete the current management user")
 	ErrSessionInvalid     = errors.New("session invalid")
@@ -151,7 +152,8 @@ type wsTicket struct {
 }
 
 type Service struct {
-	db database.Store
+	db    database.Store
+	users UserStore
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
@@ -171,7 +173,7 @@ func New(db database.Store, sessionLifetime time.Duration) *Service {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		db: db, sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		db: db, users: NewUserStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
 		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}
