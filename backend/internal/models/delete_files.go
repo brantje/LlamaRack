@@ -160,10 +160,6 @@ func (s *Service) ensureArtifactNotShared(ctx context.Context, modelID string, f
 }
 
 func (s *Service) ensureInstanceCompanionNotShared(ctx context.Context, modelID string, targets map[string]string) error {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT m.name, io.option_value
-FROM instance_options io
-JOIN instances i ON i.id=io.instafunc (s *Service) ensureInstanceCompanionNotShared(ctx context.Context, modelID string, targets map[string]string) error {
 	refs, err := s.store.InstanceCompanionReferencesExcluding(ctx, modelID)
 	if err != nil {
 		return err
