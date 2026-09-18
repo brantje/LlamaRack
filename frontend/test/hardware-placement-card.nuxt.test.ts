@@ -101,6 +101,44 @@ describe('GPU placement cards', () => {
     expect(wrapper.emitted('update:gpuDevices')?.some(args => JSON.stringify(args[0]) === JSON.stringify(['CUDA0']))).toBe(true)
   })
 
+  it('binds recommendation requests to unsaved Instance runtime policy and runnable context', async () => {
+    const bounded = recommendation({
+      context_length: 32768,
+      context_capability: 262144,
+      placement_ranges: ranges({
+        maximum_context: 65536,
+        zones: [
+          { start_context: 512, end_context: 65536, kind: 'partial', offload_mode: 'partial', gpu_count: 1, devices: ['CUDA0'], kv_on_gpu: true, current_fit: true, total_hardware_fit: true }
+        ]
+      })
+    })
+    mocks.request.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/hardware') return hardware
+      if (path === '/api/v1/llamacpp/config?model_id=model-1&instance_id=instance-1') return { effective: { values: { 'ctx-size': '32768' } } }
+      if (path === '/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true') return bounded
+      throw new Error(`unexpected request ${path}`)
+    })
+
+    const wrapper = await mountSuspended(HardwarePlacementEditor, {
+      route: false,
+      props: {
+        gpuMode: 'manual', gpuDevices: ['CUDA0'], tensorSplit: '1',
+        modelId: 'model-1', instanceId: 'instance-1', systemSpilloverEnabled: true, llamaOptions: {}
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Model capability: 262,144 tokens')
+    const slider = [
+      ...wrapper.findAllComponents({ name: 'Slider' }),
+      ...wrapper.findAllComponents({ name: 'USlider' })
+    ][0]
+    expect(slider).toBeTruthy()
+    expect(slider!.props('max')).toBe(1)
+    expect(wrapper.text()).toContain('65K')
+    expect(mocks.request).toHaveBeenCalledWith('/api/v1/models/model-1/recommendation?context_length=32768&instance_id=instance-1&gpu_mode=manual&gpu_devices=CUDA0&tensor_split=1&system_spillover_enabled=true')
+  })
+
   it('uses inherited context and shows a GPU-only fit with memory guidance', async () => {
     mocks.request.mockImplementation(async (path: string) => {
       if (path === '/api/v1/hardware') return hardware

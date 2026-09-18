@@ -13,7 +13,7 @@ const now = Date.parse('2026-09-01T12:00:00.000Z')
 function durableID(slug: string) { return `uuid-${slug}` }
 
 function instance(slug: string, overrides: Partial<Instance> = {}): Instance {
-  return { id: durableID(slug), slug, model_id: 'm1', name: slug.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
+  return { id: durableID(slug), slug, model_id: 'm1', name: slug.replaceAll('-', ' '), enabled: true, autoload_enabled: true, always_on: false, priority: 'normal', eviction_enabled: true, system_spillover_enabled: false, idle_unload_seconds: 0, gpu_mode: 'auto', gpu_devices: [], request_log_mode: 'metadata', ...overrides }
 }
 
 function telemetry(slug: string, overrides: Partial<RuntimeTelemetry> = {}): RuntimeTelemetry {
@@ -29,7 +29,7 @@ function seed() {
   manager.user.value = { id: 1, username: 'admin', enabled: true }
   manager.models.value = [{ id: 'm1', slug: 'coder-model', name: 'Coder Model', gguf_path: 'coder.gguf', total_bytes: 1, context_length: 8192 }]
   manager.instances.value = [
-    instance('ready', { always_on: true, idle_unload_seconds: 600, gpu_devices: ['CUDA0'] }),
+    instance('ready', { always_on: true, idle_unload_seconds: 600, gpu_devices: ['CUDA0'], system_spillover_enabled: true }),
     instance('stopped'),
     instance('failed', { autoload_enabled: false }),
     instance('downloading')
@@ -116,6 +116,7 @@ describe('Instances redesign', () => {
     expect(readyCard.text()).toContain('Always On')
     expect(readyCard.text()).toContain('Autoload')
     expect(readyCard.text()).toContain('Resource-pressure eviction allowed')
+    expect(readyCard.text()).toContain('System RAM spillover allowed')
     expect(readyCard.text()).toContain('Global GPU usage')
     expect(readyCard.text()).toContain('8.0 GiB')
     expect(readyCard.find('[data-testid="instance-id"]').text()).toBe('ready')
@@ -124,6 +125,7 @@ describe('Instances redesign', () => {
     expect(readyCard.text()).not.toContain('Duplicate')
 
     const stoppedCard = cards.find(card => card.text().includes('stopped'))!
+    expect(stoppedCard.text()).toContain('System RAM spillover off')
     expect(stoppedCard.text()).toContain('Unloaded after 300 s without inference activity.')
     const failedCard = cards.find(card => card.text().includes('failed'))!
     expect(failedCard.text()).toContain('CUDA allocation failed')
