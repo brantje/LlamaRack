@@ -2,24 +2,30 @@ package huggingface
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 
+	appcache "github.com/brantje/llamarack/backend/internal/cache"
+	
 	"github.com/brantje/llamarack/backend/internal/ggufmeta"
 )
 
 const (
+	discoveryMetadataCacheVersion = "v1"
+	discoveryMetadataCacheTTL     = 7 * 24 * time.Hour
 	discoveryMetadataLimit          = int64(8 << 20)
 	discoveryMetadataMaxLimit       = int64(50_000_000)
 	discoveryMetadataCandidateLimit = 3
 )
 
-var discoveryMetadataCache sync.Map
+var defaultDerivedMetadataCache appcache.Cache = appcache.NewObserved("hf_derived", "memory", appcache.NewMemory())
 
 // DerivedMetadata enriches the Hugging Face model-info GGUF summary with only
 // the low-level architecture dimensions needed by the KV-cache estimator. The
@@ -49,9 +55,12 @@ func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufm
 		if err := ctx.Err(); err != nil {
 			return providerDerived(lastDerived, detail.GGUF), err
 		}
-		cacheKey := c.baseURL.String() + "|" + detail.ID + "|" + detail.Revision + "|" + modelFile
-		if cached, ok := discoveryMetadataCache.Load(cacheKey); ok {
-			return providerDerived(cached.(ggufmeta.Derived), detail.GGUF), nil
+		cacheKey := c.derivedMetadataCacheKey(detail, modelFile)
+		if c.metadataCache != nil {
+			var cached ggufmeta.Derived
+			if hit, _ := c.metadataCache.Get(ctx, cacheKey, &cached); hit {
+				return providerDerived(cached, detail.GGUF), nil
+			}
 		}
 
 		rawURL, err := c.DownloadURL(detail.ID, detail.Revision, modelFile)
@@ -64,7 +73,9 @@ func (c *Client) DerivedMetadata(ctx context.Context, detail ModelDetail) (ggufm
 			derived, inspectErr := c.readDerivedMetadataRange(ctx, rawURL, limit)
 			lastDerived = derived
 			if inspectErr == nil {
-				discoveryMetadataCache.Store(cacheKey, derived)
+				if c.metadataCache != nil {
+					_ = c.metadataCache.Set(ctx, cacheKey, derived, discoveryMetadataCacheTTL)
+				}
 				return providerDerived(derived, detail.GGUF), nil
 			}
 			lastErr = fmt.Errorf("%s: %w", modelFile, inspectErr)
@@ -210,4 +221,21 @@ func (c *Client) readDerivedMetadataRange(ctx context.Context, rawURL string, li
 
 func metadataRangeExhausted(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func (c *Client) SetDerivedMetadataCache(value appcache.Cache) {
+	if c == nil || value == nil {
+		return
+	}
+	c.metadataCache = value
+}
+
+func (c *Client) derivedMetadataCacheKey(detail ModelDetail, modelFile string) string {
+	endpoint := *c.baseURL
+	endpoint.User = nil
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	identity := endpoint.String() + "\x00" + detail.ID + "\x00" + detail.Revision + "\x00" + modelFile
+	digest := sha256.Sum256([]byte(identity))
+	return "llamarack:" + discoveryMetadataCacheVersion + ":hf:derived:" + hex.EncodeToString(digest[:])
 }

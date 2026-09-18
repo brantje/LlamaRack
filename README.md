@@ -582,6 +582,8 @@ Schema upgrades run automatically during startup through embedded Goose migratio
 
 PostgreSQL is available as an optional authoritative database for 1.1 deployments. SQLite remains the default and simplest single-node setup. See [PostgreSQL storage](./docs/postgresql.md) for the supported configuration, optional Compose override, backup/restore expectations, and the current no-cross-engine-migration policy.
 
+Redis is independently optional and non-authoritative. It is used only for safe recomputable cache data; see [Optional Redis cache](./docs/redis-cache.md).
+
 ---
 
 ## Common configuration
@@ -594,6 +596,8 @@ PostgreSQL is available as an optional authoritative database for 1.1 deployment
 | `LLAMARACK_DATABASE_PATH` | `{dataDir}/manager.db` | SQLite database path |
 | `LLAMARACK_DATABASE_URL` | empty | Optional PostgreSQL URL; when set, PostgreSQL is authoritative and startup does not fall back to SQLite |
 | `DATABASE_URL` | empty | PostgreSQL URL fallback when `LLAMARACK_DATABASE_URL` is unset |
+| `LLAMARACK_REDIS_URL` | empty | Optional Redis URL for non-authoritative derived-data caching |
+| `REDIS_URL` | empty | Redis URL fallback when `LLAMARACK_REDIS_URL` is unset |
 | `LLAMARACK_LLAMA_SERVER` | `/app/llama-server` | Managed `llama-server` binary |
 | `LLAMARACK_HUGGINGFACE_BASE_URL` | `https://huggingface.co` | Hugging Face API base URL |
 | `LLAMARACK_WORKER_HOST` | `127.0.0.1` | Bind address for managed workers |

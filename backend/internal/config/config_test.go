@@ -8,7 +8,7 @@ import (
 
 func TestLoadDefaults(t *testing.T) {
 	for _, key := range []string{
-		"LLAMARACK_DATA_DIR", "LLAMARACK_MODELS_DIR", "LLAMARACK_DATABASE_PATH", "LLAMARACK_DATABASE_URL", "DATABASE_URL", "LLAMARACK_LISTEN_ADDR",
+		"LLAMARACK_DATA_DIR", "LLAMARACK_MODELS_DIR", "LLAMARACK_DATABASE_PATH", "LLAMARACK_DATABASE_URL", "DATABASE_URL", "LLAMARACK_REDIS_URL", "REDIS_URL", "LLAMARACK_LISTEN_ADDR",
 		"LLAMARACK_LLAMA_SERVER", "LLAMARACK_HUGGINGFACE_BASE_URL", "LLAMARACK_WORKER_HOST", "LLAMARACK_WORKER_PORT_START",
 		"LLAMARACK_STARTUP_TIMEOUT_SECONDS", "LLAMARACK_ALLOWED_ORIGIN",
 	} {
@@ -18,7 +18,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ListenAddr != ":8000" || cfg.DataDir != "/config" || cfg.ModelsDir != "/models" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
-	if cfg.DatabasePath != filepath.Join("/config", "manager.db") || cfg.DatabaseURL != "" {
+	if cfg.DatabasePath != filepath.Join("/config", "manager.db") || cfg.DatabaseURL != "" || cfg.RedisURL != "" {
 		t.Fatalf("database config path=%q url=%q", cfg.DatabasePath, cfg.DatabaseURL)
 	}
 	if cfg.LlamaServerPath != "llama-server" || cfg.WorkerHost != "127.0.0.1" || cfg.WorkerPortStart != 10000 {
@@ -97,5 +97,17 @@ func TestDatabaseURLFallback(t *testing.T) {
 	t.Setenv("LLAMARACK_DATABASE_URL", "postgres://preferred/db")
 	if got := Load().DatabaseURL; got != "postgres://preferred/db" {
 		t.Fatalf("database URL priority=%q", got)
+	}
+}
+
+func TestRedisURLFallback(t *testing.T) {
+	t.Setenv("LLAMARACK_REDIS_URL", "")
+	t.Setenv("REDIS_URL", "rediss://cache.example:6380/0")
+	if got := Load().RedisURL; got != "rediss://cache.example:6380/0" {
+		t.Fatalf("Redis URL fallback=%q", got)
+	}
+	t.Setenv("LLAMARACK_REDIS_URL", "redis://preferred:6379/0")
+	if got := Load().RedisURL; got != "redis://preferred:6379/0" {
+		t.Fatalf("Redis URL priority=%q", got)
 	}
 }

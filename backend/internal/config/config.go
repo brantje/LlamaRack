@@ -13,6 +13,7 @@ type Config struct {
 	ModelsDir                 string
 	DatabasePath              string
 	DatabaseURL               string
+	RedisURL                  string
 	LlamaServerPath           string
 	LlamaBenchPath            string
 	HuggingFaceBaseURL        string
@@ -43,6 +44,7 @@ func Load() Config {
 		ModelsDir:                 env("LLAMARACK_MODELS_DIR", "/models"),
 		DatabasePath:              env("LLAMARACK_DATABASE_PATH", filepath.Join(dataDir, "manager.db")),
 		DatabaseURL:               firstEnv("LLAMARACK_DATABASE_URL", "DATABASE_URL"),
+		RedisURL:                  firstEnv("LLAMARACK_REDIS_URL", "REDIS_URL"),
 		LlamaServerPath:           llamaServerPath,
 		LlamaBenchPath:            env("LLAMARACK_LLAMA_BENCH", llamaBenchDefault),
 		HuggingFaceBaseURL:        env("LLAMARACK_HUGGINGFACE_BASE_URL", "https://huggingface.co"),

@@ -16,6 +16,7 @@ import (
 	"github.com/brantje/llamarack/backend/internal/api"
 	"github.com/brantje/llamarack/backend/internal/auth"
 	"github.com/brantje/llamarack/backend/internal/benchmark"
+	appcache "github.com/brantje/llamarack/backend/internal/cache"
 	"github.com/brantje/llamarack/backend/internal/config"
 	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
@@ -179,6 +180,23 @@ func run(ctx context.Context, cfg config.Config) error {
 	hfClient, err := huggingface.NewClient(cfg.HuggingFaceBaseURL, providerSecrets.GetToken)
 	if err != nil {
 		return fmt.Errorf("initialize Hugging Face provider: %w", err)
+	}
+	if cfg.RedisURL != "" {
+		redisCache, cacheErr := appcache.NewRedis(cfg.RedisURL)
+		if cacheErr != nil {
+			slog.Warn("Redis cache disabled", "error", cacheErr)
+		} else {
+			defer redisCache.Close()
+			if pingErr := redisCache.Ping(ctx); pingErr != nil {
+				slog.Warn("Redis cache unavailable; continuing with in-memory cache", "error", pingErr)
+			} else {
+				hfClient.SetDerivedMetadataCache(appcache.NewLayered(
+					appcache.NewObserved("hf_derived", "memory", appcache.NewMemory()),
+					appcache.NewObserved("hf_derived", "redis", redisCache),
+					7*24*time.Hour,
+				))
+			}
+		}
 	}
 	downloadManager := downloads.New(ctx, db, cfg.ModelsDir, hfClient, func(ctx context.Context) (int64, error) {
 		return managerSettings.Int64(ctx, settings.MaxDownloadBytes)

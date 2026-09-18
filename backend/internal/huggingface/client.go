@@ -16,14 +16,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	appcache "github.com/brantje/llamarack/backend/internal/cache"
 )
 
 type TokenProvider func(context.Context) (string, error)
 
 type Client struct {
-	baseURL *url.URL
-	http    *http.Client
-	token   TokenProvider
+	baseURL       *url.URL
+	http          *http.Client
+	token         TokenProvider
+	metadataCache appcache.Cache
 }
 
 type SearchOptions struct {
@@ -127,7 +130,7 @@ func NewClient(base string, token TokenProvider) (*Client, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("invalid Hugging Face base URL")
 	}
-	c := &Client{baseURL: u, token: token}
+	c := &Client{baseURL: u, token: token, metadataCache: defaultDerivedMetadataCache}
 	c.http = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
