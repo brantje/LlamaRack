@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -184,10 +183,10 @@ func TestUserAdministrationSafeguardsAndPasswords(t *testing.T) {
 	if _, err := s.RevokeOtherSessions(ctx, admin.ID, adminSession.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RevokeSession(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.RevokeSession(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing revoke=%v", err)
 	}
-	if err := s.RevokeOwnSession(ctx, admin.ID, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.RevokeOwnSession(ctx, admin.ID, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing own revoke=%v", err)
 	}
 	if _, err := s.RevokeAllSessions(ctx, admin.ID); err != nil {
