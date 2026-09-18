@@ -22,7 +22,7 @@ func TestRecommendationHandler(t *testing.T) {
 	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
 	gib := int64(1024 * 1024 * 1024)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: hardware.Snapshot{
 		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 16 * gib,
 		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12 * gib, FreeBytes: 10 * gib}},
 	}})
@@ -49,7 +49,7 @@ func TestRecommendationReturnsEstimateWhenHardwareProbeFails(t *testing.T) {
 	f := newAPIFixture(t, nil)
 	cookie := bootstrapAndLogin(t, f)
 	model := createModel(t, f, cookie)
-	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{err: errors.New("probe unavailable")})
+	handler := NewRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{err: errors.New("probe unavailable")})
 	w := doRequest(t, handler, http.MethodGet, "/api/v1/models/"+model.ID+"/recommendation", nil, cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "probe unavailable") || !strings.Contains(w.Body.String(), `"confidence":"low"`) {
 		t.Fatalf("hardware failure=%d body=%s", w.Code, w.Body.String())
@@ -372,7 +372,7 @@ func TestRecommendationAccountsForPendingSchedulerReservation(t *testing.T) {
 	if err != nil || lease.ID == "" {
 		t.Fatalf("pending reservation=%+v err=%v", lease, err)
 	}
-	handler := NewReservationAwareRecommendationHandler(f.auth, f.models, staticHardware{snapshot: raw}, ledger)
+	handler := NewReservationAwareRecommendationHandler(f.auth, f.models, f.instances, f.config, staticHardware{snapshot: raw}, ledger)
 	w := doRequest(t, handler, http.MethodGet,
 		"/api/v1/models/"+model.ID+"/recommendation?context_length=4096", nil, cookie)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"current_fit":false`) {
