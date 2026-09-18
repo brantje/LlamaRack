@@ -2,7 +2,7 @@ package observability
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,8 +19,13 @@ func playgroundTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return New(db)
+	service := New(db)
+	observabilityTestDBs.Store(service, db)
+	t.Cleanup(func() {
+		observabilityTestDBs.Delete(service)
+		_ = db.Close()
+	})
+	return service
 }
 
 func TestPlaygroundDiagnosticsUsesRequestRecordAndCorrelatedLifecycle(t *testing.T) {
@@ -114,7 +119,7 @@ func TestInferenceTurnStatsPreserveUnavailableVersusZero(t *testing.T) {
 func TestInferenceTurnStatsRequiresCorrelatedRequest(t *testing.T) {
 	service := playgroundTestService(t)
 	value := 1.0
-	if err := service.SaveInferenceTurnStats(context.Background(), "missing", InferenceTurnStats{PromptMS: &value}); err != sql.ErrNoRows {
+	if err := service.SaveInferenceTurnStats(context.Background(), "missing", InferenceTurnStats{PromptMS: &value}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing correlation err=%v", err)
 	}
 	if err := service.SaveInferenceTurnStats(context.Background(), " ", InferenceTurnStats{PromptMS: &value}); err == nil {

@@ -36,7 +36,7 @@ func TestModelSlugCollisionsAndOptionFailuresRollbackIdentity(t *testing.T) {
 		t.Fatalf("slug collision mutated durable resource: before=%+v after=%+v", first, unchanged)
 	}
 
-	if _, err := service.db.ExecContext(ctx, `DROP TABLE model_options`); err != nil {
+	if _, err := testModelDB(t, service).ExecContext(ctx, `DROP TABLE model_options`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.Update(ctx, first.ID, UpdateModelInput{

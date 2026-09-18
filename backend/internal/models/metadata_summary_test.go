@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/brantje/llamarack/backend/internal/llamaconfig"
 )
 
 func TestMetadataSummaryServicePaths(t *testing.T) {
@@ -45,7 +47,8 @@ func TestMetadataSummaryServicePaths(t *testing.T) {
 		t.Fatalf("explicit context refresh=%+v err=%v", refreshed, err)
 	}
 
-	unregister := s.RegisterDetectedLlamaDefaults()
+	configStore := llamaconfig.New(testModelDB(t, s))
+	unregister := configStore.RegisterDetectedDefaultsProvider(s.DetectedLlamaDefaults)
 	unregister()
 }
 

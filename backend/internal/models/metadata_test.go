@@ -147,7 +147,7 @@ func TestRunMetadataReconcilerAcceptsDefaultIntervalAndStopsOnCancelledContext(t
 
 func TestRefreshUnknownContextsReturnsListError(t *testing.T) {
 	s, _ := testModelService(t)
-	if err := s.DB().Close(); err != nil {
+	if err := testModelDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RefreshUnknownContexts(context.Background()); err == nil {

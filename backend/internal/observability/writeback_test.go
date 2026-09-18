@@ -2,7 +2,6 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -190,7 +189,7 @@ func TestWritebackBuffersStoredResponseState(t *testing.T) {
 	if err != nil || !stored.Deleted {
 		t.Fatalf("deleted buffered response=%+v err=%v", stored, err)
 	}
-	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_buffered"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.MarkOpenAIResponseDeleted(ctx, "resp_buffered"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("second delete err=%v", err)
 	}
 }
