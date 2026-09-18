@@ -157,6 +157,7 @@ type Service struct {
 	sessions SessionStore
 	apiKeys   APIKeyStore
 	serviceAccounts ServiceAccountStore
+	oidc            OIDCStore
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
@@ -176,7 +177,7 @@ func New(db database.Store, sessionLifetime time.Duration) *Service {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		db: db, users: NewUserStore(db), sessions: NewSessionStore(db), apiKeys: NewAPIKeyStore(db), serviceAccounts: NewServiceAccountStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		db: db, users: NewUserStore(db), sessions: NewSessionStore(db), apiKeys: NewAPIKeyStore(db), serviceAccounts: NewServiceAccountStore(db), oidc: NewOIDCStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
 		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}

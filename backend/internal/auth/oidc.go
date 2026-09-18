@@ -226,13 +226,17 @@ func (m *OIDCManager) CreateProvider(ctx context.Context, in OIDCProviderInput) 
 		return OIDCProvider{}, err
 	}
 	now := time.Now().Unix()
-	scopes, _ := json.Marshal(in.Scopes)
-	_, err = m.auth.db.ExecContext(ctx, `INSERT INTO oidc_providers(id,name,enabled,issuer,discovery_url,client_id,scopes,username_claim,authorization_endpoint,token_endpoint,jwks_url,last_test_succeeded,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, in.Name, boolInt(in.Enabled), in.Issuer, in.DiscoveryURL, in.ClientID, string(scopes), in.UsernameClaim, in.AuthorizationEndpoint, in.TokenEndpoint, in.JWKSURL, 0, now, now)
-	if err != nil {
+	provider := OIDCProvider{
+		ID: id, Name: in.Name, Enabled: in.Enabled, Issuer: in.Issuer, DiscoveryURL: in.DiscoveryURL,
+		ClientID: in.ClientID, Scopes: append([]string(nil), in.Scopes...), UsernameClaim: in.UsernameClaim,
+		AuthorizationEndpoint: in.AuthorizationEndpoint, TokenEndpoint: in.TokenEndpoint, JWKSURL: in.JWKSURL,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := m.auth.oidc.CreateProvider(ctx, provider); err != nil {
 		return OIDCProvider{}, err
 	}
 	if err := m.secrets.SetSecret(ctx, oidcSecretName(id), strings.TrimSpace(*in.ClientSecret)); err != nil {
-		_, _ = m.auth.db.ExecContext(ctx, "DELETE FROM oidc_providers WHERE id=?", id)
+		_ = m.auth.oidc.DeleteProvider(ctx, id)
 		return OIDCProvider{}, err
 	}
 	return m.GetProvider(ctx, id)
@@ -263,16 +267,26 @@ func (m *OIDCManager) UpdateProvider(ctx context.Context, id string, in OIDCProv
 			}
 		}
 	}
-	scopes, _ := json.Marshal(in.Scopes)
-	tested, testedAt := current.LastTestSucceeded, any(nil)
-	if current.LastTestedAt != nil {
-		testedAt = *current.LastTestedAt
-	}
+	tested := current.LastTestSucceeded
+	testedAt := current.LastTestedAt
 	if changed || (!in.Enabled && current.Enabled) {
-		tested, testedAt = false, nil
+		tested = false
+		testedAt = nil
 	}
-	_, err = m.auth.db.ExecContext(ctx, `UPDATE oidc_providers SET name=?,enabled=?,issuer=?,discovery_url=?,client_id=?,scopes=?,username_claim=?,authorization_endpoint=?,token_endpoint=?,jwks_url=?,last_tested_at=?,last_test_succeeded=?,updated_at=? WHERE id=?`, in.Name, boolInt(in.Enabled), in.Issuer, in.DiscoveryURL, in.ClientID, string(scopes), in.UsernameClaim, in.AuthorizationEndpoint, in.TokenEndpoint, in.JWKSURL, testedAt, boolInt(tested), time.Now().Unix(), id)
-	if err != nil {
+	current.Name = in.Name
+	current.Enabled = in.Enabled
+	current.Issuer = in.Issuer
+	current.DiscoveryURL = in.DiscoveryURL
+	current.ClientID = in.ClientID
+	current.Scopes = append([]string(nil), in.Scopes...)
+	current.UsernameClaim = in.UsernameClaim
+	current.AuthorizationEndpoint = in.AuthorizationEndpoint
+	current.TokenEndpoint = in.TokenEndpoint
+	current.JWKSURL = in.JWKSURL
+	current.LastTestedAt = testedAt
+	current.LastTestSucceeded = tested
+	current.UpdatedAt = time.Now().Unix()
+	if err := m.auth.oidc.UpdateProvider(ctx, current); err != nil {
 		return OIDCProvider{}, err
 	}
 	if in.ClientSecret != nil && strings.TrimSpace(*in.ClientSecret) != "" {
@@ -290,14 +304,14 @@ func (m *OIDCManager) DeleteProvider(ctx context.Context, id string) error {
 	if err := m.ensureProviderMayBeDisabled(ctx, id); err != nil {
 		return err
 	}
-	if _, err := m.auth.db.ExecContext(ctx, "DELETE FROM oidc_providers WHERE id=?", id); err != nil {
+	if err := m.auth.oidc.DeleteProvider(ctx, id); err != nil {
 		return err
 	}
 	return m.secrets.DeleteSecret(ctx, oidcSecretName(id))
 }
 
 func (m *OIDCManager) GetProvider(ctx context.Context, id string) (OIDCProvider, error) {
-	provider, err := scanOIDCProvider(m.auth.db.QueryRowContext(ctx, `SELECT id,name,enabled,issuer,discovery_url,client_id,scopes,username_claim,authorization_endpoint,token_endpoint,jwks_url,last_tested_at,last_test_succeeded,created_at,updated_at FROM oidc_providers WHERE id=?`, id).Scan)
+	provider, err := m.auth.oidc.GetProvider(ctx, id)
 	if err != nil {
 		return OIDCProvider{}, err
 	}
@@ -306,23 +320,8 @@ func (m *OIDCManager) GetProvider(ctx context.Context, id string) (OIDCProvider,
 }
 
 func (m *OIDCManager) ListProviders(ctx context.Context) ([]OIDCProvider, error) {
-	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name,enabled,issuer,discovery_url,client_id,scopes,username_claim,authorization_endpoint,token_endpoint,jwks_url,last_tested_at,last_test_succeeded,created_at,updated_at FROM oidc_providers ORDER BY LOWER(name),name`)
+	out, err := m.auth.oidc.ListProviders(ctx)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]OIDCProvider, 0)
-	for rows.Next() {
-		provider, err := scanOIDCProvider(rows.Scan)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, provider)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	for i := range out {
@@ -335,42 +334,8 @@ func (m *OIDCManager) ListProviders(ctx context.Context) ([]OIDCProvider, error)
 	return out, nil
 }
 
-type scanFunc func(...any) error
-
-func scanOIDCProvider(scan scanFunc) (OIDCProvider, error) {
-	var provider OIDCProvider
-	var enabled, tested int
-	var scopesRaw string
-	var testedAt sql.NullInt64
-	if err := scan(&provider.ID, &provider.Name, &enabled, &provider.Issuer, &provider.DiscoveryURL, &provider.ClientID, &scopesRaw, &provider.UsernameClaim, &provider.AuthorizationEndpoint, &provider.TokenEndpoint, &provider.JWKSURL, &testedAt, &tested, &provider.CreatedAt, &provider.UpdatedAt); err != nil {
-		return OIDCProvider{}, err
-	}
-	provider.Enabled, provider.LastTestSucceeded = enabled != 0, tested != 0
-	if testedAt.Valid {
-		v := testedAt.Int64
-		provider.LastTestedAt = &v
-	}
-	if err := json.Unmarshal([]byte(scopesRaw), &provider.Scopes); err != nil || len(provider.Scopes) == 0 {
-		provider.Scopes = []string{"openid"}
-	}
-	return provider, nil
-}
-
 func (m *OIDCManager) PublicProviders(ctx context.Context) ([]PublicOIDCProvider, error) {
-	rows, err := m.auth.db.QueryContext(ctx, `SELECT id,name FROM oidc_providers WHERE enabled=1 ORDER BY LOWER(name),name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]PublicOIDCProvider, 0)
-	for rows.Next() {
-		var item PublicOIDCProvider
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return m.auth.oidc.PublicProviders(ctx)
 }
 
 func (m *OIDCManager) TestProvider(ctx context.Context, id string) (OIDCProvider, error) {
@@ -389,7 +354,7 @@ func (m *OIDCManager) TestProvider(ctx context.Context, id string) (OIDCProvider
 		testErr = errors.New("client secret is not configured")
 	}
 	now := time.Now().Unix()
-	if _, err := m.auth.db.ExecContext(ctx, "UPDATE oidc_providers SET last_tested_at=?,last_test_succeeded=?,updated_at=? WHERE id=?", now, boolInt(testErr == nil), now, id); err != nil {
+	if err := m.auth.oidc.SetProviderTestResult(ctx, id, now, testErr == nil); err != nil {
 		return OIDCProvider{}, err
 	}
 	updated, err := m.GetProvider(ctx, id)
@@ -429,16 +394,7 @@ func (m *OIDCManager) CanDisableLocalLogin(ctx context.Context) (bool, error) {
 }
 
 func (m *OIDCManager) hasUsableProvider(ctx context.Context, excludeID string) (bool, error) {
-	query, args := "SELECT COUNT(*) FROM oidc_providers WHERE enabled=1 AND last_test_succeeded=1", []any{}
-	if excludeID != "" {
-		query += " AND id<>?"
-		args = append(args, excludeID)
-	}
-	var count int
-	if err := m.auth.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	return m.auth.oidc.HasUsableProvider(ctx, excludeID)
 }
 
 func (m *OIDCManager) ensureProviderMayBeDisabled(ctx context.Context, id string) error {
@@ -634,7 +590,7 @@ func (m *OIDCManager) CompleteCallback(ctx context.Context, providerID, state, c
 		return "", err
 	}
 	now := time.Now().Unix()
-	if _, err := m.auth.db.ExecContext(ctx, "UPDATE users SET last_login_at=? WHERE id=?", now, user.ID); err == nil {
+	if err := m.auth.sessions.CommitLogin(ctx, user.ID, "", "", now, nil); err == nil {
 		result.User.LastLoginAt = &now
 	}
 	exchangeCode, err := randomToken(24)
@@ -724,8 +680,7 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 	if subject == "" {
 		return User{}, errors.New("OIDC subject is missing")
 	}
-	var userID int64
-	err := m.auth.db.QueryRowContext(ctx, "SELECT user_id FROM external_identities WHERE provider_id=? AND issuer=? AND subject=?", provider.ID, provider.Issuer, subject).Scan(&userID)
+	userID, err := m.auth.oidc.IdentityUserID(ctx, provider.ID, provider.Issuer, subject)
 	if err == nil {
 		user, err := m.auth.UserByID(ctx, userID)
 		if err != nil || !user.Enabled {
@@ -733,7 +688,7 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 		}
 		return user, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return User{}, err
 	}
 	jit, err := m.settings.Bool(ctx, settings.OIDCJITProvisioningEnabled)
@@ -747,8 +702,7 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 	if len(username) < 2 {
 		return User{}, errors.New("OIDC username claim is too short")
 	}
-	var existingID int64
-	err = m.auth.db.QueryRowContext(ctx, "SELECT id FROM users WHERE LOWER(username)=LOWER(?)", username).Scan(&existingID)
+	existingID, err := m.auth.oidc.UserIDByUsername(ctx, username)
 	if err == nil {
 		autoLink, err := m.settings.Bool(ctx, settings.OIDCAutoLinkEnabled)
 		if err != nil {
@@ -766,53 +720,14 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 		}
 		return user, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return User{}, err
 	}
-	tx, err := database.Begin(ctx, m.auth.db)
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-	now := time.Now().Unix()
-	var id int64
-	if err := tx.QueryRowContext(ctx, "INSERT INTO users(username,password_hash,enabled,created_at) VALUES(?,?,1,?) RETURNING id", username, "!oidc", now).Scan(&id); err != nil {
-		return User{}, err
-	}
-	identityID, err := randomToken(12)
-	if err != nil {
-		return User{}, err
-	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", identityID, provider.ID, provider.Issuer, subject, id, now); err != nil {
-		return User{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-	return User{ID: id, Username: username, Enabled: true, CreatedAt: now}, nil
+	return m.auth.oidc.CreateJITUser(ctx, username, provider.ID, provider.Issuer, subject, time.Now().Unix())
 }
 
 func (m *OIDCManager) ListIdentities(ctx context.Context, userID int64) ([]ExternalIdentity, error) {
-	query, args := "SELECT id,provider_id,issuer,subject,user_id,created_at FROM external_identities", []any{}
-	if userID > 0 {
-		query += " WHERE user_id=?"
-		args = append(args, userID)
-	}
-	query += " ORDER BY created_at,id"
-	rows, err := m.auth.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]ExternalIdentity, 0)
-	for rows.Next() {
-		var item ExternalIdentity
-		if err := rows.Scan(&item.ID, &item.ProviderID, &item.Issuer, &item.Subject, &item.UserID, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
+	return m.auth.oidc.ListIdentities(ctx, userID)
 }
 
 func (m *OIDCManager) LinkIdentity(ctx context.Context, userID int64, providerID, issuer, subject string) (ExternalIdentity, error) {
@@ -842,45 +757,23 @@ func (m *OIDCManager) linkIdentity(ctx context.Context, userID int64, providerID
 	if err != nil {
 		return ExternalIdentity{}, err
 	}
-	now := time.Now().Unix()
-	if _, err := m.auth.db.ExecContext(ctx, "INSERT INTO external_identities(id,provider_id,issuer,subject,user_id,created_at) VALUES(?,?,?,?,?,?)", id, providerID, issuer, subject, userID, now); err != nil {
+	item := ExternalIdentity{ID: id, ProviderID: providerID, Issuer: issuer, Subject: subject, UserID: userID, CreatedAt: time.Now().Unix()}
+	if err := m.auth.oidc.LinkIdentity(ctx, item); err != nil {
 		return ExternalIdentity{}, err
 	}
-	return ExternalIdentity{ID: id, ProviderID: providerID, Issuer: issuer, Subject: subject, UserID: userID, CreatedAt: now}, nil
+	return item, nil
 }
 
 func (m *OIDCManager) UnlinkIdentity(ctx context.Context, id string) error {
-	result, err := m.auth.db.ExecContext(ctx, "DELETE FROM external_identities WHERE id=?", strings.TrimSpace(id))
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return m.auth.oidc.UnlinkIdentity(ctx, strings.TrimSpace(id))
 }
 
 func (m *OIDCManager) UnlinkOwnIdentity(ctx context.Context, userID int64, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" || userID <= 0 {
-		return sql.ErrNoRows
+		return database.ClassifyError(sql.ErrNoRows)
 	}
-	result, err := m.auth.db.ExecContext(ctx, "DELETE FROM external_identities WHERE id=? AND user_id=?", id, userID)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return m.auth.oidc.UnlinkOwnIdentity(ctx, userID, id)
 }
 
 func (m *OIDCManager) oidcTrust(ctx context.Context) (bool, []string, error) {
