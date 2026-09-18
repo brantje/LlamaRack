@@ -555,7 +555,10 @@ func TestLedgerAwareRuntimeEvictionPlanningUsesCommittedReservations(t *testing.
 	}
 
 	owner := ResourceOwner{Kind: ResourceOwnerInstance, ID: "requester"}
-	planning := ledger.PlanningSnapshotWithCredits(raw, owner, nil)
+	snapshotFor := func(selected []Candidate) hardware.Snapshot {
+		return ledger.PlanningSnapshotWithCredits(raw, owner, CreditsFromCandidates(selected))
+	}
+	planning := snapshotFor(nil)
 	request.Snapshot = planning
 	blocked, err := PlanRuntime(request)
 	if err != nil {
@@ -569,7 +572,7 @@ func TestLedgerAwareRuntimeEvictionPlanningUsesCommittedReservations(t *testing.
 		ModelID: "victim-model", InstanceID: "victim", Ready: true, EvictionEnabled: true,
 		Resources: CandidateResources{GPU: []GPUResource{{DeviceID: "CUDA0", Bytes: 10 * gib}}},
 	}
-	evictionPlan := PlanRuntimeEvictions([]Candidate{candidate}, planning, request)
+	evictionPlan := PlanRuntimeEvictionsWithSnapshots([]Candidate{candidate}, request, snapshotFor)
 	if !evictionPlan.Fits || len(evictionPlan.Evict) != 1 || evictionPlan.Evict[0].InstanceID != "victim" {
 		t.Fatalf("ledger-aware eviction plan=%+v", evictionPlan)
 	}

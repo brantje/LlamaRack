@@ -234,7 +234,9 @@ func TestEvictionFreshSnapshotMustRecoverCapacityBeforeRequesterStarts(t *testin
 	}
 	victim := items[0]
 	exec("UPDATE models SET total_bytes=? WHERE id=?", 8*testGiB, m.ID)
-	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * testGiB}}}}}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{
+		ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 0, FreeBytes: 16 * testGiB,
+	}}}}}
 	if _, err := s.StartInstance(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -246,8 +248,8 @@ func TestEvictionFreshSnapshotMustRecoverCapacityBeforeRequesterStarts(t *testin
 		t.Fatal(err)
 	}
 	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{
-		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * testGiB}}},
-		{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * testGiB}}},
+		{GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 12 * testGiB, FreeBytes: 4 * testGiB}}},
+		{GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 16 * testGiB, UsedBytes: 12 * testGiB, FreeBytes: 4 * testGiB}}},
 	}}
 	if _, err := s.StartInstance(ctx, requester.ID); !errors.Is(err, errResourcePressureBlocked) {
 		t.Fatalf("fresh snapshot without recovered capacity must block requester: %v", err)

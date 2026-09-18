@@ -238,8 +238,8 @@ func TestAttributeResourcesPrefersObservedThenLeaseThenDevices(t *testing.T) {
 		LeaseGPUs:      []GPUReservation{{DeviceID: "CUDA0", Bytes: 8 * gib}},
 		Devices:        []string{"CUDA0"},
 	})
-	if len(observed.GPU) != 2 || observed.GPU[0].Bytes != 3*gib || observed.GPU[1].DeviceID != "CUDA1" {
-		t.Fatalf("observed=%+v", observed)
+	if len(observed.GPU) != 2 || observed.GPU[0].Bytes != 8*gib || observed.GPU[1].DeviceID != "CUDA1" {
+		t.Fatalf("observed must be floored by the committed lease: %+v", observed)
 	}
 
 	lease := AttributeResources(ResourceAttribution{

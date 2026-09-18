@@ -155,20 +155,33 @@ func PlanEvictions(candidates []Candidate, snapshot hardware.Snapshot, request P
 }
 
 func PlanRuntimeEvictions(candidates []Candidate, snapshot hardware.Snapshot, request RuntimePlanRequest) Plan {
-	request.Snapshot = snapshot
+	return PlanRuntimeEvictionsWithSnapshots(candidates, request, func(selected []Candidate) hardware.Snapshot {
+		return snapshotWithCandidateCredits(snapshot, selected)
+	})
+}
+
+// PlanRuntimeEvictionsWithSnapshots evaluates each proposed victim set against
+// a caller-provided capacity view. Lifecycle uses this to re-run the ledger's
+// reservation accounting from the original hardware snapshot for every set,
+// so eviction planning and AcquireRuntime see identical schedulable capacity.
+func PlanRuntimeEvictionsWithSnapshots(candidates []Candidate, request RuntimePlanRequest, snapshotFor func([]Candidate) hardware.Snapshot) Plan {
+	if snapshotFor == nil {
+		return Plan{}
+	}
+	currentSnapshot := snapshotFor(nil)
+	request.Snapshot = currentSnapshot
 	current, err := PlanRuntime(request)
 	if err == nil && current.Fits {
 		return Plan{Fits: true, Devices: append([]string(nil), current.Placement.Devices...)}
 	}
 
-	currentSnapshot := snapshot
 	selected := make([]Candidate, 0, len(candidates))
 	for _, candidate := range RankEvictionCandidates(candidates) {
 		if candidateGPUBytes(candidate) <= 0 && candidate.Resources.HostRAMBytes <= 0 {
 			continue
 		}
 		trial := append(append([]Candidate(nil), selected...), candidate)
-		trialSnapshot := snapshotWithCandidateCredits(snapshot, trial)
+		trialSnapshot := snapshotFor(trial)
 		request.Snapshot = trialSnapshot
 		after, err := PlanRuntime(request)
 		if err != nil {
@@ -177,7 +190,7 @@ func PlanRuntimeEvictions(candidates []Candidate, snapshot hardware.Snapshot, re
 		if !runtimePlanProgress(current, after, currentSnapshot, trialSnapshot, request.Placement) {
 			continue
 		}
-		selected = append(selected, candidate)
+		selected = trial
 		current = after
 		currentSnapshot = trialSnapshot
 		if after.Fits {

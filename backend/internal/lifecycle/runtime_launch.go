@@ -80,16 +80,19 @@ func (s *Service) prepareRuntimeLaunch(
 			return scheduler.RuntimePlan{}, fmt.Errorf("%w: eviction attempts exhausted", errResourcePressureBlocked)
 		}
 
-		planning := s.reservations.PlanningSnapshotWithCredits(
-			snapshot,
-			scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerInstance, ID: instance.ID},
-			scheduler.CreditsFromCandidates(stopped),
-		)
+		owner := scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerInstance, ID: instance.ID}
+		baseCredits := scheduler.CreditsFromCandidates(stopped)
+		snapshotFor := func(selected []scheduler.Candidate) hardware.Snapshot {
+			credits := append([]scheduler.Credit(nil), baseCredits...)
+			credits = append(credits, scheduler.CreditsFromCandidates(selected)...)
+			return s.reservations.PlanningSnapshotWithCredits(snapshot, owner, credits)
+		}
+		planning := snapshotFor(nil)
 		candidates, err := s.evictionCandidates(ctx, planning, instance.ID, skip)
 		if err != nil {
 			return scheduler.RuntimePlan{}, err
 		}
-		eviction := scheduler.PlanRuntimeEvictions(candidates, planning, request)
+		eviction := scheduler.PlanRuntimeEvictionsWithSnapshots(candidates, request, snapshotFor)
 		if !eviction.Fits {
 			return scheduler.RuntimePlan{}, runtimePressureError(plan)
 		}
