@@ -9,6 +9,11 @@ ARG LLAMA_CPP_RELEASE=
 ARG LLAMA_CPP_BUILD=
 ARG LLAMA_CPP_IMAGE=
 
+FROM ghcr.io/ggml-org/llama.cpp:full AS llama-bench-cpu
+FROM ghcr.io/ggml-org/llama.cpp:full-cuda AS llama-bench-cuda
+FROM llama-bench-cpu AS llama-bench-unknown
+FROM llama-bench-${LLAMARACK_VARIANT} AS llama-bench-runtime
+
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS frontend-build
 ARG NUXT_PUBLIC_API_BASE=
 ARG LLAMARACK_EXTERNAL_URL=
@@ -64,12 +69,21 @@ LABEL org.opencontainers.image.version="${LLAMARACK_VERSION}" \
       io.llamarack.llama.cpp.image="${LLAMA_CPP_IMAGE}"
 COPY --from=backend-build /out/llamarack /usr/local/bin/llamarack
 COPY --from=frontend-build /src/frontend/.output/public /app/frontend
-RUN mkdir -p /config /models && \
+COPY --from=llama-bench-runtime /app/llama-bench /app/llama-bench
+RUN test -x /app/llama-bench && \
+    case "$LLAMA_CPP_BUILD" in \
+      b[0-9]*) expected_build="${LLAMA_CPP_BUILD#b}"; \
+        /app/llama-bench --version 2>&1 | grep -F "$expected_build" >/dev/null || { \
+          echo "llama-bench does not match expected llama.cpp build ${LLAMA_CPP_BUILD}" >&2; exit 1; \
+        } ;; \
+    esac && \
+    mkdir -p /config /models && \
     chown -R 1000:1000 /config /models
 ENV LLAMARACK_LISTEN_ADDR=:8000 \
     LLAMARACK_DATA_DIR=/config \
     LLAMARACK_MODELS_DIR=/models \
     LLAMARACK_LLAMA_SERVER=/app/llama-server \
+    LLAMARACK_LLAMA_BENCH=/app/llama-bench \
     LLAMARACK_FRONTEND_DIR=/app/frontend
 VOLUME ["/config", "/models"]
 EXPOSE 8000

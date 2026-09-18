@@ -1158,10 +1158,10 @@ func (s *Service) preparePlacementWithDemand(ctx context.Context, i instances.In
 		slog.Warn("hardware snapshot unavailable; preserving compatibility placement", "instance_id", i.ID, "error", err)
 		return scheduler.Placement{}, nil
 	}
-	if len(snapshot.GPUs) == 0 {
+	if len(snapshot.GPUs) == 0 && demand.HostRAMBytes <= 0 {
 		return scheduler.Placement{}, nil
 	}
-	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
+	request := scheduler.PlacementRequest{RequiredBytes: requiredBytes, HostRAMBytes: demand.HostRAMBytes, Mode: i.GPUMode, Devices: i.GPUDevices, TensorSplit: i.TensorSplit}
 	lease, err := s.reservations.Acquire(scheduler.AcquireRequest{InstanceID: i.ID, Snapshot: snapshot, Placement: request, HostRAM: demand.HostRAMBytes})
 	if err != nil {
 		return scheduler.Placement{}, err

@@ -382,6 +382,39 @@ func TestPlanEvictionsSkipsUnknownDeviceEstimate(t *testing.T) {
 	}
 }
 
+func TestPlanEvictionsFreesHostRAM(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes:     32 * gib,
+		RAMAvailableBytes: 4 * gib,
+		GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 16 * gib}},
+	}
+	victim := Candidate{
+		ModelID: "victim", InstanceID: "victim", Priority: "low", Ready: true, EvictionEnabled: true,
+		Resources: CandidateResources{HostRAMBytes: 8 * gib},
+	}
+	plan := PlanEvictions([]Candidate{victim}, snapshot, PlacementRequest{RequiredBytes: 4 * gib, HostRAMBytes: 8 * gib})
+	if !plan.Fits || len(plan.Evict) != 1 || plan.FreedHostRAMBytes != 8*gib {
+		t.Fatalf("host RAM eviction plan=%+v", plan)
+	}
+}
+
+func TestHostRAMFitsAndCandidateCredits(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	snapshot := hardware.Snapshot{RAMTotalBytes: 16 * gib, RAMAvailableBytes: 6 * gib}
+	if !hostRAMFits(snapshot, 0) || !hostRAMFits(hardware.Snapshot{}, 8*gib) {
+		t.Fatal("host RAM fit edge cases")
+	}
+	if hostRAMFits(snapshot, 8*gib) || !hostRAMFits(snapshot, 4*gib) {
+		t.Fatalf("available=%d", snapshot.RAMAvailableBytes)
+	}
+	candidate := Candidate{InstanceID: "victim", Resources: CandidateResources{HostRAMBytes: 5 * gib}}
+	adjusted := ApplyCandidateCredits(snapshot, []Candidate{candidate})
+	if adjusted.RAMAvailableBytes != 11*gib {
+		t.Fatalf("credited snapshot=%+v", adjusted)
+	}
+}
+
 func TestPlanEvictionsAutoFallsBackToMultiGPU(t *testing.T) {
 	const gib int64 = 1024 * 1024 * 1024
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{

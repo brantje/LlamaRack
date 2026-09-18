@@ -42,10 +42,12 @@ func TestDockerNVIDIATelemetryRuntimeConfiguration(t *testing.T) {
 	}
 
 	dockerfilePath := filepath.Join(repoRoot, "Dockerfile")
+	backendDockerfilePath := filepath.Join(backendRoot, "Dockerfile")
 	prodComposePath := filepath.Join(repoRoot, "docker-compose.yml")
 	prodNVIDIAComposePath := filepath.Join(repoRoot, "docker-compose.nvidia.yml")
 	devNVIDIAComposePath := filepath.Join(repoRoot, "docker-compose.dev.nvidia.yml")
 	dockerfile := read(dockerfilePath)
+	backendDockerfile := read(backendDockerfilePath)
 	prodCompose := read(prodComposePath)
 	prodNVIDIACompose := read(prodNVIDIAComposePath)
 	devNVIDIACompose := read(devNVIDIAComposePath)
@@ -71,11 +73,31 @@ func TestDockerNVIDIATelemetryRuntimeConfiguration(t *testing.T) {
 	)
 	assertContains(devNVIDIAComposePath, devNVIDIACompose,
 		"LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}",
+		"LLAMA_BENCH_VARIANT: cuda",
 		"NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}",
 		"NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}",
 		"driver: nvidia",
 		"count: all",
 		"capabilities: [gpu]",
+	)
+
+	// llama.cpp server images intentionally omit llama-bench. Keep the small
+	// server runtime image, but select the matching full-image build stage and
+	// copy only llama-bench into the final image. Release builds additionally
+	// verify the copied binary reports the expected llama.cpp build number.
+	assertContains(dockerfilePath, dockerfile,
+		"FROM ghcr.io/ggml-org/llama.cpp:full AS llama-bench-cpu",
+		"FROM ghcr.io/ggml-org/llama.cpp:full-cuda AS llama-bench-cuda",
+		"FROM llama-bench-${LLAMARACK_VARIANT} AS llama-bench-runtime",
+		"COPY --from=llama-bench-runtime /app/llama-bench /app/llama-bench",
+		"llama-bench does not match expected llama.cpp build",
+		"LLAMARACK_LLAMA_BENCH=/app/llama-bench",
+	)
+	assertContains(backendDockerfilePath, backendDockerfile,
+		"ARG LLAMA_BENCH_VARIANT=cpu",
+		"FROM llama-bench-${LLAMA_BENCH_VARIANT} AS llama-bench-runtime",
+		"COPY --from=llama-bench-runtime /app/llama-bench /app/llama-bench",
+		"LLAMARACK_LLAMA_BENCH=/app/llama-bench",
 	)
 
 	// Published images must not run the manager or llama-server as root. The

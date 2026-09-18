@@ -152,6 +152,33 @@ func TestEvictionPlanUsesRuntimeDemand(t *testing.T) {
 	}
 }
 
+func TestCPUOnlyPlacementReservesHostRAMWithoutGPUs(t *testing.T) {
+	const gib = testGiB
+	s, _, _, _, _ := setupLifecycle(t, true, false)
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		RAMTotalBytes:     16 * gib,
+		RAMAvailableBytes: 12 * gib,
+	}}}
+	demand := scheduler.ResourceDemand{HostRAMBytes: 8 * gib}
+	placement, err := s.preparePlacementWithDemand(context.Background(), instances.Instance{ID: "cpu-only", GPUMode: "auto"}, demand, false)
+	if err != nil || !placement.Fits {
+		t.Fatalf("placement=%+v err=%v", placement, err)
+	}
+	lease, ok := s.reservations.GetByInstance("cpu-only")
+	if !ok || lease.HostRAM != 8*gib {
+		t.Fatalf("lease=%+v ok=%v", lease, ok)
+	}
+
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		RAMTotalBytes:     16 * gib,
+		RAMAvailableBytes: 6 * gib,
+	}}}
+	_, err = s.preparePlacementWithDemand(context.Background(), instances.Instance{ID: "cpu-starved", GPUMode: "auto"}, demand, false)
+	if err == nil {
+		t.Fatal("expected host RAM pressure error")
+	}
+}
+
 func TestDemandCompatibleWithMultiGPULease(t *testing.T) {
 	demand := scheduler.EstimateDemand(scheduler.DemandInput{WeightsBytes: 14 * testGiB, Context: 4096})
 	s, _, _, _, _ := setupLifecycle(t, true, false)

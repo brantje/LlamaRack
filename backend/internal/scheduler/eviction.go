@@ -40,13 +40,14 @@ type Candidate struct {
 
 // Plan is a deterministic eviction decision for a requested placement.
 // Fits is false when the eligible candidates cannot free enough on the devices
-// the placement actually uses.
+// the placement actually uses or enough host RAM for admission.
 type Plan struct {
-	Evict      []Candidate
-	FreedBytes int64
-	Freed      []GPUResource
-	Devices    []string
-	Fits       bool
+	Evict             []Candidate
+	FreedBytes        int64
+	FreedHostRAMBytes int64
+	Freed             []GPUResource
+	Devices           []string
+	Fits              bool
 }
 
 // ResourceAttribution is the input used to attach reclaimable VRAM to a
@@ -103,19 +104,29 @@ func RankEvictionCandidates(candidates []Candidate) []Candidate {
 }
 
 // PlanEvictions chooses the smallest ranked victim set that makes request fit
-// on the devices the placement actually uses. Automatic placement stays
-// single-GPU first: each device is tried in the same largest-usable order as
-// PlanPlacement before any multi-GPU aggregation.
+// on both its GPU placement and host-RAM admission. Automatic GPU placement
+// stays single-GPU first: each device is tried in the same largest-usable order
+// as PlanPlacement before any multi-GPU aggregation.
 func PlanEvictions(candidates []Candidate, snapshot hardware.Snapshot, request PlacementRequest) Plan {
-	if request.RequiredBytes <= 0 {
+	if request.RequiredBytes <= 0 && request.HostRAMBytes <= 0 {
 		return Plan{Fits: true}
 	}
-	if len(snapshot.GPUs) == 0 {
+	if len(snapshot.GPUs) == 0 && request.RequiredBytes > 0 {
+		// Preserve the legacy scalar fallback for hosts whose accelerator
+		// inventory is unavailable. Lifecycle admission normally bypasses this
+		// path, but eligibility previews still rely on it.
 		return PlanEvictionsBytes(candidates, request.RequiredBytes)
 	}
 
-	if current, err := PlanPlacement(snapshot, request); err == nil && current.Fits {
+	current, err := PlanPlacement(snapshot, request)
+	if err != nil {
+		return Plan{}
+	}
+	if current.Fits && hostRAMFits(snapshot, request.HostRAMBytes) {
 		return Plan{Fits: true, Devices: append([]string(nil), current.Devices...)}
+	}
+	if len(snapshot.GPUs) == 0 || current.Fits {
+		return coverPlacement(candidates, snapshot, request)
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(request.Mode))
@@ -130,6 +141,7 @@ func PlanEvictions(candidates []Candidate, snapshot hardware.Snapshot, request P
 	for _, gpu := range sortedGPUsByUsable(snapshot, reserve) {
 		single := PlacementRequest{
 			RequiredBytes: request.RequiredBytes,
+			HostRAMBytes:  request.HostRAMBytes,
 			Mode:          "manual",
 			Devices:       []string{gpu.ID},
 			ReserveBytes:  request.ReserveBytes,
@@ -168,37 +180,52 @@ func PlanEvictionsBytes(candidates []Candidate, requiredBytes int64) Plan {
 }
 
 func coverPlacement(candidates []Candidate, snapshot hardware.Snapshot, request PlacementRequest) Plan {
-	current, err := PlanPlacement(snapshot, request)
+	currentSnapshot := snapshot
+	current, err := PlanPlacement(currentSnapshot, request)
 	if err != nil {
 		return Plan{}
 	}
-	if current.Fits {
-		return planFromSelection(nil, current)
+	currentHostFits := hostRAMFits(currentSnapshot, request.HostRAMBytes)
+	if current.Fits && currentHostFits {
+		return planFromSelection(nil, current, true)
 	}
 
 	selected := make([]Candidate, 0, len(candidates))
 	for _, candidate := range RankEvictionCandidates(candidates) {
-		if candidateGPUBytes(candidate) <= 0 {
+		if candidateGPUBytes(candidate) <= 0 && candidate.Resources.HostRAMBytes <= 0 {
 			continue
 		}
 		trial := append(append([]Candidate(nil), selected...), candidate)
-		after, err := PlanPlacement(snapshotWithCandidateCredits(snapshot, trial), request)
+		trialSnapshot := snapshotWithCandidateCredits(snapshot, trial)
+		after, err := PlanPlacement(trialSnapshot, request)
 		if err != nil {
 			continue
 		}
-		if !after.Fits && after.AvailableBytes <= current.AvailableBytes {
+		afterHostFits := hostRAMFits(trialSnapshot, request.HostRAMBytes)
+		gpuProgress := !current.Fits && (after.Fits || after.AvailableBytes > current.AvailableBytes)
+		hostProgress := !currentHostFits && (afterHostFits || trialSnapshot.RAMAvailableBytes > currentSnapshot.RAMAvailableBytes)
+		if !gpuProgress && !hostProgress {
 			continue
 		}
 		selected = append(selected, candidate)
 		current = after
-		if after.Fits {
-			return planFromSelection(selected, after)
+		currentSnapshot = trialSnapshot
+		currentHostFits = afterHostFits
+		if after.Fits && afterHostFits {
+			return planFromSelection(selected, after, true)
 		}
 	}
-	return planFromSelection(selected, current)
+	return planFromSelection(selected, current, current.Fits && currentHostFits)
 }
 
-func planFromSelection(selected []Candidate, placement Placement) Plan {
+func hostRAMFits(snapshot hardware.Snapshot, required int64) bool {
+	if required <= 0 || snapshot.RAMTotalBytes <= 0 && snapshot.RAMAvailableBytes <= 0 {
+		return true
+	}
+	return snapshot.RAMAvailableBytes >= required
+}
+
+func planFromSelection(selected []Candidate, placement Placement, fits bool) Plan {
 	target := map[string]bool{}
 	for _, id := range placement.Devices {
 		target[id] = true
@@ -215,7 +242,11 @@ func planFromSelection(selected []Candidate, placement Placement) Plan {
 	freedByDevice := map[string]int64{}
 	order := make([]string, 0, len(target))
 	total := int64(0)
+	hostTotal := int64(0)
 	for _, candidate := range selected {
+		if candidate.Resources.HostRAMBytes > 0 {
+			hostTotal += candidate.Resources.HostRAMBytes
+		}
 		for _, gpu := range candidate.Resources.GPU {
 			id := strings.TrimSpace(gpu.DeviceID)
 			if id == "" || gpu.Bytes <= 0 {
@@ -236,21 +267,22 @@ func planFromSelection(selected []Candidate, placement Placement) Plan {
 		freed = append(freed, GPUResource{DeviceID: id, Bytes: freedByDevice[id]})
 	}
 	return Plan{
-		Evict:      selected,
-		FreedBytes: total,
-		Freed:      freed,
-		Devices:    append([]string(nil), placement.Devices...),
-		Fits:       placement.Fits,
+		Evict:             selected,
+		FreedBytes:        total,
+		FreedHostRAMBytes: hostTotal,
+		Freed:             freed,
+		Devices:           append([]string(nil), placement.Devices...),
+		Fits:              fits,
 	}
 }
 
 func snapshotWithCandidateCredits(snapshot hardware.Snapshot, selected []Candidate) hardware.Snapshot {
-	return adjustSnapshot(snapshot, nil, creditBytesFromCandidates(selected))
+	return adjustSnapshot(snapshot, nil, hostOccupancy{}, creditBytesFromCandidates(selected), hostCreditFromCandidates(selected))
 }
 
 // ApplyCandidateCredits pretends selected instances have already released
-// their attributed per-device VRAM. Used to re-plan after a stop when the
-// hardware snapshot has not yet observed the free memory.
+// their attributed per-device VRAM and host RAM. Used to re-plan after a stop
+// when the hardware snapshot has not yet observed the released capacity.
 func ApplyCandidateCredits(snapshot hardware.Snapshot, selected []Candidate) hardware.Snapshot {
 	return snapshotWithCandidateCredits(snapshot, selected)
 }
@@ -269,15 +301,26 @@ func creditBytesFromCandidates(selected []Candidate) map[string]int64 {
 	return out
 }
 
-// CreditsFromCandidates builds per-device ledger credits. Scalar Bytes is
-// left zero so leftover estimates cannot be dumped onto an unrelated GPU.
+func hostCreditFromCandidates(selected []Candidate) int64 {
+	total := int64(0)
+	for _, candidate := range selected {
+		if candidate.Resources.HostRAMBytes > 0 {
+			total += candidate.Resources.HostRAMBytes
+		}
+	}
+	return total
+}
+
+// CreditsFromCandidates builds per-device and host-RAM ledger credits. Scalar
+// Bytes is left zero so leftover estimates cannot be dumped onto an unrelated
+// GPU.
 func CreditsFromCandidates(candidates []Candidate) []Credit {
 	out := make([]Credit, 0, len(candidates))
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate.InstanceID) == "" {
 			continue
 		}
-		credit := Credit{InstanceID: candidate.InstanceID}
+		credit := Credit{InstanceID: candidate.InstanceID, HostRAM: candidate.Resources.HostRAMBytes}
 		for _, gpu := range candidate.Resources.GPU {
 			id := strings.TrimSpace(gpu.DeviceID)
 			if id == "" || gpu.Bytes <= 0 {
