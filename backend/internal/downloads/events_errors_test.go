@@ -12,7 +12,7 @@ import (
 
 func TestSubscribeReturnsDatabaseError(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
-	if err := manager.db.Close(); err != nil {
+	if err := downloadTestDB(t, manager).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := manager.Subscribe(context.Background()); err == nil {
@@ -26,7 +26,7 @@ func TestSubscribeToleratesTransientRefreshErrorsUntilCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.db.Close(); err != nil {
+	if err := downloadTestDB(t, manager).Close(); err != nil {
 		t.Fatal(err)
 	}
 	// Let the subscription hit at least one refresh tick with the closed DB.
@@ -45,12 +45,12 @@ func TestSubscribeToleratesTransientRefreshErrorsUntilCancelled(t *testing.T) {
 func TestRemoveCancelledInvokesActiveCancelAndSkipsUnsafeProviderPath(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
 	ctx := context.Background()
-	_, err := manager.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := downloadTestDB(t, manager).ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('cancel-remove','huggingface','acme/demo','rev','artifact','demo.gguf','',?,1,0,0,'',unixepoch(),unixepoch())`, StateCancelled)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('cancel-remove','../unsafe.gguf',1,?,0,0,'')`, StateCancelled)
+	_, err = downloadTestDB(t, manager).ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('cancel-remove','../unsafe.gguf',1,?,0,0,'')`, StateCancelled)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,12 +69,12 @@ VALUES('cancel-remove','huggingface','acme/demo','rev','artifact','demo.gguf',''
 func TestRemoveReturnsPartialCleanupError(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
 	ctx := context.Background()
-	_, err := manager.db.ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := downloadTestDB(t, manager).ExecContext(ctx, `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('cleanup-error','huggingface','acme/demo','rev','artifact','demo.gguf','',?,1,0,0,'',unixepoch(),unixepoch())`, StateCancelled)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.db.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('cleanup-error','demo.gguf',1,?,0,0,'')`, StateCancelled)
+	_, err = downloadTestDB(t, manager).ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path) VALUES('cleanup-error','demo.gguf',1,?,0,0,'')`, StateCancelled)
 	if err != nil {
 		t.Fatal(err)
 	}
