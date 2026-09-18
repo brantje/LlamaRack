@@ -143,11 +143,22 @@ func (s *Service) prepareRuntimeLaunch(
 
 func runtimeCapabilities(profile llamacpp.Profile) scheduler.RuntimeCapabilities {
 	return scheduler.RuntimeCapabilities{
-		NCPUMoe:     profile.Has("n-cpu-moe"),
-		CPUMoe:      profile.Has("cpu-moe"),
-		NoKVOffload: profile.Has("no-kv-offload"),
-		GPULayers:   profile.Has("n-gpu-layers") || profile.Has("gpu-layers"),
+		NCPUMoe:         profile.Has("n-cpu-moe"),
+		CPUMoe:          profile.Has("cpu-moe"),
+		NoKVOffload:     profile.Has("no-kv-offload"),
+		GPULayers:       profile.Has("n-gpu-layers") || profile.Has("gpu-layers"),
+		GPULayersOption: gpuLayerOptionFromProfile(profile),
 	}
+}
+
+func gpuLayerOptionFromProfile(profile llamacpp.Profile) string {
+	if profile.Has("n-gpu-layers") {
+		return "n-gpu-layers"
+	}
+	if profile.Has("gpu-layers") {
+		return "gpu-layers"
+	}
+	return ""
 }
 
 func runtimePressureError(plan scheduler.RuntimePlan) error {
@@ -166,6 +177,9 @@ func (s *Service) logRuntimeSpill(instanceID string, plan scheduler.RuntimePlan)
 	switch plan.Mode {
 	case "partial", "hybrid":
 		layers := optionInt64(plan.Options, "n-gpu-layers")
+		if layers == 0 {
+			layers = optionInt64(plan.Options, "gpu-layers")
+		}
 		device := strings.Join(plan.Placement.Devices, ",")
 		s.AddManagerLog(instanceID, fmt.Sprintf("spillover %s layers=%d device=%s host_ram=%d", plan.Mode, layers, device, plan.Demand.HostRAMBytes))
 	case "cpu":

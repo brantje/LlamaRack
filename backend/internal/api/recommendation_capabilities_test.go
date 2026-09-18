@@ -26,8 +26,11 @@ func TestRecommendationCapabilities(t *testing.T) {
 		return llamacpp.Profile{Options: []llamacpp.Option{
 			{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"},
 		}}, nil
-	}); !got.NCPUMoe || !got.CPUMoe || !got.GPULayers || !got.NoKVOffload {
+	}); !got.NCPUMoe || !got.CPUMoe || !got.GPULayers || !got.NoKVOffload || got.GPULayersOption != "n-gpu-layers" {
 		t.Fatalf("runtime capabilities not advertised: %+v", got)
+	}
+	if got := recommendationCapabilitiesFromProfile(llamacpp.Profile{Options: []llamacpp.Option{{Key: "gpu-layers"}}}); !got.GPULayers || got.GPULayersOption != "gpu-layers" {
+		t.Fatalf("gpu-layers alias capability=%+v", got)
 	}
 	if got := recommendationCapabilitiesFromProfile(llamacpp.Profile{}); got != (recommendations.Capabilities{}) {
 		t.Fatalf("empty profile capabilities=%+v", got)

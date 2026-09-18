@@ -10,10 +10,11 @@ import (
 const defaultRAMReserveBytes int64 = 1024 * 1024 * 1024
 
 type RuntimeCapabilities struct {
-	NCPUMoe     bool
-	CPUMoe      bool
-	NoKVOffload bool
-	GPULayers   bool
+	NCPUMoe          bool
+	CPUMoe           bool
+	NoKVOffload      bool
+	GPULayers        bool
+	GPULayersOption  string
 }
 
 type RuntimePlanRequest struct {
@@ -36,7 +37,8 @@ type RuntimePlan struct {
 
 func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 	base := cloneStringMap(req.Demand.Options)
-	if req.IdleSnapshot != nil && !req.AllowSystemSpillover && req.Capabilities.NCPUMoe && !hasExplicitOffload(base) {
+	locks := runtimeOptionLocksFor(base)
+	if req.IdleSnapshot != nil && !req.AllowSystemSpillover && req.Capabilities.NCPUMoe && !locks.MoE {
 		idleReq := req
 		idleReq.Snapshot = *req.IdleSnapshot
 		idleReq.IdleSnapshot = nil
@@ -47,63 +49,131 @@ func PlanRuntime(req RuntimePlanRequest) (RuntimePlan, error) {
 		}
 	}
 	if len(req.Snapshot.GPUs) == 0 {
+		if locks.GPULayers {
+			return evaluateRuntimeCandidate(req, base, false)
+		}
 		cpuDemandOptions := cloneStringMap(base)
 		cpuDemandOptions["n-gpu-layers"] = "0"
-		demand := demandFor(req.Demand, cpuDemandOptions)
 		options := cloneStringMap(base)
-		if req.Capabilities.GPULayers {
-			options["n-gpu-layers"] = "0"
+		if key := gpuLayerOptionKey(req.Capabilities); key != "" {
+			options[key] = "0"
+			cpuDemandOptions = options
 		}
+		demand := demandFor(req.Demand, cpuDemandOptions)
 		return RuntimePlan{
 			Fits: runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes),
 			Mode: "cpu", Demand: demand, Placement: Placement{RequiredBytes: 0, Fits: true},
 			Options: options,
 		}, nil
 	}
-	if hasExplicitOffload(base) {
-		return evaluateRuntimeCandidate(req, base, false)
-	}
+
 	full, err := evaluateRuntimeCandidate(req, base, false)
 	if err != nil || full.Fits {
 		return full, err
 	}
-	if req.Demand.Metadata.ExpertCount > 0 && req.Capabilities.NCPUMoe {
-		if moe, ok, err := planAutomaticMoE(req, base); err != nil {
+
+	if req.Demand.Metadata.ExpertCount > 0 && req.Capabilities.NCPUMoe && !locks.MoE {
+		if moe, ok, err := planAutomaticMoE(req, base, locks); err != nil {
 			return RuntimePlan{}, err
 		} else if ok {
 			return moe, nil
 		}
 	}
-	if !req.AllowSystemSpillover || !req.Capabilities.GPULayers {
+
+	if !req.AllowSystemSpillover {
 		return full, nil
 	}
-	if partial, ok, err := planDensePartial(req, base, false); err != nil {
-		return RuntimePlan{}, err
-	} else if ok {
-		return partial, nil
-	}
-	if req.Capabilities.NoKVOffload {
-		if hybrid, ok, err := planDensePartial(req, base, true); err != nil {
+
+	if !locks.GPULayers && gpuLayerOptionKey(req.Capabilities) != "" {
+		if partial, ok, err := planDensePartial(req, base, false); err != nil {
 			return RuntimePlan{}, err
 		} else if ok {
-			return hybrid, nil
+			return partial, nil
 		}
 	}
-	cpuOptions := cloneStringMap(base)
-	cpuOptions["n-gpu-layers"] = "0"
-	cpu, err := evaluateRuntimeCandidate(req, cpuOptions, true)
-	if err != nil {
-		return RuntimePlan{}, err
+
+	if !locks.KV && req.Capabilities.NoKVOffload {
+		if !locks.GPULayers && gpuLayerOptionKey(req.Capabilities) != "" {
+			if hybrid, ok, err := planDensePartial(req, base, true); err != nil {
+				return RuntimePlan{}, err
+			} else if ok {
+				return hybrid, nil
+			}
+		} else {
+			options := cloneStringMap(base)
+			options["no-kv-offload"] = "true"
+			kvPlan, err := evaluateRuntimeCandidate(req, options, true)
+			if err != nil {
+				return RuntimePlan{}, err
+			}
+			if kvPlan.Fits {
+				kvPlan.RequiresSpillover = true
+				return kvPlan, nil
+			}
+		}
 	}
-	if cpu.Fits {
-		cpu.Mode = "cpu"
-		cpu.RequiresSpillover = true
-		return cpu, nil
+
+	if !locks.GPULayers {
+		if key := gpuLayerOptionKey(req.Capabilities); key != "" {
+			cpuOptions := cloneStringMap(base)
+			cpuOptions[key] = "0"
+			cpu, err := evaluateRuntimeCandidate(req, cpuOptions, true)
+			if err != nil {
+				return RuntimePlan{}, err
+			}
+			if cpu.Fits {
+				cpu.Mode = "cpu"
+				cpu.RequiresSpillover = true
+				return cpu, nil
+			}
+		}
 	}
 	return full, nil
 }
 
-func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePlan, bool, error) {
+type runtimeOptionLocks struct {
+	GPULayers bool
+	MoE       bool
+	KV        bool
+}
+
+func runtimeOptionLocksFor(options map[string]string) runtimeOptionLocks {
+	return runtimeOptionLocks{
+		GPULayers: optionPresent(options, "gpu-layers") || optionPresent(options, "n-gpu-layers"),
+		MoE:       optionPresent(options, "cpu-moe") || optionPresent(options, "n-cpu-moe"),
+		KV:        optionPresent(options, "no-kv-offload") || optionPresent(options, "kv-offload"),
+	}
+}
+
+func optionPresent(options map[string]string, key string) bool {
+	if options == nil {
+		return false
+	}
+	if _, ok := options[key]; ok {
+		return true
+	}
+	_, ok := options["--"+key]
+	return ok
+}
+
+func gpuLayerOptionKey(capabilities RuntimeCapabilities) string {
+	if key := strings.TrimSpace(capabilities.GPULayersOption); key != "" {
+		return strings.TrimLeft(key, "-")
+	}
+	if capabilities.GPULayers {
+		return "n-gpu-layers"
+	}
+	return ""
+}
+
+func gpuLayerOptionValue(options map[string]string) string {
+	if value := optionValue(options, "gpu-layers"); strings.TrimSpace(value) != "" {
+		return value
+	}
+	return optionValue(options, "n-gpu-layers")
+}
+
+func planAutomaticMoE(req RuntimePlanRequest, base map[string]string, locks runtimeOptionLocks) (RuntimePlan, bool, error) {
 	blocks := req.Demand.Metadata.BlockCount
 	if blocks <= 0 {
 		return RuntimePlan{}, false, nil
@@ -120,7 +190,7 @@ func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePl
 		if err != nil {
 			return RuntimePlan{}, false, err
 		}
-		if placement.Fits {
+		if placement.Fits && runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes) {
 			firstGPUFit = mid
 			hi = mid - 1
 		} else {
@@ -142,16 +212,19 @@ func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePl
 			return plan, true, nil
 		}
 	}
-	if !req.Capabilities.NoKVOffload {
-		return RuntimePlan{}, false, nil
-	}
+
 	options = cloneStringMap(base)
 	if req.Capabilities.CPUMoe {
 		options["cpu-moe"] = "true"
 	} else {
 		options["n-cpu-moe"] = strconv.FormatInt(blocks, 10)
 	}
-	options["no-kv-offload"] = "true"
+	if !optionEnabled(options, "no-kv-offload") {
+		if locks.KV || !req.Capabilities.NoKVOffload {
+			return RuntimePlan{}, false, nil
+		}
+		options["no-kv-offload"] = "true"
+	}
 	plan, err := evaluateRuntimeCandidate(req, options, false)
 	if err != nil {
 		return RuntimePlan{}, false, err
@@ -165,7 +238,8 @@ func planAutomaticMoE(req RuntimePlanRequest, base map[string]string) (RuntimePl
 
 func planDensePartial(req RuntimePlanRequest, base map[string]string, moveKV bool) (RuntimePlan, bool, error) {
 	blocks := req.Demand.Metadata.BlockCount
-	if blocks <= 0 {
+	key := gpuLayerOptionKey(req.Capabilities)
+	if blocks <= 0 || key == "" {
 		return RuntimePlan{}, false, nil
 	}
 	options := cloneStringMap(base)
@@ -177,13 +251,13 @@ func planDensePartial(req RuntimePlanRequest, base map[string]string, moveKV boo
 	for lo <= hi {
 		mid := lo + (hi-lo)/2
 		probe := cloneStringMap(options)
-		probe["n-gpu-layers"] = strconv.FormatInt(mid, 10)
+		probe[key] = strconv.FormatInt(mid, 10)
 		demand := demandFor(req.Demand, probe)
 		placement, err := planDemandPlacement(req.Placement, req.Snapshot, demand)
 		if err != nil {
 			return RuntimePlan{}, false, err
 		}
-		if placement.Fits {
+		if placement.Fits && runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes) {
 			best = mid
 			lo = mid + 1
 		} else {
@@ -193,18 +267,13 @@ func planDensePartial(req RuntimePlanRequest, base map[string]string, moveKV boo
 	if best <= 0 {
 		return RuntimePlan{}, false, nil
 	}
-	options["n-gpu-layers"] = strconv.FormatInt(best, 10)
+	options[key] = strconv.FormatInt(best, 10)
 	plan, err := evaluateRuntimeCandidate(req, options, true)
 	if err != nil {
 		return RuntimePlan{}, false, err
 	}
 	if !plan.Fits {
 		return RuntimePlan{}, false, nil
-	}
-	if moveKV {
-		plan.Mode = "hybrid"
-	} else {
-		plan.Mode = "partial"
 	}
 	plan.RequiresSpillover = true
 	return plan, true, nil
@@ -265,7 +334,7 @@ func candidateMode(options map[string]string, demand ResourceDemand, placement P
 	if optionEnabled(options, "no-kv-offload") {
 		return "hybrid"
 	}
-	if raw := strings.TrimSpace(optionValue(options, "n-gpu-layers")); raw != "" {
+	if raw := strings.TrimSpace(gpuLayerOptionValue(options)); raw != "" {
 		if layers, err := strconv.ParseInt(raw, 10, 64); err == nil && layers > 0 {
 			return "partial"
 		}
@@ -274,18 +343,6 @@ func candidateMode(options map[string]string, demand ResourceDemand, placement P
 		return "multi_gpu"
 	}
 	return "full"
-}
-
-func hasExplicitOffload(options map[string]string) bool {
-	for _, key := range []string{"gpu-layers", "n-gpu-layers", "cpu-moe", "n-cpu-moe", "no-kv-offload"} {
-		if _, ok := options[key]; ok {
-			return true
-		}
-		if _, ok := options["--"+key]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

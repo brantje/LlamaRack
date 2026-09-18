@@ -272,29 +272,96 @@ func TestPlanAutomaticMoERequiresBlockMetadata(t *testing.T) {
 		Snapshot: hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 << 30}}},
 		Demand: DemandInput{WeightsBytes: 4 << 30},
 		Placement: PlacementRequest{Mode: "auto"},
-	}, nil)
+	}, nil, runtimeOptionLocks{})
 	if err != nil || ok || plan.Fits {
 		t.Fatalf("metadata-free MoE plan=%+v ok=%v err=%v", plan, ok, err)
 	}
 }
 
-func TestHasExplicitOffloadRecognizesCanonicalAndCLIKeys(t *testing.T) {
-	for _, options := range []map[string]string{
-		{"gpu-layers": "2"},
-		{"--n-gpu-layers": "2"},
-		{"cpu-moe": "true"},
-		{"--n-cpu-moe": "4"},
-		{"no-kv-offload": "true"},
-	} {
-		if !hasExplicitOffload(options) {
-			t.Fatalf("explicit offload not recognized: %v", options)
-		}
+func TestRuntimeOptionLocksArePerDimension(t *testing.T) {
+	locks := runtimeOptionLocksFor(map[string]string{
+		"--gpu-layers": "2",
+		"cpu-moe": "false",
+		"no-kv-offload": "false",
+	})
+	if !locks.GPULayers || !locks.MoE || !locks.KV {
+		t.Fatalf("locks=%+v", locks)
 	}
-	if hasExplicitOffload(map[string]string{"ctx-size": "4096"}) || hasExplicitOffload(nil) {
-		t.Fatal("ordinary launch options must not count as explicit offload")
+	if locks := runtimeOptionLocksFor(map[string]string{"ctx-size": "4096"}); locks != (runtimeOptionLocks{}) {
+		t.Fatalf("ordinary options locked planner dimensions: %+v", locks)
 	}
 }
 
+func TestPlanRuntimeExplicitLayersCanStillMoveKV(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMTotalBytes: 64 * gib, RAMAvailableBytes: 48 * gib,
+			GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 5 * gib}},
+		},
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib, Context: 32768,
+			Metadata: KVMetadata{BlockCount: 8, Embedding: 4096, HeadCount: 32, KVHeadCount: 32},
+			Options: map[string]string{"n-gpu-layers": "4"},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true, GPULayersOption: "n-gpu-layers", NoKVOffload: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || plan.Options["n-gpu-layers"] != "4" || !optionEnabled(plan.Options, "no-kv-offload") {
+		t.Fatalf("explicit layers must stay locked while KV may move: %+v", plan)
+	}
+}
+
+func TestPlanRuntimeExplicitKVCanStillPlanLayers(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMTotalBytes: 64 * gib, RAMAvailableBytes: 48 * gib,
+			GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 5 * gib}},
+		},
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib,
+			Metadata: KVMetadata{BlockCount: 8},
+			Options: map[string]string{"no-kv-offload": "false"},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true, GPULayersOption: "n-gpu-layers", NoKVOffload: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || optionEnabled(plan.Options, "no-kv-offload") || strings.TrimSpace(plan.Options["n-gpu-layers"]) == "" {
+		t.Fatalf("explicit KV-on-GPU policy must stay locked while layers may spill: %+v", plan)
+	}
+}
+
+func TestPlanRuntimeUsesAdvertisedGPULayerAlias(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMTotalBytes: 64 * gib, RAMAvailableBytes: 48 * gib,
+			GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 5 * gib}},
+		},
+		Demand: DemandInput{WeightsBytes: 8 * gib, Metadata: KVMetadata{BlockCount: 8}},
+		Placement: PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities: RuntimeCapabilities{GPULayers: true, GPULayersOption: "gpu-layers"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || strings.TrimSpace(plan.Options["gpu-layers"]) == "" {
+		t.Fatalf("alias-only runtime plan=%+v", plan)
+	}
+	if _, wrong := plan.Options["n-gpu-layers"]; wrong {
+		t.Fatalf("planner generated unsupported alias: %v", plan.Options)
+	}
+}
 
 func TestPlanRuntimeRejectsSpillWhenGPUKnownButHostRAMUnknown(t *testing.T) {
 	const gib int64 = 1024 * 1024 * 1024

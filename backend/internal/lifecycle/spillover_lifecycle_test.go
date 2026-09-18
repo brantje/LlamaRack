@@ -194,10 +194,54 @@ func TestManualSystemSpilloverStaysOnConfiguredDevice(t *testing.T) {
 func TestRuntimeCapabilitiesFollowDiscoveredProfile(t *testing.T) {
 	profile := spilloverProfile()
 	caps := runtimeCapabilities(profile)
-	if !caps.GPULayers || !caps.NoKVOffload || !caps.NCPUMoe || !caps.CPUMoe {
+	if !caps.GPULayers || caps.GPULayersOption != "n-gpu-layers" || !caps.NoKVOffload || !caps.NCPUMoe || !caps.CPUMoe {
 		t.Fatalf("caps=%+v", caps)
 	}
 	if caps := runtimeCapabilities(llamacpp.Profile{}); caps != (scheduler.RuntimeCapabilities{}) {
 		t.Fatalf("empty profile caps=%+v", caps)
+	}
+}
+
+
+func TestSystemSpilloverLaunchUsesAdvertisedGPULayersAlias(t *testing.T) {
+	ctx := context.Background()
+	s, ms, model, sup, execDB := setupLifecycle(t, true, false)
+	path, err := ms.ModelAbsolutePath(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLifecycleMetadataGGUF(t, path, "qwen2", map[string]int64{
+		"qwen2.context_length": 32768, "qwen2.block_count": 10, "qwen2.embedding_length": 1024,
+		"qwen2.attention.head_count": 8, "qwen2.attention.head_count_kv": 8,
+	})
+	items, err := s.instances.ListByModel(ctx, model.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("instances=%+v err=%v", items, err)
+	}
+	instance := items[0]
+	execDB("UPDATE models SET total_bytes=? WHERE id=?", 10*testGiB, model.ID)
+	spill := true
+	eviction := false
+	instance, err = s.instances.Update(ctx, instance.ID, instances.UpdateInput{
+		Name: instance.Name, SystemSpilloverEnabled: &spill, EvictionEnabled: &eviction,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		RAMTotalBytes: 64 * testGiB, RAMAvailableBytes: 64 * testGiB,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}},
+	}}}
+	s.SetProfileGetter(func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Options: []llamacpp.Option{
+			{Key: "ctx-size"}, {Key: "gpu-layers"}, {Key: "no-kv-offload"},
+		}}, nil
+	})
+	if _, err := s.StartInstance(ctx, instance.ID); err != nil {
+		t.Fatal(err)
+	}
+	args := processCmdline(t, sup.Status(instance.ID).PID)
+	if !hasFlag(args, "--gpu-layers") || hasFlag(args, "--n-gpu-layers") {
+		t.Fatalf("alias-only profile launch args=%v", args)
 	}
 }

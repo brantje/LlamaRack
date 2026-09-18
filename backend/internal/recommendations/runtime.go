@@ -176,6 +176,7 @@ func runtimeRequest(snapshot hardware.Snapshot, idle *hardware.Snapshot, weights
 		Capabilities: scheduler.RuntimeCapabilities{
 			NCPUMoe: capabilities.NCPUMoe, CPUMoe: capabilities.CPUMoe,
 			NoKVOffload: capabilities.NoKVOffload, GPULayers: capabilities.GPULayers,
+			GPULayersOption: capabilities.GPULayersOption,
 		},
 	}
 }
@@ -214,7 +215,7 @@ func runtimeMemory(weights, companionBytes, context int64, metadata Metadata, op
 
 func offloadFromRuntimePlan(plan scheduler.RuntimePlan, metadata Metadata) Offload {
 	layers := metadata.BlockCount
-	if raw := runtimeOption(plan.Options, "n-gpu-layers"); raw != "" {
+	if raw := runtimeGPUOption(plan.Options); raw != "" {
 		if parsed, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil {
 			if parsed < 0 {
 				layers = metadata.BlockCount
@@ -290,6 +291,13 @@ func cloneRuntimeOptions(in map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func runtimeGPUOption(options map[string]string) string {
+	if value := runtimeOption(options, "gpu-layers"); strings.TrimSpace(value) != "" {
+		return value
+	}
+	return runtimeOption(options, "n-gpu-layers")
 }
 
 func runtimeOption(options map[string]string, key string) string {
