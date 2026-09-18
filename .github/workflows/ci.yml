@@ -103,11 +103,13 @@ jobs:
         run: |
           go test ./internal/database ./internal/storagecontract -count=1
           go test ./internal/modelimports -count=10
+          go test ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderSQLiteConcurrency' -v -count=1
           go test ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
       - name: PostgreSQL storage and model-import qualification with race detector
         run: |
           go test -race ./internal/database ./internal/storagecontract -count=1
           go test -race ./internal/modelimports -count=10
+          go test -race ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderSQLiteConcurrency' -v -count=1
           go test -race ./internal/modelimports -run 'TestReconcileAutoStartClaimedOnceUnderPostgresConcurrency' -v -count=1
 
   cache-redis:
