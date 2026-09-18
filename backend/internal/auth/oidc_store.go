@@ -80,7 +80,7 @@ func (s *sqlOIDCStore) ListProviders(ctx context.Context) ([]OIDCProvider, error
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []OIDCProvider
+	out := make([]OIDCProvider, 0)
 	for rows.Next() {
 		p, err := scanStoredOIDCProvider(rows)
 		if err != nil {
@@ -100,7 +100,7 @@ func (s *sqlOIDCStore) PublicProviders(ctx context.Context) ([]PublicOIDCProvide
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []PublicOIDCProvider
+	out := make([]PublicOIDCProvider, 0)
 	for rows.Next() {
 		var item PublicOIDCProvider
 		if err := rows.Scan(&item.ID, &item.Name); err != nil {
@@ -189,7 +189,7 @@ func (s *sqlOIDCStore) ListIdentities(ctx context.Context, userID int64) ([]Exte
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []ExternalIdentity
+	out := make([]ExternalIdentity, 0)
 	for rows.Next() {
 		var item ExternalIdentity
 		if err := rows.Scan(&item.ID, &item.ProviderID, &item.Issuer, &item.Subject, &item.UserID, &item.CreatedAt); err != nil {
