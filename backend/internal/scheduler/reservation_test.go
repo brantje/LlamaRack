@@ -348,6 +348,20 @@ func TestAdjustSnapshotAndReservationsHelpers(t *testing.T) {
 func TestLedgerDeviceCreditDoesNotApplyToUnrelatedGPU(t *testing.T) {
 	gib := int64(1024 * 1024 * 1024)
 	ledger := NewLedger()
+	victim, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "victim",
+		Snapshot: hardware.Snapshot{GPUs: []hardware.GPU{
+			{ID: "CUDA0", FreeBytes: 12 * gib},
+			{ID: "CUDA1", FreeBytes: 12 * gib},
+		}},
+		Placement: PlacementRequest{RequiredBytes: 8 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1},
+	})
+	if err != nil || !victim.Placement.Fits {
+		t.Fatalf("victim lease=%+v err=%v", victim, err)
+	}
+	if err := ledger.Commit(victim.ID); err != nil {
+		t.Fatal(err)
+	}
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
 		{ID: "CUDA0", FreeBytes: 2 * gib},
 		{ID: "CUDA1", FreeBytes: 12 * gib},

@@ -151,12 +151,12 @@ func TestRecommendOffloadMoERequiresBinaryCapability(t *testing.T) {
 	}
 }
 
-func TestPlacementIdentityIgnoresNCPUMoeButTracksKVLocation(t *testing.T) {
+func TestPlacementIdentityTracksPublishedPlanDetails(t *testing.T) {
 	base := classifiedPlacement{Fit: true, Offload: Offload{Mode: "moe", Devices: []string{"CUDA0", "CUDA1"}, KVOnGPU: true, NCPUMoe: 8}}
 	otherN := base
 	otherN.Offload.NCPUMoe = 20
-	if placementIdentity(base) != placementIdentity(otherN) {
-		t.Fatal("n_cpu_moe must not fragment placement zones")
+	if placementIdentity(base) == placementIdentity(otherN) {
+		t.Fatal("n_cpu_moe is published per zone and must remain a zone boundary")
 	}
 	kvRAM := base
 	kvRAM.Offload.KVOnGPU = false

@@ -144,7 +144,7 @@ func TestPlanEvictionsReportsMultiGPUCandidateResources(t *testing.T) {
 func TestPlanEvictionsMultiGPUIgnoresUnrelatedDevice(t *testing.T) {
 	const gib int64 = 1024 * 1024 * 1024
 	snapshot := hardware.Snapshot{GPUs: []hardware.GPU{
-		{ID: "CUDA0", FreeBytes: gib},
+		{ID: "CUDA0", FreeBytes: 4 * gib},
 		{ID: "CUDA1", FreeBytes: gib},
 		{ID: "CUDA2", FreeBytes: 20 * gib},
 	}}

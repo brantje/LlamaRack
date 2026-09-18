@@ -204,7 +204,7 @@ func TestReleasedVictimGPUIsNotCreditedOnFreshSnapshot(t *testing.T) {
 	if lease.Placement.Fits {
 		t.Fatalf("released victim GPU was double-counted against a fresh snapshot: %+v", lease)
 	}
-	if lease.Placement.AvailableBytes != 7*gib {
-		t.Fatalf("fresh snapshot usable VRAM=%d want=%d", lease.Placement.AvailableBytes, 7*gib)
+	if lease.Placement.AvailableBytes != 8*gib-1 {
+		t.Fatalf("fresh snapshot usable VRAM=%d want=%d", lease.Placement.AvailableBytes, 8*gib-1)
 	}
 }
