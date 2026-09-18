@@ -40,6 +40,40 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+  storage-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: llamarack
+          POSTGRES_PASSWORD: llamarack-test
+          POSTGRES_DB: llamarack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U llamarack -d llamarack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LLAMARACK_TEST_POSTGRES_URL: postgres://llamarack:llamarack-test@127.0.0.1:5432/llamarack?sslmode=disable
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
+      - name: PostgreSQL storage contracts
+        run: go test ./internal/database ./internal/storagecontract -count=1
+      - name: PostgreSQL storage contracts with race detector
+        run: go test -race ./internal/database ./internal/storagecontract -count=1
+
   backend-race:
     runs-on: ubuntu-latest
     defaults:

@@ -1,0 +1,274 @@
+package storagecontract_test
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"net/url"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/brantje/llamarack/backend/internal/auth"
+	"github.com/brantje/llamarack/backend/internal/database"
+	"github.com/brantje/llamarack/backend/internal/downloads"
+	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/models"
+	"github.com/brantje/llamarack/backend/internal/observability"
+	"github.com/brantje/llamarack/backend/internal/settings"
+	"github.com/brantje/llamarack/backend/internal/supervisor"
+	_ "github.com/jackc/pgx/v5/stdlib"
+)
+
+type backendFactory struct {
+	name string
+	open func(t *testing.T) database.Store
+}
+
+func TestSQLitePersistenceContract(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "manager.db")
+	runPersistenceContract(t, backendFactory{
+		name: "sqlite",
+		open: func(t *testing.T) database.Store {
+			t.Helper()
+			store, err := database.OpenConfigured(context.Background(), path, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		},
+	}, filepath.Join(root, "models"))
+}
+
+func TestPostgresPersistenceContract(t *testing.T) {
+	base := os.Getenv("LLAMARACK_TEST_POSTGRES_URL")
+	if base == "" {
+		t.Skip("LLAMARACK_TEST_POSTGRES_URL is not configured")
+	}
+	dsn := isolatedPostgresDSN(t, base)
+	runPersistenceContract(t, backendFactory{
+		name: "postgres",
+		open: func(t *testing.T) database.Store {
+			t.Helper()
+			store, err := database.OpenConfigured(context.Background(), "", dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		},
+	}, t.TempDir())
+}
+
+func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir string) {
+	t.Helper()
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store := backend.open(t)
+
+	defaults := settings.Defaults{
+		SessionLifetime: 24 * time.Hour,
+		AllowedOrigins: "http://localhost:3000",
+		StartupTimeout: 180 * time.Second,
+		AlwaysOnReconcile: 15 * time.Second,
+		DataDir: t.TempDir(),
+		ModelsDir: modelsDir,
+		DatabasePath: "contract.db",
+		ListenAddr: ":8000",
+		LlamaServerPath: "llama-server",
+	}
+	settingService := settings.New(store, defaults)
+	if _, err := settingService.Set(ctx, settings.IdleUnloadSeconds, 321); err != nil {
+		t.Fatalf("%s settings write: %v", backend.name, err)
+	}
+
+	authService := auth.New(store, time.Hour)
+	admin, err := authService.Bootstrap(ctx, "admin", "correct-horse-battery")
+	if err != nil {
+		t.Fatalf("%s bootstrap: %v", backend.name, err)
+	}
+	key, secret, err := authService.CreateAPIKeyForUser(ctx, "contract", admin.ID)
+	if err != nil {
+		t.Fatalf("%s api key create: %v", backend.name, err)
+	}
+	if err := authService.AuthenticateAPIKey(ctx, secret); err != nil {
+		t.Fatalf("%s api key authenticate: %v", backend.name, err)
+	}
+	if err := authService.SetAPIKeyEnabled(ctx, key.ID, false); err != nil {
+		t.Fatalf("%s api key disable: %v", backend.name, err)
+	}
+	if err := authService.AuthenticateAPIKey(ctx, secret); !errors.Is(err, auth.ErrAPIKeyInvalid) {
+		t.Fatalf("%s disabled api key remained valid: %v", backend.name, err)
+	}
+	if err := authService.SetAPIKeyEnabled(ctx, key.ID, true); err != nil {
+		t.Fatalf("%s api key re-enable: %v", backend.name, err)
+	}
+
+	modelPath := filepath.Join(modelsDir, "contract-Q4_K_M.gguf")
+	if err := os.WriteFile(modelPath, []byte("contract-gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelService := models.New(store, modelsDir)
+	model, err := modelService.Create(ctx, models.CreateModelInput{
+		Name: "Contract Model", GGUFPath: modelPath, ContextLength: 4096,
+		Options: map[string]string{"ctx-size": "4096"},
+	})
+	if err != nil {
+		t.Fatalf("%s model create: %v", backend.name, err)
+	}
+
+	instanceService := instances.New(store)
+	instance, err := instanceService.Create(ctx, instances.CreateInput{
+		ModelID: model.ID,
+		Name: "Contract Instance",
+		Options: map[string]string{"threads": "4"},
+	})
+	if err != nil {
+		t.Fatalf("%s instance create: %v", backend.name, err)
+	}
+	if opts, err := instanceService.Options(ctx, instance.ID); err != nil || opts["threads"] != "4" {
+		t.Fatalf("%s instance options=%v err=%v", backend.name, opts, err)
+	}
+
+	runtimeStore := supervisor.NewSQLStore(store)
+	record := supervisor.WorkerRecord{InstanceID: instance.ID, Generation: "generation-a", PID: 1234, StartTicks: 5678, Port: 10001}
+	if err := runtimeStore.Upsert(ctx, record); err != nil {
+		t.Fatalf("%s runtime upsert: %v", backend.name, err)
+	}
+	if got, err := runtimeStore.Get(ctx, instance.ID); err != nil || got != record {
+		t.Fatalf("%s runtime get=%+v err=%v", backend.name, got, err)
+	}
+
+	if _, err := store.ExecContext(ctx, `INSERT INTO download_jobs(
+		id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())`,
+		"contract-download", "huggingface", "acme/demo", "revision-a", "artifact-a", "contract.gguf", "Q4_K_M", downloads.StateCompleted, 42, 42, 0, ""); err != nil {
+		t.Fatalf("%s download insert: %v", backend.name, err)
+	}
+	if _, err := store.ExecContext(ctx, `INSERT INTO download_files(job_id,path,size,state,downloaded_bytes,ordinal,local_path)
+		VALUES(?,?,?,?,?,?,?)`, "contract-download", "contract.gguf", 42, downloads.StateCompleted, 42, 0, "contract.gguf"); err != nil {
+		t.Fatalf("%s download file insert: %v", backend.name, err)
+	}
+	downloadManager := downloads.New(ctx, store, modelsDir, nil)
+	if got, err := downloadManager.Get(ctx, "contract-download"); err != nil || got.ID != "contract-download" || len(got.Files) != 1 {
+		t.Fatalf("%s download get=%+v err=%v", backend.name, got, err)
+	}
+
+	observabilityService := observability.New(store)
+	now := time.Now().UnixMilli()
+	if err := observabilityService.RecordRequest(ctx, observability.RequestRecord{
+		StartedAt: now, FinishedAt: now + 5, InstanceID: instance.ID, Endpoint: "/v1/chat/completions",
+		StatusCode: 200, Result: "success", DurationMS: 5, PromptTokens: 3, GeneratedTokens: 4, TotalTokens: 7,
+	}); err != nil {
+		t.Fatalf("%s observability write: %v", backend.name, err)
+	}
+	if rows, err := observabilityService.ListRequests(ctx, observability.RequestFilters{InstanceID: instance.ID, Limit: 10}); err != nil || len(rows) != 1 {
+		t.Fatalf("%s observability rows=%d err=%v", backend.name, len(rows), err)
+	}
+
+	tx, err := database.Begin(ctx, store)
+	if err != nil {
+		t.Fatalf("%s begin rollback transaction: %v", backend.name, err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)`, "contract_rollback", "value", time.Now().Unix()); err != nil {
+		t.Fatalf("%s rollback insert: %v", backend.name, err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("%s rollback: %v", backend.name, err)
+	}
+	var rolledBack string
+	if err := store.QueryRowContext(ctx, `SELECT setting_value FROM manager_settings WHERE setting_key=?`, "contract_rollback").Scan(&rolledBack); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("%s rollback persisted row: value=%q err=%v", backend.name, rolledBack, err)
+	}
+
+	tx, err = database.Begin(ctx, store)
+	if err != nil {
+		t.Fatalf("%s begin commit transaction: %v", backend.name, err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)`, "contract_commit", "value", time.Now().Unix()); err != nil {
+		t.Fatalf("%s commit insert: %v", backend.name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("%s commit: %v", backend.name, err)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("%s close before reopen: %v", backend.name, err)
+	}
+	store = backend.open(t)
+	defer store.Close()
+
+	settingService = settings.New(store, defaults)
+	if got, err := settingService.Int(ctx, settings.IdleUnloadSeconds); err != nil || got != 321 {
+		t.Fatalf("%s reopened settings=%d err=%v", backend.name, got, err)
+	}
+	authService = auth.New(store, time.Hour)
+	if err := authService.AuthenticateAPIKey(ctx, secret); err != nil {
+		t.Fatalf("%s reopened api key auth: %v", backend.name, err)
+	}
+	modelService = models.New(store, modelsDir)
+	if got, err := modelService.GetByID(ctx, model.ID); err != nil || got.ID != model.ID {
+		t.Fatalf("%s reopened model=%+v err=%v", backend.name, got, err)
+	}
+	instanceService = instances.New(store)
+	if got, err := instanceService.GetByID(ctx, instance.ID); err != nil || got.ID != instance.ID {
+		t.Fatalf("%s reopened instance=%+v err=%v", backend.name, got, err)
+	}
+	runtimeStore = supervisor.NewSQLStore(store)
+	if got, err := runtimeStore.Get(ctx, instance.ID); err != nil || got != record {
+		t.Fatalf("%s reopened runtime=%+v err=%v", backend.name, got, err)
+	}
+	downloadManager = downloads.New(ctx, store, modelsDir, nil)
+	if got, err := downloadManager.Get(ctx, "contract-download"); err != nil || got.DownloadedBytes != 42 {
+		t.Fatalf("%s reopened download=%+v err=%v", backend.name, got, err)
+	}
+	observabilityService = observability.New(store)
+	if rows, err := observabilityService.ListRequests(ctx, observability.RequestFilters{InstanceID: instance.ID, Limit: 10}); err != nil || len(rows) != 1 {
+		t.Fatalf("%s reopened observability rows=%d err=%v", backend.name, len(rows), err)
+	}
+
+	if err := modelService.Delete(ctx, model.ID); err != nil {
+		t.Fatalf("%s model delete: %v", backend.name, err)
+	}
+	if _, err := instanceService.GetByID(ctx, instance.ID); err == nil {
+		t.Fatalf("%s model delete did not cascade to instance", backend.name)
+	}
+}
+
+func isolatedPostgresDSN(t *testing.T, base string) string {
+	t.Helper()
+	parsed, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	schema := "llamarack_contract_" + hex.EncodeToString(random[:])
+	admin, err := sql.Open("pgx", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.Ping(); err != nil {
+		admin.Close()
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(context.Background(), "CREATE SCHEMA "+schema); err != nil {
+		admin.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+		_ = admin.Close()
+	})
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
