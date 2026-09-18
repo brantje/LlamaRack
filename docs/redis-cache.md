@@ -138,22 +138,28 @@ network benefit.
 
 ### Recorded CI evidence
 
-GitHub Actions CI run `35384253391` on source commit
-`f25db474647acce846d0537f07eebb35a7edc09e` completed the deterministic Redis
-benchmarks and the live Hugging Face qualification successfully.
+GitHub Actions CI run `35399621025` on source commit
+`25cb655caf7cf4a8fabfb55abd075890c8c9805c` reran the deterministic Redis
+benchmarks after the model-import correctness fix. Median values from three
+samples were:
 
-Deterministic benchmark medians from three samples were:
+| Mode | Median latency | Allocations |
+| --- | ---: | ---: |
+| Warm in-process L1 | 2,179 ns/op | 13 allocs/op |
+| Synthetic authoritative origin | 5,347,643 ns/op | 156 allocs/op |
+| Warm Redis from an empty L1 | 171,296 ns/op | 25 allocs/op |
+| Warm Redis parallel | 58,557 ns/op | 25 allocs/op |
 
-| Mode | Median latency |
-| --- | ---: |
-| Warm in-process L1 | 2,025 ns/op |
-| Synthetic authoritative origin | 5,399,665 ns/op |
-| Warm Redis from an empty L1 | 125,379 ns/op |
-| Warm Redis parallel | 48,301 ns/op |
+These measurements are deterministic CI evidence only. They continue to show
+the intended hierarchy—process-local L1 is the fastest path and Redis can serve
+a fresh client without the synthetic origin delay—but the exact wall-clock
+numbers vary materially between CI hosts/runs. The synthetic 5 ms origin floor
+must not be presented as real Hugging Face network performance or as the #162
+release qualification.
 
-The live provider qualification resolved
-`Qwen/Qwen2.5-0.5B-Instruct-GGUF` at immutable revision
-`9217f5db79a29953eb74d5343926648285ec7e67` and measured:
+For historical context, ordinary CI run `35384253391` on commit
+`f25db474647acce846d0537f07eebb35a7edc09e` still contained the live-provider
+test and measured:
 
 - cold authoritative lookup: **553.017 ms**, **2** range requests,
   **5,937,634 bytes** transferred;
@@ -162,8 +168,9 @@ The live provider qualification resolved
 - 16 concurrent warm-Redis requests: **17.791 ms total**, **0** origin range
   requests.
 
-This demonstrates the intended benefit: Redis is slower than the process-local
-L1 and therefore remains an L2 only, but after a process-local cache reset it
-avoids the real provider range reads entirely and reduces the measured lookup
-from hundreds of milliseconds to hundreds of microseconds. Redis remains
-non-authoritative and is not involved in correctness or distributed locking.
+That live result is retained as historical evidence only. It predates the
+current release candidate and therefore does **not** qualify a newer commit
+under the validity policy above. Current #162 release evidence must come from a
+successful manual `.github/workflows/redis-release-qualification.yml` run
+against the commit intended for release, with its uploaded
+`redis-live-qualification-<sha>` artifact.
