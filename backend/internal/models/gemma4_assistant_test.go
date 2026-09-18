@@ -20,7 +20,7 @@ func TestGemma4AssistantIsExcludedFromAvailableAndAttachedByInspect(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := testModelDB(t, s).ExecContext(ctx, `
 INSERT INTO gguf_index(path,size_bytes,mtime_ns,architecture,has_mtp,mtp_only)
 VALUES(?,?,?,?,1,0)`, filepath.Base(mtp), mtpInfo.Size(), mtpInfo.ModTime().UnixNano(), "gemma4-assistant"); err != nil {
 		t.Fatal(err)

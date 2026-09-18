@@ -58,7 +58,7 @@ func TestGGUFSummaryUsesFingerprintCacheAndInvalidates(t *testing.T) {
 		t.Fatal("changed fingerprint should force reinspection of corrupt file")
 	}
 	var warning string
-	if err := s.db.QueryRowContext(ctx, `SELECT inspect_error FROM gguf_index WHERE path='cached-Q4_K_M.gguf'`).Scan(&warning); err != nil || warning == "" {
+	if err := testModelDB(t, s).QueryRowContext(ctx, `SELECT inspect_error FROM gguf_index WHERE path='cached-Q4_K_M.gguf'`).Scan(&warning); err != nil || warning == "" {
 		t.Fatalf("warning=%q err=%v", warning, err)
 	}
 }
@@ -77,7 +77,7 @@ func TestAvailableGGUFsIndexesOnlyFirstSplitShard(t *testing.T) {
 		t.Fatalf("files=%+v", files)
 	}
 	var indexed int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gguf_index`).Scan(&indexed); err != nil {
+	if err := testModelDB(t, s).QueryRowContext(ctx, `SELECT COUNT(*) FROM gguf_index`).Scan(&indexed); err != nil {
 		t.Fatal(err)
 	}
 	if indexed != 1 {
@@ -106,7 +106,7 @@ func TestAvailableGGUFsReusesIndexAndRemovesMissingRows(t *testing.T) {
 		t.Fatalf("after remove=%+v err=%v", files, err)
 	}
 	var indexed int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gguf_index`).Scan(&indexed); err != nil || indexed != 1 {
+	if err := testModelDB(t, s).QueryRowContext(ctx, `SELECT COUNT(*) FROM gguf_index`).Scan(&indexed); err != nil || indexed != 1 {
 		t.Fatalf("indexed=%d err=%v", indexed, err)
 	}
 }
@@ -133,7 +133,7 @@ func TestGGUFIndexErrorPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.Close(); err != nil {
+	if err := testModelDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.loadGGUFIndex(ctx); err == nil {
