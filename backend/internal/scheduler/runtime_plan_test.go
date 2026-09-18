@@ -167,3 +167,130 @@ func TestPlanRuntimeNoGPUUsesCPUWithoutRequiringSpillPolicy(t *testing.T) {
 		t.Fatalf("no-GPU plan=%+v", plan)
 	}
 }
+
+
+func TestPlanRuntimeIdleFullFitDoesNotInventMoESpillWhenPolicyOff(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	idle := hardware.Snapshot{
+		RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 10 * gib}},
+	}
+	req := RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMAvailableBytes: 32 * gib,
+			GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * gib}},
+		},
+		IdleSnapshot: &idle,
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib,
+			Metadata: KVMetadata{BlockCount: 16, ExpertCount: 64},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		Capabilities: RuntimeCapabilities{NCPUMoe: true, CPUMoe: true},
+	}
+	plan, err := PlanRuntime(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Fits || plan.Mode != "full" {
+		t.Fatalf("spillover-off current plan must remain GPU-or-fail when idle hardware fits fully: %+v", plan)
+	}
+	if _, ok := plan.Options["n-cpu-moe"]; ok {
+		t.Fatalf("idle-only pressure must not invent expert spill: %v", plan.Options)
+	}
+	if _, ok := plan.Options["cpu-moe"]; ok {
+		t.Fatalf("idle-only pressure must not invent cpu-moe: %v", plan.Options)
+	}
+}
+
+func TestPlanRuntimeHonorsExplicitOffloadWithoutSystemSpillPolicy(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	req := RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
+			GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * gib}},
+		},
+		Demand: DemandInput{
+			WeightsBytes: 8 * gib,
+			Metadata: KVMetadata{BlockCount: 8},
+			Options: map[string]string{"n-gpu-layers": "2"},
+		},
+		Placement: PlacementRequest{Mode: "auto"},
+		Capabilities: RuntimeCapabilities{GPULayers: true},
+	}
+	plan, err := PlanRuntime(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || plan.Mode != "partial" {
+		t.Fatalf("explicit user offload must be evaluated as configured: %+v", plan)
+	}
+	if plan.RequiresSpillover {
+		t.Fatalf("explicit offload is user configuration, not automatic spillover: %+v", plan)
+	}
+	if plan.Options["n-gpu-layers"] != "2" || plan.Demand.HostRAMBytes <= 0 {
+		t.Fatalf("explicit offload options/demand=%+v", plan)
+	}
+}
+
+func TestPlanRuntimeNoGPUEmitsCPUFlagWhenSupported(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	plan, err := PlanRuntime(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{RAMTotalBytes: 16 * gib, RAMAvailableBytes: 12 * gib},
+		Demand: DemandInput{WeightsBytes: 4 * gib, Options: map[string]string{"ctx-size": "4096"}},
+		Capabilities: RuntimeCapabilities{GPULayers: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || plan.Mode != "cpu" || plan.Options["n-gpu-layers"] != "0" {
+		t.Fatalf("CPU-only host must force zero GPU layers when supported: %+v", plan)
+	}
+}
+
+func TestRuntimeHostRAMHeadroomBoundaries(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	if !runtimeHostRAMFits(hardware.Snapshot{}, 8*gib) {
+		t.Fatal("unknown RAM telemetry must preserve compatibility")
+	}
+	if !runtimeHostRAMFits(hardware.Snapshot{RAMAvailableBytes: gib}, 0) {
+		t.Fatal("zero host demand must fit")
+	}
+	if runtimeHostRAMFits(hardware.Snapshot{RAMAvailableBytes: gib}, 1) {
+		t.Fatal("the 1 GiB reserve must be preserved")
+	}
+	if runtimeHostRAMFits(hardware.Snapshot{RAMAvailableBytes: 5 * gib}, 4*gib+1) {
+		t.Fatal("demand above available-minus-reserve must not fit")
+	}
+	if !runtimeHostRAMFits(hardware.Snapshot{RAMAvailableBytes: 5 * gib}, 4*gib) {
+		t.Fatal("exact available-minus-reserve boundary should fit")
+	}
+}
+
+func TestPlanAutomaticMoERequiresBlockMetadata(t *testing.T) {
+	plan, ok, err := planAutomaticMoE(RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 << 30}}},
+		Demand: DemandInput{WeightsBytes: 4 << 30},
+		Placement: PlacementRequest{Mode: "auto"},
+	}, nil)
+	if err != nil || ok || plan.Fits {
+		t.Fatalf("metadata-free MoE plan=%+v ok=%v err=%v", plan, ok, err)
+	}
+}
+
+func TestHasExplicitOffloadRecognizesCanonicalAndCLIKeys(t *testing.T) {
+	for _, options := range []map[string]string{
+		{"gpu-layers": "2"},
+		{"--n-gpu-layers": "2"},
+		{"cpu-moe": "true"},
+		{"--n-cpu-moe": "4"},
+		{"no-kv-offload": "true"},
+	} {
+		if !hasExplicitOffload(options) {
+			t.Fatalf("explicit offload not recognized: %v", options)
+		}
+	}
+	if hasExplicitOffload(map[string]string{"ctx-size": "4096"}) || hasExplicitOffload(nil) {
+		t.Fatal("ordinary launch options must not count as explicit offload")
+	}
+}
