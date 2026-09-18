@@ -150,7 +150,7 @@ func TestPlaygroundLifecycleRecorderIgnoresUnrelatedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := service.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM playground_lifecycle_events`).Scan(&count); err != nil {
+	if err := observabilityTestDB(t, service).QueryRowContext(ctx, `SELECT COUNT(*) FROM playground_lifecycle_events`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -170,13 +170,13 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	if err := service.ensurePlaygroundSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !hasTableColumn(t, ctx, service.db, "playground_lifecycle_events", "correlation_id") {
+	if !hasTableColumn(t, ctx, observabilityTestDB(t, service), "playground_lifecycle_events", "correlation_id") {
 		t.Fatal("expected playground_lifecycle_events.correlation_id from migrations")
 	}
-	if !hasTableColumn(t, ctx, service.db, "inference_request_timings", "predicted_ms") {
+	if !hasTableColumn(t, ctx, observabilityTestDB(t, service), "inference_request_timings", "predicted_ms") {
 		t.Fatal("expected inference_request_timings.predicted_ms from migrations")
 	}
-	if _, err := service.db.ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
+	if _, err := observabilityTestDB(t, service).ExecContext(ctx, `INSERT INTO playground_lifecycle_events(event,instance_id,correlation_id) VALUES(?,?,?)`, LifecycleEviction, "victim", "trace"); err != nil {
 		t.Fatalf("insert playground event: %v", err)
 	}
 }
