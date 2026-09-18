@@ -20,11 +20,20 @@ func newTestManager(t *testing.T, handler http.Handler) (*Manager, *httptest.Ser
 	return newTestManagerLimit(t, handler, 0)
 }
 
+func downloadTestDB(t *testing.T, manager *Manager) database.Store {
+	t.Helper()
+	store, ok := manager.store.(*sqlDownloadStore)
+	if !ok {
+		t.Fatalf("unexpected download store %T", manager.store)
+	}
+	return store.db
+}
+
 func newTestManagerLimit(t *testing.T, handler http.Handler, maxBytes int64) (*Manager, *httptest.Server, context.CancelFunc) {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	root := t.TempDir()
-	db, err := database.Open(context.Background(), filepath.Join(root, "manager.db"))
+	db, err := database.Open(context.Background(), filepath.Join(root, "downloadTestDB(t, manager)"))
 	if err != nil {
 		server.Close()
 		t.Fatal(err)
@@ -387,7 +396,7 @@ func TestCreateValidationDuplicateAndFailures(t *testing.T) {
 		t.Fatal("expected unsafe filename rejection")
 	}
 
-	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := downloadTestDB(t, manager).ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('existing','huggingface','acme/demo','rev','same','demo.gguf','',?,1,1,0,'',unixepoch(),unixepoch())`, StateCompleted)
 	if err != nil {
 		t.Fatal(err)
@@ -453,12 +462,12 @@ func TestPathHelpers(t *testing.T) {
 
 func insertJob(t *testing.T, manager *Manager, id, state, etag string, downloaded int64) {
 	t.Helper()
-	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := downloadTestDB(t, manager).ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES(?,?,?,?,?,?,?,?,6,?,0,'',unixepoch(),unixepoch())`, id, "huggingface", "acme/demo", "rev", "artifact-"+id, "demo.gguf", "", state, downloaded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.db.ExecContext(context.Background(), `INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path)
+	_, err = downloadTestDB(t, manager).ExecContext(context.Background(), `INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path)
 VALUES(?,?,6,'',?,?,?,0,'')`, id, "demo.gguf", state, downloaded, etag)
 	if err != nil {
 		t.Fatal(err)
