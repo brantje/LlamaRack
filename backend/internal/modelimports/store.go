@@ -80,7 +80,7 @@ ORDER BY pi.created_at DESC,pi.id DESC`)
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []Status
+	out := make([]Status, 0)
 	for rows.Next() {
 		var item Status
 		var start int
@@ -107,7 +107,7 @@ func (s *sqlStore) OwnedModelIDs(ctx context.Context, jobID string) ([]string, e
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []string
+	out := make([]string, 0)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -127,7 +127,7 @@ func (s *sqlStore) Linked(ctx context.Context, jobID string) ([]linkedImport, er
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []linkedImport
+	out := make([]linkedImport, 0)
 	for rows.Next() {
 		var item linkedImport
 		var owns int
@@ -157,7 +157,7 @@ WHERE pi.instance_id IS NOT NULL AND pi.instance_id<>''`)
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []pendingImport
+	out := make([]pendingImport, 0)
 	for rows.Next() {
 		var item pendingImport
 		var start, attempted int
@@ -217,7 +217,7 @@ ORDER BY dj.updated_at,dj.id`, downloads.StateCompleted)
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var out []completedDownload
+	out := make([]completedDownload, 0)
 	for rows.Next() {
 		var item completedDownload
 		if err := rows.Scan(&item.ID, &item.RepoID, &item.Name, &item.Quantization); err != nil {
