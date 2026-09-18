@@ -136,7 +136,7 @@ func TestOversizedOrUnverifiablePartialRestarts(t *testing.T) {
 
 func TestRunRejectsUnsupportedProviderAndInvalidStoredIdentity(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
-	_, err := manager.db.Exec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('other','direct-url','x/y','rev','a','x.gguf','',?,0,0,0,'',unixepoch(),unixepoch())`, StateQueued)
 	if err != nil {
 		t.Fatal(err)
@@ -145,12 +145,12 @@ VALUES('other','direct-url','x/y','rev','a','x.gguf','',?,0,0,0,'',unixepoch(),u
 		t.Fatalf("run error = %v", err)
 	}
 
-	_, err = manager.db.Exec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err = manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('badrepo','huggingface','bad','rev','a','x.gguf','',?,1,0,0,'',unixepoch(),unixepoch())`, StateQueued)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.db.Exec(`INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path) VALUES('badrepo','x.gguf',1,'',?,0,'',0,'')`, StateQueued)
+	_, err = manager.db.ExecContext(context.Background(), `INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path) VALUES('badrepo','x.gguf',1,'',?,0,'',0,'')`, StateQueued)
 	if err != nil {
 		t.Fatal(err)
 	}

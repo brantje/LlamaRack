@@ -387,7 +387,7 @@ func TestCreateValidationDuplicateAndFailures(t *testing.T) {
 		t.Fatal("expected unsafe filename rejection")
 	}
 
-	_, err := manager.db.Exec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('existing','huggingface','acme/demo','rev','same','demo.gguf','',?,1,1,0,'',unixepoch(),unixepoch())`, StateCompleted)
 	if err != nil {
 		t.Fatal(err)
@@ -453,12 +453,12 @@ func TestPathHelpers(t *testing.T) {
 
 func insertJob(t *testing.T, manager *Manager, id, state, etag string, downloaded int64) {
 	t.Helper()
-	_, err := manager.db.Exec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES(?,?,?,?,?,?,?,?,6,?,0,'',unixepoch(),unixepoch())`, id, "huggingface", "acme/demo", "rev", "artifact-"+id, "demo.gguf", "", state, downloaded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = manager.db.Exec(`INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path)
+	_, err = manager.db.ExecContext(context.Background(), `INSERT INTO download_files(job_id,path,size,oid,state,downloaded_bytes,etag,ordinal,local_path)
 VALUES(?,?,6,'',?,?,?,0,'')`, id, "demo.gguf", state, downloaded, etag)
 	if err != nil {
 		t.Fatal(err)

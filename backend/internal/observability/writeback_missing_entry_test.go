@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
@@ -11,7 +13,6 @@ func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.startWriteback(ctx, time.Hour)
-	s.db.SetMaxOpenConns(1)
 
 	record := RequestRecord{StartedAt: 1000, Endpoint: "/v1/chat/completions"}
 	if err := s.BeginCorrelatedRequest(ctx, "req-missing-active", record); err != nil {
@@ -28,7 +29,7 @@ func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
 		t.Fatal("begin did not retain the active entry snapshot")
 	}
 
-	conn, err := s.db.Conn(ctx)
+	blocker, err := database.Begin(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,17 +37,17 @@ func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
 	hotCtx, hotCancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	if err := s.SetRequestModelSlug(hotCtx, "req-missing-active", "public-model"); err != nil {
 		hotCancel()
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("model slug unexpectedly touched SQLite: %v", err)
 	}
 	record.InstanceID = "instance-a"
 	if err := s.UpdateCorrelatedRequest(hotCtx, "req-missing-active", record); err != nil {
 		hotCancel()
-		_ = conn.Close()
+		_ = blocker.Rollback()
 		t.Fatalf("update unexpectedly touched SQLite: %v", err)
 	}
 	hotCancel()
-	if err := conn.Close(); err != nil {
+	if err := blocker.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 

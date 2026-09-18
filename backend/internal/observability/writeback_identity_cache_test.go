@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
@@ -18,7 +20,7 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +39,7 @@ func TestWritebackModelIdentityCachesPerInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, err = s.db.BeginTx(ctx, nil)
+	tx, err = database.Begin(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}

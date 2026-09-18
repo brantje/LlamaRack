@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestAPIKeyCacheHitAvoidsSQLite(t *testing.T) {
@@ -23,7 +25,7 @@ func TestAPIKeyCacheHitAvoidsSQLite(t *testing.T) {
 		t.Fatalf("first auth=%+v err=%v", first, err)
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}

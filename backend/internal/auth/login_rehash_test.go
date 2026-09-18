@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/argon2"
 )
@@ -91,7 +92,7 @@ func TestPersistPasswordRehashRejectsStaleHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		t.Fatal(err)
 	}

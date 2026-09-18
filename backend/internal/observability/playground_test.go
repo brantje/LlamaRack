@@ -181,7 +181,7 @@ func TestPlaygroundSchemaExistsFromMigrations(t *testing.T) {
 	}
 }
 
-func hasTableColumn(t *testing.T, ctx context.Context, db *sql.DB, table, column string) bool {
+func hasTableColumn(t *testing.T, ctx context.Context, db database.Querier, table, column string) bool {
 	t.Helper()
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {

@@ -46,7 +46,7 @@ func assertPromotedStats(t *testing.T, service *Service, requestID string) {
 		t.Fatalf("promoted stats=%+v", stats)
 	}
 	var staged int
-	if err := service.db.QueryRow(`SELECT COUNT(*) FROM inference_request_timing_staging WHERE request_id=?`, requestID).Scan(&staged); err != nil {
+	if err := service.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM inference_request_timing_staging WHERE request_id=?`, requestID).Scan(&staged); err != nil {
 		t.Fatal(err)
 	}
 	if staged != 0 {

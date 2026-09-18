@@ -126,7 +126,7 @@ VALUES('remove','huggingface','acme/demo','rev','artifact','demo.gguf','',?,6,3,
 
 func TestRemoveRejectsNonCancelledDownload(t *testing.T) {
 	manager, _, _ := newTestManager(t, http.NotFoundHandler())
-	_, err := manager.db.Exec(`INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
+	_, err := manager.db.ExecContext(context.Background(), `INSERT INTO download_jobs(id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at)
 VALUES('active','huggingface','acme/demo','rev','artifact','demo.gguf','',?,1,0,0,'',unixepoch(),unixepoch())`, StateQueued)
 	if err != nil {
 		t.Fatal(err)
