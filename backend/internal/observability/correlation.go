@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 // CorrelatedRequestRecord is the request detail DTO. Full-mode bodies are
 // deliberately exposed here only; RequestRecord itself never serializes them.
