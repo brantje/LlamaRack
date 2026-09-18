@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -138,7 +139,7 @@ func (s *Service) RecordContextMetrics(ctx context.Context, collectedAt time.Tim
 		collectedAt = time.Now().UTC()
 	}
 	timestamp := collectedAt.UTC().UnixMilli()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

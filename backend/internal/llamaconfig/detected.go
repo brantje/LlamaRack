@@ -1,8 +1,8 @@
 package llamaconfig
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
-	"database/sql"
 	"sync"
 )
 
@@ -13,7 +13,7 @@ var detectedDefaultsProviders sync.Map
 // RegisterDetectedDefaultsProvider installs runtime defaults derived from the
 // backing model file. Detected values are lower priority than every explicit
 // global, model, or instance option.
-func RegisterDetectedDefaultsProvider(db *sql.DB, provider DetectedDefaultsProvider) func() {
+func RegisterDetectedDefaultsProvider(db database.Store, provider DetectedDefaultsProvider) func() {
 	if db == nil || provider == nil {
 		return func() {}
 	}
@@ -21,7 +21,7 @@ func RegisterDetectedDefaultsProvider(db *sql.DB, provider DetectedDefaultsProvi
 	return func() { detectedDefaultsProviders.Delete(db) }
 }
 
-func detectedDefaultsProvider(db *sql.DB) DetectedDefaultsProvider {
+func detectedDefaultsProvider(db database.Store) DetectedDefaultsProvider {
 	value, ok := detectedDefaultsProviders.Load(db)
 	if !ok {
 		return nil

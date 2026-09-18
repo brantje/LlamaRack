@@ -1,6 +1,7 @@
 package instances
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"errors"
@@ -69,12 +70,12 @@ type UpdateInput struct {
 
 type ChangeNotifier func(ctx context.Context, instanceID string)
 type Service struct {
-	db       *sql.DB
+	db database.Store
 	onChange ChangeNotifier
 	hotCache instanceHotCache
 }
 
-func New(db *sql.DB) *Service {
+func New(db database.Store) *Service {
 	return &Service{db: db, hotCache: instanceHotCache{byID: map[string]Instance{}, slugToID: map[string]string{}}}
 }
 func (s *Service) SetOnChange(fn ChangeNotifier) { s.onChange = fn }
@@ -102,7 +103,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Instance, error) 
 	if err != nil {
 		return Instance{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -131,7 +132,7 @@ func (s *Service) Update(ctx context.Context, currentID string, in UpdateInput) 
 	if err != nil {
 		return Instance{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return Instance{}, err
 	}
@@ -433,7 +434,7 @@ func normalizeValues(base Instance, modelID, name string, enabledInput, autoload
 	return base, nil
 }
 
-func replaceOptions(ctx context.Context, tx *sql.Tx, id string, options map[string]string) error {
+func replaceOptions(ctx context.Context, tx database.Querier, id string, options map[string]string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM instance_options WHERE instance_id=?`, id); err != nil {
 		return err
 	}

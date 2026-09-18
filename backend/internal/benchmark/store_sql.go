@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -12,9 +13,9 @@ import (
 
 const runColumns = `id,instance_id,instance_slug_snapshot,instance_name_snapshot,instance_config_snapshot,benchmark_overrides,effective_benchmark_config,model_id,model_slug_snapshot,model_name_snapshot,artifact_snapshot,workload_profile,resolved_argv,mapping_differences,status,created_at,started_at,completed_at,llamarack_version,llamarack_commit,llama_cpp_release,llama_cpp_build,llama_bench_version,llama_bench_fingerprint,runtime_variant,benchmark_schema_version,parser_schema_version,hardware_snapshot,failure,diagnostic_output`
 
-type SQLStore struct{ db *sql.DB }
+type SQLStore struct{ db database.Store }
 
-func NewSQLStore(db *sql.DB) *SQLStore { return &SQLStore{db: db} }
+func NewSQLStore(db database.Store) *SQLStore { return &SQLStore{db: db} }
 
 func (s *SQLStore) CreateRun(ctx context.Context, run Run) error {
 	if s == nil || s.db == nil {
@@ -170,7 +171,7 @@ func (s *SQLStore) CompleteRun(ctx context.Context, id string, completion Comple
 	if completion.CompletedAt.IsZero() {
 		completion.CompletedAt = time.Now().UTC()
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return Run{}, err
 	}

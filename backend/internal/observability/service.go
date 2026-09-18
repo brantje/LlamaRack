@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -108,7 +109,7 @@ type Counter struct {
 }
 
 type Service struct {
-	db *sql.DB
+	db database.Store
 
 	mu     sync.RWMutex
 	active map[string]int
@@ -121,7 +122,7 @@ type Service struct {
 	pendingLimits func(context.Context) (perInstance, global int)
 }
 
-func New(db *sql.DB) *Service {
+func New(db database.Store) *Service {
 	return &Service{db: db, active: map[string]int{}, queued: map[string]int{}, now: time.Now}
 }
 
@@ -174,7 +175,7 @@ func (s *Service) RecordQueueLimitRejection(ctx context.Context, instanceID, sco
 	if scope != "instance" && scope != "global" {
 		scope = "instance"
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -233,7 +234,7 @@ func (s *Service) RecordRequest(ctx context.Context, record RequestRecord) error
 	if record.ResponseBody != nil {
 		responseBody = *record.ResponseBody
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -256,7 +257,7 @@ func (s *Service) RecordRequest(ctx context.Context, record RequestRecord) error
 	return tx.Commit()
 }
 
-func addFinalCounters(ctx context.Context, tx *sql.Tx, record RequestRecord) error {
+func addFinalCounters(ctx context.Context, tx database.Querier, record RequestRecord) error {
 	if err := addCounter(ctx, tx, Counter{Metric: "gateway_requests_total", InstanceID: record.InstanceID, Endpoint: record.Endpoint, StatusCode: record.StatusCode, Result: record.Result, Streaming: record.Streaming, Value: 1}); err != nil {
 		return err
 	}
@@ -272,7 +273,7 @@ func addFinalCounters(ctx context.Context, tx *sql.Tx, record RequestRecord) err
 	return nil
 }
 
-func addCounter(ctx context.Context, tx *sql.Tx, counter Counter) error {
+func addCounter(ctx context.Context, tx database.Querier, counter Counter) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO observability_counters(metric,instance_id,endpoint,status_code,result,streaming,value)
 		VALUES(?,?,?,?,?,?,?) ON CONFLICT(metric,instance_id,endpoint,status_code,result,streaming)
 		DO UPDATE SET value=value+excluded.value`, counter.Metric, counter.InstanceID, counter.Endpoint, counter.StatusCode, counter.Result, boolInt(counter.Streaming), counter.Value)

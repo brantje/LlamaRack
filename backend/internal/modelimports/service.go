@@ -1,6 +1,7 @@
 package modelimports
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -31,7 +32,7 @@ type InstanceStarter interface {
 }
 
 type Service struct {
-	db        *sql.DB
+	db database.Store
 	modelsDir string
 	models    *models.Service
 	instances *instances.Service
@@ -75,7 +76,7 @@ func (s *Service) SetInstanceOnChange(fn instances.ChangeNotifier) {
 	s.instances.SetOnChange(fn)
 }
 
-func New(db *sql.DB, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
+func New(db database.Store, modelsDir string, modelService *models.Service, downloadManager *downloads.Manager, starter InstanceStarter) *Service {
 	return &Service{
 		db: db, modelsDir: modelsDir, models: modelService, instances: instances.New(db),
 		downloads: downloadManager, starter: starter,
@@ -414,7 +415,7 @@ func (s *Service) createPendingModel(ctx context.Context, mainPath string, artif
 		ID: modelID, Name: name, GGUFPath: mainPath, TotalBytes: artifact.ModelBytes,
 		Quantization: artifact.Quantization, ContextLength: contextLength,
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return models.Model{}, err
 	}

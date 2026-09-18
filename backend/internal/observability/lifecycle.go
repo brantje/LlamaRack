@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"fmt"
 	"time"
@@ -32,7 +33,7 @@ func (s *Service) RecordLifecycle(ctx context.Context, event, instanceID string,
 	default:
 		return fmt.Errorf("unsupported lifecycle event %q", event)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

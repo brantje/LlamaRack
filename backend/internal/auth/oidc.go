@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -768,7 +769,7 @@ func (m *OIDCManager) resolveIdentity(ctx context.Context, provider OIDCProvider
 	if !errors.Is(err, sql.ErrNoRows) {
 		return User{}, err
 	}
-	tx, err := m.auth.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, m.auth.db)
 	if err != nil {
 		return User{}, err
 	}

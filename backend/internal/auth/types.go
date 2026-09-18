@@ -1,9 +1,9 @@
 package auth
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"crypto/ed25519"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"sync"
 	"time"
@@ -151,7 +151,7 @@ type wsTicket struct {
 }
 
 type Service struct {
-	db *sql.DB
+	db database.Store
 
 	mu              sync.RWMutex
 	sessionLifetime time.Duration
@@ -165,7 +165,7 @@ type Service struct {
 	wsTickets map[string]wsTicket
 }
 
-func New(db *sql.DB, sessionLifetime time.Duration) *Service {
+func New(db database.Store, sessionLifetime time.Duration) *Service {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic("generate management signing key: " + err.Error())

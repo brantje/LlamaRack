@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"errors"
@@ -99,12 +100,12 @@ type definition struct {
 }
 
 type Service struct {
-	db      *sql.DB
+	db database.Store
 	defs    map[string]definition
 	runtime RuntimeInfo
 }
 
-func New(db *sql.DB, defaults Defaults) *Service {
+func New(db database.Store, defaults Defaults) *Service {
 	return &Service{
 		db: db,
 		defs: map[string]definition{

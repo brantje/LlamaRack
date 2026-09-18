@@ -1,6 +1,7 @@
 package downloads
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -66,7 +67,7 @@ type File struct {
 
 type Manager struct {
 	ctx       context.Context
-	db        *sql.DB
+	db database.Store
 	modelsDir string
 	hf        *huggingface.Client
 	limit     SizeLimitFunc
@@ -74,7 +75,7 @@ type Manager struct {
 	cancels   map[string]context.CancelFunc
 }
 
-func New(ctx context.Context, db *sql.DB, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
+func New(ctx context.Context, db database.Store, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
 	var limit SizeLimitFunc
 	if len(limits) > 0 {
 		limit = limits[0]
@@ -108,7 +109,7 @@ func (m *Manager) CreateHuggingFace(ctx context.Context, detail huggingface.Mode
 	if err != nil {
 		return Job{}, err
 	}
-	tx, err := m.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, m.db)
 	if err != nil {
 		return Job{}, err
 	}

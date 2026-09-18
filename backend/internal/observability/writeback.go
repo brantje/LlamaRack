@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"errors"
@@ -504,7 +505,7 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 	if err := s.EnsureCorrelationSchema(ctx); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -517,7 +518,7 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 	return tx.Commit()
 }
 
-func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry writebackEntry) error {
+func (s *Service) persistWritebackEntry(ctx context.Context, tx database.Querier, entry writebackEntry) error {
 	record := normalizeFinalRecord(entry.record)
 	keyID, keyName, keyPrefix, ownerKind, ownerID, ttft, tps, requestBody, responseBody := requestValues(record)
 	var promptTPS any
@@ -629,7 +630,7 @@ func (s *Service) persistWritebackEntry(ctx context.Context, tx *sql.Tx, entry w
 	return nil
 }
 
-func (s *Service) resolveWritebackModelIdentity(ctx context.Context, tx *sql.Tx, durableID, publicID string) (string, string, error) {
+func (s *Service) resolveWritebackModelIdentity(ctx context.Context, tx database.Querier, durableID, publicID string) (string, string, error) {
 	durableID = strings.TrimSpace(durableID)
 	publicID = strings.TrimSpace(publicID)
 	if durableID == "" && publicID == "" {

@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -75,7 +76,7 @@ func (s *Service) BeginCorrelatedRequest(ctx context.Context, requestID string, 
 		return err
 	}
 	keyID, keyName, keyPrefix, ownerKind, ownerID, _, _, requestBody, _ := requestValues(record)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -172,7 +173,7 @@ func (s *Service) FinalizeCorrelatedRequest(ctx context.Context, requestID strin
 	if promptTokensPerSecond != nil {
 		promptTPS = *promptTokensPerSecond
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

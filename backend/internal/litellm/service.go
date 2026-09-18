@@ -1,6 +1,7 @@
 package litellm
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -55,7 +56,7 @@ type DisconnectInput struct {
 }
 
 type Service struct {
-	db       *sql.DB
+	db database.Store
 	auth     *auth.Service
 	secrets  *huggingface.SecretStore
 	settings *settings.Service
@@ -64,7 +65,7 @@ type Service struct {
 	reconcileMu sync.Mutex
 }
 
-func New(db *sql.DB, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
+func New(db database.Store, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
 	return &Service{db: db, auth: authService, secrets: secrets, settings: managerSettings, http: &http.Client{Timeout: 30 * time.Second}}
 }
 

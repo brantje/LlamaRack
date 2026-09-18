@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -83,7 +84,7 @@ func loadOrCreateEd25519Key(path string) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
-func persistPasswordRehash(ctx context.Context, tx *sql.Tx, userID int64, originalHash, rehashed string) error {
+func persistPasswordRehash(ctx context.Context, tx database.Querier, userID int64, originalHash, rehashed string) error {
 	result, err := tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=? AND password_hash=?", rehashed, userID, originalHash)
 	if err != nil {
 		return err
@@ -120,7 +121,7 @@ func (s *Service) LoginBearerWithMetadata(ctx context.Context, username, passwor
 	work.Release()
 
 	now := time.Now()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return LoginResult{}, err
 	}

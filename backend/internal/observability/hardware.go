@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"fmt"
@@ -72,7 +73,7 @@ func (s *Service) RecordHardware(ctx context.Context, snapshot hardware.Snapshot
 		collectedAt = time.Now().UTC()
 	}
 	timestamp := collectedAt.UnixMilli()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

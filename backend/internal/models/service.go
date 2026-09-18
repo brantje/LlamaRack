@@ -1,6 +1,7 @@
 package models
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -80,12 +81,12 @@ type UpdateModelInput struct {
 }
 
 type Service struct {
-	db        *sql.DB
+	db database.Store
 	modelsDir string
 }
 
-func New(db *sql.DB, modelsDir string) *Service { return &Service{db: db, modelsDir: modelsDir} }
-func (s *Service) DB() *sql.DB                  { return s.db }
+func New(db database.Store, modelsDir string) *Service { return &Service{db: db, modelsDir: modelsDir} }
+func (s *Service) DB() database.Store { return s.db }
 
 func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error) {
 	in.Name = strings.TrimSpace(in.Name)
@@ -124,7 +125,7 @@ func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error
 		Quantization:  quantFromName(filepath.Base(ggufPath)),
 		ContextLength: in.ContextLength,
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return Model{}, err
 	}
@@ -195,7 +196,7 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateModelInput) (M
 	if in.ContextLength < 0 {
 		return Model{}, errors.New("context_length must be zero or greater")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return Model{}, err
 	}
@@ -426,7 +427,7 @@ func scanModel(row scanner) (Model, error) {
 	return m, nil
 }
 
-func replaceOptions(ctx context.Context, tx *sql.Tx, table, idColumn, id string, options map[string]string) error {
+func replaceOptions(ctx context.Context, tx database.Querier, table, idColumn, id string, options map[string]string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+idColumn+"=?", id); err != nil {
 		return err
 	}

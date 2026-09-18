@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"errors"
@@ -21,7 +22,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) (Use
 	if err != nil {
 		return User{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return User{}, err
 	}
@@ -104,7 +105,7 @@ func (s *Service) UserByID(ctx context.Context, id int64) (User, error) {
 }
 
 func (s *Service) SetUserEnabled(ctx context.Context, id int64, enabled bool) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -145,7 +146,7 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, id int64) error {
 	if actorID == id {
 		return ErrSelfDelete
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -181,7 +182,7 @@ func (s *Service) ResetPassword(ctx context.Context, userID int64, newPassword s
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}
@@ -222,7 +223,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassw
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return err
 	}

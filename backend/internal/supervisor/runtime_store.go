@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -52,11 +53,11 @@ type RuntimeStore interface {
 
 // SQLStore stores worker runtime rows in SQLite.
 type SQLStore struct {
-	db *sql.DB
+	db database.Store
 }
 
 // NewSQLStore returns a SQLite-backed runtime store.
-func NewSQLStore(db *sql.DB) *SQLStore {
+func NewSQLStore(db database.Store) *SQLStore {
 	return &SQLStore{db: db}
 }
 
@@ -185,7 +186,7 @@ func (s *MemoryStore) List(context.Context) ([]WorkerRecord, error) {
 }
 
 // EnsureInstallationID returns the durable installation UUID, creating it once.
-func EnsureInstallationID(ctx context.Context, db *sql.DB) (string, error) {
+func EnsureInstallationID(ctx context.Context, db database.Store) (string, error) {
 	if db == nil {
 		return "", errors.New("database is required")
 	}

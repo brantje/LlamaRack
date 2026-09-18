@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"database/sql"
 	"strings"
@@ -41,7 +42,7 @@ func (s *Service) LoginWithMetadata(ctx context.Context, username, password, rem
 		return "", "", User{}, err
 	}
 	now := time.Now()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := database.Begin(ctx, s.db)
 	if err != nil {
 		return "", "", User{}, err
 	}
