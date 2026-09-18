@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,7 +13,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/modelimports"
 	"github.com/brantje/llamarack/backend/internal/settings"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type huggingFaceHandler struct {
 	auth      *auth.Service
@@ -347,7 +347,7 @@ func (h *huggingFaceHandler) downloadItem(w http.ResponseWriter, r *http.Request
 		case http.MethodGet:
 			job, err := h.downloads.Get(r.Context(), parts[0])
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, database.ErrNotFound) {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
 					return
 				}
@@ -358,7 +358,7 @@ func (h *huggingFaceHandler) downloadItem(w http.ResponseWriter, r *http.Request
 		case http.MethodDelete:
 			job, err := h.downloads.Get(r.Context(), parts[0])
 			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, database.ErrNotFound) {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
 					return
 				}
@@ -372,7 +372,7 @@ func (h *huggingFaceHandler) downloadItem(w http.ResponseWriter, r *http.Request
 				}
 			}
 			if err := h.downloads.Remove(r.Context(), parts[0]); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
+				if errors.Is(err, database.ErrNotFound) {
 					writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
 					return
 				}
@@ -392,7 +392,7 @@ func (h *huggingFaceHandler) downloadItem(w http.ResponseWriter, r *http.Request
 	switch parts[1] {
 	case "cancel":
 		if err := h.downloads.Cancel(r.Context(), parts[0]); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
 				return
 			}
@@ -403,7 +403,7 @@ func (h *huggingFaceHandler) downloadItem(w http.ResponseWriter, r *http.Request
 	case "retry":
 		job, err := h.downloads.Retry(r.Context(), parts[0])
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "download not found"})
 				return
 			}

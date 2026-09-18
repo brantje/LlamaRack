@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +13,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type Server struct {
 	models    *models.Service
@@ -332,7 +332,7 @@ func (s *Server) resolveModelRoute(r *http.Request, value string) (models.Model,
 	if err == nil {
 		return item, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return models.Model{}, err
 	}
 	// Transitional compatibility for old opaque-ID management links. Frontend
@@ -345,7 +345,7 @@ func (s *Server) resolveInstanceRoute(r *http.Request, value string) (instances.
 	if err == nil {
 		return item, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return instances.Instance{}, err
 	}
 	// Transitional compatibility for old opaque-ID management links. Frontend
@@ -485,7 +485,7 @@ func validInstanceRouteMethod(w http.ResponseWriter, method string, parts []stri
 }
 
 func writeResourceLookupError(w http.ResponseWriter, resource string, err error) {
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": resource + " not found"})
 		return
 	}

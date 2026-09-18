@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,7 +16,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/observability"
 	"github.com/brantje/llamarack/backend/internal/slots"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bool, allowedIDs map[string]struct{}) {
 	items, err := g.lifecycle.Instances().List(r.Context())
@@ -151,7 +151,7 @@ func (g *Gateway) proxySlots(observed *responseObserver, r *http.Request, spec r
 func (g *Gateway) resolveInstanceBySlug(observed *responseObserver, r *http.Request, record *observability.RequestRecord, slug string) (instances.Instance, bool) {
 	instance, err := g.lifecycle.Instances().GetBySlug(r.Context(), slug)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
 			record.Error = sanitizeError(err.Error())
@@ -165,7 +165,7 @@ func (g *Gateway) resolveInstanceBySlug(observed *responseObserver, r *http.Requ
 func (g *Gateway) resolveInstanceByID(observed *responseObserver, r *http.Request, record *observability.RequestRecord, id string) (instances.Instance, bool) {
 	instance, err := g.lifecycle.Instances().GetByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeError(observed, http.StatusNotFound, "invalid_request_error", "model_not_found", "The model does not exist")
 		} else {
 			record.Error = sanitizeError(err.Error())

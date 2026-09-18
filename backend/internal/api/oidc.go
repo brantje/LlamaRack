@@ -2,7 +2,6 @@ package api
 
 import (
 	"crypto/subtle"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -15,7 +14,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/auth"
 	managersecurity "github.com/brantje/llamarack/backend/internal/security"
 	"github.com/brantje/llamarack/backend/internal/settings"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 const oidcStateCookie = "llamarack_oidc_state"
 
@@ -460,7 +460,7 @@ func (h *oidcHandler) unlinkOwnIdentity(w http.ResponseWriter, r *http.Request, 
 }
 
 func writeOIDCNotFound(w http.ResponseWriter, err error, message string) {
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, database.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": message})
 		return
 	}

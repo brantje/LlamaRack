@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +17,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/recommendations"
 	"github.com/brantje/llamarack/backend/internal/scheduler"
-)
+
+	"github.com/brantje/llamarack/backend/internal/database")
 
 type recommendationHandler struct {
 	auth      *auth.Service
@@ -75,7 +75,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}
@@ -104,7 +104,7 @@ func (h *recommendationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if instanceID != "" {
 		instance, instanceErr := h.instances.Get(r.Context(), instanceID)
 		if instanceErr != nil {
-			if errors.Is(instanceErr, sql.ErrNoRows) {
+			if errors.Is(instanceErr, database.ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "instance not found"})
 				return
 			}
@@ -234,7 +234,7 @@ func (h *modelDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	id := modelIDFromRequest(r)
 	model, err := h.models.GetByID(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, database.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
 			return
 		}
