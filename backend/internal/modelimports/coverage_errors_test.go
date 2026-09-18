@@ -1,7 +1,6 @@
 package modelimports
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/models"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestPrepareCleansPendingModelWhenInstanceSlugConflicts(t *testing.T) {
@@ -133,10 +134,10 @@ func TestCleanupJobSafeRemovesOwnedModelAndInstance(t *testing.T) {
 	if err := service.CleanupJobSafe(ctx, "owned-safe-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.instances.Get(ctx, instance.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := service.instances.Get(ctx, instance.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("instance still exists: %v", err)
 	}
-	if _, err := modelService.GetByID(ctx, model.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := modelService.GetByID(ctx, model.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("owned model still exists: %v", err)
 	}
 }
