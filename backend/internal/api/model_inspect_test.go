@@ -12,6 +12,7 @@ import (
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
 	"github.com/brantje/llamarack/backend/internal/instances"
+	"github.com/brantje/llamarack/backend/internal/llamacpp"
 	"github.com/brantje/llamarack/backend/internal/models"
 )
 
@@ -190,5 +191,67 @@ func TestSplitRecommendationDevices(t *testing.T) {
 	got := splitRecommendationDevices(" CUDA0,CUDA1,CUDA0, ")
 	if len(got) != 2 || got[0] != "CUDA0" || got[1] != "CUDA1" {
 		t.Fatalf("devices=%v", got)
+	}
+}
+
+
+func TestRecommendationRuntimePreviewOverridesAndModelBinding(t *testing.T) {
+	f := newAPIFixture(t, nil)
+	cookie := bootstrapAndLogin(t, f)
+	model := createModel(t, f, cookie)
+	enabled := true
+	spill := false
+	instance, err := f.server.lifecycle.Instances().Create(t.Context(), instances.CreateInput{
+		ModelID: model.ID, Name: "Runtime preview", Enabled: &enabled, SystemSpilloverEnabled: &spill,
+		GPUMode: "auto",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gib := int64(1024 * 1024 * 1024)
+	handler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12 * gib, FreeBytes: 10 * gib}},
+	}}, func() (llamacpp.Profile, error) {
+		return llamacpp.Profile{Options: []llamacpp.Option{
+			{Key: "ctx-size"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"},
+		}}, nil
+	})
+
+	url := "/api/v1/models/" + model.ID + "/recommendation?instance_id=" + instance.ID +
+		"&context_length=4096&gpu_mode=manual&gpu_devices=CUDA0,CUDA0&tensor_split=1&system_spillover_enabled=true"
+	w := doRequest(t, handler, http.MethodGet, url, nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("runtime preview=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"context_length":4096`) || !strings.Contains(w.Body.String(), `"CUDA0"`) {
+		t.Fatalf("runtime preview body=%s", w.Body.String())
+	}
+
+	otherPath := filepath.Join(f.dir, "other-runtime.gguf")
+	writeAPIMetadataGGUF(t, otherPath, "qwen2", 8192)
+	other, err := f.models.Create(t.Context(), models.CreateModelInput{Name: "Other runtime", GGUFPath: otherPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherInstance, err := f.server.lifecycle.Instances().Create(t.Context(), instances.CreateInput{
+		ModelID: other.ID, Name: "Other instance", Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = doRequest(t, handler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?instance_id="+otherInstance.ID, nil, cookie)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not belong to model") {
+		t.Fatalf("model binding=%d body=%s", w.Code, w.Body.String())
+	}
+
+	profileErrorHandler := NewRecommendationHandler(f.auth, f.models, staticHardware{snapshot: hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 24 * gib,
+	}}, func() (llamacpp.Profile, error) { return llamacpp.Profile{}, errors.New("profile unavailable") })
+	w = doRequest(t, profileErrorHandler, http.MethodGet,
+		"/api/v1/models/"+model.ID+"/recommendation?instance_id="+instance.ID+"&context_length=4096", nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("profile fallback=%d body=%s", w.Code, w.Body.String())
 	}
 }
