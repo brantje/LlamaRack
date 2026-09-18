@@ -15,10 +15,10 @@ func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.startWriteback(ctx, time.Hour)
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-a','model-a','Model A','model.gguf',1)`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO models(id,slug,name,gguf_path,total_bytes) VALUES('model-a','model-a','Model A','model.gguf',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-a','public-model','model-a','Instance A')`); err != nil {
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `INSERT INTO instances(id,slug,model_id,name) VALUES('instance-a','public-model','model-a','Instance A')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,7 +38,7 @@ func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	}
 
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&count); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -55,7 +55,7 @@ func TestWritebackBuffersUntilContextReadyAndFlushes(t *testing.T) {
 	}
 
 	var requestID, instanceID, modelSlug, sessionID, modelID, modelName string
-	if err := s.db.QueryRowContext(ctx, `SELECT c.request_id,r.instance_id,r.model_slug,x.session_id,x.model_id,x.model_name
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT c.request_id,r.instance_id,r.model_slug,x.session_id,x.model_id,x.model_name
         FROM inference_requests r
         JOIN inference_request_correlations c ON c.inference_request_id=r.id
         JOIN inference_request_log_context x ON x.request_id=c.request_id`).Scan(&requestID, &instanceID, &modelSlug, &sessionID, &modelID, &modelName); err != nil {
@@ -83,7 +83,7 @@ func TestWritebackExplicitFlushPersistsFinalizedWithoutContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&count); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -135,7 +135,7 @@ func TestWritebackFailureRequeuesBatch(t *testing.T) {
 	if err := s.RecordCorrelatedRequest(ctx, "req-requeue", nil, record); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.Close(); err != nil {
+	if err := observabilityTestDB(t, s).Close(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.flushWriteback(ctx, true); err == nil {
@@ -216,10 +216,10 @@ func TestWritebackPersistenceIsIdempotentByRequestID(t *testing.T) {
 		t.Fatal(err)
 	}
 	var requests, correlations int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&requests); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_requests").Scan(&requests); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_request_correlations WHERE request_id='req-idempotent'").Scan(&correlations); err != nil {
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, "SELECT COUNT(*) FROM inference_request_correlations WHERE request_id='req-idempotent'").Scan(&correlations); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 1 || correlations != 1 {
@@ -241,7 +241,7 @@ func TestWritebackFlushDropsPermanentFailuresAndDrainsRemainingBatches(t *testin
 	ctx := context.Background()
 	s.startWriteback(ctx, time.Hour)
 
-	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER reject_permanent_writeback
+	if _, err := observabilityTestDB(t, s).ExecContext(ctx, `CREATE TRIGGER reject_permanent_writeback
 BEFORE INSERT ON inference_requests
 WHEN NEW.endpoint='/v1/permanent'
 BEGIN
