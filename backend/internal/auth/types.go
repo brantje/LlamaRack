@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -176,14 +175,6 @@ type Stores struct {
 	APIKeys         APIKeyStore
 	ServiceAccounts ServiceAccountStore
 	OIDC            OIDCStore
-}
-
-// New is the compatibility/composition helper for the SQL-backed adapters.
-func New(db database.Store, sessionLifetime time.Duration) *Service {
-	return NewWithStores(Stores{
-		Users: NewUserStore(db), Sessions: NewSessionStore(db), APIKeys: NewAPIKeyStore(db),
-		ServiceAccounts: NewServiceAccountStore(db), OIDC: NewOIDCStore(db),
-	}, sessionLifetime)
 }
 
 // NewWithStores constructs auth from domain persistence contracts only.

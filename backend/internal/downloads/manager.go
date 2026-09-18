@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
@@ -72,10 +71,6 @@ type Manager struct {
 	limit     SizeLimitFunc
 	mu        sync.Mutex
 	cancels   map[string]context.CancelFunc
-}
-
-func New(ctx context.Context, db database.Store, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {
-	return NewWithStore(ctx, NewDownloadStore(db), modelsDir, hf, limits...)
 }
 
 func NewWithStore(ctx context.Context, store DownloadStore, modelsDir string, hf *huggingface.Client, limits ...SizeLimitFunc) *Manager {

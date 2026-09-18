@@ -1,7 +1,6 @@
 package models
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -81,10 +80,6 @@ type UpdateModelInput struct {
 type Service struct {
 	store     ModelStore
 	modelsDir string
-}
-
-func New(db database.Store, modelsDir string) *Service {
-	return NewWithStore(NewModelStore(db), modelsDir)
 }
 
 func NewWithStore(store ModelStore, modelsDir string) *Service {

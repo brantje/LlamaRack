@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/brantje/llamarack/backend/internal/auth"
-	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/settings"
@@ -61,10 +60,6 @@ type Service struct {
 	http     *http.Client
 
 	reconcileMu sync.Mutex
-}
-
-func New(db database.Store, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {
-	return NewWithStore(NewLiteLLMStore(db), authService, secrets, managerSettings)
 }
 
 func NewWithStore(store LiteLLMStore, authService *auth.Service, secrets *huggingface.SecretStore, managerSettings *settings.Service) *Service {

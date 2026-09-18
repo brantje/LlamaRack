@@ -1,7 +1,6 @@
 package observability
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"fmt"
 	"math"
@@ -119,10 +118,6 @@ type Service struct {
 	correlationReady bool
 
 	pendingLimits func(context.Context) (perInstance, global int)
-}
-
-func New(db database.Store) *Service {
-	return NewWithStore(NewObservabilityStore(db))
 }
 
 func NewWithStore(store ObservabilityStore) *Service {
