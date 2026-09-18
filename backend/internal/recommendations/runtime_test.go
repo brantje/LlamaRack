@@ -81,6 +81,11 @@ func TestRuntimePlacementRangeClassificationMatchesSchedulerPlan(t *testing.T) {
 			if kind != zone.Kind || count != zone.GPUCount {
 				t.Fatalf("context %d classified=%s:%d zone=%+v", context, kind, count, zone)
 			}
+			assertZonePlanDetails(t, zone, classified)
+			totalFit := runtimeTotalHardwareFit(assumeIdleSnapshot(snapshot), 20*gib, gib, context, meta, nil, caps, runtime)
+			if totalFit != zone.TotalHardwareFit {
+				t.Fatalf("context %d total fit=%v zone=%+v", context, totalFit, zone)
+			}
 		}
 	}
 	next := ranges.MaximumContext + ranges.ContextStep

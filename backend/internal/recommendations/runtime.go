@@ -93,16 +93,21 @@ func ComputeRuntimePlacementRanges(snapshot hardware.Snapshot, weights, companio
 
 	idle := assumeIdleSnapshot(snapshot)
 	var current *classifiedPlacement
+	currentIdentity := ""
+	currentTotalHardwareFit := false
 	start := int64(0)
 	lastFit := int64(0)
 	for context := placementMinContext; context <= maxCapability; context += placementContextStep {
 		classified := classifyRuntime(snapshot, &idle, weights, companionBytes, context, metadata, metadataErr, capabilities, runtime)
+		totalFit := runtimeTotalHardwareFit(idle, weights, companionBytes, context, metadata, metadataErr, capabilities, runtime)
+		identity := placementIdentity(classified) + "|" + offloadBool(totalFit)
 		if !classified.Fit {
 			if current != nil {
 				zone := placementZoneFrom(start, context-placementContextStep, *current)
-				zone.TotalHardwareFit = runtimeTotalHardwareFit(idle, weights, companionBytes, start, metadata, metadataErr, capabilities, runtime)
+				zone.TotalHardwareFit = currentTotalHardwareFit
 				ranges.Zones = append(ranges.Zones, zone)
 				current = nil
+				currentIdentity = ""
 			}
 			continue
 		}
@@ -113,21 +118,25 @@ func ComputeRuntimePlacementRanges(snapshot hardware.Snapshot, weights, companio
 		if current == nil {
 			copy := classified
 			current = &copy
+			currentIdentity = identity
+			currentTotalHardwareFit = totalFit
 			start = context
 			continue
 		}
-		if placementIdentity(classified) != placementIdentity(*current) {
+		if identity != currentIdentity {
 			zone := placementZoneFrom(start, context-placementContextStep, *current)
-			zone.TotalHardwareFit = runtimeTotalHardwareFit(idle, weights, companionBytes, start, metadata, metadataErr, capabilities, runtime)
+			zone.TotalHardwareFit = currentTotalHardwareFit
 			ranges.Zones = append(ranges.Zones, zone)
 			copy := classified
 			current = &copy
+			currentIdentity = identity
+			currentTotalHardwareFit = totalFit
 			start = context
 		}
 	}
 	if current != nil {
 		zone := placementZoneFrom(start, lastFit, *current)
-		zone.TotalHardwareFit = runtimeTotalHardwareFit(idle, weights, companionBytes, start, metadata, metadataErr, capabilities, runtime)
+		zone.TotalHardwareFit = currentTotalHardwareFit
 		ranges.Zones = append(ranges.Zones, zone)
 	}
 	if lastFit == 0 {
