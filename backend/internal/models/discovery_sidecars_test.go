@@ -157,7 +157,7 @@ func TestDownloadSidecarsByMainUsesNewestCompletedJobAndFileOrder(t *testing.T) 
 	insert("pending", "model.gguf", mainPath, 0)
 	insert("pending", "pending-helper.gguf", "huggingface/org/repo/pending-helper.gguf", 1)
 
-	got, err := s.downloadSidecarsByMain(ctx)
+	got, err := s.store.DownloadSidecarsByMain(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

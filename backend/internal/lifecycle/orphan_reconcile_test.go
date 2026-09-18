@@ -182,7 +182,7 @@ func TestManagerRestartRemovesOwnedWorkerAndStartsOneReplacement(t *testing.T) {
 		defer stopCancel()
 		restartedSup.Shutdown(stopCtx)
 	})
-	restarted := New(ms, restartedSup)
+	restarted := New(ms, s.instances, s.config, restartedSup)
 	restarted.hardware = abundantSingleGPUHardware()
 	restarted.ArmStartupReconcile()
 	if err := restarted.ReconcileStaleWorkers(ctx); err != nil {

@@ -60,6 +60,9 @@ type sqlObservabilityStore struct {
 }
 
 func NewObservabilityStore(db database.Store) ObservabilityStore {
+	if db == nil {
+		return nil
+	}
 	return &sqlObservabilityStore{db: db, modelIdentities: map[string]writebackModelIdentity{}}
 }
 

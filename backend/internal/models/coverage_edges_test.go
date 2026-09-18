@@ -25,7 +25,7 @@ func TestServiceDBAndDiscoveryEdgePaths(t *testing.T) {
 
 func TestAvailableGGUFsReturnsDatabaseQueryError(t *testing.T) {
 	s, _ := testModelService(t)
-	db := db
+	db := testModelDB(t, s)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}

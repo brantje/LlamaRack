@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -236,7 +237,7 @@ func NewCorrelatedRequestHandler(service *Service) http.Handler {
 		}
 		record, err := service.GetRequestByRequestID(r.Context(), requestID)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
 				return
 			}
