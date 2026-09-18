@@ -22,7 +22,6 @@ jobs:
           --health-retries 10
     env:
       LLAMARACK_TEST_REDIS_URL: redis://127.0.0.1:6379/0
-      LLAMARACK_LIVE_HF_QUALIFICATION: "1"
     defaults:
       run:
         working-directory: backend
@@ -41,6 +40,8 @@ jobs:
           go test ./internal/huggingface -run '^TestDerivedMetadataConcurrentColdMissCoalescesOrigin$' -count=10
 
       - name: Real Hugging Face Redis qualification
+        env:
+          LLAMARACK_LIVE_HF_QUALIFICATION: "1"
         run: |
           set -o pipefail
           go test ./internal/huggingface             -run '^TestLiveRedisDerivedMetadataQualification$'             -v -count=1 | tee ../redis-live-qualification.txt

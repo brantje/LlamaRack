@@ -1,7 +1,7 @@
 package downloads
 
 import (
-		"context"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"

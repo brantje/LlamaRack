@@ -1,12 +1,12 @@
 package instances
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"errors"
 	"regexp"
 	"strings"
 
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/resourceid"
 )
 

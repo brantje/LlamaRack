@@ -1,7 +1,6 @@
 package modelimports
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/downloads"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 	"github.com/brantje/llamarack/backend/internal/instances"

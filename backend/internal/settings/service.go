@@ -1,7 +1,6 @@
 package settings
 
 import (
-	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 const (

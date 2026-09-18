@@ -14,8 +14,9 @@ type Querier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// Store is a root persistence handle. Production services depend on this
-// interface rather than concrete database/sql or ORM handles.
+// Store is the generic SQL execution substrate used by SQL adapters and
+// application composition. Domain services depend on package-owned store
+// interfaces instead of this SQL-shaped surface.
 type Store interface {
 	Querier
 	Close() error
