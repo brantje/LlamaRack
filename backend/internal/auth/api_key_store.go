@@ -97,7 +97,7 @@ func (s *sqlAPIKeyStore) List(ctx context.Context, serviceAccountID string) ([]A
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var items []APIKey
+	items := make([]APIKey, 0)
 	for rows.Next() {
 		item, err := scanStoredAPIKey(rows)
 		if err != nil {
