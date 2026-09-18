@@ -1080,36 +1080,25 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 			}
 		}
 	}
-	moePlan := s.prepareAutoMoELaunch(ctx, i, m, path, launchOptions, effective.Values)
-	launchOptions = applyCPUMoeLoadMode(moePlan.Options, liveProfile)
+	runtimePlan, err := s.prepareRuntimeLaunch(ctx, i, m, path, launchOptions, liveProfile, allowEviction)
+	if err != nil {
+		return "", err
+	}
+	launchOptions = applyCPUMoeLoadMode(runtimePlan.Options, liveProfile)
 	args := optionArgs(launchOptions)
 	_, hasTensorSplitOverride := launchOptions["tensor-split"]
-
-	// Demand must reflect the exact launch options, including any Auto-generated
-	// MoE expert spill and KV placement, before resources are reserved.
-	demand := s.estimateDemand(m, path, launchOptions)
-	placementInstance := i
-	if moePlan.Applied {
-		placementInstance.GPUMode = "manual"
-		placementInstance.GPUDevices = append([]string(nil), moePlan.Devices...)
-		placementInstance.TensorSplit = moePlan.TensorSplit
-		if hasTensorSplitOverride {
-			placementInstance.TensorSplit = launchOptions["tensor-split"]
-		}
-	}
-	placement, placementErr := s.preparePlacementWithDemand(ctx, placementInstance, demand, allowEviction)
-	if placementErr != nil {
-		return "", placementErr
-	}
+	placement := runtimePlan.Placement
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	var workerEnv []string
 	if len(placement.Devices) > 0 {
 		args, workerEnv = appendPlacementLaunchArgs(args, placement.Devices, placement.TensorSplit, hasTensorSplitOverride)
+	} else if runtimePlan.Mode == "cpu" {
+		workerEnv = append(workerEnv, "CUDA_VISIBLE_DEVICES=", "HIP_VISIBLE_DEVICES=", "ROCR_VISIBLE_DEVICES=")
 	} else if i.GPUMode == "manual" && len(i.GPUDevices) > 0 {
-		// Preserve explicitly configured non-NVIDIA/ROCm backends when this Phase 7
-		// detector cannot observe them.
+		// Preserve explicitly configured non-NVIDIA/ROCm backends when hardware
+		// telemetry is unavailable. CPU spill never reuses a manual device pin.
 		args, workerEnv = appendPlacementLaunchArgs(args, i.GPUDevices, i.TensorSplit, hasTensorSplitOverride)
 	}
 
@@ -1380,10 +1369,11 @@ func (s *Service) resolveLaunchOptions(ctx context.Context, modelID, instanceID 
 	return effective.Values, nil
 }
 
-func (s *Service) estimateDemand(m models.Model, path string, options map[string]string) scheduler.ResourceDemand {
+func (s *Service) demandInput(m models.Model, path string, options map[string]string) scheduler.DemandInput {
 	metadata, metaErr := recommendations.ReadMetadata(path)
-	return scheduler.EstimateDemand(scheduler.DemandInput{
-		WeightsBytes: m.TotalBytes + companionBytes(options),
+	return scheduler.DemandInput{
+		WeightsBytes:   m.TotalBytes,
+		CompanionBytes: companionBytes(options),
 		Metadata: scheduler.KVMetadata{
 			Architecture: metadata.Architecture, ContextLength: metadata.ContextLength, BlockCount: metadata.BlockCount,
 			Embedding: metadata.Embedding, HeadCount: metadata.HeadCount, KVHeadCount: metadata.KVHeadCount,
@@ -1391,7 +1381,11 @@ func (s *Service) estimateDemand(m models.Model, path string, options map[string
 		},
 		MetadataErr: metaErr,
 		Options:     options,
-	})
+	}
+}
+
+func (s *Service) estimateDemand(m models.Model, path string, options map[string]string) scheduler.ResourceDemand {
+	return scheduler.EstimateDemand(s.demandInput(m, path, options))
 }
 
 func companionBytes(options map[string]string) int64 {
