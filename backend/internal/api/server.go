@@ -14,7 +14,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/models"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 type Server struct {
 	models    *models.Service
