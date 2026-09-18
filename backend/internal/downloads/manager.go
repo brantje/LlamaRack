@@ -265,7 +265,7 @@ func (m *Manager) run(ctx context.Context, id string) error {
 	if err := m.setJobState(ctx, id, StateVerifying, ""); err != nil {
 		return err
 	}
-	files, err := m.files(ctx, id)
+	files, err := m.store.Files(ctx, id)
 	if err != nil {
 		return err
 	}
