@@ -535,3 +535,17 @@ func TestPlanRuntimeEvictionsDropsGPUVictimForHostOnlyPressure(t *testing.T) {
 		t.Fatalf("host-only pressure must not retain GPU-only victim: %+v", plan)
 	}
 }
+
+
+func TestAttributeResourcesFloorsObservedVRAMAtCommittedLease(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	got := AttributeResources(ResourceAttribution{
+		EstimatedBytes: 10 * gib,
+		LeaseGPUs: []GPUReservation{{DeviceID: "CUDA0", Bytes: 10 * gib}},
+		PID: 42,
+		Processes: []hardware.GPUProcess{{PID: 42, DeviceID: "CUDA0", UsedBytes: 2 * gib}},
+	})
+	if len(got.GPU) != 1 || got.GPU[0].DeviceID != "CUDA0" || got.GPU[0].Bytes != 10*gib {
+		t.Fatalf("lazy observed VRAM must not under-credit committed lease: %+v", got)
+	}
+}

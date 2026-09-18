@@ -518,3 +518,83 @@ func TestManualTensorSplitLeaseMatchesAdmittedVectorAndProtectsConcurrentStarts(
 		t.Fatalf("pending vector must protect both assigned GPU amounts: %+v", second)
 	}
 }
+
+
+func TestLedgerAwareRuntimeEvictionPlanningUsesCommittedReservations(t *testing.T) {
+	const gib int64 = 1024 * 1024 * 1024
+	ledger := NewLedger()
+	raw := hardware.Snapshot{
+		RAMTotalBytes: 32 * gib, RAMAvailableBytes: 32 * gib,
+		GPUs: []hardware.GPU{{
+			ID: "CUDA0", TotalBytes: 16 * gib, UsedBytes: 2 * gib, FreeBytes: 14 * gib,
+		}},
+	}
+	victim, err := ledger.Acquire(AcquireRequest{
+		InstanceID: "victim",
+		Snapshot: raw,
+		Placement: PlacementRequest{
+			RequiredBytes: 10 * gib, Mode: "manual", Devices: []string{"CUDA0"}, ReserveBytes: 1,
+		},
+	})
+	if err != nil || victim.ID == "" || !victim.Placement.Fits {
+		t.Fatalf("victim lease=%+v err=%v", victim, err)
+	}
+	if err := ledger.Commit(victim.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	request := RuntimePlanRequest{
+		Demand: DemandInput{WeightsBytes: 8 * gib},
+		Placement: PlacementRequest{Mode: "auto"},
+	}
+	rawRequest := request
+	rawRequest.Snapshot = raw
+	rawPlan, err := PlanRuntime(rawRequest)
+	if err != nil || !rawPlan.Fits {
+		t.Fatalf("raw telemetry should look runnable before lease accounting: %+v err=%v", rawPlan, err)
+	}
+
+	owner := ResourceOwner{Kind: ResourceOwnerInstance, ID: "requester"}
+	planning := ledger.PlanningSnapshotWithCredits(raw, owner, nil)
+	request.Snapshot = planning
+	blocked, err := PlanRuntime(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Fits {
+		t.Fatalf("committed lease must block the second runtime: %+v snapshot=%+v", blocked, planning)
+	}
+
+	candidate := Candidate{
+		ModelID: "victim-model", InstanceID: "victim", Ready: true, EvictionEnabled: true,
+		Resources: CandidateResources{GPU: []GPUResource{{DeviceID: "CUDA0", Bytes: 10 * gib}}},
+	}
+	evictionPlan := PlanRuntimeEvictions([]Candidate{candidate}, planning, request)
+	if !evictionPlan.Fits || len(evictionPlan.Evict) != 1 || evictionPlan.Evict[0].InstanceID != "victim" {
+		t.Fatalf("ledger-aware eviction plan=%+v", evictionPlan)
+	}
+
+	credits := CreditsFromCandidates(evictionPlan.Evict)
+	credited := ledger.PlanningSnapshotWithCredits(raw, owner, credits)
+	request.Snapshot = credited
+	creditedPlan, err := PlanRuntime(request)
+	if err != nil || !creditedPlan.Fits {
+		t.Fatalf("victim credit must reopen the reserved hole: %+v err=%v snapshot=%+v", creditedPlan, err, credited)
+	}
+	if len(ledger.All()) != 1 || len(ledger.claimed) != 0 {
+		t.Fatalf("read-only planning mutated ledger: leases=%+v claimed=%+v", ledger.All(), ledger.claimed)
+	}
+
+	lease, admitted, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "requester",
+		Snapshot: raw,
+		Plan: RuntimePlanRequest{
+			Demand: DemandInput{WeightsBytes: 8 * gib},
+			Placement: PlacementRequest{Mode: "auto"},
+		},
+		Credits: credits,
+	})
+	if err != nil || !admitted.Fits || lease.ID == "" {
+		t.Fatalf("second runtime reservation=%+v plan=%+v err=%v", lease, admitted, err)
+	}
+}

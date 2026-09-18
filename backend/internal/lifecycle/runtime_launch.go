@@ -80,7 +80,11 @@ func (s *Service) prepareRuntimeLaunch(
 			return scheduler.RuntimePlan{}, fmt.Errorf("%w: eviction attempts exhausted", errResourcePressureBlocked)
 		}
 
-		planning := scheduler.ApplyCandidateCredits(snapshot, stopped)
+		planning := s.reservations.PlanningSnapshotWithCredits(
+			snapshot,
+			scheduler.ResourceOwner{Kind: scheduler.ResourceOwnerInstance, ID: instance.ID},
+			scheduler.CreditsFromCandidates(stopped),
+		)
 		candidates, err := s.evictionCandidates(ctx, planning, instance.ID, skip)
 		if err != nil {
 			return scheduler.RuntimePlan{}, err

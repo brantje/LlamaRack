@@ -326,16 +326,29 @@ func (l *Ledger) GetByInstance(instanceID string) (ResourceLease, bool) {
 }
 
 func (l *Ledger) PlanningSnapshot(snapshot hardware.Snapshot, owner ResourceOwner) hardware.Snapshot {
+	return l.PlanningSnapshotWithCredits(snapshot, owner, nil)
+}
+
+func (l *Ledger) PlanningSnapshotWithCredits(snapshot hardware.Snapshot, owner ResourceOwner, credits []Credit) hardware.Snapshot {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sweepExpiredLocked()
 
 	ignoreOwner := ""
+	requesterInstance := ""
 	if normalized, err := normalizeOwner(owner, ""); err == nil {
 		ignoreOwner = resourceOwnerKey(normalized)
+		if normalized.Kind == ResourceOwnerInstance {
+			requesterInstance = normalized.ID
+		} else {
+			credits = nil
+		}
+	} else {
+		credits = nil
 	}
-	occupancy, host := l.occupancyLocked(ignoreOwner, nil)
-	return adjustSnapshot(snapshot, occupancy, host, nil, 0)
+	usableCredits, creditBytes, hostCredit := l.usableCreditsLocked(requesterInstance, credits)
+	occupancy, host := l.occupancyLocked(ignoreOwner, usableCredits)
+	return adjustSnapshot(snapshot, occupancy, host, creditBytes, hostCredit)
 }
 
 func (l *Ledger) Pending() []ResourceLease {

@@ -425,8 +425,8 @@ func candidateGPUBytes(candidate Candidate) int64 {
 }
 
 // AttributeResources fills a per-device resource vector. Observed process VRAM
-// wins per device, then missing lease/configured devices are filled from the
-// lease or a split of the estimate. Tensor-split workers often report nvidia-smi
+// is floored by the committed lease per device, then missing lease/configured
+// devices are filled from the lease or a split of the estimate. Tensor-split workers often report nvidia-smi
 // used-memory on only one GPU; the lease still names every reserved device.
 // Unknown devices are not invented except when the snapshot contains exactly
 // one GPU, which is the only device the instance could be using.
@@ -481,13 +481,19 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		if id == "" || gpu.Bytes <= 0 {
 			continue
 		}
-		leaseByID[id] = gpu.Bytes
+		if gpu.Bytes > leaseByID[id] {
+			leaseByID[id] = gpu.Bytes
+		}
 		if !have[id] {
 			devices = append(devices, id)
 		}
 	}
+	for i := range out {
+		if bytes := leaseByID[out[i].DeviceID]; bytes > out[i].Bytes {
+			out[i].Bytes = bytes
+		}
+	}
 	devices = cleanDeviceIDs(devices)
-	leaseAllocated := int64(0)
 	missing := make([]string, 0, len(devices))
 	for _, id := range devices {
 		if have[id] {
@@ -495,7 +501,6 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 		}
 		if bytes := leaseByID[id]; bytes > 0 {
 			out = append(out, GPUResource{DeviceID: id, Bytes: bytes})
-			leaseAllocated += bytes
 			have[id] = true
 			continue
 		}
@@ -504,13 +509,13 @@ func unionObservedWithReserved(observed []GPUResource, devices []string, lease [
 	if len(missing) == 0 || estimated <= 0 {
 		return out
 	}
-	observedTotal := int64(0)
-	for _, gpu := range observed {
+	allocated := int64(0)
+	for _, gpu := range out {
 		if gpu.Bytes > 0 {
-			observedTotal += gpu.Bytes
+			allocated += gpu.Bytes
 		}
 	}
-	remaining := estimated - observedTotal - leaseAllocated
+	remaining := estimated - allocated
 	if remaining < 1 {
 		return out
 	}
