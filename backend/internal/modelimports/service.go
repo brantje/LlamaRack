@@ -230,13 +230,19 @@ func (s *Service) reconcilePrepared(ctx context.Context) error {
 			if claimed {
 				s.instances.NotifyChange(ctx, item.InstanceID)
 			}
-			if item.StartWhenReady && !item.StartAttempted && s.starter != nil {
-				_, startErr := s.starter.StartInstance(context.Background(), item.InstanceID)
-				message := ""
-				if startErr != nil {
-					message = startErr.Error()
+			if item.StartWhenReady && s.starter != nil {
+				startClaimed, err := s.store.ClaimStartAttempt(ctx, item.ID)
+				if err != nil {
+					return err
 				}
-				_ = s.store.MarkStartAttempted(context.Background(), item.ID, message)
+				if startClaimed {
+					_, startErr := s.starter.StartInstance(context.Background(), item.InstanceID)
+					message := ""
+					if startErr != nil {
+						message = startErr.Error()
+					}
+					_ = s.store.RecordStartAttemptResult(context.Background(), item.ID, message)
+				}
 			}
 		default:
 			if err := s.store.SetState(ctx, item.ID, StateDownloading, ""); err != nil {
