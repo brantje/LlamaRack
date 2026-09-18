@@ -3,7 +3,6 @@ package settings
 import (
 	"github.com/brantje/llamarack/backend/internal/database"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -100,14 +99,14 @@ type definition struct {
 }
 
 type Service struct {
-	db database.Store
+	store SettingStore
 	defs    map[string]definition
 	runtime RuntimeInfo
 }
 
 func New(db database.Store, defaults Defaults) *Service {
 	return &Service{
-		db: db,
+		store: NewSettingStore(db),
 		defs: map[string]definition{
 			SessionLifetimeSeconds:        {env: "LLAMARACK_SESSION_LIFETIME_SECONDS", defaultValue: strconv.FormatInt(int64(defaults.SessionLifetime/time.Second), 10), kind: "int", min: 60, max: 365 * 24 * 3600},
 			LoginProtectionEnabled:        {env: "LLAMARACK_LOGIN_PROTECTION_ENABLED", defaultValue: "true", kind: "bool"},
@@ -140,8 +139,7 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 		return Value{}, fmt.Errorf("unknown manager setting %q", key)
 	}
 	if def.databaseOverridesEnv {
-		var stored string
-		err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
+		stored, err := s.store.Get(ctx, key)
 		if err == nil {
 			parsed, parseErr := parse(def, stored)
 			if parseErr != nil {
@@ -149,7 +147,7 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 			}
 			return Value{Value: parsed, Source: "database", Editable: true}, nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if !errors.Is(err, database.ErrNotFound) {
 			return Value{}, err
 		}
 		if def.env != "" {
@@ -176,8 +174,7 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 			return Value{Value: parsed, Source: "environment", Editable: false}, nil
 		}
 	}
-	var stored string
-	err := s.db.QueryRowContext(ctx, "SELECT setting_value FROM manager_settings WHERE setting_key=?", key).Scan(&stored)
+	stored, err := s.store.Get(ctx, key)
 	if err == nil {
 		parsed, parseErr := parse(def, stored)
 		if parseErr != nil {
@@ -185,7 +182,7 @@ func (s *Service) Resolve(ctx context.Context, key string) (Value, error) {
 		}
 		return Value{Value: parsed, Source: "database", Editable: true}, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, database.ErrNotFound) {
 		return Value{}, err
 	}
 	parsed, err := parse(def, def.defaultValue)
@@ -222,8 +219,7 @@ func (s *Service) Set(ctx context.Context, key string, value any) (Value, error)
 	if err != nil {
 		return Value{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)
-		ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=excluded.updated_at`, key, serialized, time.Now().Unix())
+	err = s.store.Set(ctx, key, serialized, time.Now().Unix())
 	if err != nil {
 		return Value{}, err
 	}
