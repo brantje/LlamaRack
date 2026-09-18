@@ -32,7 +32,7 @@ func TestStartOneManualGPUAndModelPathEscape(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	s, _, m, _, exec := setupLifecycle(t, true, false)
-	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{}}}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{RAMTotalBytes: 16 * testGiB, RAMAvailableBytes: 12 * testGiB}}}
 	exec("UPDATE instances SET gpu_mode='manual',gpu_devices='0,1',tensor_split='1,1' WHERE model_id=?", m.ID)
 	if _, err := s.StartModel(ctx, m.ID); err != nil {
 		t.Fatalf("manual GPU start: %v", err)

@@ -80,7 +80,7 @@ func TestRuntimeDeviceSnapshotterFiltersPlacementButPreservesHostSnapshot(t *tes
 
 func TestPreparePlacementCPUOnlyAndManualFailure(t *testing.T) {
 	s, _, _, _, _ := setupLifecycle(t, true, false)
-	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}}}}}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{RAMTotalBytes: 16 * testGiB, RAMAvailableBytes: 12 * testGiB, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}}}}}
 	profile := runtimeProfile()
 	s.SetRuntimeDeviceProfile(func() (llamacpp.Profile, error) { return profile, nil })
 	placement, err := s.preparePlacement(context.Background(), instances.Instance{ID: "auto", GPUMode: "auto"}, testGiB)
