@@ -79,15 +79,13 @@ type UpdateModelInput struct {
 }
 
 type Service struct {
-	db       database.Store
-	store    ModelStore
+	store     ModelStore
 	modelsDir string
 }
 
 func New(db database.Store, modelsDir string) *Service {
-	return &Service{db: db, store: NewModelStore(db), modelsDir: modelsDir}
+	return &Service{store: NewModelStore(db), modelsDir: modelsDir}
 }
-func (s *Service) DB() database.Store { return s.db }
 
 func (s *Service) Create(ctx context.Context, in CreateModelInput) (Model, error) {
 	in.Name = strings.TrimSpace(in.Name)
