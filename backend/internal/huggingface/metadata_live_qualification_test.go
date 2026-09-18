@@ -70,9 +70,10 @@ func measureQualificationPhase(traffic *qualificationTraffic, fn func() error) (
 
 // TestLiveRedisDerivedMetadataQualification is an opt-in real-provider
 // qualification for #162. It is intentionally excluded from ordinary local
-// test runs because it measures the real Hugging Face network path. CI runs it
-// as non-threshold evidence: correctness assertions cover origin avoidance,
-// while latency is recorded rather than compared to a fragile wall-clock limit.
+// test runs because it measures the real Hugging Face network path. The
+// dedicated Redis release-qualification workflow runs it as a release gate:
+// warm shared-cache phases must avoid origin traffic and the fresh-client Redis
+// hit must be materially faster than the cold authoritative lookup.
 func TestLiveRedisDerivedMetadataQualification(t *testing.T) {
 	if os.Getenv("LLAMARACK_LIVE_HF_QUALIFICATION") != "1" {
 		t.Skip("set LLAMARACK_LIVE_HF_QUALIFICATION=1 to run real Hugging Face qualification")

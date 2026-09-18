@@ -38,20 +38,7 @@ func TestDomainPackagesDoNotExecuteGenericSQLOrUseRawNotFound(t *testing.T) {
 			for _, imp := range file.Imports {
 				value, _ := strconv.Unquote(imp.Path.Value)
 				if value == "database/sql" {
-					forbidden := false
-					ast.Inspect(file, func(node ast.Node) bool {
-						sel, ok := node.(*ast.SelectorExpr)
-						if !ok || sel.Sel.Name != "ErrNoRows" {
-							return true
-						}
-						if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "sql" {
-							forbidden = true
-						}
-						return true
-					})
-					if forbidden {
-						t.Errorf("%s uses sql.ErrNoRows outside an SQL adapter; use portable storage/domain errors", filepath.Join(pkg, name))
-					}
+					t.Errorf("%s imports database/sql outside an SQL adapter; keep SQL persistence details behind domain stores", filepath.Join(pkg, name))
 				}
 			}
 			ast.Inspect(file, func(node ast.Node) bool {
