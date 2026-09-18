@@ -17,7 +17,8 @@ import (
 	"github.com/brantje/llamarack/backend/internal/slots"
 	"github.com/brantje/llamarack/backend/internal/supervisor"
 
-	"github.com/brantje/llamarack/backend/internal/database")
+	"github.com/brantje/llamarack/backend/internal/database"
+)
 
 func (g *Gateway) listModels(w http.ResponseWriter, r *http.Request, allowAll bool, allowedIDs map[string]struct{}) {
 	items, err := g.lifecycle.Instances().List(r.Context())
