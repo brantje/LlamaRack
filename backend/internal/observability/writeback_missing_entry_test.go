@@ -29,7 +29,7 @@ func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
 		t.Fatal("begin did not retain the active entry snapshot")
 	}
 
-	blocker, err := database.Begin(ctx, s.db)
+	blocker, err := database.Begin(ctx, observabilityTestDB(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestWritebackActiveEntryRecoveryStaysOffSQLite(t *testing.T) {
 	}
 
 	var instanceID, modelSlug string
-	if err := s.db.QueryRowContext(ctx, `SELECT r.instance_id,r.model_slug
+	if err := observabilityTestDB(t, s).QueryRowContext(ctx, `SELECT r.instance_id,r.model_slug
 		FROM inference_requests r
 		JOIN inference_request_correlations c ON c.inference_request_id=r.id
 		WHERE c.request_id=?`, "req-missing-active").Scan(&instanceID, &modelSlug); err != nil {
