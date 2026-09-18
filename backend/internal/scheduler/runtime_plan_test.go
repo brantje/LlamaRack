@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/brantje/llamarack/backend/internal/hardware"
