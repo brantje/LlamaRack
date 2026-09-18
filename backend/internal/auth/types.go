@@ -152,7 +152,6 @@ type wsTicket struct {
 }
 
 type Service struct {
-	db       database.Store
 	users    UserStore
 	sessions SessionStore
 	apiKeys   APIKeyStore
@@ -177,7 +176,7 @@ func New(db database.Store, sessionLifetime time.Duration) *Service {
 		panic("generate management signing key: " + err.Error())
 	}
 	return &Service{
-		db: db, users: NewUserStore(db), sessions: NewSessionStore(db), apiKeys: NewAPIKeyStore(db), serviceAccounts: NewServiceAccountStore(db), oidc: NewOIDCStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
+		users: NewUserStore(db), sessions: NewSessionStore(db), apiKeys: NewAPIKeyStore(db), serviceAccounts: NewServiceAccountStore(db), oidc: NewOIDCStore(db), sessionLifetime: sessionLifetime, lastAPIKeyWrite: map[string]time.Time{},
 		apiKeyCache: apiKeyCacheState{byHash: map[string]APIKey{}},
 		jwtPrivate:  privateKey, jwtPublic: publicKey, wsTickets: map[string]wsTicket{},
 	}
