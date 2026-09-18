@@ -2,10 +2,11 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/brantje/llamarack/backend/internal/database"
 )
 
 func TestAdminUserAndSessionServiceEdges(t *testing.T) {
@@ -35,7 +36,7 @@ func TestAdminUserAndSessionServiceEdges(t *testing.T) {
 	if _, err := s.CreateUser(ctx, "operator", "operator-password"); err == nil {
 		t.Fatal("expected duplicate username rejection")
 	}
-	if err := s.SetUserEnabled(ctx, 999999, false); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.SetUserEnabled(ctx, 999999, false); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing enable target error=%v", err)
 	}
 	if err := s.SetUserEnabled(ctx, operator.ID, false); err != nil {
@@ -51,7 +52,7 @@ func TestAdminUserAndSessionServiceEdges(t *testing.T) {
 	if err := s.ResetPassword(ctx, operator.ID, "short"); err == nil {
 		t.Fatal("expected short reset password rejection")
 	}
-	if err := s.ResetPassword(ctx, 999999, "replacement-password"); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.ResetPassword(ctx, 999999, "replacement-password"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing reset target error=%v", err)
 	}
 	if err := s.ChangePassword(ctx, operator.ID, "operator-password", "short", ""); err == nil {
@@ -72,13 +73,13 @@ func TestAdminUserAndSessionServiceEdges(t *testing.T) {
 		t.Fatalf("password change without keep session must revoke all sessions: %v", err)
 	}
 
-	if err := s.DeleteUser(ctx, admin.ID, 999999); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.DeleteUser(ctx, admin.ID, 999999); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing delete target error=%v", err)
 	}
 	if err := s.DeleteUser(ctx, admin.ID, operator.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UserByID(ctx, operator.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.UserByID(ctx, operator.ID); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("deleted user still resolves: %v", err)
 	}
 }
@@ -97,10 +98,10 @@ func TestAPIKeyServiceEdges(t *testing.T) {
 	if err := s.AuthenticateAPIKey(ctx, "definitely-invalid"); !errors.Is(err, ErrAPIKeyInvalid) {
 		t.Fatalf("invalid key error=%v", err)
 	}
-	if err := s.UpdateAPIKey(ctx, "missing", UpdateAPIKeyInput{}); !errors.Is(err, sql.ErrNoRows) {
+	if err := s.UpdateAPIKey(ctx, "missing", UpdateAPIKeyInput{}); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing update error=%v", err)
 	}
-	if _, _, err := s.RotateAPIKey(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := s.RotateAPIKey(ctx, "missing"); !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("missing rotate error=%v", err)
 	}
 
