@@ -21,7 +21,7 @@ func TestInstanceRoutesCoverCRUDLifecycleAndRunningReconfigure(t *testing.T) {
 	model := createModel(t, f, cookie)
 
 	sup := supervisor.New(fakeAPILogServer(t), "127.0.0.1", 33600, 5*time.Second)
-	f.server.lifecycle = lifecycle.New(f.models, sup)
+	f.server.lifecycle = lifecycle.New(f.models, f.instances, f.config, sup)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
