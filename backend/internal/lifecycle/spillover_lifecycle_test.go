@@ -159,7 +159,7 @@ func TestManualSystemSpilloverStaysOnConfiguredDevice(t *testing.T) {
 	execDB("UPDATE models SET total_bytes=? WHERE id=?", 6*testGiB, model.ID)
 	spill := true
 	eviction := false
-	instance, err := s.instances.Update(ctx, instance.ID, instances.UpdateInput{
+	instance, err = s.instances.Update(ctx, instance.ID, instances.UpdateInput{
 		Name: instance.Name, SystemSpilloverEnabled: &spill, EvictionEnabled: &eviction,
 		GPUMode: "manual", GPUDevices: []string{"CUDA0"},
 	})
