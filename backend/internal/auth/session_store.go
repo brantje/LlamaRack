@@ -145,7 +145,7 @@ func (s *sqlSessionStore) List(ctx context.Context, userID, now int64) ([]Sessio
 		return nil, database.ClassifyError(err)
 	}
 	defer rows.Close()
-	var items []Session
+	items := make([]Session, 0)
 	for rows.Next() {
 		var item Session
 		if err := rows.Scan(&item.ID, &item.UserID, &item.CreatedAt, &item.ExpiresAt, &item.RemoteAddress, &item.UserAgent); err != nil {
