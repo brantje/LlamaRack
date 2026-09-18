@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brantje/llamarack/backend/internal/database"
 	"github.com/brantje/llamarack/backend/internal/huggingface"
 )
 
@@ -130,16 +131,6 @@ func (m *Manager) List(ctx context.Context) ([]Job, error) {
 }
 
 func (m *Manager) Get(ctx context.Context, id string) (Job, error) {
-	row := m.db.QueryRowContext(ctx, `SELECT id,provider,repo_id,revision,artifact_id,name,quantization,state,total_bytes,downloaded_bytes,speed_bps,error,created_at,updated_at FROM download_jobs WHERE id=?`, id)
-	job, err := scanJob(row)
-	if err != nil {
-		return Job{}, err
-	}
-	files, err := m.store.Files(ctx, id)
-	if err != nil {
-		return Job{}, err
-	}
-	job.Files = ffunc (m *Manager) Get(ctx context.Context, id string) (Job, error) {
 	job, err := m.store.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
