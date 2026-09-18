@@ -1119,7 +1119,6 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 	}
 	var workerRuntime supervisor.Runtime
 	workerRuntime, err = s.sup.StartWithEnv(ctx, i.ID, m.ID, path, args, workerEnv, slotSavePath)
-	s.logRuntimeSpill(i.ID, runtimePlan)
 	if err != nil {
 		if isStartupInterrupt(err) {
 			return "", fmt.Errorf("%w: %w", errStartupKilled, err)
@@ -1141,6 +1140,7 @@ func (s *Service) startOneWithEviction(ctx context.Context, i instances.Instance
 		return "", err
 	}
 	committed = true
+	s.logRuntimeSpill(i.ID, runtimePlan)
 	if lease, ok := s.reservations.GetByInstance(i.ID); ok {
 		s.trackCommittedWorker(i.ID, workerRuntime.PID, lease.ID)
 		current := s.sup.Status(i.ID)

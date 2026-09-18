@@ -245,3 +245,44 @@ func TestSystemSpilloverLaunchUsesAdvertisedGPULayersAlias(t *testing.T) {
 		t.Fatalf("alias-only profile launch args=%v", args)
 	}
 }
+
+
+func TestFailedSpilloverStartDoesNotLogSuccessfulPlacement(t *testing.T) {
+	ctx := context.Background()
+	s, ms, model, _, execDB := setupLifecycle(t, true, false)
+	path, err := ms.ModelAbsolutePath(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLifecycleMetadataGGUF(t, path, "qwen2", map[string]int64{
+		"qwen2.context_length": 32768, "qwen2.block_count": 10, "qwen2.embedding_length": 1024,
+		"qwen2.attention.head_count": 8, "qwen2.attention.head_count_kv": 8,
+	})
+	items, err := s.instances.ListByModel(ctx, model.ID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("instances=%+v err=%v", items, err)
+	}
+	instance := items[0]
+	execDB("UPDATE models SET total_bytes=? WHERE id=?", 10*testGiB, model.ID)
+	spill := true
+	eviction := false
+	instance, err = s.instances.Update(ctx, instance.ID, instances.UpdateInput{
+		Name: instance.Name, SystemSpilloverEnabled: &spill, EvictionEnabled: &eviction,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.hardware = &sequenceHardware{snapshots: []hardware.Snapshot{{
+		RAMTotalBytes: 64 * testGiB, RAMAvailableBytes: 64 * testGiB,
+		GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * testGiB}},
+	}}}
+	s.SetProfileGetter(func() (llamacpp.Profile, error) { return spilloverProfile(), nil })
+	attachBrokenSupervisor(t, s)
+
+	if _, err := s.StartInstance(ctx, instance.ID); err == nil {
+		t.Fatal("expected worker startup failure")
+	}
+	if logs := strings.Join(s.Logs(instance.ID), "\n"); strings.Contains(logs, "spillover partial") || strings.Contains(logs, "spillover hybrid") || strings.Contains(logs, "spillover cpu-only") {
+		t.Fatalf("failed start logged successful spill placement: %s", logs)
+	}
+}
