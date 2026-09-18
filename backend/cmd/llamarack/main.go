@@ -224,7 +224,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	managementAPI.Handle("POST /api/v1/models/inspect", api.NewModelInspectHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/details/value", api.NewModelMetadataValueHandler(authService, modelService))
 	managementAPI.Handle("GET /api/v1/models/{id}/details", api.NewModelDetailsHandler(authService, modelService))
-	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewReservationAwareRecommendationHandler(authService, modelService, hardwareDetector, lifecycleService.Reservations(), profileGetter))
+	managementAPI.Handle("GET /api/v1/models/{id}/recommendation", api.NewReservationAwareRecommendationHandler(authService, modelService, instanceService, llamaConfigStore, hardwareDetector, lifecycleService.Reservations(), profileGetter))
 	managementAPI.Handle("/api/v1/llamacpp/config", api.NewLlamaConfigHandler(authService, llamaConfigStore, profileGetter))
 	benchmarkHandler := api.NewBenchmarkHandler(benchmarkService, lifecycleService.Instances())
 	api.RegisterBenchmarkRoutes(managementAPI, benchmarkHandler)
