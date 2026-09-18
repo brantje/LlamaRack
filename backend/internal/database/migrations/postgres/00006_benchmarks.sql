@@ -51,10 +51,8 @@ CREATE TABLE benchmark_results (
     UNIQUE(run_id, case_index)
 );
 
-CREATE INDEX idx_benchmark_results_run ON benchmark_results(run_id, case_index);
 
 -- +goose Down
-DROP INDEX IF EXISTS idx_benchmark_results_run;
 DROP TABLE IF EXISTS benchmark_results;
 DROP INDEX IF EXISTS idx_benchmark_runs_status;
 DROP INDEX IF EXISTS idx_benchmark_runs_model;

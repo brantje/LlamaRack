@@ -138,7 +138,7 @@ func (c *Connection) ExecContext(ctx context.Context, query string, args ...any)
 	}
 	tx := c.orm.WithContext(ctx).Exec(c.query(query), args...)
 	if tx.Error != nil {
-		return nil, tx.Error
+		return nil, ClassifyError(tx.Error)
 	}
 	return result{rows: tx.RowsAffected}, nil
 }
@@ -147,7 +147,11 @@ func (c *Connection) QueryContext(ctx context.Context, query string, args ...any
 	if c == nil || c.orm == nil {
 		return nil, errors.New("database store is closed")
 	}
-	return c.orm.WithContext(ctx).Raw(c.query(query), args...).Rows()
+	rows, err := c.orm.WithContext(ctx).Raw(c.query(query), args...).Rows()
+	if err != nil {
+		return nil, ClassifyError(err)
+	}
+	return rows, nil
 }
 
 func (c *Connection) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
@@ -180,7 +184,7 @@ func (t *gormTransaction) ExecContext(ctx context.Context, query string, args ..
 	}
 	tx := t.orm.WithContext(ctx).Exec(t.query(query), args...)
 	if tx.Error != nil {
-		return nil, tx.Error
+		return nil, ClassifyError(tx.Error)
 	}
 	return result{rows: tx.RowsAffected}, nil
 }
@@ -189,7 +193,11 @@ func (t *gormTransaction) QueryContext(ctx context.Context, query string, args .
 	if t == nil || t.orm == nil {
 		return nil, errors.New("database transaction is closed")
 	}
-	return t.orm.WithContext(ctx).Raw(t.query(query), args...).Rows()
+	rows, err := t.orm.WithContext(ctx).Raw(t.query(query), args...).Rows()
+	if err != nil {
+		return nil, ClassifyError(err)
+	}
+	return rows, nil
 }
 
 func (t *gormTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
@@ -200,7 +208,7 @@ func (t *gormTransaction) Commit() error {
 	if t == nil || t.orm == nil {
 		return errors.New("database transaction is closed")
 	}
-	return t.orm.Commit().Error
+	return ClassifyError(t.orm.Commit().Error)
 }
 
 func (t *gormTransaction) Rollback() error {

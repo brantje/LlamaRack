@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 )
 
 //go:embed migrations/postgres/*.sql
@@ -16,14 +18,35 @@ var embeddedPostgresMigrations embed.FS
 
 var postgresMigrationFS fs.FS = embeddedPostgresMigrations
 
+const postgresSchemaMarkerValue = "llamarack:schema-owner:v1"
+
 func migratePostgres(ctx context.Context, db *sql.DB) (int64, error) {
-	class, err := classifyPostgresDatabase(ctx, db)
+	locker, err := lock.NewPostgresSessionLocker()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("create PostgreSQL migration locker: %w", err)
 	}
-	if class == dbClassUnsupported {
-		return 0, ErrUnsupportedDatabaseSchema
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("open PostgreSQL migration lock session: %w", err)
 	}
+	if err := locker.SessionLock(ctx, conn); err != nil {
+		_ = conn.Close()
+		return 0, fmt.Errorf("acquire PostgreSQL migration lock: %w", err)
+	}
+
+	version, migrateErr := migratePostgresLocked(ctx, db)
+	unlockErr := locker.SessionUnlock(context.WithoutCancel(ctx), conn)
+	closeErr := conn.Close()
+	if migrateErr != nil {
+		return 0, errors.Join(migrateErr, unlockErr, closeErr)
+	}
+	if unlockErr != nil || closeErr != nil {
+		return 0, errors.Join(unlockErr, closeErr)
+	}
+	return version, nil
+}
+
+func migratePostgresLocked(ctx context.Context, db *sql.DB) (int64, error) {
 	fsys, err := fs.Sub(postgresMigrationFS, "migrations/postgres")
 	if err != nil {
 		return 0, fmt.Errorf("open PostgreSQL migrations: %w", err)
@@ -31,6 +54,14 @@ func migratePostgres(ctx context.Context, db *sql.DB) (int64, error) {
 	target, err := maxMigrationVersion(fsys, ".")
 	if err != nil {
 		return 0, err
+	}
+
+	class, err := classifyPostgresDatabase(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	if class == dbClassUnsupported {
+		return 0, ErrUnsupportedDatabaseSchema
 	}
 	if class == dbClassManaged {
 		current, ok, err := appliedPostgresGooseVersion(ctx, db)
@@ -41,6 +72,12 @@ func migratePostgres(ctx context.Context, db *sql.DB) (int64, error) {
 			return current, fmt.Errorf("database schema version %d is newer than this binary supports (%d)", current, target)
 		}
 	}
+	if class == dbClassEmpty {
+		if err := ensurePostgresSchemaMarker(ctx, db); err != nil {
+			return 0, err
+		}
+	}
+
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, fsys, goose.WithDisableGlobalRegistry(true))
 	if err != nil {
 		return 0, err
@@ -51,6 +88,19 @@ func migratePostgres(ctx context.Context, db *sql.DB) (int64, error) {
 	version, err := provider.GetDBVersion(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("read PostgreSQL migration version: %w", err)
+	}
+	if version > target {
+		return version, fmt.Errorf("database schema version %d is newer than this binary supports (%d)", version, target)
+	}
+	owned, err := hasPostgresSchemaOwnership(ctx, db)
+	if err != nil {
+		return 0, err
+	}
+	if !owned {
+		return 0, fmt.Errorf("%w: PostgreSQL migrations completed without LlamaRack ownership marker", ErrUnsupportedDatabaseSchema)
+	}
+	if err := ensurePostgresSchemaMarker(ctx, db); err != nil {
+		return 0, err
 	}
 	return version, nil
 }
@@ -65,11 +115,26 @@ func classifyPostgresDatabase(ctx context.Context, db *sql.DB) (dbClass, error) 
 		if err != nil {
 			return dbClassUnsupported, err
 		}
-		if !owned {
-			return dbClassUnsupported, nil
+		if owned {
+			return dbClassManaged, nil
 		}
-		return dbClassManaged, nil
 	}
+
+	marker, err := postgresSchemaMarker(ctx, db)
+	if err != nil {
+		return dbClassUnsupported, err
+	}
+	if marker == postgresSchemaMarkerValue {
+		recoverable, err := postgresBootstrapResidue(ctx, db, hasGoose)
+		if err != nil {
+			return dbClassUnsupported, err
+		}
+		if recoverable {
+			return dbClassEmpty, nil
+		}
+		return dbClassUnsupported, nil
+	}
+
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_type='BASE TABLE'`).Scan(&count); err != nil {
 		return dbClassUnsupported, err
@@ -78,6 +143,73 @@ func classifyPostgresDatabase(ctx context.Context, db *sql.DB) (dbClass, error) 
 		return dbClassEmpty, nil
 	}
 	return dbClassUnsupported, nil
+}
+
+func postgresSchemaMarker(ctx context.Context, db *sql.DB) (string, error) {
+	var marker sql.NullString
+	err := db.QueryRowContext(ctx, `SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname=current_schema()`).Scan(&marker)
+	if err != nil {
+		return "", err
+	}
+	return marker.String, nil
+}
+
+func ensurePostgresSchemaMarker(ctx context.Context, db *sql.DB) error {
+	current, err := postgresSchemaMarker(ctx, db)
+	if err != nil {
+		return err
+	}
+	if current == postgresSchemaMarkerValue {
+		return nil
+	}
+	if current != "" {
+		return fmt.Errorf("%w: active PostgreSQL schema already has an unrelated schema marker", ErrUnsupportedDatabaseSchema)
+	}
+	var schema string
+	if err := db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+		return err
+	}
+	if strings.TrimSpace(schema) == "" {
+		return errors.New("active PostgreSQL schema is empty")
+	}
+	quoted := `"` + strings.ReplaceAll(schema, `"`, `""`) + `"`
+	if _, err := db.ExecContext(ctx, `COMMENT ON SCHEMA `+quoted+` IS '`+postgresSchemaMarkerValue+`'`); err != nil {
+		return fmt.Errorf("mark PostgreSQL schema ownership: %w", err)
+	}
+	return nil
+}
+
+func postgresBootstrapResidue(ctx context.Context, db *sql.DB, hasGoose bool) (bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_type='BASE TABLE'`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		count++
+		if name != goose.DefaultTablename {
+			return false, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return true, nil
+	}
+	if !hasGoose || count != 1 {
+		return false, nil
+	}
+	var applied int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+goose.DefaultTablename+` WHERE is_applied=true AND version_id>0`).Scan(&applied); err != nil {
+		return false, err
+	}
+	return applied == 0, nil
 }
 
 func postgresTableExists(ctx context.Context, db *sql.DB, name string) (bool, error) {

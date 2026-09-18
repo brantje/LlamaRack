@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"encoding/hex"
 	"io/fs"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/pressly/goose/v3"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -138,4 +141,127 @@ func postgresIntegrationDSN(t *testing.T) string {
 	query.Set("search_path", schema)
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+
+func TestPostgresFailedFreshInitializationCanRetry(t *testing.T) {
+	dsn := postgresIntegrationDSN(t)
+	original := postgresMigrationFS
+	postgresMigrationFS = fstest.MapFS{
+		"migrations/postgres/00001_fail.sql": {Data: []byte("-- +goose Up\nCREATE TABLE should_rollback(id BIGINT PRIMARY KEY);\nSELECT 1/0;\n")},
+	}
+	_, err := OpenConfigured(context.Background(), "", dsn)
+	postgresMigrationFS = original
+	if err == nil {
+		t.Fatal("expected first migration to fail")
+	}
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	marker, err := postgresSchemaMarker(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marker != postgresSchemaMarkerValue {
+		t.Fatalf("schema marker=%q", marker)
+	}
+	var rolledBack bool
+	if err := db.QueryRowContext(context.Background(), `SELECT EXISTS(
+		SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='should_rollback'
+	)`).Scan(&rolledBack); err != nil {
+		t.Fatal(err)
+	}
+	if rolledBack {
+		t.Fatal("failed baseline table survived transaction rollback")
+	}
+
+	store, err := OpenConfigured(context.Background(), "", dsn)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	defer store.Close()
+}
+
+func TestPostgresConcurrentFreshStartupSerializesMigrations(t *testing.T) {
+	dsn := postgresIntegrationDSN(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store, err := OpenConfigured(context.Background(), "", dsn)
+			if err == nil {
+				err = store.Close()
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatalf("concurrent startup: %v", err)
+		}
+	}
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var owners int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM manager_settings WHERE setting_key=$1 AND setting_value=$2`, schemaOwnerSettingKey, schemaOwnerSettingValue).Scan(&owners); err != nil {
+		t.Fatal(err)
+	}
+	if owners != 1 {
+		t.Fatalf("schema ownership rows=%d", owners)
+	}
+}
+
+func TestPostgresGooseMetadataWithoutLlamaRackMarkerIsRejected(t *testing.T) {
+	dsn := postgresIntegrationDSN(t)
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE goose_db_version(version_id BIGINT NOT NULL, is_applied BOOLEAN NOT NULL)`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO goose_db_version(version_id,is_applied) VALUES(0,true)`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = OpenConfigured(context.Background(), "", dsn)
+	if err == nil || !strings.Contains(err.Error(), ErrUnsupportedDatabaseSchema.Error()) {
+		t.Fatalf("goose-only schema error=%v", err)
+	}
+}
+
+func TestPostgresClassifiesConstraintErrors(t *testing.T) {
+	dsn := postgresIntegrationDSN(t)
+	ctx := context.Background()
+	store, err := OpenConfigured(ctx, "", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	_, err = store.ExecContext(ctx, `INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)`, "schema_owner", "duplicate", 1)
+	if !errors.Is(err, ErrConflict) || !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("duplicate classification=%v", err)
+	}
+	_, err = store.ExecContext(ctx, `INSERT INTO models(id,name,gguf_path,total_bytes,context_length) VALUES(?,?,?,?,?)`, "bad", "Bad", "bad.gguf", 1, -1)
+	if !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("check classification=%v", err)
+	}
 }

@@ -88,6 +88,10 @@ func TestGORMAdapterQueryRollbackAndResultSemantics(t *testing.T) {
 		}
 		keys = append(keys, key)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
 	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -156,5 +160,24 @@ func TestGORMAdapterNilSafeHelpers(t *testing.T) {
 	}
 	if err := redactDatabaseError("prefix", "postgres://example/db", nil); err != nil {
 		t.Fatalf("nil database error=%v", err)
+	}
+}
+
+
+func TestSQLiteClassifiesConstraintErrors(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, filepath.Join(t.TempDir(), "manager.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	_, err = store.ExecContext(ctx, "INSERT INTO manager_settings(setting_key,setting_value,updated_at) VALUES(?,?,?)", "schema_owner", "duplicate", 1)
+	if !errors.Is(err, ErrConflict) || !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("duplicate classification=%v", err)
+	}
+	_, err = store.ExecContext(ctx, "INSERT INTO models(id,name,gguf_path,total_bytes,context_length) VALUES(?,?,?,?,?)", "bad", "Bad", "bad.gguf", 1, -1)
+	if !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("check classification=%v", err)
 	}
 }
