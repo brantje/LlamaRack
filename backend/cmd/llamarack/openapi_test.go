@@ -56,6 +56,23 @@ func TestRuntimeOpenAPIDocumentCoversCorePublicRoutes(t *testing.T) {
 	}
 }
 
+
+func TestRecommendationOpenAPIDocumentsRuntimePreviewParameters(t *testing.T) {
+	op := newOpenAPIDocument().Paths["/api/v1/models/{id}/recommendation"]["get"]
+	params := map[string]string{}
+	for _, parameter := range op.Parameters {
+		params[parameter.Name] = parameter.In
+	}
+	for _, name := range []string{"id", "context_length", "instance_id", "gpu_mode", "gpu_devices", "tensor_split", "system_spillover_enabled"} {
+		if params[name] == "" {
+			t.Fatalf("missing recommendation parameter %q: %+v", name, op.Parameters)
+		}
+	}
+	if params["id"] != "path" || params["system_spillover_enabled"] != "query" {
+		t.Fatalf("recommendation parameter locations=%v", params)
+	}
+}
+
 func TestInferenceOpenAPIResponseHeaders(t *testing.T) {
 	doc := newOpenAPIDocument()
 	operation := doc.Paths["/v1/chat/completions"]["post"]

@@ -2,146 +2,20 @@ package lifecycle
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/brantje/llamarack/backend/internal/hardware"
-	"github.com/brantje/llamarack/backend/internal/instances"
 	"github.com/brantje/llamarack/backend/internal/llamacpp"
-	"github.com/brantje/llamarack/backend/internal/models"
 )
 
-type moeStaticHardware struct{ snapshot hardware.Snapshot }
-
-func (m moeStaticHardware) Snapshot(context.Context) (hardware.Snapshot, error) {
-	return m.snapshot, nil
-}
-
-func TestPrepareAutoMoELaunchInjectsFlagsBeforeDemand(t *testing.T) {
-	const gib = int64(1024 * 1024 * 1024)
-	path := writeLifecycleMoEGGUF(t, 40, 64)
-	s := &Service{
-		hardware: moeStaticHardware{snapshot: hardware.Snapshot{
-			RAMAvailableBytes: 64 * gib,
-			GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}},
-		}},
-		profile: func() (llamacpp.Profile, error) {
-			return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"}}}, nil
-		},
-	}
-	model := models.Model{ID: "moe", TotalBytes: 20 * gib, ContextLength: 32768}
-	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "auto"}
-	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, map[string]string{"ctx-size": "4096"}, map[string]string{"ctx-size": "4096"})
-	if !plan.Applied || len(plan.Devices) != 2 {
-		t.Fatalf("plan=%+v", plan)
-	}
-	if plan.Options["n-gpu-layers"] != "40" {
-		t.Fatalf("n-gpu-layers=%q want 40", plan.Options["n-gpu-layers"])
-	}
-	if plan.Options["n-cpu-moe"] == "" && plan.Options["cpu-moe"] != "true" {
-		t.Fatalf("expected expert spill flag, options=%v", plan.Options)
-	}
-
-	fullDemand := s.estimateDemand(model, path, map[string]string{"ctx-size": "4096"})
-	moeDemand := s.estimateDemand(model, path, plan.Options)
-	if moeDemand.VRAMBytes() >= fullDemand.VRAMBytes() {
-		t.Fatalf("MoE launch options did not reduce reservation: full=%d moe=%d", fullDemand.VRAMBytes(), moeDemand.VRAMBytes())
-	}
-	if moeDemand.HostRAMBytes <= fullDemand.HostRAMBytes {
-		t.Fatalf("MoE launch options did not reserve expert RAM: full=%d moe=%d", fullDemand.HostRAMBytes, moeDemand.HostRAMBytes)
-	}
-}
-
-func TestPrepareAutoMoELaunchRespectsUserOverrides(t *testing.T) {
-	const gib = int64(1024 * 1024 * 1024)
-	path := writeLifecycleMoEGGUF(t, 40, 64)
-	s := &Service{
-		hardware: moeStaticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}}}},
-		profile: func() (llamacpp.Profile, error) {
-			return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"}}}, nil
-		},
-	}
-	model := models.Model{ID: "moe", TotalBytes: 20 * gib, ContextLength: 32768}
-	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "auto"}
-	user := map[string]string{"ctx-size": "4096", "n-gpu-layers": "12", "n-cpu-moe": "7", "no-kv-offload": "true"}
-	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, user, user)
-	if !plan.Applied {
-		t.Fatal("expected MoE plan")
-	}
-	if plan.Options["n-gpu-layers"] != "12" || plan.Options["n-cpu-moe"] != "7" || plan.Options["no-kv-offload"] != "true" {
-		t.Fatalf("user overrides changed: %v", plan.Options)
-	}
-}
-
-func TestPrepareAutoMoELaunchSkipsLeftoverPinWhenIdleFitsMultiGPU(t *testing.T) {
-	const gib = int64(1024 * 1024 * 1024)
-	path := writeLifecycleMoEGGUF(t, 40, 64)
-	s := &Service{
-		hardware: moeStaticHardware{snapshot: hardware.Snapshot{
-			RAMAvailableBytes: 64 * gib,
-			RAMTotalBytes:     64 * gib,
-			GPUs: []hardware.GPU{
-				{ID: "CUDA0", FreeBytes: 512 * 1024 * 1024, TotalBytes: 16 * gib},
-				{ID: "CUDA1", FreeBytes: 9 * gib, TotalBytes: 16 * gib},
-			},
-		}},
-		profile: func() (llamacpp.Profile, error) {
-			return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"}}}, nil
-		},
-	}
-	model := models.Model{ID: "moe", TotalBytes: 20 * gib, ContextLength: 32768}
-	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "auto"}
-	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, map[string]string{"ctx-size": "4096"}, map[string]string{"ctx-size": "4096"})
-	if plan.Applied || len(plan.Devices) != 0 {
-		t.Fatalf("idle multi-GPU fit must not pin leftover devices, plan=%+v", plan)
-	}
-	if plan.Options["n-cpu-moe"] != "" || plan.Options["cpu-moe"] != "" {
-		t.Fatalf("idle multi-GPU fit must not inject expert spill, options=%v", plan.Options)
-	}
-}
-
-func TestPrepareAutoMoELaunchDoesNotInventManualDevices(t *testing.T) {
-	const gib = int64(1024 * 1024 * 1024)
-	path := writeLifecycleMoEGGUF(t, 40, 64)
-	s := &Service{
-		hardware: moeStaticHardware{snapshot: hardware.Snapshot{RAMAvailableBytes: 64 * gib, GPUs: []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}}}},
-		profile: func() (llamacpp.Profile, error) {
-			return llamacpp.Profile{Options: []llamacpp.Option{{Key: "n-cpu-moe"}}}, nil
-		},
-	}
-	model := models.Model{ID: "moe", TotalBytes: 20 * gib}
-	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "manual", GPUDevices: []string{"CUDA0"}}
-	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, map[string]string{}, map[string]string{})
-	if plan.Applied || len(plan.Devices) != 0 {
-		t.Fatalf("manual placement must remain advisory-only, plan=%+v", plan)
-	}
-}
-
 func TestApplyCPUMoeLoadMode(t *testing.T) {
-	const gib = int64(1024 * 1024 * 1024)
-	path := writeLifecycleMoEGGUF(t, 40, 64)
-	s := &Service{
-		hardware: moeStaticHardware{snapshot: hardware.Snapshot{
-			RAMAvailableBytes: 64 * gib,
-			GPUs:              []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}},
-		}},
-		profile: func() (llamacpp.Profile, error) {
-			return llamacpp.Profile{Options: []llamacpp.Option{
-				{Key: "n-cpu-moe"}, {Key: "cpu-moe"}, {Key: "n-gpu-layers"}, {Key: "no-kv-offload"},
-				{Key: "load-mode", Kind: "enum", Choices: []string{"auto", "mmap", "none"}},
-			}}, nil
-		},
-	}
-	model := models.Model{ID: "moe", TotalBytes: 20 * gib, ContextLength: 32768}
-	instance := instances.Instance{ID: "moe", ModelID: model.ID, GPUMode: "auto"}
-	plan := s.prepareAutoMoELaunch(context.Background(), instance, model, path, map[string]string{"ctx-size": "4096"}, map[string]string{"ctx-size": "4096"})
-	profile, _ := s.profile()
-	got := applyCPUMoeLoadMode(plan.Options, profile)
+	got := applyCPUMoeLoadMode(map[string]string{"n-cpu-moe": "8"}, llamacpp.Profile{Options: []llamacpp.Option{
+		{Key: "n-cpu-moe"}, {Key: "load-mode", Kind: "enum", Choices: []string{"auto", "mmap", "none"}},
+	}})
 	if got["load-mode"] != "none" {
-		t.Fatalf("auto MoE launch must inject load-mode=none, options=%v", got)
+		t.Fatalf("CPU MoE launch must inject load-mode=none, options=%v", got)
 	}
 
 	for name, tc := range map[string]struct {

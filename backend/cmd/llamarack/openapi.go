@@ -156,6 +156,16 @@ func registerManagementOperations(doc *manageropenapi.Document) {
 		if containsPathParameter(route.path, "request_id") {
 			op.Parameters = append(op.Parameters, pathParameter("request_id", "Stable X-LlamaRack-Request-ID correlation identifier"))
 		}
+		if route.operationID == "getModelRecommendation" {
+			op.Parameters = append(op.Parameters,
+				queryParameter("context_length", "Requested context length in tokens", manageropenapi.Schema{Type: "integer"}),
+				queryParameter("instance_id", "Bind the recommendation to this Instance's effective runtime configuration", manageropenapi.Schema{Type: "string"}),
+				queryParameter("gpu_mode", "Override Instance GPU placement mode for an unsaved preview", manageropenapi.Schema{Type: "string", Enum: []string{"auto", "manual"}}),
+				queryParameter("gpu_devices", "Comma-separated GPU device IDs for an unsaved manual-placement preview", manageropenapi.Schema{Type: "string"}),
+				queryParameter("tensor_split", "Tensor split for an unsaved manual-placement preview", manageropenapi.Schema{Type: "string"}),
+				queryParameter("system_spillover_enabled", "Override the Instance system-RAM spillover policy for an unsaved preview", manageropenapi.Schema{Type: "boolean"}),
+			)
+		}
 		if strings.HasPrefix(route.path, "/api/v1/admin/service-accounts") {
 			op.Description = "Service-account administration is allowed for a management JWT or a Full Access API key (any owner, including service-account-owned). Management and inference keys receive 403."
 		}
@@ -460,6 +470,10 @@ func integerHeader(description string) manageropenapi.Header {
 
 func pathParameter(name, description string) manageropenapi.Parameter {
 	return manageropenapi.Parameter{Name: name, In: "path", Required: true, Description: description, Schema: manageropenapi.Schema{Type: "string"}}
+}
+
+func queryParameter(name, description string, schema manageropenapi.Schema) manageropenapi.Parameter {
+	return manageropenapi.Parameter{Name: name, In: "query", Description: description, Schema: schema}
 }
 
 func containsPathParameter(path, name string) bool {
