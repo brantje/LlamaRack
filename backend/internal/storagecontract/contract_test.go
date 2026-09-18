@@ -219,6 +219,30 @@ func runPersistenceContract(t *testing.T, backend backendFactory, modelsDir stri
 		t.Fatalf("%s observability rows=%d err=%v", backend.name, len(rows), err)
 	}
 
+	mixedRecord := observability.RequestRecord{
+		StartedAt: now + 10, FinishedAt: now + 15, InstanceID: "Instance-MiXeD", Endpoint: "/V1/MiXeD",
+		TraceID: "TrAcE-MiXeD", StatusCode: 200, Result: "success", DurationMS: 5,
+		APIKey: &observability.APIKeyRef{ID: "Key-ID-MiXeD", Name: "Key-Name-MiXeD", Prefix: "sk-MiXeD"},
+		ClientIP: "Client-MiXeD", UserAgent: "Agent-MiXeD",
+	}
+	if err := observabilityService.FinalizeCorrelatedRequest(ctx, "Req-MiXeD", nil, mixedRecord); err != nil {
+		t.Fatalf("%s mixed observability write: %v", backend.name, err)
+	}
+	for _, term := range []string{"req-mixed", "trace-mixed", "instance-mixed", "/v1/mixed", "key-name-mixed", "client-mixed"} {
+		rows, err := observabilityService.ListRequests(ctx, observability.RequestFilters{Search: term, Limit: 10})
+		if err != nil || len(rows) != 1 || rows[0].RequestID != "Req-MiXeD" {
+			t.Fatalf("%s case-insensitive search %q rows=%+v err=%v", backend.name, term, rows, err)
+		}
+	}
+	page, err := observabilityService.ListRequests(ctx, observability.RequestFilters{Limit: 1})
+	if err != nil || len(page) != 1 || page[0].RequestID != "Req-MiXeD" {
+		t.Fatalf("%s first ordered page=%+v err=%v", backend.name, page, err)
+	}
+	page, err = observabilityService.ListRequests(ctx, observability.RequestFilters{Limit: 1, Offset: 1})
+	if err != nil || len(page) != 1 || page[0].InstanceID != instance.ID {
+		t.Fatalf("%s second ordered page=%+v err=%v", backend.name, page, err)
+	}
+
 	tx, err := database.Begin(ctx, store)
 	if err != nil {
 		t.Fatalf("%s begin rollback transaction: %v", backend.name, err)

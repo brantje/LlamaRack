@@ -268,3 +268,13 @@ END`); err != nil {
 		t.Fatalf("explicit Flush left %d buffered entries after permanent failures", pending)
 	}
 }
+
+
+func TestPermanentWritebackErrorUsesPortableIntegrityClassification(t *testing.T) {
+	if !isPermanentWritebackError(fmt.Errorf("writeback: %w", database.ErrIntegrity)) {
+		t.Fatal("portable integrity error was not permanent")
+	}
+	if isPermanentWritebackError(errors.New("constraint violation text without storage classification")) {
+		t.Fatal("writeback still relies on backend error strings")
+	}
+}

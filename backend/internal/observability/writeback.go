@@ -494,11 +494,7 @@ func (s *Service) finishWritebackEntries(batch []writebackEntry) {
 }
 
 func isPermanentWritebackError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "constraint failed") || strings.Contains(message, "constraint violation")
+	return errors.Is(err, database.ErrIntegrity)
 }
 
 func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEntry) error {
@@ -512,10 +508,10 @@ func (s *Service) persistWritebackBatch(ctx context.Context, batch []writebackEn
 	defer tx.Rollback()
 	for i := range batch {
 		if err := s.persistWritebackEntry(ctx, tx, batch[i]); err != nil {
-			return err
+			return database.ClassifyError(err)
 		}
 	}
-	return tx.Commit()
+	return database.ClassifyError(tx.Commit())
 }
 
 func (s *Service) persistWritebackEntry(ctx context.Context, tx database.Querier, entry writebackEntry) error {

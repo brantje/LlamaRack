@@ -414,7 +414,7 @@ func (s *Service) ListRequests(ctx context.Context, filters RequestFilters) ([]R
 	}
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		like := "%" + search + "%"
-		query += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR r.instance_id LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		query += ` AND (LOWER(COALESCE(c.request_id,'')) LIKE LOWER(?) OR LOWER(r.trace_id) LIKE LOWER(?) OR LOWER(r.instance_id) LIKE LOWER(?) OR LOWER(r.endpoint) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_prefix,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.error,'')) LIKE LOWER(?) OR LOWER(r.client_ip) LIKE LOWER(?) OR LOWER(r.user_agent) LIKE LOWER(?))`
 		for i := 0; i < 9; i++ {
 			args = append(args, like)
 		}

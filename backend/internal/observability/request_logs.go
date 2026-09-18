@@ -139,7 +139,7 @@ func (s *Service) ListRequestLogs(ctx context.Context, filters RequestFilters, s
 	}
 	if search := strings.TrimSpace(filters.Search); search != "" {
 		like := "%" + search + "%"
-		whereSQL += ` AND (c.request_id LIKE ? OR r.trace_id LIKE ? OR x.session_id LIKE ? OR r.instance_id LIKE ? OR r.model_slug LIKE ? OR x.model_id LIKE ? OR x.model_name LIKE ? OR r.endpoint LIKE ? OR COALESCE(r.api_key_name,'') LIKE ? OR COALESCE(r.api_key_prefix,'') LIKE ? OR COALESCE(r.error,'') LIKE ? OR r.client_ip LIKE ? OR r.user_agent LIKE ?)`
+		whereSQL += ` AND (LOWER(COALESCE(c.request_id,'')) LIKE LOWER(?) OR LOWER(r.trace_id) LIKE LOWER(?) OR LOWER(COALESCE(x.session_id,'')) LIKE LOWER(?) OR LOWER(r.instance_id) LIKE LOWER(?) OR LOWER(r.model_slug) LIKE LOWER(?) OR LOWER(COALESCE(x.model_id,'')) LIKE LOWER(?) OR LOWER(COALESCE(x.model_name,'')) LIKE LOWER(?) OR LOWER(r.endpoint) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_name,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.api_key_prefix,'')) LIKE LOWER(?) OR LOWER(COALESCE(r.error,'')) LIKE LOWER(?) OR LOWER(r.client_ip) LIKE LOWER(?) OR LOWER(r.user_agent) LIKE LOWER(?))`
 		for i := 0; i < 13; i++ {
 			args = append(args, like)
 		}
