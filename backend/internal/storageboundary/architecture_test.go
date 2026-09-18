@@ -27,7 +27,7 @@ func TestDomainPackagesDoNotExecuteGenericSQLOrUseRawNotFound(t *testing.T) {
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || strings.Contains(name, "store.go") || strings.Contains(name, "store_sql.go") {
+			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || strings.Contains(name, "store.go") || strings.Contains(name, "store_sql.go") || name == "sql_factory.go" {
 				continue
 			}
 			path := filepath.Join(dir, name)
@@ -54,6 +54,16 @@ func TestDomainPackagesDoNotExecuteGenericSQLOrUseRawNotFound(t *testing.T) {
 					}
 				}
 			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				sel, ok := node.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Store" {
+					return true
+				}
+				if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "database" {
+					t.Errorf("%s depends on generic database.Store outside an SQL adapter/factory", filepath.Join(pkg, name))
+				}
+				return true
+			})
 			ast.Inspect(file, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
