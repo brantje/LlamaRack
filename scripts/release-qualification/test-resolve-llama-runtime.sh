@@ -51,8 +51,9 @@ done
 printf '%s\n' "$ref" >> "$log_file"
 
 if [[ "$mode" == 'hang' ]]; then
-  sleep 60
-  exit 1
+  # Replace the mock shell so timeout kills the actual sleeping process.
+  # Otherwise its child can retain the command-substitution pipe for 60s.
+  exec sleep 60
 fi
 
 is_version_query=0
