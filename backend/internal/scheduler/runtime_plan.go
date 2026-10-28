@@ -257,7 +257,12 @@ func planDensePartial(req RuntimePlanRequest, base map[string]string, moveKV boo
 		if err != nil {
 			return RuntimePlan{}, false, err
 		}
-		if placement.Fits && runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes) {
+		// GPU demand grows with GPU layers, while host RAM demand shrinks.
+		// Searching on their conjunction is not monotone: a fitting band can
+		// exist between RAM-limited and VRAM-limited layer counts. Find the
+		// highest GPU-feasible count first; evaluateRuntimeCandidate below
+		// checks host RAM for that count, where its demand is minimal.
+		if placement.Fits {
 			best = mid
 			lo = mid + 1
 		} else {

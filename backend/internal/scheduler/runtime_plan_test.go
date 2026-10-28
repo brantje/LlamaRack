@@ -385,3 +385,135 @@ func TestPlanRuntimeRejectsSpillWhenGPUKnownButHostRAMUnknown(t *testing.T) {
 		t.Fatalf("host-RAM spill must not fit with unknown RAM telemetry: %+v", plan)
 	}
 }
+
+
+// Regression for #226: the GPU-fit predicate is monotone, but its
+// conjunction with host-RAM fit is not. The valid layer interval is 52..62.
+func TestPlanRuntimeDenseHybridFindsFeasibleBand(t *testing.T) {
+	req := denseHybridRegressionRequest()
+	for _, tc := range []struct {
+		layers  int64
+		gpuFits bool
+		ramFits bool
+	}{
+		{33, true, false},
+		{62, true, true},
+		{63, false, true},
+	} {
+		options := map[string]string{
+			"n-gpu-layers":  intString(tc.layers),
+			"no-kv-offload": "true",
+		}
+		demand := demandFor(req.Demand, options)
+		placement, err := planDemandPlacement(req.Placement, req.Snapshot, demand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if placement.Fits != tc.gpuFits || runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes) != tc.ramFits {
+			t.Fatalf("layers=%d: GPU fits=%v, RAM fits=%v; demand=%+v", tc.layers, placement.Fits, runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes), demand)
+		}
+	}
+	for _, context := range []int64{36864, 44544} {
+		req.Demand.Context = context
+		plan, err := PlanRuntime(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !plan.Fits || plan.Mode != "hybrid" || !plan.RequiresSpillover || plan.Options["n-gpu-layers"] != "62" || plan.Options["no-kv-offload"] != "true" {
+			t.Fatalf("ctx=%d: expected feasible 62-layer hybrid, got %+v", context, plan)
+		}
+		if !plan.Placement.Fits || !runtimeHostRAMFits(req.Snapshot, plan.Demand.HostRAMBytes) {
+			t.Fatalf("ctx=%d: selected plan exceeds available resources: %+v", context, plan)
+		}
+	}
+}
+
+func denseHybridRegressionRequest() RuntimePlanRequest {
+	return RuntimePlanRequest{
+		Snapshot: hardware.Snapshot{
+			RAMTotalBytes:     16106127360,
+			RAMAvailableBytes: 15032385536,
+			GPUs:              []hardware.GPU{{ID: "CUDA0", TotalBytes: 12884901888, FreeBytes: 12883906560}},
+		},
+		Demand: DemandInput{
+			WeightsBytes:   9828981664,
+			CompanionBytes: 927607488 + 1369590656,
+			Context:        44544,
+			Metadata: KVMetadata{
+				BlockCount: 65, Embedding: 8192, HeadCount: 32, KVHeadCount: 4,
+			},
+		},
+		Placement:            PlacementRequest{Mode: "auto"},
+		AllowSystemSpillover: true,
+		Capabilities:         RuntimeCapabilities{GPULayers: true, NoKVOffload: true},
+	}
+}
+
+// Compare the logarithmic search with a test-only exhaustive oracle.
+// This also covers manual-device constraints and both KV placements.
+func TestPlanDensePartialMatchesExhaustiveFeasibleSearch(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	scenarios := []struct {
+		name         string
+		context      int64
+		ramAvailable int64
+		GPUs         []hardware.GPU
+		placement    PlacementRequest
+	}{
+		{"bounded-fit", 44544, 15032385536, []hardware.GPU{{ID: "CUDA0", FreeBytes: 12883906560}}, PlacementRequest{Mode: "auto"}},
+		{"lower-context", 34816, 15032385536, []hardware.GPU{{ID: "CUDA0", FreeBytes: 12883906560}}, PlacementRequest{Mode: "auto"}},
+		{"tight-host-ram", 44544, 8 * gib, []hardware.GPU{{ID: "CUDA0", FreeBytes: 12883906560}}, PlacementRequest{Mode: "auto"}},
+		{"unknown-host-ram", 44544, 0, []hardware.GPU{{ID: "CUDA0", FreeBytes: 12883906560}}, PlacementRequest{Mode: "auto"}},
+		{"tight-vram", 44544, 32 * gib, []hardware.GPU{{ID: "CUDA0", FreeBytes: 4 * gib}}, PlacementRequest{Mode: "auto"}},
+		{"ample-resources", 4096, 32 * gib, []hardware.GPU{{ID: "CUDA0", FreeBytes: 24 * gib}}, PlacementRequest{Mode: "auto"}},
+		{"multi-gpu-auto", 44544, 32 * gib, []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}}, PlacementRequest{Mode: "auto"}},
+		{"manual-single", 44544, 15032385536, []hardware.GPU{{ID: "CUDA0", FreeBytes: 12883906560}, {ID: "CUDA1", FreeBytes: 24 * gib}}, PlacementRequest{Mode: "manual", Devices: []string{"CUDA0"}}},
+		{"manual-split", 44544, 32 * gib, []hardware.GPU{{ID: "CUDA0", FreeBytes: 8 * gib}, {ID: "CUDA1", FreeBytes: 8 * gib}}, PlacementRequest{Mode: "manual", Devices: []string{"CUDA0", "CUDA1"}, TensorSplit: "1,1"}},
+	}
+	for _, tc := range scenarios {
+		for _, moveKV := range []bool{false, true} {
+			req := denseHybridRegressionRequest()
+			req.Demand.Context = tc.context
+			req.Snapshot.GPUs = tc.GPUs
+			req.Snapshot.RAMAvailableBytes = tc.ramAvailable
+			req.Placement = tc.placement
+			name := tc.name + "/kv-on-gpu"
+			if moveKV {
+				name = tc.name + "/kv-in-ram"
+			}
+			t.Run(name, func(t *testing.T) {
+				best := int64(0)
+				for layer := int64(1); layer <= req.Demand.Metadata.BlockCount; layer++ {
+					options := map[string]string{"n-gpu-layers": intString(layer)}
+					if moveKV {
+						options["no-kv-offload"] = "true"
+					}
+					demand := demandFor(req.Demand, options)
+					placement, err := planDemandPlacement(req.Placement, req.Snapshot, demand)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if placement.Fits && runtimeHostRAMFits(req.Snapshot, demand.HostRAMBytes) {
+						best = layer
+					}
+				}
+				plan, ok, err := planDensePartial(req, nil, moveKV)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ok != (best > 0) {
+					t.Fatalf("planner found=%v, exhaustive best=%d, plan=%+v", ok, best, plan)
+				}
+				if !ok {
+					return
+				}
+				if got := plan.Options["n-gpu-layers"]; got != intString(best) {
+					t.Fatalf("picked GPU layers=%q, exhaustive best=%d", got, best)
+				}
+				if !plan.Fits || !plan.RequiresSpillover || !plan.Placement.Fits || !runtimeHostRAMFits(req.Snapshot, plan.Demand.HostRAMBytes) {
+					t.Fatalf("infeasible candidate selected: %+v", plan)
+				}
+			})
+		}
+	}
+}
