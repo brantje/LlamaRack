@@ -601,3 +601,55 @@ func TestLedgerAwareRuntimeEvictionPlanningUsesCommittedReservations(t *testing.
 		t.Fatalf("second runtime reservation=%+v plan=%+v err=%v", lease, admitted, err)
 	}
 }
+
+
+func TestLedgerAcquireRuntimeMatchesFeasibleHybridPreview(t *testing.T) {
+	// #226: a feasible middle layer interval must survive admission and
+	// reserve the actual hybrid demand rather than the rejected full candidate.
+	ledger := NewLedger()
+	req := denseHybridRegressionRequest()
+	preview, err := PlanRuntime(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.Fits || preview.Mode != "hybrid" || preview.Options["n-gpu-layers"] != "62" {
+		t.Fatalf("expected a fitting hybrid preview: %+v", preview)
+	}
+
+	lease, admitted, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "hybrid-instance",
+		Snapshot:   req.Snapshot,
+		Plan:       req,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admitted.Fits || admitted.Mode != preview.Mode ||
+		admitted.Options["n-gpu-layers"] != preview.Options["n-gpu-layers"] ||
+		admitted.Options["no-kv-offload"] != preview.Options["no-kv-offload"] ||
+		admitted.Demand.VRAMBytes() != preview.Demand.VRAMBytes() ||
+		admitted.Demand.HostRAMBytes != preview.Demand.HostRAMBytes {
+		t.Fatalf("preview=%+v admitted=%+v", preview, admitted)
+	}
+	if lease.ID == "" || lease.HostRAM != admitted.Demand.HostRAMBytes || len(lease.GPUs) != 1 ||
+		lease.GPUs[0].DeviceID != "CUDA0" || lease.GPUs[0].Bytes != admitted.Demand.VRAMBytes() {
+		t.Fatalf("lease does not reserve hybrid demand: %+v, plan=%+v", lease, admitted)
+	}
+	if err := ledger.Commit(lease.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The original telemetry is unchanged. The committed lease must
+	// prevent another instance from double-booking its GPU/host resources.
+	secondLease, second, err := ledger.AcquireRuntime(RuntimeAcquireRequest{
+		InstanceID: "second-instance",
+		Snapshot:   req.Snapshot,
+		Plan:       req,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Fits || secondLease.ID != "" {
+		t.Fatalf("second runtime overcommitted resources: lease=%+v plan=%+v", secondLease, second)
+	}
+}
