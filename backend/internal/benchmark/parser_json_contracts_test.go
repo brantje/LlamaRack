@@ -19,7 +19,7 @@ func TestBenchmarkNumericFieldEncodingCompatibility(t *testing.T) {
 		{"negative", "-5", -5, -5},
 		{"floating", "12.5", 12, 12.5},
 		{"numeric-string", `"42"`, 42, 42},
-		{"floating-string", `"3.75"`, 0, 3.75},
+		{"floating-string", `"3.75"`, 3, 3.75},
 		{"invalid-string", `"unavailable"`, 0, 0},
 		{"boolean", "true", 0, 0},
 		{"null", "null", 0, 0},
