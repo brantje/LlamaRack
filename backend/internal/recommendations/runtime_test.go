@@ -231,3 +231,51 @@ func TestOffloadFromRuntimePlanCPUIsSemanticallyCPUOnly(t *testing.T) {
 		t.Fatalf("cpu offload metadata=%+v", got)
 	}
 }
+
+
+func TestRuntimePreviewFindsDenseHybridFeasibleBand(t *testing.T) {
+	// #226: placement preview and the runtime planner must agree when the
+	// feasible GPU-layer interval is bounded by host RAM and GPU VRAM.
+	const context = int64(44544)
+	const weights = int64(9828981664)
+	const companions = int64(927607488 + 1369590656)
+	meta := Metadata{
+		ContextLength: context, BlockCount: 65,
+		Embedding: 8192, HeadCount: 32, KVHeadCount: 4,
+	}
+	snapshot := hardware.Snapshot{
+		RAMTotalBytes: 16106127360, RAMAvailableBytes: 15032385536,
+		GPUs: []hardware.GPU{{ID: "CUDA0", TotalBytes: 12884901888, FreeBytes: 12883906560}},
+	}
+	caps := Capabilities{GPULayers: true, NoKVOffload: true}
+	runtime := RuntimeConfig{GPUMode: "auto", AllowSystemSpillover: true}
+	request := runtimeRequest(snapshot, nil, weights, companions, context, meta, nil, caps, runtime)
+	plan, err := scheduler.PlanRuntime(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Fits || plan.Mode != "hybrid" || plan.Options["n-gpu-layers"] != "62" {
+		t.Fatalf("unexpected runtime plan: %+v", plan)
+	}
+	preview := classifyRuntime(snapshot, nil, weights, companions, context, meta, nil, caps, runtime)
+	if !preview.Fit || preview.Offload.Mode != plan.Mode || preview.Offload.GPULayers != 62 ||
+		preview.Offload.KVOnGPU || len(preview.Offload.Devices) != 1 || preview.Offload.Devices[0] != "CUDA0" {
+		t.Fatalf("preview=%+v disagrees with runtime plan=%+v", preview, plan)
+	}
+	ranges := ComputeRuntimePlacementRanges(snapshot, weights, companions, meta, nil, context, caps, runtime)
+	if !ranges.Available || ranges.MaximumContext != context {
+		t.Fatalf("preview must advertise the fitting context: %+v", ranges)
+	}
+	found := false
+	for _, zone := range ranges.Zones {
+		if zone.StartContext <= context && context <= zone.EndContext {
+			if zone.OffloadMode != "hybrid" || zone.GPULayers != 62 || zone.KVOnGPU || !zone.CurrentFit {
+				t.Fatalf("advertised zone disagrees with runtime: %+v", zone)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fitting context not represented in placement zones: %+v", ranges)
+	}
+}
